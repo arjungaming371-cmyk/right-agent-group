@@ -1,0 +1,24 @@
+# dependencies
+node_modules/
+server/node_modules/
+server/stt-service/venv/
+
+# builds
+.next/
+out/
+*.tsbuildinfo
+
+# env & secrets — NEVER commit these
+.env
+.env.local
+.env.production
+
+
+# logs & OS junk
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# STT model cache
+server/stt-service/models/

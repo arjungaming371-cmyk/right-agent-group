@@ -1,0 +1,177 @@
+@import 'tailwindcss';
+
+:root {
+  --bg-primary: #05070c;
+  --bg-secondary: #0a0e17;
+  --bg-card: #0e1320;
+  --bg-card-hover: #131929;
+  --bg-sidebar: #070a12;
+  --border: #1c2437;
+  --border-light: #161d2e;
+  --text-primary: #eef1f7;
+  --text-secondary: #9aa5bd;
+  --text-muted: #64708c;
+  --accent-blue: #5b7cfa;
+  --accent-blue-dim: #3d5af1;
+  --accent-violet: #8b7cff;
+  --accent-green: #2dd4a0;
+  --accent-red: #fb5670;
+  --accent-yellow: #f7b731;
+  --accent-purple: #a78bfa;
+  --accent-cyan: #38bdf8;
+  --gradient-brand: linear-gradient(135deg, #8b7cff 0%, #5b7cfa 45%, #38bdf8 100%);
+  --shadow-soft: 0 1px 2px rgba(0,0,0,0.5), 0 10px 32px -12px rgba(0,0,0,0.6);
+  --shadow-glow: 0 8px 32px -8px rgba(91,124,250,0.45);
+  --radius-lg: 14px;
+  --radius-md: 10px;
+  --radius-sm: 7px;
+}
+
+/* Base resets & element defaults — layered so Tailwind utilities always win */
+@layer base {
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { color-scheme: dark; }
+
+  body {
+    background:
+      radial-gradient(1100px 550px at 12% -8%, rgba(139,124,255,0.07), transparent 60%),
+      radial-gradient(900px 480px at 105% -5%, rgba(56,189,248,0.055), transparent 55%),
+      var(--bg-primary);
+    color: var(--text-primary);
+    font-family: var(--font-inter), -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    letter-spacing: -0.011em;
+  }
+
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #232c42; border-radius: 999px; }
+  ::-webkit-scrollbar-thumb:hover { background: #2e3a56; }
+
+  input, select, textarea {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    border-radius: var(--radius-md);
+    padding: 9px 13px;
+    font-size: 13.5px;
+    font-family: inherit;
+    outline: none;
+    width: 100%;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+  }
+  input:hover, select:hover, textarea:hover { border-color: #273148; }
+  input:focus, select:focus, textarea:focus {
+    border-color: var(--accent-blue);
+    box-shadow: 0 0 0 3px rgba(91,124,250,0.16);
+    background: var(--bg-card);
+  }
+  input::placeholder, textarea::placeholder { color: var(--text-muted); }
+
+  button {
+    cursor: pointer;
+    font-size: 14px;
+    font-family: inherit;
+    transition: transform 0.1s ease, opacity 0.15s ease, background 0.15s ease,
+                border-color 0.15s ease, box-shadow 0.15s ease, color 0.15s ease;
+  }
+  button:active { transform: scale(0.985); }
+  button:disabled { cursor: not-allowed; }
+
+  a { color: inherit; text-decoration: none; }
+}
+
+/* Reusable premium primitives — components layer so utilities can override */
+@layer components {
+  .glass {
+    background: rgba(12,16,26,0.78);
+    backdrop-filter: blur(18px) saturate(150%);
+    -webkit-backdrop-filter: blur(18px) saturate(150%);
+    border: 1px solid rgba(255,255,255,0.055);
+  }
+
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-soft);
+  }
+
+  .btn-primary {
+    display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+    background: var(--gradient-brand);
+    color: #fff; border: none; border-radius: 10px;
+    font-weight: 600; font-size: 13px; padding: 0 16px; height: 36px;
+    box-shadow: 0 4px 16px -4px rgba(91,124,250,0.5), inset 0 1px 0 rgba(255,255,255,0.18);
+    white-space: nowrap;
+  }
+  .btn-primary:hover { filter: brightness(1.08); box-shadow: 0 6px 22px -4px rgba(91,124,250,0.6), inset 0 1px 0 rgba(255,255,255,0.18); }
+  .btn-primary:disabled { opacity: 0.45; filter: none; }
+
+  .btn-ghost {
+    display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+    background: transparent; color: var(--text-secondary);
+    border: 1px solid var(--border); border-radius: 10px;
+    font-weight: 500; font-size: 13px; padding: 0 14px; height: 36px;
+    white-space: nowrap;
+  }
+  .btn-ghost:hover { background: rgba(255,255,255,0.04); color: var(--text-primary); border-color: #2b3550; }
+
+  .icon-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 34px; height: 34px; border-radius: 9px; flex-shrink: 0;
+    background: var(--bg-secondary); border: 1px solid var(--border);
+    color: var(--text-secondary);
+  }
+  .icon-btn:hover { color: var(--text-primary); border-color: #2b3550; background: var(--bg-card-hover); }
+
+  .gradient-text {
+    background: var(--gradient-brand);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .kbd {
+    display: inline-flex; align-items: center; justify-content: center;
+    padding: 1px 6px; border-radius: 5px;
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08);
+    font-size: 10.5px; font-weight: 500; color: var(--text-muted);
+    font-family: inherit; letter-spacing: 0.02em;
+  }
+
+  .toggle {
+    position: relative; width: 44px; height: 24px;
+    background: #1d2438; border-radius: 12px; border: none;
+    cursor: pointer; transition: background 0.2s;
+    display: inline-block; flex-shrink: 0;
+  }
+  .toggle.on { background: var(--accent-blue); }
+  .toggle::after {
+    content: ''; position: absolute; top: 2px; left: 2px;
+    width: 20px; height: 20px; background: white;
+    border-radius: 50%; transition: left 0.2s;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.35);
+  }
+  .toggle.on::after { left: 22px; }
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes pulse-dot {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(45,212,160,0.55); }
+  50% { box-shadow: 0 0 0 5px rgba(45,212,160,0); }
+}
+@keyframes shimmer {
+  0% { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
