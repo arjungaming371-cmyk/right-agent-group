@@ -22,3 +22,4 @@ Thumbs.db
 
 # STT model cache
 server/stt-service/models/
+server/stt-service/__pycache__/
