@@ -104,7 +104,12 @@
       "Bash(git --version)",
       "Bash(gh --version)",
       "Bash(gh auth *)",
-      "PowerShell(winget install --id GitHub.cli -e --accept-source-agreements --accept-package-agreements)"
+      "PowerShell(winget install --id GitHub.cli -e --accept-source-agreements --accept-package-agreements)",
+      "Bash(git rm *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(git ls-remote *)"
     ]
   }
 }
