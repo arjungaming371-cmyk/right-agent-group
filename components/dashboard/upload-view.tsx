@@ -1,11 +1,13 @@
 "use client"
 import { useEffect, useRef, useState } from "react"
 import { ClipboardList, FolderUp, FileText, FileUp, Phone, Plus, Play } from "lucide-react"
+import { useToast } from "../ui/toast"
 
 type UploadedFile = { id: string; filename: string; type: string; row_count: number; processed: number; status: string; created_at: string }
 type Contact = { name: string; phone: string; language: string; product_interest: string; leadId: string }
 
 export default function UploadView() {
+  const toast = useToast()
   const [files, setFiles] = useState<UploadedFile[]>([])
   const [uploading, setUploading] = useState(false)
   const [queueForm, setQueueForm] = useState({ name: "", phone: "", language: "english", product_interest: "Home Loan", notes: "" })
@@ -48,10 +50,10 @@ export default function UploadView() {
       if (type === "contacts" && data.contacts?.length > 0) {
         setPreview({ uploadId: data.uploadId, contacts: data.contacts })
       } else {
-        alert(`✅ Uploaded! ${data.rowCount ?? ""} items processed.`)
+        toast.success(`Uploaded — ${data.rowCount ?? ""} items processed`)
       }
     } else {
-      alert(`❌ Upload failed: ${data.error}`)
+      toast.error(`Upload failed: ${data.error}`)
     }
     e.target.value = ""
   }
@@ -68,10 +70,10 @@ export default function UploadView() {
     setConfirming(false)
     setPreview(null)
     if (res.ok) {
-      alert(`✅ ${data.queued} contacts added to the outbound queue. Use the batch controls below to start calling.`)
+      toast.success(`${data.queued} contacts queued — use batch controls below to start calling`)
       load()
     } else {
-      alert(`❌ ${data.error}`)
+      toast.error(data.error || "Queueing failed")
     }
   }
 
@@ -79,8 +81,8 @@ export default function UploadView() {
 
   async function addToQueue() {
     const res = await fetch("/api/outbound", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(queueForm) })
-    if (res.ok) { alert("✅ Added to outbound queue"); setQueueForm({ name: "", phone: "", language: "english", product_interest: "Home Loan", notes: "" }); load() }
-    else { const d = await res.json(); alert(`❌ ${d.error}`) }
+    if (res.ok) { toast.success("Added to outbound queue"); setQueueForm({ name: "", phone: "", language: "english", product_interest: "Home Loan", notes: "" }); load() }
+    else { const d = await res.json(); toast.error(d.error || "Could not add to queue") }
   }
 
   async function runBatch() {
@@ -92,7 +94,8 @@ export default function UploadView() {
     })
     const data = await res.json()
     setProcessing(false)
-    alert(`✅ Dialed ${data.called}/${data.total} calls (${data.failed} failed)`)
+    if (res.ok) toast.success(`Dialed ${data.called}/${data.total} calls (${data.failed} failed)`)
+    else toast.error(data.error || "Batch calling failed")
     load()
   }
 

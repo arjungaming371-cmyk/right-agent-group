@@ -1,6 +1,7 @@
 "use client"
 import { useEffect, useState } from "react"
 import { ShieldCheck, AlertTriangle, RotateCcw, FileLock2 } from "lucide-react"
+import { SkeletonList } from "../ui/skeleton"
 
 type Setting = { key: string; enabled: boolean }
 type AuditLog = { id: string; action: string; performed_by: string; created_at: string }
@@ -77,7 +78,7 @@ export default function SecurityView() {
             <div style={{ fontWeight:600,fontSize:15 }}>Access Controls</div>
             <span style={{ background:"rgba(45,212,160,0.11)",color:"#2dd4a0",border:"1px solid rgba(45,212,160,0.3)",borderRadius:6,padding:"4px 12px",fontSize:12,fontWeight:600,display:"inline-flex",alignItems:"center",gap:5 }}><ShieldCheck size={13} strokeWidth={2} /> {activeCount}/{total} active</span>
           </div>
-          {loading && <div style={{ padding: 24, textAlign: "center", color: "var(--text-muted)" }}>Loading...</div>}
+          {loading && <SkeletonList rows={4} />}
           {!loading && orderedSettings.map(item => {
             const meta = LABELS[item.key] ?? { label: item.key, desc: "" }
             return (

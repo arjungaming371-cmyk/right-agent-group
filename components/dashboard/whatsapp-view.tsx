@@ -1,6 +1,7 @@
 "use client"
 import { useEffect, useRef, useState, useCallback } from "react"
 import { Search, Send, Bot, MessageCircle, AlertTriangle } from "lucide-react"
+import { useToast } from "../ui/toast"
 
 type Lead = { id: string; name: string; phone: string; last_message?: string; last_message_time?: string; last_direction?: string; unread?: number }
 type Msg  = { id: string; direction: string; content: string; created_at: string; status?: string }
@@ -25,6 +26,7 @@ function Tick({ status }: { status?: string }) {
 
 export default function WhatsAppView({ role }: { role: "admin" | "agent" | "viewer" }) {
   const canEdit = role !== "viewer"
+  const toast = useToast()
   const [leads, setLeads]       = useState<Lead[]>([])
   const [selected, setSelected] = useState<Lead | null>(null)
   const [messages, setMessages] = useState<Msg[]>([])
@@ -101,10 +103,10 @@ export default function WhatsAppView({ role }: { role: "admin" | "agent" | "view
     try {
       const res  = await fetch("/api/whatsapp/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ to: selected.phone, message: msg, leadId: selected.id }) })
       const data = await res.json()
-      if (!res.ok) alert(`❌ ${data.error || "Send failed"}`)
+      if (!res.ok) toast.error(data.error || "Send failed")
       await loadMessages(selected.id)
       await loadLeads()
-    } catch { alert("Send failed — check WhatsApp service") }
+    } catch { toast.error("Send failed — check WhatsApp service") }
     setSending(false)
     inputRef.current?.focus()
   }
@@ -112,7 +114,7 @@ export default function WhatsAppView({ role }: { role: "admin" | "agent" | "view
   async function aiReply() {
     if (!selected || aiTyping) return
     const lastInbound = [...messages].reverse().find(m => m.direction === "inbound")
-    if (!lastInbound) { alert("No customer message to reply to"); return }
+    if (!lastInbound) { toast.info("No customer message to reply to"); return }
     setAiTyping(true)
     try {
       const history = messages.slice(-10).map(m => ({ role: m.direction === "inbound" ? "user" : "model", content: m.content }))
@@ -122,7 +124,7 @@ export default function WhatsAppView({ role }: { role: "admin" | "agent" | "view
       await fetch("/api/whatsapp/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ to: selected.phone, message: reply, leadId: selected.id }) })
       await loadMessages(selected.id)
       await loadLeads()
-    } catch (e: any) { alert(`❌ AI reply failed: ${e.message}`) }
+    } catch (e: any) { toast.error(`AI reply failed: ${e.message}`) }
     setAiTyping(false)
   }
 

@@ -2,6 +2,8 @@
 import { useEffect, useRef, useState } from "react"
 import { Bot, Phone, PhoneIncoming, PhoneOutgoing, Play, RotateCcw, X } from "lucide-react"
 import { formatDuration, timeAgo } from "@/lib/utils"
+import { useToast } from "../ui/toast"
+import { SkeletonList } from "../ui/skeleton"
 
 type Call = {
   id: string; phone: string; direction: string; duration: number
@@ -34,6 +36,7 @@ function proxyRecordingUrl(url: string | null): string | null {
 
 export default function VoiceLogsView({ role }: { role: "admin" | "agent" | "viewer" }) {
   const canEdit = role !== "viewer"
+  const toast = useToast()
   const [calls, setCalls]   = useState<Call[]>([])
   const [leads, setLeads]   = useState<Lead[]>([])
   const [loading, setLoading] = useState(true)
@@ -74,15 +77,15 @@ export default function VoiceLogsView({ role }: { role: "admin" | "agent" | "vie
     })
     const data = await res.json()
     setCalling(false)
-    if (res.ok) { alert(`✅ AI call started — ${data.callSid}`); setInstructions(""); load() }
-    else alert(`❌ ${data.error}`)
+    if (res.ok) { toast.success("AI call started — Priya is dialing now"); setInstructions(""); load() }
+    else toast.error(data.error || "Call failed")
   }
 
   function playRecording(call: Call) {
     const url = proxyRecordingUrl(call.recording_url)
     if (!url || !audioRef.current) return
     audioRef.current.src = url
-    audioRef.current.play().catch(e => alert(`Cannot play recording: ${e.message}`))
+    audioRef.current.play().catch(e => toast.error(`Cannot play recording: ${e.message}`))
   }
 
   const today         = new Date().toDateString()
@@ -184,7 +187,7 @@ export default function VoiceLogsView({ role }: { role: "admin" | "agent" | "vie
           </button>
         </div>
 
-        {loading && <div style={{ padding: 40, textAlign: "center", color: "var(--text-muted)" }}>Loading...</div>}
+        {loading && <SkeletonList rows={4} />}
         {!loading && calls.length === 0 && <div style={{ padding: 40, textAlign: "center", color: "var(--text-muted)" }}>No calls yet.</div>}
 
         {calls.map(call => {

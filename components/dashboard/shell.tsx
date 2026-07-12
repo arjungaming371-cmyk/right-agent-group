@@ -2,8 +2,10 @@
 import { useState, useEffect } from "react"
 import {
   Users, FileText, Phone, MessageCircle, Activity, ShieldCheck, UploadCloud,
-  ScrollText, LogOut, Mic, BarChart3, UserCog, type LucideIcon,
+  ScrollText, LogOut, Mic, BarChart3, UserCog, Search, type LucideIcon,
 } from "lucide-react"
+import { ToastProvider } from "../ui/toast"
+import CommandPalette from "../ui/command-palette"
 import LeadsView    from "./leads-view"
 import LoanAppsView from "./loan-apps-view"
 import VoiceLogsView from "./voice-logs-view"
@@ -83,6 +85,21 @@ export default function DashboardShell() {
   const [counts, setCounts] = useState({ leads: 0, loans: 0, whatsapp: 0 })
   const [userEmail, setUserEmail] = useState("")
   const [role, setRole] = useState<Role>("viewer") // safest default until the real role loads
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  // Search text seeded into a view when jumping there from the command palette.
+  const [seedSearch, setSeedSearch] = useState<{ view: ViewKey; q: string } | null>(null)
+
+  // Global Ctrl+K / Cmd+K opens the command palette.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault()
+        setPaletteOpen(o => !o)
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [])
 
   useEffect(() => {
     async function loadCounts() {
@@ -123,8 +140,15 @@ export default function DashboardShell() {
 
   const { title, sub } = VIEW_TITLES[view]
   const initials = userEmail ? userEmail.slice(0, 2).toUpperCase() : "RA"
+  const allowedViews = NAV_SECTIONS.flatMap(s => s.items.filter(i => i.roles.includes(role)).map(i => i.key))
+
+  function navigateFromPalette(target: ViewKey, search?: string) {
+    setView(target)
+    setSeedSearch(search ? { view: target, q: search } : null)
+  }
 
   return (
+    <ToastProvider>
     <div className="flex h-screen bg-[var(--bg-primary)]">
       {/* ======= Sidebar ======= */}
       <aside className="flex w-[258px] flex-shrink-0 flex-col border-r border-[var(--border)] bg-[var(--bg-sidebar)]">
@@ -250,13 +274,26 @@ export default function DashboardShell() {
           <StatusPill icon={Mic} label="Voice Bot" />
           <StatusPill icon={MessageCircle} label="WhatsApp" />
 
+          <div className="mx-1 hidden h-6 w-px bg-[var(--border)] lg:block" />
+
+          {/* Global search — opens the command palette (also Ctrl+K) */}
+          <button
+            onClick={() => setPaletteOpen(true)}
+            aria-label="Search everything"
+            className="hidden h-9 items-center gap-2.5 rounded-[10px] border border-[var(--border)] bg-[var(--bg-secondary)] px-3 text-[13px] text-[var(--text-muted)] transition-colors hover:border-[#2b3550] hover:text-[var(--text-secondary)] md:flex"
+            style={{ width: 210 }}
+          >
+            <Search size={14} strokeWidth={2} />
+            <span className="flex-1 text-left">Search</span>
+            <span className="kbd">Ctrl K</span>
+          </button>
         </header>
 
         {/* Content */}
         <main key={view} className="flex-1 overflow-auto p-6" style={{ animation: "fadeInUp 0.25s ease" }}>
           {view === "analytics" && <AnalyticsView />}
-          {view === "leads"    && <LeadsView role={role} />}
-          {view === "loans"    && <LoanAppsView role={role} />}
+          {view === "leads"    && <LeadsView role={role} initialSearch={seedSearch?.view === "leads" ? seedSearch.q : undefined} />}
+          {view === "loans"    && <LoanAppsView role={role} initialSearch={seedSearch?.view === "loans" ? seedSearch.q : undefined} />}
           {view === "voice"    && <VoiceLogsView role={role} />}
           {view === "whatsapp" && <WhatsAppView role={role} />}
           {view === "comms"    && <CommLogView />}
@@ -266,6 +303,13 @@ export default function DashboardShell() {
         </main>
       </div>
       <QuickChat />
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        onNavigate={navigateFromPalette}
+        allowedViews={allowedViews}
+      />
     </div>
+    </ToastProvider>
   )
 }

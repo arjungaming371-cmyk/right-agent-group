@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react"
 import { BadgeCheck } from "lucide-react"
 import { formatCurrency, timeAgo } from "@/lib/utils"
+import { SkeletonList } from "../ui/skeleton"
 
 type LoanApp = {
   id: string; customer_name: string; city: string; loan_type: string
@@ -19,12 +20,15 @@ function Avatar({ name }: { name: string }) {
   )
 }
 
-export default function LoanAppsView({ role }: { role: "admin" | "agent" | "viewer" }) {
+export default function LoanAppsView({ role, initialSearch }: { role: "admin" | "agent" | "viewer"; initialSearch?: string }) {
   const canEdit = role !== "viewer"
   const [apps, setApps] = useState<LoanApp[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [search, setSearch] = useState("")
+  const [search, setSearch] = useState(initialSearch || "")
+
+  // Command-palette jumps re-seed the search box.
+  useEffect(() => { if (initialSearch !== undefined) setSearch(initialSearch) }, [initialSearch])
 
   async function load() {
     setLoading(true)
@@ -61,7 +65,7 @@ export default function LoanAppsView({ role }: { role: "admin" | "agent" | "view
           <input placeholder="Search name..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ width: "100%", height: 34, fontSize: 13 }} />
         </div>
         <div style={{ flex: 1, overflowY: "auto" }}>
-          {loading && <div style={{ padding: 30, textAlign: "center", color: "var(--text-muted)" }}>Loading...</div>}
+          {loading && <SkeletonList rows={4} />}
           {!loading && filtered.length === 0 && <div style={{ padding: 30, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>No applications submitted yet.</div>}
           {filtered.map((app) => (
             <div

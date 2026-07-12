@@ -2,6 +2,8 @@
 import { useEffect, useState } from "react"
 import { Users, Target, IndianRupee, BadgeCheck, Phone, MessageCircle, RotateCcw, Plus, Search, Link2, Check } from "lucide-react"
 import { formatCurrency, timeAgo } from "@/lib/utils"
+import { useToast } from "../ui/toast"
+import { Skeleton } from "../ui/skeleton"
 
 // TODO: replace with the real loan types from rightagentgroupe.com once available
 const LOAN_TYPES = ["Home Loan", "Personal Loan", "Car Loan", "Business Loan", "Term Insurance", "Health Insurance"]
@@ -77,11 +79,15 @@ function Avatar({ name }: { name: string }) {
   )
 }
 
-export default function LeadsView({ role }: { role: "admin" | "agent" | "viewer" }) {
+export default function LeadsView({ role, initialSearch }: { role: "admin" | "agent" | "viewer"; initialSearch?: string }) {
   const canEdit = role !== "viewer"
+  const toast = useToast()
   const [leads, setLeads] = useState<Lead[]>([])
   const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState("")
+  const [search, setSearch] = useState(initialSearch || "")
+
+  // Command-palette jumps re-seed the search box.
+  useEffect(() => { if (initialSearch !== undefined) setSearch(initialSearch) }, [initialSearch])
   const [ageFilter, setAgeFilter] = useState("all")
   const [amountFilter, setAmountFilter] = useState("all")
   const [loanTypeFilter, setLoanTypeFilter] = useState("all")
@@ -134,8 +140,8 @@ export default function LeadsView({ role }: { role: "admin" | "agent" | "viewer"
     setCalling(null)
     setCallTarget(null)
     setCallInstructions("")
-    if (res.ok) load()
-    else alert(`❌ ${data.error}`)
+    if (res.ok) { toast.success("AI call started — Priya is dialing now"); load() }
+    else toast.error(data.error || "Call failed")
   }
 
   async function sendWa() {
@@ -149,8 +155,8 @@ export default function LeadsView({ role }: { role: "admin" | "agent" | "viewer"
     })
     const data = await res.json()
     setWaSending(false)
-    if (res.ok) { setWaTarget(null); setWaText("") }
-    else alert(data.error === "WHATSAPP_NOT_CONFIGURED" ? data.message : `❌ ${data.error}`)
+    if (res.ok) { setWaTarget(null); setWaText(""); toast.success("WhatsApp message sent") }
+    else toast.error(data.error === "WHATSAPP_NOT_CONFIGURED" ? data.message : data.error || "Send failed")
   }
 
   async function addLead() {
@@ -159,7 +165,8 @@ export default function LeadsView({ role }: { role: "admin" | "agent" | "viewer"
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...form, loan_amount: form.loan_amount ? parseFloat(form.loan_amount) : null, source: "manual" }),
     })
-    if (res.ok) { setShowAdd(false); load() }
+    if (res.ok) { setShowAdd(false); toast.success(`${form.name} added to leads`); load() }
+    else { const d = await res.json().catch(() => ({})); toast.error(d.error || "Could not add lead") }
   }
 
   const Card = ({ label, value, icon: Icon, tone }: { label: string; value: string; icon: any; tone: string }) => (
@@ -253,7 +260,22 @@ export default function LeadsView({ role }: { role: "admin" | "agent" | "viewer"
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={10} style={{ padding: 40, textAlign: "center", color: "var(--text-muted)" }}>Loading...</td></tr>}
+            {loading && Array.from({ length: 4 }).map((_, i) => (
+              <tr key={`sk-${i}`} style={{ borderBottom: "1px solid var(--border-light)" }}>
+                <td style={{ padding: "14px 16px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <Skeleton w={36} h={36} r={18} />
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      <Skeleton w={110} h={12} />
+                      <Skeleton w={80} h={10} />
+                    </div>
+                  </div>
+                </td>
+                {Array.from({ length: 9 }).map((_, j) => (
+                  <td key={j} style={{ padding: "14px 16px" }}><Skeleton w={j === 8 ? 68 : 52} h={12} /></td>
+                ))}
+              </tr>
+            ))}
             {!loading && leads.length === 0 && (
               <tr><td colSpan={10} style={{ padding: 40, textAlign: "center", color: "var(--text-muted)" }}>No leads match these filters.</td></tr>
             )}

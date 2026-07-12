@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react"
 import { Phone, MessageCircle, Bot, User, Zap } from "lucide-react"
 import { timeAgo } from "@/lib/utils"
+import { SkeletonList } from "../ui/skeleton"
 
 type CallLog  = { id:string; lead_name:string; phone:string; duration:string; time:string; status:string; transcript:{role:string;text:string}[] }
 type WALog    = { id:string; type:string; lead_name:string; content:string; time:string; status:string }
@@ -48,7 +49,7 @@ export default function CommLogView() {
           <span style={{ background:"var(--bg-secondary)",border:"1px solid var(--border)",borderRadius:6,padding:"3px 10px",fontSize:12,color:"var(--text-muted)" }}>{calls.length} calls</span>
         </div>
         <div style={{ flex:1,overflowY:"auto" }}>
-          {loading && <div style={{ padding:30,textAlign:"center",color:"var(--text-muted)" }}>Loading...</div>}
+          {loading && <SkeletonList rows={3} />}
           {!loading && calls.length===0 && <div style={{ padding:30,textAlign:"center",color:"var(--text-muted)",fontSize:13 }}>No calls yet. Trigger an AI call from Voice Logs.</div>}
           {calls.map(call => {
             const st = STATUS_STYLE[call.status]??STATUS_STYLE.initiated
@@ -102,7 +103,7 @@ export default function CommLogView() {
           <span style={{ background:"var(--bg-secondary)",border:"1px solid var(--border)",borderRadius:6,padding:"3px 10px",fontSize:12,color:"var(--text-muted)" }}>Auto-replies</span>
         </div>
         <div style={{ flex:1,overflowY:"auto" }}>
-          {loading && <div style={{ padding:30,textAlign:"center",color:"var(--text-muted)" }}>Loading...</div>}
+          {loading && <SkeletonList rows={3} />}
           {!loading && waLogs.length===0 && <div style={{ padding:30,textAlign:"center",color:"var(--text-muted)",fontSize:13 }}>No WhatsApp automation logs yet.</div>}
           {waLogs.map(log => {
             const st = STATUS_STYLE[log.outcome]??STATUS_STYLE.sent
