@@ -2,9 +2,11 @@ import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { makeCall } from "@/lib/exotel"
 import { requireRole } from "@/lib/auth"
+import { logAudit } from "@/lib/audit"
 
 export async function POST(req: NextRequest) {
-  if (!(await requireRole(req, ["admin"]))) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+  const session = await requireRole(req, ["admin"])
+  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const { concurrency = 1, limit = 10 } = await req.json().catch(() => ({}))
 
   const { data: pending } = await db.from("outbound_queue")
@@ -75,5 +77,6 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  logAudit("outbound campaign triggered", session.email, { called, failed, total: pending.length, concurrency })
   return NextResponse.json({ called, failed, total: pending.length })
 }

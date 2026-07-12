@@ -29,6 +29,16 @@ CREATE TABLE IF NOT EXISTS leads (
 CREATE INDEX IF NOT EXISTS idx_leads_phone  ON leads (phone);
 CREATE INDEX IF NOT EXISTS idx_leads_status ON leads (status);
 
+-- Full-text search (name/product/address weighted above notes) — phone search
+-- still uses ILIKE at the query layer since digits don't tokenize usefully.
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS search_vector tsvector
+  GENERATED ALWAYS AS (
+    setweight(to_tsvector('english', coalesce(name, '')), 'A') ||
+    setweight(to_tsvector('english', coalesce(address, '') || ' ' || coalesce(product_interest, '')), 'B') ||
+    setweight(to_tsvector('english', coalesce(notes, '')), 'C')
+  ) STORED;
+CREATE INDEX IF NOT EXISTS idx_leads_search ON leads USING GIN (search_vector);
+
 -- Voice calls (every call Priya makes or receives)
 CREATE TABLE IF NOT EXISTS voice_calls (
   id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -71,6 +81,14 @@ CREATE TABLE IF NOT EXISTS loan_applications (
   status          TEXT DEFAULT 'pending',
   submitted_at    TIMESTAMPTZ DEFAULT now()
 );
+
+ALTER TABLE loan_applications ADD COLUMN IF NOT EXISTS search_vector tsvector
+  GENERATED ALWAYS AS (
+    setweight(to_tsvector('english', coalesce(customer_name, '') || ' ' || coalesce(full_name, '')), 'A') ||
+    setweight(to_tsvector('english', coalesce(city, '') || ' ' || coalesce(loan_type, '')), 'B') ||
+    setweight(to_tsvector('english', coalesce(address, '') || ' ' || coalesce(employment_type, '')), 'C')
+  ) STORED;
+CREATE INDEX IF NOT EXISTS idx_loan_apps_search ON loan_applications USING GIN (search_vector);
 
 -- One-time form links (sent via WhatsApp after a successful call)
 CREATE TABLE IF NOT EXISTS form_links (

@@ -1,6 +1,6 @@
 "use client"
 import { useEffect, useState } from "react"
-import { BadgeCheck } from "lucide-react"
+import { BadgeCheck, Download } from "lucide-react"
 import { formatCurrency, timeAgo } from "@/lib/utils"
 import { SkeletonList } from "../ui/skeleton"
 
@@ -61,7 +61,12 @@ export default function LoanAppsView({ role, initialSearch }: { role: "admin" | 
       {/* List */}
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         <div style={{ padding: "16px 18px", borderBottom: "1px solid var(--border)" }}>
-          <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 8 }}>Loan Applications</div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <div style={{ fontWeight: 600, fontSize: 15 }}>Loan Applications</div>
+            <a href="/api/loans/export" className="icon-btn" title="Export all loan applications as CSV" aria-label="Export CSV">
+              <Download size={14} strokeWidth={2} />
+            </a>
+          </div>
           <input placeholder="Search name..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ width: "100%", height: 34, fontSize: 13 }} />
         </div>
         <div style={{ flex: 1, overflowY: "auto" }}>

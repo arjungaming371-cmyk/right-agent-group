@@ -1,6 +1,6 @@
 "use client"
 import { useEffect, useState } from "react"
-import { Users, Target, IndianRupee, BadgeCheck, Phone, MessageCircle, RotateCcw, Plus, Search, Link2, Check } from "lucide-react"
+import { Users, Target, IndianRupee, BadgeCheck, Phone, MessageCircle, RotateCcw, Plus, Search, Link2, Check, Download } from "lucide-react"
 import { formatCurrency, timeAgo } from "@/lib/utils"
 import { useToast } from "../ui/toast"
 import { Skeleton } from "../ui/skeleton"
@@ -243,6 +243,9 @@ export default function LeadsView({ role, initialSearch }: { role: "admin" | "ag
             {/* Spacer */}
             <div style={{ flex: 1 }} />
             <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{leads.length} shown</div>
+            <a href="/api/leads/export" className="btn-ghost" style={{ height: 34, textDecoration: "none" }} title="Export all leads as CSV">
+              <Download size={14} strokeWidth={2} /> Export
+            </a>
             {canEdit && (
               <button onClick={() => setShowAdd(true)} className="btn-primary" style={{ height: 34 }}>
                 <Plus size={15} strokeWidth={2.2} /> Add Lead

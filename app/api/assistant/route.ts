@@ -23,8 +23,10 @@ const SYSTEM_PROMPT = `You are the Right Agent Group Internal Operations Assista
 
 You are NOT Priya and you are NOT on a phone call or WhatsApp chat with a customer. You are a private tool for Right Agent Group staff (admins and loan officers) with broad visibility into the whole business: leads, calls, loan applications, WhatsApp activity, security settings, the audit log, upload/outbound campaigns, and the team roster.
 
+You also get full-text SEARCH RESULTS relevant to the staff member's specific question (when present) — this covers ALL leads and loan applications on file, not just the recent handful in the snapshot, so you can answer questions about a specific person, area, or loan type even if they're not recent.
+
 RULES:
-- Answer using ONLY the LIVE DATA SNAPSHOT provided below. Never guess or invent numbers, names, or details.
+- Answer using ONLY the LIVE DATA SNAPSHOT and SEARCH RESULTS provided below. Never guess or invent numbers, names, or details.
 - If something isn't in the snapshot, say so plainly and suggest which dashboard tab has it (Leads, Loan Applications, Voice Logs, WhatsApp Chat, Analytics, Security, Team Access).
 - Be concise but thorough when asked for detail — lists and short paragraphs are fine, this isn't limited to one-liners anymore.
 - Never pretend to be talking to a customer, never use loan-pitch language, never ask for a caller's name/city/WhatsApp number — that's Priya's job on calls, not yours here.
@@ -175,6 +177,49 @@ async function getStatsSnapshot(): Promise<string> {
   ].join("\n\n")
 }
 
+/**
+ * Full-text search across leads and loan applications, keyed off the
+ * staff member's own message. websearch_to_tsquery tolerates arbitrary
+ * natural-language input (stopwords, punctuation) far better than
+ * to_tsquery, so the raw question can be used directly — no keyword
+ * extraction needed. This is what gives the assistant real memory beyond
+ * "the most recent 8 leads": ask about anyone/anything on file, by name,
+ * area, or loan type, and it can actually find them.
+ */
+async function searchDatabase(userMessage: string): Promise<string> {
+  try {
+    const [leadHits, loanHits] = await Promise.all([
+      query(
+        `SELECT name, phone, status, product_interest, address, ts_rank(search_vector, websearch_to_tsquery('english', $1)) AS rank
+         FROM leads WHERE search_vector @@ websearch_to_tsquery('english', $1) ORDER BY rank DESC LIMIT 8`,
+        [userMessage]
+      ).catch(() => ({ rows: [] })),
+      query(
+        `SELECT customer_name, loan_type, loan_amount, status, city, ts_rank(search_vector, websearch_to_tsquery('english', $1)) AS rank
+         FROM loan_applications WHERE search_vector @@ websearch_to_tsquery('english', $1) ORDER BY rank DESC LIMIT 8`,
+        [userMessage]
+      ).catch(() => ({ rows: [] })),
+    ])
+    if (leadHits.rows.length === 0 && loanHits.rows.length === 0) return ""
+
+    const parts: string[] = []
+    if (leadHits.rows.length) {
+      parts.push(
+        `Matching leads: ${leadHits.rows.map((r: any) => `${r.name || r.phone} (${r.status}${r.product_interest ? ", " + r.product_interest : ""}${r.address ? ", " + r.address : ""})`).join("; ")}`
+      )
+    }
+    if (loanHits.rows.length) {
+      parts.push(
+        `Matching loan applications: ${loanHits.rows.map((r: any) => `${r.customer_name} — ${r.loan_type || "?"} (${r.status}${r.city ? ", " + r.city : ""})`).join("; ")}`
+      )
+    }
+    return `--- SEARCH RESULTS for this question (full-text search across ALL leads and loan applications, not just the recent lists above) ---\n${parts.join("\n")}`
+  } catch (e: any) {
+    console.error("assistant search error:", e.message)
+    return ""
+  }
+}
+
 export async function POST(req: NextRequest) {
   const session = await getSessionFromRequest(req)
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
@@ -192,11 +237,12 @@ export async function POST(req: NextRequest) {
       if (owns.rowCount) ownedChatId = chatId
     }
 
-    const snapshot = await getStatsSnapshot()
+    const [snapshot, searchResults] = await Promise.all([getStatsSnapshot(), searchDatabase(message)])
+    const fullContext = [SYSTEM_PROMPT, snapshot, searchResults].filter(Boolean).join("\n\n")
     const messages = [...(Array.isArray(history) ? history.slice(-10) : []), { role: "user", content: message }]
     // Not a live phone call — staff can tolerate a slower, richer answer.
     // Bigger context window so the full snapshot above actually fits.
-    const reply = await chatWithSystemPrompt(messages, `${SYSTEM_PROMPT}\n\n${snapshot}`, {
+    const reply = await chatWithSystemPrompt(messages, fullContext, {
       numCtx: 8192,
       numPredict: 400,
       timeoutMs: 90000,

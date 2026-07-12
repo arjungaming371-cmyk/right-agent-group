@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db, query } from "@/lib/db"
 import { requireRole } from "@/lib/auth"
+import { logAudit } from "@/lib/audit"
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
@@ -21,9 +22,14 @@ export async function GET(req: NextRequest) {
   let i = 1
 
   if (search) {
-    where.push(`(name ILIKE $${i} OR phone ILIKE $${i})`)
-    params.push(`%${search}%`)
-    i++
+    // Phone/name stay ILIKE (partial-digit and partial-name matches need
+    // substring, not tokenized, matching). Full-text search additionally
+    // covers address, product interest, and notes — so "term insurance" or
+    // a street/area name now finds leads that plain ILIKE on name/phone
+    // never could.
+    where.push(`(name ILIKE $${i} OR phone ILIKE $${i} OR search_vector @@ websearch_to_tsquery('english', $${i + 1}))`)
+    params.push(`%${search}%`, search)
+    i += 2
   }
   if (loanType && loanType !== "all") {
     where.push(`product_interest = $${i}`)
@@ -63,7 +69,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  if (!(await requireRole(req, ["admin", "agent"]))) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+  const session = await requireRole(req, ["admin", "agent"])
+  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const body = await req.json()
   if (!body.phone) return NextResponse.json({ error: "phone required" }, { status: 400 })
 
@@ -75,11 +82,13 @@ export async function POST(req: NextRequest) {
       const id = existing.rows[0].id
       const { data, error } = await db.from("leads").update({ ...body, updated_at: new Date().toISOString() }).eq("id", id).select().single()
       if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+      logAudit("lead updated (via dedupe)", session.email, { leadId: id, phone: body.phone })
       return NextResponse.json(data)
     }
 
     const { data, error } = await db.from("leads").insert(body).select().single()
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    logAudit("lead created", session.email, { leadId: data?.id, name: body.name, phone: body.phone })
     return NextResponse.json(data)
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 })
@@ -87,19 +96,23 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  if (!(await requireRole(req, ["admin", "agent"]))) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+  const session = await requireRole(req, ["admin", "agent"])
+  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const { id, ...updates } = await req.json()
   const { data, error } = await db.from("leads").update({ ...updates, updated_at: new Date().toISOString() }).eq("id", id).select().single()
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  logAudit("lead updated", session.email, { leadId: id, fields: Object.keys(updates) })
   return NextResponse.json(data)
 }
 
 export async function DELETE(req: NextRequest) {
-  if (!(await requireRole(req, ["admin", "agent"]))) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+  const session = await requireRole(req, ["admin", "agent"])
+  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const { searchParams } = new URL(req.url)
   const id = searchParams.get("id")
   if (!id) return NextResponse.json({ error: "id required" }, { status: 400 })
   const { error } = await db.from("leads").delete().eq("id", id)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  logAudit("lead deleted", session.email, { leadId: id })
   return NextResponse.json({ ok: true })
 }

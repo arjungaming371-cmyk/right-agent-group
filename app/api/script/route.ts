@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
 import { DEFAULT_SCRIPTS } from "@/lib/default-scripts"
 import { requireRole } from "@/lib/auth"
+import { logAudit } from "@/lib/audit"
 
 export const dynamic = "force-dynamic"
 
@@ -41,7 +42,8 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  if (!(await requireRole(req, ["admin"]))) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+  const session = await requireRole(req, ["admin"])
+  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   try {
     await ensureTable()
     const { language, content } = await req.json()
@@ -55,12 +57,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "script too long (max 20,000 characters)" }, { status: 400 })
     }
     await query(
-      `INSERT INTO ai_scripts (language, content, updated_at)
-       VALUES ($1, $2, now())
+      `INSERT INTO ai_scripts (language, content, updated_at, updated_by)
+       VALUES ($1, $2, now(), $3)
        ON CONFLICT (language) DO UPDATE
-       SET content = $2, updated_at = now()`,
-      [language, content.trim()]
+       SET content = $2, updated_at = now(), updated_by = $3`,
+      [language, content.trim(), session.email]
     )
+    logAudit("Priya script edited", session.email, { language })
     return NextResponse.json({ ok: true })
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 })
@@ -68,7 +71,8 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  if (!(await requireRole(req, ["admin"]))) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+  const session = await requireRole(req, ["admin"])
+  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   try {
     const language = new URL(req.url).searchParams.get("language")
     if (!language || !["english", "hindi", "telugu"].includes(language)) {
@@ -76,12 +80,13 @@ export async function DELETE(req: NextRequest) {
     }
     // Reset to default instead of hard delete
     await query(
-      `INSERT INTO ai_scripts (language, content, updated_at)
-       VALUES ($1, $2, now())
+      `INSERT INTO ai_scripts (language, content, updated_at, updated_by)
+       VALUES ($1, $2, now(), $3)
        ON CONFLICT (language) DO UPDATE
-       SET content = $2, updated_at = now()`,
-      [language, DEFAULTS[language]]
+       SET content = $2, updated_at = now(), updated_by = $3`,
+      [language, DEFAULTS[language], session.email]
     )
+    logAudit("Priya script reset to default", session.email, { language })
     return NextResponse.json({ ok: true, message: "Reset to default script" })
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 })
