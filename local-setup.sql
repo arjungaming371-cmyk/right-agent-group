@@ -167,6 +167,25 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
+-- Internal Ops Assistant — persistent chat history, one thread per staff member.
+CREATE TABLE IF NOT EXISTS assistant_chats (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_email TEXT NOT NULL,
+  title      TEXT NOT NULL DEFAULT 'New chat',
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_assistant_chats_user ON assistant_chats (user_email, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS assistant_messages (
+  id         BIGSERIAL PRIMARY KEY,
+  chat_id    UUID NOT NULL REFERENCES assistant_chats(id) ON DELETE CASCADE,
+  role       TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+  content    TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_assistant_messages_chat ON assistant_messages (chat_id, created_at ASC);
+
 -- Real-time dashboard notifications (loan applications, escalations, logins, new WhatsApp contacts)
 CREATE TABLE IF NOT EXISTS notifications (
   id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),

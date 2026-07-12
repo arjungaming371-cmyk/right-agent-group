@@ -125,17 +125,19 @@ export async function chatWithOllama(
  */
 export async function chatWithSystemPrompt(
   messages: { role: "user" | "model"; content: string }[],
-  systemPrompt: string
+  systemPrompt: string,
+  opts?: { numCtx?: number; numPredict?: number; timeoutMs?: number; historyTurns?: number }
 ): Promise<string> {
   if (!messages?.length) return "Hello! How can I help you today?"
-  return runOllamaChat(messages, systemPrompt)
+  return runOllamaChat(messages, systemPrompt, opts)
 }
 
 async function runOllamaChat(
   messages: { role: "user" | "model"; content: string }[],
-  systemPrompt: string
+  systemPrompt: string,
+  opts?: { numCtx?: number; numPredict?: number; timeoutMs?: number; historyTurns?: number }
 ): Promise<string> {
-  const recentMessages = messages.slice(-6)
+  const recentMessages = messages.slice(-(opts?.historyTurns ?? 6))
   const ollamaMessages = toOllamaMessages(recentMessages, systemPrompt)
 
   const controller = new AbortController()
@@ -145,7 +147,10 @@ async function runOllamaChat(
   // 10.171s (old 10000ms cutoff) and 20.178s (old 20000ms cutoff). A tight
   // timeout that matches the "normal" case keeps getting blown by cold
   // starts, so give it real headroom instead of chasing the exact number.
-  const timeoutMs = IS_GPU ? 35000 : 25000
+  // Callers that aren't live phone calls (e.g. the staff dashboard
+  // assistant) can pass a longer timeoutMs — a human reading a dashboard
+  // reply tolerates a slower answer far better than someone on hold.
+  const timeoutMs = opts?.timeoutMs ?? (IS_GPU ? 35000 : 25000)
 
   await acquireSlot()
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
@@ -163,8 +168,8 @@ async function runOllamaChat(
         // without it, every reply pays a multi-second model reload.
         keep_alive: "30m",
         options: IS_GPU
-          ? { num_predict: 120, temperature: 0.6, num_ctx: 2048, num_gpu: 99 }
-          : { num_predict: 80, temperature: 0.6, num_ctx: 1536, num_thread: 8 },
+          ? { num_predict: opts?.numPredict ?? 120, temperature: 0.6, num_ctx: opts?.numCtx ?? 2048, num_gpu: 99 }
+          : { num_predict: opts?.numPredict ?? 80, temperature: 0.6, num_ctx: opts?.numCtx ?? 1536, num_thread: 8 },
       }),
     })
     clearTimeout(timeoutId)
