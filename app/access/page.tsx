@@ -1,26 +1,51 @@
 "use client"
 
 // Team Access — admin-only page to add/remove teammates and set their role.
-// The API enforces admin-only server-side; this page also redirects non-admins
-// so they don't land on a page full of 401s.
+// Styled to match the operations console design system. The API enforces
+// admin-only server-side; this page also redirects non-admins so they don't
+// land on a page full of 401s.
 
 import { useCallback, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
+import { ArrowLeft, LogOut, Shield, UserCog, Eye, UserPlus, Users, Trash2 } from "lucide-react"
+import { ToastProvider, useToast } from "@/components/ui/toast"
+import { SkeletonList } from "@/components/ui/skeleton"
 
 type Role = "admin" | "agent" | "viewer"
 type AllowedEmail = { email: string; added_by: string | null; role: Role; created_at: string }
 
-const ROLE_LABEL: Record<Role, string> = { admin: "Admin", agent: "Loan Officer", viewer: "Viewer" }
+const ROLE_META: Record<Role, { label: string; desc: string; color: string; icon: typeof Shield }> = {
+  admin:  { label: "Admin",        desc: "Full access, including this page",                          color: "#8b7cff", icon: Shield },
+  agent:  { label: "Loan Officer", desc: "Leads, loans, calls, WhatsApp, analytics — no settings",    color: "#38bdf8", icon: UserCog },
+  viewer: { label: "Viewer",       desc: "Same views as Loan Officer, strictly read-only",            color: "#64708c", icon: Eye },
+}
 
-export default function AccessPage() {
+function RoleBadge({ role }: { role: Role }) {
+  const meta = ROLE_META[role] ?? ROLE_META.agent
+  const Icon = meta.icon
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 6,
+      background: `${meta.color}1c`, border: `1px solid ${meta.color}42`, color: meta.color,
+      borderRadius: 7, padding: "4px 10px", fontSize: 12, fontWeight: 600,
+    }}>
+      <Icon size={12} strokeWidth={2.1} />
+      {meta.label}
+    </span>
+  )
+}
+
+function AccessPageInner() {
   const router = useRouter()
+  const toast = useToast()
   const [checking, setChecking] = useState(true)
+  const [loading, setLoading] = useState(true)
   const [emails, setEmails] = useState<AllowedEmail[]>([])
   const [you, setYou] = useState("")
   const [newEmail, setNewEmail] = useState("")
   const [newRole, setNewRole] = useState<Role>("agent")
   const [busy, setBusy] = useState(false)
-  const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null)
+  const [confirmTarget, setConfirmTarget] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -33,23 +58,22 @@ export default function AccessPage() {
       const data = await res.json()
       setEmails(data.emails || [])
       setYou(data.you || "")
+      setLoading(false)
     } catch {
-      setMsg({ kind: "err", text: "Could not load the access list." })
+      toast.error("Could not load the access list")
+      setLoading(false)
     } finally {
       setChecking(false)
     }
-  }, [router])
+  }, [router]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => {
-    load()
-  }, [load])
+  useEffect(() => { load() }, [load])
 
   async function addEmail(e: React.FormEvent) {
     e.preventDefault()
     const email = newEmail.trim().toLowerCase()
     if (!email) return
     setBusy(true)
-    setMsg(null)
     try {
       const res = await fetch("/api/allowed-emails", {
         method: "POST",
@@ -60,27 +84,26 @@ export default function AccessPage() {
       if (!res.ok) throw new Error(data.error || "Failed")
       setNewEmail("")
       setNewRole("agent")
-      setMsg({ kind: "ok", text: `${email} can now log in as ${ROLE_LABEL[newRole]}.` })
+      toast.success(`${email} can now log in as ${ROLE_META[newRole].label}`)
       await load()
     } catch (err: any) {
-      setMsg({ kind: "err", text: err.message })
+      toast.error(err.message)
     } finally {
       setBusy(false)
     }
   }
 
   async function removeEmail(email: string) {
-    if (!confirm(`Remove login access for ${email}?`)) return
     setBusy(true)
-    setMsg(null)
+    setConfirmTarget(null)
     try {
       const res = await fetch(`/api/allowed-emails?email=${encodeURIComponent(email)}`, { method: "DELETE" })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || "Failed")
-      setMsg({ kind: "ok", text: `${email} removed.` })
+      toast.success(`${email} removed`)
       await load()
     } catch (err: any) {
-      setMsg({ kind: "err", text: err.message })
+      toast.error(err.message)
     } finally {
       setBusy(false)
     }
@@ -89,109 +112,176 @@ export default function AccessPage() {
   if (checking) return null
 
   return (
-    <main className="min-h-screen bg-black px-4 py-10 text-white">
-      <div className="mx-auto max-w-3xl">
-        <div className="mb-8 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold">Team Access</h1>
-            <p className="mt-1 text-sm text-zinc-400">
-              Who can sign in and what they can do.
-              {you && <span className="ml-1 text-zinc-500">Signed in as {you}.</span>}
-            </p>
+    <main style={{ minHeight: "100vh", padding: "0 20px" }}>
+      <div style={{ maxWidth: 860, margin: "0 auto", padding: "36px 0 80px" }}>
+
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 28, flexWrap: "wrap", gap: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <div style={{
+              width: 40, height: 40, borderRadius: 11, flexShrink: 0,
+              background: "var(--gradient-brand)",
+              boxShadow: "0 4px 16px -4px rgba(91,124,250,0.6), inset 0 1px 0 rgba(255,255,255,0.25)",
+              display: "flex", alignItems: "center", justifyContent: "center", color: "white",
+            }}>
+              <Users size={19} strokeWidth={2} />
+            </div>
+            <div>
+              <h1 style={{ fontSize: 20, fontWeight: 700, letterSpacing: "-0.02em" }}>Team Access</h1>
+              <p style={{ fontSize: 12.5, color: "var(--text-muted)", marginTop: 1 }}>
+                Who can sign in and what they can do{you ? <span> · signed in as <span style={{ color: "var(--text-secondary)" }}>{you}</span></span> : null}
+              </p>
+            </div>
           </div>
-          <div className="flex items-center gap-3">
-            <a href="/dashboard" className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-900">
-              Back to dashboard
+          <div style={{ display: "flex", gap: 8 }}>
+            <a href="/dashboard" className="btn-ghost" style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 7 }}>
+              <ArrowLeft size={14} strokeWidth={2} /> Dashboard
             </a>
-            <form action="/api/auth/logout" method="POST">
-              <button className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-900">
-                Log out
+            <form action="/api/auth/logout" method="POST" style={{ display: "inline-flex" }}>
+              <button className="btn-ghost" style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+                <LogOut size={13.5} strokeWidth={2} /> Log out
               </button>
             </form>
           </div>
         </div>
 
-        <form onSubmit={addEmail} className="mb-6 flex gap-3">
-          <input
-            type="email"
-            required
-            value={newEmail}
-            onChange={(e) => setNewEmail(e.target.value)}
-            placeholder="teammate@gmail.com"
-            className="flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-4 py-3 text-white placeholder-zinc-500 outline-none focus:border-red-600"
-          />
-          <select
-            value={newRole}
-            onChange={(e) => setNewRole(e.target.value as Role)}
-            className="rounded-lg border border-zinc-700 bg-zinc-950 px-4 py-3 text-white outline-none focus:border-red-600"
-          >
-            <option value="agent">Loan Officer</option>
-            <option value="viewer">Viewer</option>
-            <option value="admin">Admin</option>
-          </select>
-          <button
-            type="submit"
-            disabled={busy}
-            className="rounded-lg bg-red-600 px-6 py-3 font-medium text-white transition hover:bg-red-500 disabled:opacity-50"
-          >
-            Add
-          </button>
-        </form>
+        {/* Role legend */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, marginBottom: 20 }}>
+          {(Object.keys(ROLE_META) as Role[]).map(r => {
+            const meta = ROLE_META[r]
+            const Icon = meta.icon
+            return (
+              <div key={r} style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: "14px 16px", display: "flex", gap: 12, alignItems: "flex-start" }}>
+                <span style={{ width: 30, height: 30, borderRadius: 8, background: `${meta.color}1c`, border: `1px solid ${meta.color}3d`, display: "inline-flex", alignItems: "center", justifyContent: "center", color: meta.color, flexShrink: 0 }}>
+                  <Icon size={14} strokeWidth={2} />
+                </span>
+                <div>
+                  <div style={{ fontSize: 13.5, fontWeight: 600 }}>{meta.label}</div>
+                  <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2, lineHeight: 1.45 }}>{meta.desc}</div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
 
-        <p className="mb-6 text-xs text-zinc-500">
-          <strong className="text-zinc-400">Admin</strong> — full access, including this page. {" "}
-          <strong className="text-zinc-400">Loan Officer</strong> — leads, loans, calls, WhatsApp, analytics; no security/upload/script settings. {" "}
-          <strong className="text-zinc-400">Viewer</strong> — same views as Loan Officer, read-only.
-        </p>
-
-        {msg && (
-          <div
-            className={`mb-6 rounded-lg border px-4 py-3 text-sm ${
-              msg.kind === "ok" ? "border-green-800 bg-green-950/50 text-green-300" : "border-red-800 bg-red-950/50 text-red-300"
-            }`}
-          >
-            {msg.text}
+        {/* Add teammate */}
+        <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: "18px 20px", marginBottom: 20 }}>
+          <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
+            <UserPlus size={15} strokeWidth={2} style={{ color: "var(--text-secondary)" }} />
+            Add a teammate
           </div>
-        )}
+          <form onSubmit={addEmail} style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <input
+              type="email"
+              required
+              value={newEmail}
+              onChange={(e) => setNewEmail(e.target.value)}
+              placeholder="teammate@gmail.com"
+              style={{ flex: "1 1 240px", height: 40 }}
+            />
+            <select
+              value={newRole}
+              onChange={(e) => setNewRole(e.target.value as Role)}
+              style={{ width: 150, height: 40 }}
+            >
+              <option value="agent">Loan Officer</option>
+              <option value="viewer">Viewer</option>
+              <option value="admin">Admin</option>
+            </select>
+            <button type="submit" disabled={busy} className="btn-primary" style={{ height: 40, padding: "0 22px", opacity: busy ? 0.6 : 1 }}>
+              <UserPlus size={14} strokeWidth={2.2} /> Add
+            </button>
+          </form>
+          <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 10 }}>
+            They sign in with Google using this exact Gmail address. You can change a role later by re-adding the same email with the new role.
+          </div>
+        </div>
 
-        <div className="overflow-hidden rounded-xl border border-zinc-800">
-          {emails.length === 0 ? (
-            <p className="px-4 py-6 text-sm text-zinc-500">
-              No emails added yet. The ADMIN_EMAIL from .env can always log in as Admin.
-            </p>
-          ) : (
-            <table className="w-full text-left text-sm">
-              <thead className="bg-zinc-950 text-zinc-400">
-                <tr>
-                  <th className="px-4 py-3 font-medium">Email</th>
-                  <th className="px-4 py-3 font-medium">Role</th>
-                  <th className="px-4 py-3 font-medium">Added by</th>
-                  <th className="px-4 py-3" />
-                </tr>
-              </thead>
-              <tbody>
-                {emails.map((e) => (
-                  <tr key={e.email} className="border-t border-zinc-800">
-                    <td className="px-4 py-3">{e.email}</td>
-                    <td className="px-4 py-3 text-zinc-400">{ROLE_LABEL[e.role] || e.role}</td>
-                    <td className="px-4 py-3 text-zinc-500">{e.added_by || "—"}</td>
-                    <td className="px-4 py-3 text-right">
-                      <button
-                        onClick={() => removeEmail(e.email)}
-                        disabled={busy || e.email === you}
-                        className="text-red-400 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-40"
-                        title={e.email === you ? "You cannot remove yourself" : "Remove access"}
-                      >
-                        Remove
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        {/* Team list */}
+        <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
+          <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ fontWeight: 600, fontSize: 14 }}>Team members</div>
+            <span style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 6, padding: "3px 10px", fontSize: 12, color: "var(--text-muted)" }}>
+              {emails.length} {emails.length === 1 ? "person" : "people"}
+            </span>
+          </div>
+
+          {loading && <SkeletonList rows={3} />}
+
+          {!loading && emails.length === 0 && (
+            <div style={{ padding: "36px 20px", textAlign: "center" }}>
+              <Users size={30} strokeWidth={1.3} style={{ color: "var(--text-muted)", opacity: 0.6, marginBottom: 10 }} />
+              <div style={{ fontSize: 13.5, color: "var(--text-secondary)", fontWeight: 500 }}>No teammates added yet</div>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
+                The admin email from the server config can always log in as Admin.
+              </div>
+            </div>
           )}
+
+          {!loading && emails.map((e) => (
+            <div key={e.email} style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 20px", borderBottom: "1px solid var(--border-light)" }}>
+              <div style={{
+                width: 34, height: 34, borderRadius: "50%", flexShrink: 0,
+                background: "var(--gradient-brand)", display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 11.5, fontWeight: 700, color: "white",
+              }}>
+                {e.email.slice(0, 2).toUpperCase()}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 550, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {e.email}{e.email === you && <span style={{ color: "var(--text-muted)", fontWeight: 400 }}> (you)</span>}
+                </div>
+                <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 1 }}>
+                  Added by {e.added_by || "—"}
+                </div>
+              </div>
+              <RoleBadge role={e.role} />
+              {confirmTarget === e.email ? (
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button
+                    onClick={() => removeEmail(e.email)}
+                    disabled={busy}
+                    style={{ background: "rgba(251,86,112,0.14)", border: "1px solid rgba(251,86,112,0.4)", color: "#fb5670", borderRadius: 8, padding: "6px 12px", fontSize: 12, fontWeight: 600 }}
+                  >
+                    Confirm remove
+                  </button>
+                  <button
+                    onClick={() => setConfirmTarget(null)}
+                    style={{ background: "transparent", border: "1px solid var(--border)", color: "var(--text-secondary)", borderRadius: 8, padding: "6px 12px", fontSize: 12 }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setConfirmTarget(e.email)}
+                  disabled={busy || e.email === you}
+                  title={e.email === you ? "You cannot remove yourself" : "Remove access"}
+                  aria-label={`Remove ${e.email}`}
+                  style={{
+                    background: "transparent", border: "1px solid var(--border)", borderRadius: 8,
+                    width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center",
+                    color: e.email === you ? "var(--border)" : "var(--text-muted)",
+                    cursor: e.email === you ? "not-allowed" : "pointer", flexShrink: 0,
+                  }}
+                  onMouseEnter={ev => { if (e.email !== you) { ev.currentTarget.style.color = "#fb5670"; ev.currentTarget.style.borderColor = "rgba(251,86,112,0.4)" } }}
+                  onMouseLeave={ev => { ev.currentTarget.style.color = e.email === you ? "var(--border)" : "var(--text-muted)"; ev.currentTarget.style.borderColor = "var(--border)" }}
+                >
+                  <Trash2 size={14} strokeWidth={1.9} />
+                </button>
+              )}
+            </div>
+          ))}
         </div>
       </div>
     </main>
+  )
+}
+
+export default function AccessPage() {
+  return (
+    <ToastProvider>
+      <AccessPageInner />
+    </ToastProvider>
   )
 }
