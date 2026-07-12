@@ -77,7 +77,8 @@ function Avatar({ name }: { name: string }) {
   )
 }
 
-export default function LeadsView() {
+export default function LeadsView({ role }: { role: "admin" | "agent" | "viewer" }) {
+  const canEdit = role !== "viewer"
   const [leads, setLeads] = useState<Lead[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState("")
@@ -235,9 +236,11 @@ export default function LeadsView() {
             {/* Spacer */}
             <div style={{ flex: 1 }} />
             <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{leads.length} shown</div>
-            <button onClick={() => setShowAdd(true)} className="btn-primary" style={{ height: 34 }}>
-              <Plus size={15} strokeWidth={2.2} /> Add Lead
-            </button>
+            {canEdit && (
+              <button onClick={() => setShowAdd(true)} className="btn-primary" style={{ height: 34 }}>
+                <Plus size={15} strokeWidth={2.2} /> Add Lead
+              </button>
+            )}
           </div>
         </div>
 
@@ -280,20 +283,24 @@ export default function LeadsView() {
                   <td style={{ padding: "14px 16px", fontSize: 13, color: "var(--text-secondary)" }}>{lead.call_count ?? 0}</td>
                   <td style={{ padding: "14px 16px", color: "var(--text-muted)", fontSize: 12 }}>{timeAgo(lead.updated_at || lead.created_at)}</td>
                   <td style={{ padding: "14px 16px" }}>
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <button
-                        onClick={() => { setCallTarget(lead); setCallInstructions("") }}
-                        disabled={!lead.phone || calling === lead.id}
-                        title="Call with AI"
-                        style={{ background: "rgba(139,124,255,0.12)", border: "1px solid rgba(139,124,255,0.28)", color: "#a5b0ff", borderRadius: 9, width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center", opacity: calling === lead.id ? 0.5 : 1 }}
-                      ><Phone size={14} strokeWidth={1.9} /></button>
-                      <button
-                        onClick={() => setWaTarget(lead)}
-                        disabled={!lead.phone && !lead.whatsapp_number}
-                        title="Send WhatsApp"
-                        style={{ background: "rgba(45,212,160,0.1)", border: "1px solid rgba(45,212,160,0.28)", color: "#2dd4a0", borderRadius: 9, width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
-                      ><MessageCircle size={14} strokeWidth={1.9} /></button>
-                    </div>
+                    {canEdit ? (
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button
+                          onClick={() => { setCallTarget(lead); setCallInstructions("") }}
+                          disabled={!lead.phone || calling === lead.id}
+                          title="Call with AI"
+                          style={{ background: "rgba(139,124,255,0.12)", border: "1px solid rgba(139,124,255,0.28)", color: "#a5b0ff", borderRadius: 9, width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center", opacity: calling === lead.id ? 0.5 : 1 }}
+                        ><Phone size={14} strokeWidth={1.9} /></button>
+                        <button
+                          onClick={() => setWaTarget(lead)}
+                          disabled={!lead.phone && !lead.whatsapp_number}
+                          title="Send WhatsApp"
+                          style={{ background: "rgba(45,212,160,0.1)", border: "1px solid rgba(45,212,160,0.28)", color: "#2dd4a0", borderRadius: 9, width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                        ><MessageCircle size={14} strokeWidth={1.9} /></button>
+                      </div>
+                    ) : (
+                      <span style={{ fontSize: 12, color: "var(--text-muted)" }}>View only</span>
+                    )}
                   </td>
                 </tr>
               )

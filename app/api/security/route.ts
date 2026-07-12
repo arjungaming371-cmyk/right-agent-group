@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
-import { getSessionFromRequest } from "@/lib/auth"
+import { requireRole } from "@/lib/auth"
 
 export const dynamic = "force-dynamic"
 
@@ -15,9 +15,9 @@ export async function GET() {
 }
 
 export async function PATCH(req: NextRequest) {
-  const session = await getSessionFromRequest(req)
+  const session = await requireRole(req, ["admin"])
+  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const { key, enabled } = await req.json()
-  if (key === "_action") return NextResponse.json({ ok: true })
   if (typeof key !== "string" || typeof enabled !== "boolean") {
     return NextResponse.json({ error: "key (string) and enabled (boolean) required" }, { status: 400 })
   }

@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { makeCall as makeOutboundCall } from "@/lib/exotel"
+import { requireRole } from "@/lib/auth"
 
 // STEP 2: User explicitly confirms — THIS triggers the actual calls
 export async function POST(req: NextRequest) {
+  if (!(await requireRole(req, ["admin"]))) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const { uploadId, leadIds } = await req.json()
 
   if (!leadIds || !Array.isArray(leadIds) || leadIds.length === 0) {

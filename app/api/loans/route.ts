@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
+import { requireRole } from "@/lib/auth"
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
@@ -29,6 +30,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
+  if (!(await requireRole(req, ["admin", "agent"]))) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const { id, ...updates } = await req.json()
   const { data, error } = await db.from("loan_applications").update(updates).eq("id", id).select().single()
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })

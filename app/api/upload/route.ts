@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
+import { requireRole } from "@/lib/auth"
 
 // STEP 1: Upload + PARSE ONLY — does NOT call anyone automatically.
 // Creates leads + queues them as "pending". Use /api/upload/confirm to trigger calls.
 export async function POST(req: NextRequest) {
+  if (!(await requireRole(req, ["admin"]))) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const formData = await req.formData()
   const file = formData.get("file") as File | null
   const type = formData.get("type") as string ?? "contacts"

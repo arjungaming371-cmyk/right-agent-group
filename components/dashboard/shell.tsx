@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react"
 import {
   Users, FileText, Phone, MessageCircle, Activity, ShieldCheck, UploadCloud,
-  ScrollText, Search, Bell, LogOut, Mic, BarChart3, type LucideIcon,
+  ScrollText, LogOut, Mic, BarChart3, UserCog, type LucideIcon,
 } from "lucide-react"
 import LeadsView    from "./leads-view"
 import LoanAppsView from "./loan-apps-view"
@@ -16,33 +16,39 @@ import AnalyticsView from "./analytics-view"
 import QuickChat     from "./quick-chat"
 
 export type ViewKey = "leads" | "loans" | "voice" | "whatsapp" | "comms" | "security" | "upload" | "script" | "analytics"
+export type Role = "admin" | "agent" | "viewer"
 
-type NavItem = { key: ViewKey; label: string; icon: LucideIcon }
+const ROLE_LABEL: Record<Role, string> = { admin: "Administrator", agent: "Loan Officer", viewer: "Viewer" }
+
+type NavItem = { key: ViewKey; label: string; icon: LucideIcon; roles: Role[] }
 type NavSection = { title: string; items: NavItem[] }
 
+// roles: who sees this nav item. Agents/Viewers get the day-to-day working
+// views; Security/Upload/Script are admin-only (real system configuration,
+// not something a teammate should be able to touch or even see).
 const NAV_SECTIONS: NavSection[] = [
   {
     title: "Overview",
     items: [
-      { key: "analytics", label: "Analytics",        icon: BarChart3 },
-      { key: "leads",     label: "Leads",             icon: Users },
-      { key: "loans",     label: "Loan Applications", icon: FileText },
+      { key: "analytics", label: "Analytics",        icon: BarChart3, roles: ["admin", "agent", "viewer"] },
+      { key: "leads",     label: "Leads",             icon: Users,     roles: ["admin", "agent", "viewer"] },
+      { key: "loans",     label: "Loan Applications", icon: FileText,  roles: ["admin", "agent", "viewer"] },
     ],
   },
   {
     title: "Engagement",
     items: [
-      { key: "voice",    label: "Voice Logs",        icon: Phone },
-      { key: "whatsapp", label: "WhatsApp Chat",     icon: MessageCircle },
-      { key: "comms",    label: "Communication Log", icon: Activity },
+      { key: "voice",    label: "Voice Logs",        icon: Phone,          roles: ["admin", "agent", "viewer"] },
+      { key: "whatsapp", label: "WhatsApp Chat",     icon: MessageCircle,  roles: ["admin", "agent", "viewer"] },
+      { key: "comms",    label: "Communication Log", icon: Activity,       roles: ["admin", "agent", "viewer"] },
     ],
   },
   {
     title: "System",
     items: [
-      { key: "security", label: "Security",       icon: ShieldCheck },
-      { key: "upload",   label: "Upload & Data",  icon: UploadCloud },
-      { key: "script",   label: "Priya's Script", icon: ScrollText },
+      { key: "security", label: "Security",       icon: ShieldCheck,  roles: ["admin"] },
+      { key: "upload",   label: "Upload & Data",  icon: UploadCloud,  roles: ["admin"] },
+      { key: "script",   label: "Priya's Script", icon: ScrollText,   roles: ["admin"] },
     ],
   },
 ]
@@ -76,6 +82,7 @@ export default function DashboardShell() {
   const [view, setView] = useState<ViewKey>("leads")
   const [counts, setCounts] = useState({ leads: 0, loans: 0, whatsapp: 0 })
   const [userEmail, setUserEmail] = useState("")
+  const [role, setRole] = useState<Role>("viewer") // safest default until the real role loads
 
   useEffect(() => {
     async function loadCounts() {
@@ -89,7 +96,10 @@ export default function DashboardShell() {
       } catch {}
     }
     loadCounts()
-    fetch("/api/auth/me").then(r => r.json()).then(d => setUserEmail(d.email || "")).catch(() => {})
+    fetch("/api/auth/me").then(r => r.json()).then(d => {
+      setUserEmail(d.email || "")
+      if (d.role) setRole(d.role)
+    }).catch(() => {})
     const t = setInterval(loadCounts, 30000)
     return () => clearInterval(t)
   }, [])
@@ -101,6 +111,15 @@ export default function DashboardShell() {
 
   const badgeFor = (key: ViewKey) =>
     key === "leads" ? counts.leads : key === "loans" ? counts.loans : key === "whatsapp" ? counts.whatsapp : 0
+
+  const visibleSections = NAV_SECTIONS.map(s => ({ ...s, items: s.items.filter(i => i.roles.includes(role)) })).filter(s => s.items.length > 0)
+
+  // If the current view isn't visible to this role (e.g. role loaded after
+  // mount and it was "security"), fall back to something everyone can see.
+  useEffect(() => {
+    const allowed = NAV_SECTIONS.some(s => s.items.some(i => i.key === view && i.roles.includes(role)))
+    if (!allowed) setView("leads")
+  }, [role, view])
 
   const { title, sub } = VIEW_TITLES[view]
   const initials = userEmail ? userEmail.slice(0, 2).toUpperCase() : "RA"
@@ -125,7 +144,7 @@ export default function DashboardShell() {
 
         {/* Navigation */}
         <nav className="flex-1 overflow-y-auto px-3 pb-4 pt-3" aria-label="Primary">
-          {NAV_SECTIONS.map(section => (
+          {visibleSections.map(section => (
             <div key={section.title} className="mb-1">
               <div className="mb-1.5 mt-3 px-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">
                 {section.title}
@@ -172,6 +191,19 @@ export default function DashboardShell() {
               </div>
             </div>
           ))}
+          {role === "admin" && (
+            <div className="mb-1 mt-3">
+              <div className="mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">Team</div>
+              <a
+                href="/access"
+                className="group flex h-9 w-full items-center gap-3 rounded-[10px] px-3 text-left text-[13px] text-[var(--text-secondary)] transition-colors hover:bg-white/[0.04] hover:text-[var(--text-primary)]"
+                style={{ border: "1px solid transparent", fontWeight: 480 }}
+              >
+                <UserCog size={16} strokeWidth={1.8} className="text-[var(--text-muted)] group-hover:text-[var(--text-secondary)]" />
+                <span className="flex-1 truncate">Team Access</span>
+              </a>
+            </div>
+          )}
         </nav>
 
         {/* System status */}
@@ -192,7 +224,7 @@ export default function DashboardShell() {
             {initials}
           </div>
           <div className="min-w-0 flex-1 leading-tight">
-            <div className="text-[12.5px] font-semibold text-[var(--text-primary)]">Ops Administrator</div>
+            <div className="text-[12.5px] font-semibold text-[var(--text-primary)]">{ROLE_LABEL[role]}</div>
             <div className="truncate text-[10.5px] text-[var(--text-muted)]">{userEmail || "…"}</div>
           </div>
           <button
@@ -218,38 +250,19 @@ export default function DashboardShell() {
           <StatusPill icon={Mic} label="Voice Bot" />
           <StatusPill icon={MessageCircle} label="WhatsApp" />
 
-          <div className="mx-1 hidden h-6 w-px bg-[var(--border)] lg:block" />
-
-          <div className="relative hidden md:block">
-            <Search size={14} strokeWidth={2} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
-            <input
-              placeholder="Search"
-              aria-label="Search"
-              className="!h-9 !w-[210px] !rounded-[10px] !pl-9 !pr-12 !text-[13px]"
-            />
-            <span className="kbd pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2">⌘K</span>
-          </div>
-
-          <button
-            aria-label="Notifications"
-            className="relative flex h-9 w-9 items-center justify-center rounded-[10px] border border-transparent text-[var(--text-secondary)] hover:border-[var(--border)] hover:bg-white/[0.04] hover:text-[var(--text-primary)]"
-          >
-            <Bell size={16} strokeWidth={1.9} />
-            <span className="absolute right-[8px] top-[8px] block h-[6px] w-[6px] rounded-full bg-[var(--accent-red)] ring-[2.5px] ring-[#0a0e17]" />
-          </button>
         </header>
 
         {/* Content */}
         <main key={view} className="flex-1 overflow-auto p-6" style={{ animation: "fadeInUp 0.25s ease" }}>
           {view === "analytics" && <AnalyticsView />}
-          {view === "leads"    && <LeadsView />}
-          {view === "loans"    && <LoanAppsView />}
-          {view === "voice"    && <VoiceLogsView />}
-          {view === "whatsapp" && <WhatsAppView />}
+          {view === "leads"    && <LeadsView role={role} />}
+          {view === "loans"    && <LoanAppsView role={role} />}
+          {view === "voice"    && <VoiceLogsView role={role} />}
+          {view === "whatsapp" && <WhatsAppView role={role} />}
           {view === "comms"    && <CommLogView />}
-          {view === "security" && <SecurityView />}
-          {view === "upload"   && <UploadView />}
-          {view === "script"   && <ScriptView />}
+          {view === "security" && role === "admin" && <SecurityView />}
+          {view === "upload"   && role === "admin" && <UploadView />}
+          {view === "script"   && role === "admin" && <ScriptView />}
         </main>
       </div>
       <QuickChat />

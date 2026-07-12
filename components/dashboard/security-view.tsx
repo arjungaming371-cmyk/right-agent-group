@@ -1,6 +1,6 @@
 "use client"
 import { useEffect, useState } from "react"
-import { ShieldCheck, AlertTriangle, Lock, KeyRound, Globe, RotateCcw, FileLock2 } from "lucide-react"
+import { ShieldCheck, AlertTriangle, RotateCcw, FileLock2 } from "lucide-react"
 
 type Setting = { key: string; enabled: boolean }
 type AuditLog = { id: string; action: string; performed_by: string; created_at: string }
@@ -134,26 +134,6 @@ export default function SecurityView() {
             <div style={{ width:`${score}%`,height:"100%",background: score >= 75 ? "#22c55e" : "#f59e0b",borderRadius:4,transition:"width 0.5s" }} />
           </div>
           <div style={{ fontSize:12,color:"var(--text-muted)" }}>{score}% compliance score</div>
-        </div>
-
-        <div style={{ background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:12,padding:24 }}>
-          <div style={{ fontWeight:600,fontSize:15,marginBottom:16 }}>Quick Actions</div>
-          {[
-            { icon: KeyRound, label:"Rotate API Keys" },
-            { icon: Lock,     label:"Manage Sessions" },
-            { icon: Globe,    label:"Configure Domains" },
-          ].map(a => (
-            <button key={a.label} onClick={async () => {
-              await fetch("/api/security", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "_action", enabled: true }) }).catch(() => {})
-              await fetch("/api/security", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "two_factor_auth", enabled: true }) }).catch(() => {})
-              load()
-            }} style={{ width:"100%",display:"flex",alignItems:"center",gap:12,padding:"12px 16px",background:"var(--bg-secondary)",border:"1px solid var(--border)",borderRadius:10,color:"var(--text-secondary)",fontSize:14,marginBottom:8,textAlign:"left",transition:"background 0.15s" }}
-              onMouseEnter={e=>(e.currentTarget.style.background="var(--bg-card-hover)")}
-              onMouseLeave={e=>(e.currentTarget.style.background="var(--bg-secondary)")}>
-              <span style={{ width:30,height:30,borderRadius:8,background:"rgba(139,124,255,0.11)",border:"1px solid rgba(139,124,255,0.22)",display:"inline-flex",alignItems:"center",justifyContent:"center",color:"#a5b0ff",flexShrink:0 }}><a.icon size={14} strokeWidth={1.9} /></span>
-              {a.label}
-            </button>
-          ))}
         </div>
       </div>
     </div>

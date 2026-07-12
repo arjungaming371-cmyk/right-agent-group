@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
-import { createSessionToken, SESSION_COOKIE, sessionCookieOptions } from "@/lib/auth"
+import { createSessionToken, SESSION_COOKIE, sessionCookieOptions, type Role } from "@/lib/auth"
 
 export const dynamic = "force-dynamic"
 
@@ -51,19 +51,21 @@ export async function GET(req: NextRequest) {
     if (!profileRes.ok || !email) return fail("Could not read Google profile")
     if (profile.email_verified === false) return fail("This Google account's email is not verified")
 
-    // ---- ALLOWLIST CHECK ----
+    // ---- ALLOWLIST CHECK + ROLE LOOKUP ----
+    // ADMIN_EMAIL is always the "admin" role, regardless of what's in the DB.
+    // Everyone else's role comes from allowed_emails.role (defaults to "agent").
     const adminEmail = (process.env.ADMIN_EMAIL || "").toLowerCase()
-    let allowed = adminEmail !== "" && email === adminEmail
-    if (!allowed) {
-      const r = await query(`SELECT 1 FROM allowed_emails WHERE lower(email) = $1 LIMIT 1`, [email])
-      allowed = (r.rowCount ?? 0) > 0
+    let role: Role | null = adminEmail !== "" && email === adminEmail ? "admin" : null
+    if (!role) {
+      const r = await query(`SELECT role FROM allowed_emails WHERE lower(email) = $1 LIMIT 1`, [email])
+      if (r.rowCount) role = (r.rows[0].role as Role) || "agent"
     }
-    if (!allowed) {
+    if (!role) {
       console.warn(`Login DENIED for ${email} — not in allowed_emails`)
       return fail("This email is not authorized. Ask the admin to add it.")
     }
 
-    const token = await createSessionToken(email)
+    const token = await createSessionToken(email, role)
     const safeNext = nextPath.startsWith("/") && !nextPath.startsWith("//") ? nextPath : "/"
     const res = NextResponse.redirect(`${appUrl}${safeNext}`)
     res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions(appUrl.startsWith("https")))

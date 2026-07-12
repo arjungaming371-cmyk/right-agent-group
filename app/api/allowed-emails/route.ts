@@ -1,28 +1,24 @@
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
-import { getSessionFromRequest } from "@/lib/auth"
+import { requireRole, type Role } from "@/lib/auth"
 
 export const dynamic = "force-dynamic"
 
 const EMAIL_RE = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/
+const VALID_ROLES: Role[] = ["admin", "agent", "viewer"]
 
-// Middleware already blocks unauthenticated calls, but we verify again here —
-// never trust a single layer for an access-control endpoint.
-async function requireSession(req: NextRequest) {
-  const session = await getSessionFromRequest(req)
-  if (!session) return null
-  return session
-}
-
+// Team access management is admin-only. Middleware already blocks
+// unauthenticated calls, but we verify the role again here — never trust a
+// single layer for an access-control endpoint.
 export async function GET(req: NextRequest) {
-  const session = await requireSession(req)
+  const session = await requireRole(req, ["admin"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
-  const r = await query(`SELECT email, added_by, created_at FROM allowed_emails ORDER BY created_at DESC`)
+  const r = await query(`SELECT email, added_by, role, created_at FROM allowed_emails ORDER BY created_at DESC`)
   return NextResponse.json({ emails: r.rows, you: session.email })
 }
 
 export async function POST(req: NextRequest) {
-  const session = await requireSession(req)
+  const session = await requireRole(req, ["admin"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   let body: any
@@ -35,16 +31,18 @@ export async function POST(req: NextRequest) {
   if (!EMAIL_RE.test(email) || email.length > 254) {
     return NextResponse.json({ error: "invalid email address" }, { status: 400 })
   }
+  const role: Role = VALID_ROLES.includes(body?.role) ? body.role : "agent"
 
   await query(
-    `INSERT INTO allowed_emails (email, added_by) VALUES ($1, $2) ON CONFLICT (email) DO NOTHING`,
-    [email, session.email]
+    `INSERT INTO allowed_emails (email, added_by, role) VALUES ($1, $2, $3)
+     ON CONFLICT (email) DO UPDATE SET role = $3`,
+    [email, session.email, role]
   )
-  return NextResponse.json({ ok: true, email })
+  return NextResponse.json({ ok: true, email, role })
 }
 
 export async function DELETE(req: NextRequest) {
-  const session = await requireSession(req)
+  const session = await requireRole(req, ["admin"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const email = String(new URL(req.url).searchParams.get("email") || "").trim().toLowerCase()

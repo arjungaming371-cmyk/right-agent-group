@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { makeCall } from "@/lib/exotel"
+import { requireRole } from "@/lib/auth"
 
 export async function GET() {
   const { data, error } = await db
@@ -13,6 +14,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  if (!(await requireRole(req, ["admin", "agent"]))) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const { leadId, phone, language, instructions } = await req.json()
   if (!phone) return NextResponse.json({ error: "phone required" }, { status: 400 })
   try {

@@ -157,8 +157,15 @@ ON CONFLICT (key) DO NOTHING;
 CREATE TABLE IF NOT EXISTS allowed_emails (
   email      TEXT PRIMARY KEY,
   added_by   TEXT,
+  role       TEXT NOT NULL DEFAULT 'agent' CHECK (role IN ('admin', 'agent', 'viewer')),
   created_at TIMESTAMPTZ DEFAULT now()
 );
+-- Migration for databases created before the role column existed.
+ALTER TABLE allowed_emails ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'agent';
+DO $$ BEGIN
+  ALTER TABLE allowed_emails ADD CONSTRAINT allowed_emails_role_check CHECK (role IN ('admin', 'agent', 'viewer'));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 -- Uploaded lead files
 CREATE TABLE IF NOT EXISTS uploaded_files (

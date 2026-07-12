@@ -5,6 +5,6 @@ export const dynamic = "force-dynamic"
 
 export async function GET(req: NextRequest) {
   const session = await getSessionFromRequest(req)
-  if (!session) return NextResponse.json({ email: null }, { status: 401 })
-  return NextResponse.json({ email: session.email })
+  if (!session) return NextResponse.json({ email: null, role: null }, { status: 401 })
+  return NextResponse.json({ email: session.email, role: session.role })
 }

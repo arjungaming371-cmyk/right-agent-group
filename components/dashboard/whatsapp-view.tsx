@@ -1,6 +1,6 @@
 "use client"
 import { useEffect, useRef, useState, useCallback } from "react"
-import { Search, Send, Smile, Paperclip, Bot, MessageCircle, AlertTriangle } from "lucide-react"
+import { Search, Send, Bot, MessageCircle, AlertTriangle } from "lucide-react"
 
 type Lead = { id: string; name: string; phone: string; last_message?: string; last_message_time?: string; last_direction?: string; unread?: number }
 type Msg  = { id: string; direction: string; content: string; created_at: string; status?: string }
@@ -23,7 +23,8 @@ function Tick({ status }: { status?: string }) {
   return <span style={{ color: "#a8b4c0" }}>✓</span>
 }
 
-export default function WhatsAppView() {
+export default function WhatsAppView({ role }: { role: "admin" | "agent" | "viewer" }) {
+  const canEdit = role !== "viewer"
   const [leads, setLeads]       = useState<Lead[]>([])
   const [selected, setSelected] = useState<Lead | null>(null)
   const [messages, setMessages] = useState<Msg[]>([])
@@ -299,30 +300,34 @@ export default function WhatsAppView() {
               <div ref={bottomRef} />
             </div>
 
-            {/* Input */}
-            <div style={{ padding: "10px 16px", background: "#202c33", display: "flex", alignItems: "center", gap: 10 }}>
-              <div style={{ flex: 1, background: "#2a3942", borderRadius: 10, display: "flex", alignItems: "center", padding: "0 14px", gap: 10 }}>
-                <Smile size={19} strokeWidth={1.8} style={{ color: "#8696a0", cursor: "pointer", flexShrink: 0 }} />
-                <input
-                  ref={inputRef}
-                  placeholder="Type a message"
-                  value={text}
-                  onChange={e => setText(e.target.value)}
-                  onKeyDown={e => e.key === "Enter" && !e.shiftKey && send()}
-                  disabled={ready === false}
-                  style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: "#e9edef", fontSize: 15, padding: "12px 0" }}
-                />
-                <Paperclip size={17} strokeWidth={1.8} style={{ color: "#8696a0", cursor: "pointer", flexShrink: 0 }} />
+            {/* Input — read-only role sees no composer at all */}
+            {canEdit ? (
+              <div style={{ padding: "10px 16px", background: "#202c33", display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ flex: 1, background: "#2a3942", borderRadius: 10, display: "flex", alignItems: "center", padding: "0 14px", gap: 10 }}>
+                  <input
+                    ref={inputRef}
+                    placeholder="Type a message"
+                    value={text}
+                    onChange={e => setText(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && !e.shiftKey && send()}
+                    disabled={ready === false}
+                    style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: "#e9edef", fontSize: 15, padding: "12px 0" }}
+                  />
+                </div>
+                <button
+                  onClick={send}
+                  disabled={sending || !text.trim() || ready === false}
+                  aria-label="Send message"
+                  style={{ width: 46, height: 46, borderRadius: "50%", background: "#25D366", border: "none", display: "flex", alignItems: "center", justifyContent: "center", color: "#0b141a", cursor: "pointer", opacity: (sending || !text.trim() || ready === false) ? 0.5 : 1, flexShrink: 0 }}
+                >
+                  <Send size={19} strokeWidth={2.1} />
+                </button>
               </div>
-              <button
-                onClick={send}
-                disabled={sending || !text.trim() || ready === false}
-                aria-label="Send message"
-                style={{ width: 46, height: 46, borderRadius: "50%", background: "#25D366", border: "none", display: "flex", alignItems: "center", justifyContent: "center", color: "#0b141a", cursor: "pointer", opacity: (sending || !text.trim() || ready === false) ? 0.5 : 1, flexShrink: 0 }}
-              >
-                <Send size={19} strokeWidth={2.1} />
-              </button>
-            </div>
+            ) : (
+              <div style={{ padding: "14px 16px", background: "#202c33", textAlign: "center", color: "#8696a0", fontSize: 13 }}>
+                View only — you don't have permission to send messages.
+              </div>
+            )}
           </div>
         ) : (
           <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "#0b141a", color: "#8696a0" }}>

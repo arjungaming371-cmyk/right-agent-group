@@ -32,7 +32,8 @@ function proxyRecordingUrl(url: string | null): string | null {
   return url
 }
 
-export default function VoiceLogsView() {
+export default function VoiceLogsView({ role }: { role: "admin" | "agent" | "viewer" }) {
+  const canEdit = role !== "viewer"
   const [calls, setCalls]   = useState<Call[]>([])
   const [leads, setLeads]   = useState<Lead[]>([])
   const [loading, setLoading] = useState(true)
@@ -109,65 +110,67 @@ export default function VoiceLogsView() {
         ))}
       </div>
 
-      {/* Trigger call */}
-      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: 20 }}>
-        <div style={{ fontWeight: 600, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ width: 26, height: 26, borderRadius: 8, background: "rgba(139,124,255,0.15)", border: "1px solid rgba(139,124,255,0.3)", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-            <Bot size={14} style={{ color: "#a5b0ff" }} />
-          </span>
-          Trigger AI Outbound Call
-        </div>
+      {/* Trigger call — hidden for read-only viewers */}
+      {canEdit && (
+        <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: 20 }}>
+          <div style={{ fontWeight: 600, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ width: 26, height: 26, borderRadius: 8, background: "rgba(139,124,255,0.15)", border: "1px solid rgba(139,124,255,0.3)", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+              <Bot size={14} style={{ color: "#a5b0ff" }} />
+            </span>
+            Trigger AI Outbound Call
+          </div>
 
-        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-          {["lead", "manual"].map(m => (
-            <button key={m} onClick={() => setMode(m as any)} style={{
-              padding: "6px 14px", borderRadius: 8, fontSize: 13,
-              border: "1px solid var(--border)",
-              background: mode === m ? "rgba(59,130,246,0.15)" : "transparent",
-              color: mode === m ? "#60a5fa" : "var(--text-secondary)"
-            }}>{m === "lead" ? "Select Lead" : "Manual Number"}</button>
-          ))}
-        </div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+            {["lead", "manual"].map(m => (
+              <button key={m} onClick={() => setMode(m as any)} style={{
+                padding: "6px 14px", borderRadius: 8, fontSize: 13,
+                border: "1px solid var(--border)",
+                background: mode === m ? "rgba(59,130,246,0.15)" : "transparent",
+                color: mode === m ? "#60a5fa" : "var(--text-secondary)"
+              }}>{m === "lead" ? "Select Lead" : "Manual Number"}</button>
+            ))}
+          </div>
 
-        <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
-          {mode === "lead" ? (
-            <select value={selectedLeadId} onChange={e => setSelectedLeadId(e.target.value)} style={{ flex: 1 }}>
-              <option value="">Select a lead…</option>
-              {leads.map(l => <option key={l.id} value={l.id}>{l.name} — {l.phone}</option>)}
+          <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
+            {mode === "lead" ? (
+              <select value={selectedLeadId} onChange={e => setSelectedLeadId(e.target.value)} style={{ flex: 1 }}>
+                <option value="">Select a lead…</option>
+                {leads.map(l => <option key={l.id} value={l.id}>{l.name} — {l.phone}</option>)}
+              </select>
+            ) : (
+              <input placeholder="+91 98765 43210" value={manualPhone} onChange={e => setManualPhone(e.target.value)} style={{ flex: 1 }} />
+            )}
+            <select value={language} onChange={e => setLanguage(e.target.value)} style={{ width: 140 }}>
+              <option value="english">English</option>
+              <option value="hindi">Hindi</option>
+              <option value="telugu">Telugu</option>
             </select>
-          ) : (
-            <input placeholder="+91 98765 43210" value={manualPhone} onChange={e => setManualPhone(e.target.value)} style={{ flex: 1 }} />
-          )}
-          <select value={language} onChange={e => setLanguage(e.target.value)} style={{ width: 140 }}>
-            <option value="english">English</option>
-            <option value="hindi">Hindi</option>
-            <option value="telugu">Telugu</option>
-          </select>
-        </div>
+          </div>
 
-        <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>
-          What should Priya talk about? (optional)
-        </label>
-        <textarea
-          value={instructions}
-          onChange={e => setInstructions(e.target.value)}
-          placeholder="e.g. Follow up on home loan enquiry, mention 8.4% rate offer"
-          rows={2}
-          style={{ width: "100%", background: "#0d1422", border: "1px solid var(--border)", color: "var(--text-primary)", borderRadius: 8, padding: 10, fontSize: 13, resize: "vertical", marginBottom: 12 }}
-        />
+          <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>
+            What should Priya talk about? (optional)
+          </label>
+          <textarea
+            value={instructions}
+            onChange={e => setInstructions(e.target.value)}
+            placeholder="e.g. Follow up on home loan enquiry, mention 8.4% rate offer"
+            rows={2}
+            style={{ width: "100%", background: "#0d1422", border: "1px solid var(--border)", color: "var(--text-primary)", borderRadius: 8, padding: 10, fontSize: 13, resize: "vertical", marginBottom: 12 }}
+          />
 
-        <button
-          onClick={makeCall}
-          disabled={calling || (mode === "lead" ? !selectedLeadId : !manualPhone)}
-          className="btn-primary"
-          style={{ height: 38, padding: "0 22px" }}
-        >
-          <Phone size={14} strokeWidth={2} /> {calling ? "Calling…" : "Call Now"}
-        </button>
-        <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8 }}>
-          AI Priya will call, speak in the chosen language, collect name/address/WhatsApp, and send the application link automatically.
+          <button
+            onClick={makeCall}
+            disabled={calling || (mode === "lead" ? !selectedLeadId : !manualPhone)}
+            className="btn-primary"
+            style={{ height: 38, padding: "0 22px" }}
+          >
+            <Phone size={14} strokeWidth={2} /> {calling ? "Calling…" : "Call Now"}
+          </button>
+          <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8 }}>
+            AI Priya will call, speak in the chosen language, collect name/address/WhatsApp, and send the application link automatically.
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Call history */}
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12 }}>

@@ -4,7 +4,7 @@ import { BadgeCheck } from "lucide-react"
 import { formatCurrency, timeAgo } from "@/lib/utils"
 
 type LoanApp = {
-  id: string; ref_number: string; customer_name: string; city: string; loan_type: string
+  id: string; customer_name: string; city: string; loan_type: string
   loan_amount: number; status: string; email: string; address: string; whatsapp_number: string
   employment_type: string; monthly_income: number; form_data: any; submitted_at: string; created_at: string
 }
@@ -19,7 +19,8 @@ function Avatar({ name }: { name: string }) {
   )
 }
 
-export default function LoanAppsView() {
+export default function LoanAppsView({ role }: { role: "admin" | "agent" | "viewer" }) {
+  const canEdit = role !== "viewer"
   const [apps, setApps] = useState<LoanApp[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -92,14 +93,14 @@ export default function LoanAppsView() {
                 <Avatar name={selected.customer_name} />
                 <div>
                   <div style={{ fontWeight: 700, fontSize: 18 }}>{selected.customer_name}</div>
-                  <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{selected.ref_number} · Applied {timeAgo(selected.submitted_at || selected.created_at)}</div>
+                  <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Applied {timeAgo(selected.submitted_at || selected.created_at)}</div>
                 </div>
               </div>
               {selected.status === "qualified" ? (
                 <span style={{ color: "#2dd4a0", fontSize: 13, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 5, background: "rgba(45,212,160,0.1)", border: "1px solid rgba(45,212,160,0.3)", borderRadius: 8, padding: "6px 14px" }}><BadgeCheck size={14} strokeWidth={2} /> Qualified</span>
-              ) : (
+              ) : canEdit ? (
                 <button onClick={() => markStatus(selected.id, "qualified")} style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", color: "var(--text-secondary)", borderRadius: 8, padding: "8px 18px", fontSize: 13, fontWeight: 600 }}>Mark Qualified</button>
-              )}
+              ) : null}
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>

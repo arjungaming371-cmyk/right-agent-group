@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
 import { DEFAULT_SCRIPTS } from "@/lib/default-scripts"
+import { requireRole } from "@/lib/auth"
 
 export const dynamic = "force-dynamic"
 
@@ -40,6 +41,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  if (!(await requireRole(req, ["admin"]))) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   try {
     await ensureTable()
     const { language, content } = await req.json()
@@ -66,6 +68,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
+  if (!(await requireRole(req, ["admin"]))) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   try {
     const language = new URL(req.url).searchParams.get("language")
     if (!language || !["english", "hindi", "telugu"].includes(language)) {

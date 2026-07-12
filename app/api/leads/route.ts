@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db, query } from "@/lib/db"
+import { requireRole } from "@/lib/auth"
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
@@ -62,6 +63,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  if (!(await requireRole(req, ["admin", "agent"]))) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const body = await req.json()
   if (!body.phone) return NextResponse.json({ error: "phone required" }, { status: 400 })
 
@@ -85,6 +87,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
+  if (!(await requireRole(req, ["admin", "agent"]))) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const { id, ...updates } = await req.json()
   const { data, error } = await db.from("leads").update({ ...updates, updated_at: new Date().toISOString() }).eq("id", id).select().single()
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
@@ -92,6 +95,7 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
+  if (!(await requireRole(req, ["admin", "agent"]))) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const { searchParams } = new URL(req.url)
   const id = searchParams.get("id")
   if (!id) return NextResponse.json({ error: "id required" }, { status: 400 })

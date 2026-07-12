@@ -2,7 +2,9 @@
 // Works in BOTH Next.js Edge middleware and Node API routes (no extra deps).
 //
 // Cookie format:  base64url(payloadJSON) + "." + base64url(hmacSignature)
-// Payload: { email, exp } — exp is a unix-seconds expiry.
+// Payload: { email, role, exp } — exp is a unix-seconds expiry.
+
+export type Role = "admin" | "agent" | "viewer"
 
 export const SESSION_COOKIE = "rag_session"
 const SESSION_DAYS = 7
@@ -38,10 +40,10 @@ async function hmacKey(): Promise<CryptoKey> {
   ])
 }
 
-export type Session = { email: string; exp: number }
+export type Session = { email: string; role: Role; exp: number }
 
-export async function createSessionToken(email: string): Promise<string> {
-  const payload: Session = { email, exp: Math.floor(Date.now() / 1000) + SESSION_DAYS * 86400 }
+export async function createSessionToken(email: string, role: Role): Promise<string> {
+  const payload: Session = { email, role, exp: Math.floor(Date.now() / 1000) + SESSION_DAYS * 86400 }
   const payloadB64 = toBase64Url(enc.encode(JSON.stringify(payload)))
   const sig = await crypto.subtle.sign("HMAC", await hmacKey(), enc.encode(payloadB64))
   return `${payloadB64}.${toBase64Url(new Uint8Array(sig))}`
@@ -63,6 +65,9 @@ export async function verifySessionToken(token: string | undefined | null): Prom
     const payload = JSON.parse(new TextDecoder().decode(fromBase64Url(payloadB64))) as Session
     if (!payload?.email || typeof payload.exp !== "number") return null
     if (payload.exp < Math.floor(Date.now() / 1000)) return null
+    // Sessions signed before the role field existed: treat as agent, the
+    // least-privileged non-viewer role, rather than silently trusting admin.
+    if (payload.role !== "admin" && payload.role !== "agent" && payload.role !== "viewer") payload.role = "agent"
     return payload
   } catch {
     return null
@@ -84,4 +89,11 @@ export async function getSessionFromRequest(req: Request): Promise<Session | nul
   const cookieHeader = req.headers.get("cookie") || ""
   const match = cookieHeader.match(new RegExp(`(?:^|;\\s*)${SESSION_COOKIE}=([^;]+)`))
   return verifySessionToken(match ? decodeURIComponent(match[1]) : null)
+}
+
+/** Reads the session and checks it has one of the allowed roles. Returns null if either check fails. */
+export async function requireRole(req: Request, roles: Role[]): Promise<Session | null> {
+  const session = await getSessionFromRequest(req)
+  if (!session || !roles.includes(session.role)) return null
+  return session
 }
