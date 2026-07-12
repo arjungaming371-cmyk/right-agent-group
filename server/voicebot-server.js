@@ -6,7 +6,7 @@
 //
 //   caller audio → silence-based endpointing → STT (self-hosted Whisper)
 //     → Next.js /api/calls/turn (Ollama = Priya's brain, DB, WhatsApp link)
-//     → TTS (Sarvam AI bulbul:v3 — Indic neural voices: en-IN / hi-IN / te-IN)
+//     → TTS (switchable: free Edge, paid Sarvam, or self-hosted Svara-TTS)
 //     → downsample to 8kHz PCM → streamed back to the caller.
 //
 // Exotel setup: Voicebot applet URL = wss://YOUR-DOMAIN/voicebot
@@ -125,8 +125,34 @@ async function sarvamSpeech(text, language) {
   return Buffer.from(b64, "base64")
 }
 
+// Self-hosted Kenpath Svara-TTS — one voice for Hindi/Telugu/Indian English.
+// See github.com/Kenpath/svara-tts-inference. OpenAI-compatible endpoint.
+const SVARA_URL = process.env.SVARA_TTS_URL || "http://127.0.0.1:8080"
+const SVARA_VOICES = {
+  english: process.env.SVARA_VOICE_ENGLISH || "en_female",
+  hindi: process.env.SVARA_VOICE_HINDI || "hi_female",
+  telugu: process.env.SVARA_VOICE_TELUGU || "te_female",
+}
+
+async function svaraSpeech(text, language) {
+  const res = await fetch(`${SVARA_URL}/v1/audio/speech`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "svara-tts-v1",
+      voice: SVARA_VOICES[language] || SVARA_VOICES.english,
+      input: text,
+      response_format: "wav",
+    }),
+  })
+  if (!res.ok) throw new Error(`Svara TTS HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`)
+  return Buffer.from(await res.arrayBuffer())
+}
+
 function synthesizeSpeech(text, language) {
-  return TTS_PROVIDER === "sarvam" ? sarvamSpeech(text, language) : edgeSpeech(text, language)
+  if (TTS_PROVIDER === "sarvam") return sarvamSpeech(text, language)
+  if (TTS_PROVIDER === "svara") return svaraSpeech(text, language)
+  return edgeSpeech(text, language)
 }
 
 /** WAV → 8kHz 16-bit mono PCM via ffmpeg (install once: sudo apt install -y ffmpeg). */
