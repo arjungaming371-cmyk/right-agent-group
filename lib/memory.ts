@@ -46,6 +46,75 @@ export async function getWhatsAppContext(leadId: string): Promise<string> {
   }
 }
 
+// Inbound calls auto-create a lead with a placeholder like "Caller 8090"
+// before we know the real name — never treat that as "known" info to confirm.
+const PLACEHOLDER_NAME_RE = /^Caller \d+$/
+
+/**
+ * Known lead fields (name/city/product) — used so Priya CONFIRMS details we
+ * already have instead of asking fresh, on calls and WhatsApp alike.
+ */
+export async function getKnownLeadContext(leadId: string): Promise<string> {
+  if (!leadId) return ""
+  try {
+    const res = await query(
+      `SELECT name, address, whatsapp_number, product_interest FROM leads WHERE id = $1`,
+      [leadId]
+    )
+    if (res.rows.length === 0) return ""
+    const lead = res.rows[0]
+    const safeName = lead.name && !PLACEHOLDER_NAME_RE.test(lead.name) ? lead.name : null
+    const known: string[] = []
+    if (safeName) known.push(`name: ${safeName}`)
+    if (lead.address) known.push(`city/area: ${lead.address}`)
+    if (lead.whatsapp_number) known.push(`WhatsApp number: ${lead.whatsapp_number}`)
+    if (lead.product_interest) known.push(`interested in: ${lead.product_interest}`)
+    if (known.length === 0) return ""
+    const example = safeName ? `I have your name as ${safeName} — is that right?` : `I have your area as ${lead.address} — is that right?`
+    return `KNOWN LEAD INFO — we already have this on file: ${known.join(
+      ", "
+    )}. Do NOT ask for these again — briefly CONFIRM them instead (e.g. "${example}"). Only ask fresh for whatever is missing from this list.`
+  } catch (e: any) {
+    console.error("getKnownLeadContext error:", e.message)
+    return ""
+  }
+}
+
+/** Past voice-call summary for a lead, excluding the call in progress — used to brief a NEW call. */
+export async function getPastCallContext(leadId: string, excludeCallSid?: string | null): Promise<string> {
+  if (!leadId) return ""
+  try {
+    const res = await query(
+      `SELECT transcript, ai_summary, outcome, created_at FROM voice_calls
+       WHERE lead_id = $1 AND ($2::text IS NULL OR twilio_call_sid != $2)
+         AND (transcript IS NOT NULL OR ai_summary IS NOT NULL)
+       ORDER BY created_at DESC LIMIT 1`,
+      [leadId, excludeCallSid || null]
+    )
+    if (res.rows.length === 0) return ""
+    const call = res.rows[0]
+    const when = daysAgo(call.created_at)
+
+    if (call.ai_summary) {
+      return `CROSS-CHANNEL MEMORY — we called this customer before, ${when}. Summary: ${clip(
+        call.ai_summary
+      )}. Acknowledge naturally that you've spoken before — do not treat them as a stranger.`
+    }
+    let turns: any[] = []
+    try {
+      turns = typeof call.transcript === "string" ? JSON.parse(call.transcript) : call.transcript || []
+    } catch {}
+    if (!Array.isArray(turns) || turns.length === 0) return ""
+    const last = turns.slice(-3).map((t: any) => `${t.role === "ai" ? "Priya" : "Customer"}: "${clip(t.text)}"`)
+    return `CROSS-CHANNEL MEMORY — we called this customer before, ${when}. Last moments of that call:\n${last.join(
+      "\n"
+    )}\nAcknowledge naturally that you've spoken before — do not treat them as a stranger.`
+  } catch (e: any) {
+    console.error("getPastCallContext error:", e.message)
+    return ""
+  }
+}
+
 /** Recent voice-call summary for a lead — used to brief the WhatsApp AI. */
 export async function getVoiceContext(leadId: string): Promise<string> {
   if (!leadId) return ""

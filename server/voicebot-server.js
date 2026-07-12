@@ -202,6 +202,7 @@ class CallSession {
     this.botTalking = false   // we're currently sending audio (mic muted)
     this.processing = false
     this.closed = false
+    this.started = false      // guards against a duplicate Exotel "start" event replaying the greeting mid-call
   }
 
   avgEnergy(frame) {
@@ -212,6 +213,14 @@ class CallSession {
   }
 
   async onStart(msg) {
+    if (this.started) {
+      // Exotel resent "start" mid-call (reconnect/retry). Re-running this would
+      // replay Priya's greeting and — before the transcript fix above — wipe the
+      // conversation history. Just ignore the duplicate and keep the call going.
+      console.log(`⚠ duplicate "start" event ignored sid=${this.callSid}`)
+      return
+    }
+    this.started = true
     this.streamSid = msg.stream_sid || msg.streamSid || null
     const start = msg.start || {}
     this.callSid = start.call_sid || start.callSid || start.CallSid || null

@@ -2,17 +2,19 @@ import { randomUUID } from "crypto"
 import { db, query } from "./db"
 import { chatWithOllama, extractLeadInfo, mightBeComplete, type Language } from "./ollama"
 import { sendApplicationLink } from "./whatsapp"
-import { getWhatsAppContext } from "./memory"
+import { getWhatsAppContext, getKnownLeadContext, getPastCallContext } from "./memory"
 import { detectFrustration, flagFrustratedCall } from "./frustration"
 
 // Permission-based opener — respect keeps people on the line.
+// Neutral/informational by design: this is an intake call, not a sales
+// pitch, so it states the purpose plainly instead of leading with benefits.
 export const GREETINGS: Record<Language, string> = {
   english:
-    "Hello, good morning! This is Priya calling from Right Agent Group, Hyderabad. This will take just one minute. You may qualify for a quick loan with minimal documents — I just need your name, city, and a WhatsApp number to send the application link. May I have your full name, please?",
+    "Hello, good morning! This is Priya calling from Right Agent Group, Hyderabad. This will take just one minute — I'm calling to note down a few details for a loan application: your name, city, and a WhatsApp number to send the application link. May I have your full name, please?",
   hindi:
-    "नमस्ते! मैं Priya बोल रही हूं, Right Agent Group, Hyderabad से। सिर्फ एक मिनट लगेगा। कम दस्तावेज़ों में आप क्विक लोन के पात्र हो सकते हैं — मुझे बस आपका नाम, शहर और WhatsApp नंबर चाहिए ताकि आवेदन लिंक भेज सकूं। कृपया अपना पूरा नाम बताएं?",
+    "नमस्ते! मैं Priya बोल रही हूं, Right Agent Group, Hyderabad से। सिर्फ एक मिनट लगेगा — मैं लोन आवेदन के लिए कुछ जानकारी नोट करने के लिए कॉल कर रही हूं: आपका नाम, शहर और आवेदन लिंक भेजने के लिए WhatsApp नंबर। कृपया अपना पूरा नाम बताएं?",
   telugu:
-    "నమస్కారం! నేను Priya, Right Agent Group, Hyderabad నుండి మాట్లాడుతున్నాను. ఒక్క నిమిషం చాలు. తక్కువ డాక్యుమెంట్లతో మీరు క్విక్ లోన్‌కు అర్హులు కావచ్చు — అప్లికేషన్ లింక్ పంపడానికి మీ పేరు, ఊరు, WhatsApp నంబర్ చాలు. దయచేసి మీ పూర్తి పేరు చెప్పండి?",
+    "నమస్కారం! నేను Priya, Right Agent Group, Hyderabad నుండి మాట్లాడుతున్నాను. ఒక్క నిమిషం చాలు — లోన్ అప్లికేషన్ కోసం కొన్ని వివరాలు నోట్ చేయడానికి కాల్ చేస్తున్నాను: మీ పేరు, ఊరు, మరియు అప్లికేషన్ లింక్ పంపడానికి WhatsApp నంబర్. దయచేసి మీ పూర్తి పేరు చెప్పండి?",
 }
 
 // Inbound calls are the customer's initiative — greet like a receptionist,
@@ -30,6 +32,28 @@ const CLOSING: Record<Language, string> = {
   english: "Thank you! I'm sending the application link to your WhatsApp right now. Our loan officer will confirm your best offer soon. Have a great day!",
   hindi: "धन्यवाद! मैं अभी आपके WhatsApp पर आवेदन लिंक भेज रही हूं। हमारे लोन ऑफिसर जल्द आपका बेस्ट ऑफर कन्फर्म करेंगे। आपका दिन शुभ हो!",
   telugu: "ధన్యవాదాలు! నేను ఇప్పుడు మీ WhatsApp కి అప్లికేషన్ లింక్ పంపుతున్నాను. మా లోన్ ఆఫీసర్ త్వరలో మీ బెస్ట్ ఆఫర్ కన్ఫర్మ్ చేస్తారు. మీకు మంచి రోజు జరగాలి!",
+}
+
+// Inbound calls auto-create a lead with a placeholder like "Caller 8090"
+// before we know the real name — never greet someone by that fake name.
+const PLACEHOLDER_NAME_RE = /^Caller \d+$/
+
+function personalizedGreeting(language: Language, name: string): string {
+  const templates: Record<Language, string> = {
+    english: `Hello ${name}! This is Priya calling from Right Agent Group, Hyderabad. This will take just a minute — I just need to confirm a couple of details and get a WhatsApp number to send your application link.`,
+    hindi: `नमस्ते ${name} जी! मैं Priya बोल रही हूं, Right Agent Group, Hyderabad से। सिर्फ एक मिनट लगेगा — मुझे बस कुछ जानकारी कन्फर्म करनी है और आवेदन लिंक भेजने के लिए WhatsApp नंबर चाहिए।`,
+    telugu: `నమస్కారం ${name} గారు! నేను Priya, Right Agent Group, Hyderabad నుండి మాట్లాడుతున్నాను. ఒక్క నిమిషం చాలు — నేను కొన్ని వివరాలు నిర్ధారించి, అప్లికేషన్ లింక్ పంపడానికి WhatsApp నంబర్ తీసుకోవాలి.`,
+  }
+  return templates[language]
+}
+
+function personalizedInboundGreeting(language: Language, name: string): string {
+  const templates: Record<Language, string> = {
+    english: `Hello ${name}! Thank you for calling Right Agent Group, Hyderabad. This is Priya. How can I help you today?`,
+    hindi: `नमस्ते ${name} जी! Right Agent Group, Hyderabad में कॉल करने के लिए धन्यवाद। मैं Priya बोल रही हूं। बताइए, मैं आपकी क्या मदद कर सकती हूं?`,
+    telugu: `నమస్కారం ${name} గారు! Right Agent Group, Hyderabad కి కాల్ చేసినందుకు ధన్యవాదాలు. నేను Priya. చెప్పండి, మీకు ఎలా సహాయం చేయగలను?`,
+  }
+  return templates[language]
 }
 
 const RETRY_MSG: Record<Language, string> = {
@@ -60,6 +84,13 @@ export async function startCall(
     // NOTE: no `direction` here on purpose — the row already exists by this point
     // (outbound: inserted by POST /api/calls; inbound: inserted by /api/calls/turn
     // just before this runs). Overwriting it would relabel inbound calls as outbound.
+    //
+    // NOTE: no `transcript` here on purpose either — the column already defaults
+    // to '[]' on INSERT (local-setup.sql), and upsert() writes EXCLUDED.<col> for
+    // every column present in the values object on conflict. If Exotel ever resends
+    // a "start" event mid-call (reconnect/retry) and startCall() re-runs, including
+    // transcript here would silently wipe the whole conversation back to empty —
+    // observed as Priya "reintroducing herself" with no memory of what was just said.
     db.from("voice_calls")
       .upsert(
         {
@@ -67,12 +98,26 @@ export async function startCall(
           lead_id: leadId || null,
           status: "in-progress",
           language,
-          transcript: JSON.stringify([]),
         },
         { onConflict: "twilio_call_sid" }
       )
       .catch(() => {})
   }
+
+  // Known real name (not the inbound placeholder)? Greet by name instead of
+  // generically — a fast lookup, no LLM call, so call pickup stays quick.
+  if (leadId) {
+    try {
+      const res = await query(`SELECT name FROM leads WHERE id = $1`, [leadId])
+      const name = res.rows[0]?.name
+      if (name && !PLACEHOLDER_NAME_RE.test(name)) {
+        return direction === "inbound" ? personalizedInboundGreeting(language, name) : personalizedGreeting(language, name)
+      }
+    } catch (e: any) {
+      console.error("greeting name lookup error:", e.message)
+    }
+  }
+
   return direction === "inbound" ? INBOUND_GREETINGS[language] : GREETINGS[language]
 }
 
@@ -127,12 +172,18 @@ export async function handleTurn(opts: {
     flagFrustratedCall(callSid, leadId || null, speech)
   }
 
-  // CROSS-CHANNEL MEMORY: brief Priya on this lead's recent WhatsApp chat
-  // (only on the first couple of turns — keeps later prompts small & fast).
+  // CROSS-CHANNEL MEMORY: brief Priya on known lead details (so she confirms
+  // instead of asking fresh), past calls, and recent WhatsApp chat — only on
+  // the first couple of turns, since after that it's already in the
+  // conversation history and re-injecting would just waste tokens.
   let mergedInstructions = instructions || ""
   if (leadId && history.length <= 2) {
-    const waContext = await getWhatsAppContext(leadId)
-    if (waContext) mergedInstructions = [mergedInstructions, waContext].filter(Boolean).join("\n\n")
+    const [knownContext, pastCallContext, waContext] = await Promise.all([
+      getKnownLeadContext(leadId),
+      getPastCallContext(leadId, callSid),
+      getWhatsAppContext(leadId),
+    ])
+    mergedInstructions = [mergedInstructions, knownContext, pastCallContext, waContext].filter(Boolean).join("\n\n")
   }
 
   let reply = ""

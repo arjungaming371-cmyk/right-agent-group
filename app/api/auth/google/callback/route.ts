@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
 import { createSessionToken, SESSION_COOKIE, sessionCookieOptions, type Role } from "@/lib/auth"
+import { createNotification } from "@/lib/notifications"
 
 export const dynamic = "force-dynamic"
 
@@ -64,6 +65,8 @@ export async function GET(req: NextRequest) {
       console.warn(`Login DENIED for ${email} — not in allowed_emails`)
       return fail("This email is not authorized. Ask the admin to add it.")
     }
+
+    createNotification({ type: "login", title: "Team member signed in", body: `${email} (${role})` })
 
     const token = await createSessionToken(email, role)
     const safeNext = nextPath.startsWith("/") && !nextPath.startsWith("//") ? nextPath : "/"

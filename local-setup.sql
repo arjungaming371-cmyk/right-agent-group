@@ -167,6 +167,19 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
+-- Real-time dashboard notifications (loan applications, escalations, logins, new WhatsApp contacts)
+CREATE TABLE IF NOT EXISTS notifications (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  type       TEXT NOT NULL CHECK (type IN ('loan_application', 'escalation', 'login', 'whatsapp_message')),
+  title      TEXT NOT NULL,
+  body       TEXT,
+  link_view  TEXT,
+  read       BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notifications_read    ON notifications (read);
+
 -- Uploaded lead files
 CREATE TABLE IF NOT EXISTS uploaded_files (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -107,11 +107,35 @@ export async function chatWithOllama(
 ): Promise<string> {
   if (!messages?.length) return "Hello! How can I help you today?"
 
-  const recentMessages = messages.slice(-6)
   let systemPrompt = await getSystemPrompt(language)
   if (extraInstructions?.trim()) {
     systemPrompt += `\n\nAdditional context for this specific call (from the operations team): ${extraInstructions.trim()}`
   }
+  return runOllamaChat(messages, systemPrompt)
+}
+
+/**
+ * Same Ollama call machinery (timeouts, concurrency slot, GPU options) as
+ * chatWithOllama, but with a FULLY REPLACED system prompt instead of
+ * Priya's customer-facing loan script + appended context. For callers that
+ * are not Priya and must not inherit her persona — e.g. the internal staff
+ * dashboard assistant (app/api/assistant/route.ts). Keeping this separate
+ * from chatWithOllama is deliberate: each has its own job and its own
+ * meaning, they should not be combined.
+ */
+export async function chatWithSystemPrompt(
+  messages: { role: "user" | "model"; content: string }[],
+  systemPrompt: string
+): Promise<string> {
+  if (!messages?.length) return "Hello! How can I help you today?"
+  return runOllamaChat(messages, systemPrompt)
+}
+
+async function runOllamaChat(
+  messages: { role: "user" | "model"; content: string }[],
+  systemPrompt: string
+): Promise<string> {
+  const recentMessages = messages.slice(-6)
   const ollamaMessages = toOllamaMessages(recentMessages, systemPrompt)
 
   const controller = new AbortController()

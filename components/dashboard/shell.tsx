@@ -16,6 +16,7 @@ import UploadView    from "./upload-view"
 import ScriptView    from "./script-view"
 import AnalyticsView from "./analytics-view"
 import QuickChat     from "./quick-chat"
+import NotificationBell from "./notification-bell"
 
 export type ViewKey = "leads" | "loans" | "voice" | "whatsapp" | "comms" | "security" | "upload" | "script" | "analytics"
 export type Role = "admin" | "agent" | "viewer"
@@ -287,6 +288,8 @@ export default function DashboardShell() {
             <span className="flex-1 text-left">Search</span>
             <span className="kbd">Ctrl K</span>
           </button>
+
+          <NotificationBell onNavigate={(view) => setView(view)} />
         </header>
 
         {/* Content */}

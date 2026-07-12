@@ -8,6 +8,7 @@
 
 import { db, query } from "./db"
 import { sendMail, isMailConfigured } from "./mail"
+import { createNotification } from "./notifications"
 
 // English / Hindi / Telugu frustration & escalation markers.
 // Deliberately conservative — false positives annoy operators.
@@ -68,6 +69,12 @@ async function sendEscalationEmail(channel: "Phone call" | "WhatsApp", leadId: s
   }).catch((e) => console.error("escalation email error:", e))
 }
 
+async function leadDisplayName(leadId: string | null): Promise<string> {
+  if (!leadId) return "Unknown lead"
+  const { data } = await db.from("leads").select("name, phone").eq("id", leadId).single()
+  return data?.name || data?.phone || "Unknown lead"
+}
+
 /** Fire-and-forget: mark the call + surface it on the dashboard + email the admin. Never blocks the call. */
 export function flagFrustratedCall(callSid: string | null, leadId: string | null, speech: string): void {
   ;(async () => {
@@ -81,6 +88,12 @@ export function flagFrustratedCall(callSid: string | null, leadId: string | null
         [leadId, `⚠️ FRUSTRATED CALLER — said: "${speech.slice(0, 120)}" — consider a human callback`]
       )
       await sendEscalationEmail("Phone call", leadId, speech)
+      createNotification({
+        type: "escalation",
+        title: `${await leadDisplayName(leadId)} needs a human`,
+        body: `Phone call — "${speech.slice(0, 120)}"`,
+        linkView: "voice",
+      })
     } catch (e: any) {
       console.error("flagFrustratedCall error:", e.message)
     }
@@ -97,6 +110,12 @@ export function flagFrustratedWhatsApp(leadId: string | null, message: string): 
         [leadId, `⚠️ FRUSTRATED WHATSAPP CHAT — said: "${message.slice(0, 120)}" — consider a human reply`]
       )
       await sendEscalationEmail("WhatsApp", leadId, message)
+      createNotification({
+        type: "escalation",
+        title: `${await leadDisplayName(leadId)} needs a human`,
+        body: `WhatsApp — "${message.slice(0, 120)}"`,
+        linkView: "whatsapp",
+      })
     } catch (e: any) {
       console.error("flagFrustratedWhatsApp error:", e.message)
     }

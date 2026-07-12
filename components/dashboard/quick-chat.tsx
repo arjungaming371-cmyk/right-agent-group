@@ -8,13 +8,13 @@ const QUICK_COMMANDS = [
   { label: "How many leads today?", query: "How many new leads were added today?" },
   { label: "Pending calls", query: "How many calls are pending in the queue?" },
   { label: "Best performing language", query: "Which language has the most successful calls?" },
-  { label: "Help", query: "What can you help me with on this dashboard?" },
+  { label: "Loan applications pending", query: "How many loan applications are pending?" },
 ]
 
 export default function QuickChat() {
   const [open, setOpen] = useState(false)
   const [messages, setMessages] = useState<Message[]>([
-    { role: "assistant", content: "Hi! I'm Priya's assistant. Ask me quick questions about your leads, calls, or use commands like 'call John at +91...' to trigger actions." }
+    { role: "assistant", content: "Hi! I'm the internal ops assistant — ask me about leads, calls, or loan applications and I'll pull the real numbers. I'm not Priya, so I don't handle customer calls or messages." }
   ])
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)
@@ -37,10 +37,10 @@ export default function QuickChat() {
         role: m.role === "assistant" ? "model" : "user",
         content: m.content,
       }))
-      const res = await fetch("/api/chat", {
+      const res = await fetch("/api/assistant", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: query, language: "english", history }),
+        body: JSON.stringify({ message: query, history }),
       })
       const data = await res.json()
       setMessages([...newMessages, { role: "assistant", content: data.reply || "Sorry, I couldn't process that." }])
@@ -84,9 +84,9 @@ export default function QuickChat() {
           }}><Bot size={16} strokeWidth={2} /></div>
           <div>
             <div style={{ fontWeight: 600, fontSize: 13, display: "flex", alignItems: "center", gap: 5 }}>
-              Quick Assistant <Sparkles size={11} style={{ color: "#8b7cff" }} />
+              Ops Assistant <Sparkles size={11} style={{ color: "#8b7cff" }} />
             </div>
-            <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Local AI · Always free</div>
+            <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Internal only · Live data</div>
           </div>
         </div>
         <button onClick={() => setOpen(false)} aria-label="Close" style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", width: 28, height: 28, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center" }}><X size={16} strokeWidth={2} /></button>
@@ -134,7 +134,7 @@ export default function QuickChat() {
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={e => e.key === "Enter" && send()}
-          placeholder="Ask anything or type a command…"
+          placeholder="Ask about leads, calls, loans…"
           style={{ flex: 1, fontSize: 13, height: 36 }}
         />
         <button onClick={() => send()} disabled={loading || !input.trim()} aria-label="Send" style={{

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { db, query } from "@/lib/db"
 import { rateLimit, clientIp } from "@/lib/rate-limit"
 import { sendApplicationConfirmation, isMailConfigured } from "@/lib/mail"
+import { createNotification } from "@/lib/notifications"
 
 // PUBLIC endpoint (no login) — protected by rate limiting + one-time tokens.
 
@@ -105,6 +106,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
         .update({ form_completed: true, status: "qualified", updated_at: new Date().toISOString() })
         .eq("id", link.lead_id)
     }
+
+    createNotification({
+      type: "loan_application",
+      title: "New loan application",
+      body: `${customer_name} — ${loan_type || "Home Loan"}${loan_amount ? `, ₹${Number(loan_amount).toLocaleString("en-IN")}` : ""}`,
+      linkView: "loans",
+    })
 
     // Email confirmation — fire-and-forget, never blocks the response.
     if (email && isMailConfigured()) {

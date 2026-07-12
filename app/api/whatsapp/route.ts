@@ -3,8 +3,9 @@ import crypto from "crypto"
 import pool, { query } from "@/lib/db"
 import { chatWithOllama, detectLanguage, type Language } from "@/lib/ollama"
 import { sendWhatsAppText } from "@/lib/whatsapp"
-import { getVoiceContext } from "@/lib/memory"
+import { getVoiceContext, getKnownLeadContext } from "@/lib/memory"
 import { detectFrustration, flagFrustratedWhatsApp } from "@/lib/frustration"
+import { createNotification } from "@/lib/notifications"
 import { refreshLeadScore } from "@/lib/scoring"
 
 export const dynamic = "force-dynamic"
@@ -115,6 +116,7 @@ async function handleInbound(msg: any, profileName: string | null) {
 
   // ---- 1. Find-or-create lead (race-safe via advisory lock) ----
   let lead: any = null
+  let isNewContact = false
   const client = await pool.connect()
   try {
     await client.query("BEGIN")
@@ -126,6 +128,7 @@ async function handleInbound(msg: any, profileName: string | null) {
     if (found.rows.length > 0) {
       lead = found.rows[0]
     } else {
+      isNewContact = true
       const created = await client.query(
         `INSERT INTO leads (name, phone, whatsapp_number, source, status)
          VALUES ($1, $2, $2, 'whatsapp', 'new') RETURNING *`,
@@ -154,6 +157,15 @@ async function handleInbound(msg: any, profileName: string | null) {
     )
   )
 
+  if (isNewContact) {
+    createNotification({
+      type: "whatsapp_message",
+      title: "New WhatsApp contact",
+      body: `${lead.name || lead.phone}: "${text.slice(0, 100)}"`,
+      linkView: "whatsapp",
+    })
+  }
+
   // Don't burn an Ollama generation on "[image message]" placeholders.
   if (text.startsWith("[") && text.endsWith(" message]")) return
 
@@ -176,13 +188,15 @@ async function handleInbound(msg: any, profileName: string | null) {
       flagFrustratedWhatsApp(lead.id, text)
     }
 
-    // CROSS-CHANNEL MEMORY: brief the WhatsApp AI on recent Priya calls.
-    let voiceContext: string | undefined
+    // CROSS-CHANNEL MEMORY: brief the WhatsApp AI on known lead details (so it
+    // confirms instead of asking fresh) and recent Priya calls.
+    let extraContext: string | undefined
     if (historyRes.rows.length <= 2) {
-      voiceContext = (await getVoiceContext(lead.id)) || undefined
+      const [knownContext, voiceContext] = await Promise.all([getKnownLeadContext(lead.id), getVoiceContext(lead.id)])
+      extraContext = [knownContext, voiceContext].filter(Boolean).join("\n\n") || undefined
     }
 
-    aiReply = await chatWithOllama(messages, lang, voiceContext)
+    aiReply = await chatWithOllama(messages, lang, extraContext)
 
     await query(
       `INSERT INTO ai_conversations (lead_id, role, content, language) VALUES ($1, 'user', $2, $3), ($1, 'model', $4, $3)`,
