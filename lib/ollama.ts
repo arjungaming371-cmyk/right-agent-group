@@ -115,13 +115,13 @@ export async function chatWithOllama(
   const ollamaMessages = toOllamaMessages(recentMessages, systemPrompt)
 
   const controller = new AbortController()
-  // GPU is normally much faster than CPU, but a cold model load (first
-  // inference after a fresh pull, or Kaggle's shared dual-GPU scheduling)
-  // can occasionally take longer than a hard 10s allows — observed directly:
-  // a real request landed at 10.171s and got aborted right at the old
-  // 10000ms cutoff, falling back to the "technical moment" retry message
-  // for no real reason. 20s keeps a safety margin under the CPU timeout.
-  const timeoutMs = IS_GPU ? 20000 : 25000
+  // GPU is normally much faster than CPU, but cold model loads (first
+  // inference after a fresh pull/restart, or Kaggle's shared dual-GPU
+  // scheduling) keep landing right at the wire — observed TWICE now:
+  // 10.171s (old 10000ms cutoff) and 20.178s (old 20000ms cutoff). A tight
+  // timeout that matches the "normal" case keeps getting blown by cold
+  // starts, so give it real headroom instead of chasing the exact number.
+  const timeoutMs = IS_GPU ? 35000 : 25000
 
   await acquireSlot()
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
