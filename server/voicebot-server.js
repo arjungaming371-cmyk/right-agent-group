@@ -6,7 +6,8 @@
 //
 //   caller audio → silence-based endpointing → STT (self-hosted Whisper)
 //     → Next.js /api/calls/turn (Ollama = Priya's brain, DB, WhatsApp link)
-//     → TTS (switchable: free Edge, paid Sarvam, or self-hosted Svara-TTS)
+//     → TTS (self-hosted Svara-TTS, with an automatic fallback to free Edge
+//       TTS if Svara is unreachable — a call never goes silent on TTS)
 //     → downsample to 8kHz PCM → streamed back to the caller.
 //
 // Exotel setup: Voicebot applet URL = wss://YOUR-DOMAIN/voicebot
@@ -27,17 +28,13 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "http://127.0.0.1:3000"
 const API_KEY = process.env.WHATSAPP_SERVICE_KEY || "" // shared internal service key
 const STT_URL = process.env.STT_URL || process.env.STT_SERVICE_URL || "http://127.0.0.1:3003" // self-hosted Whisper (server/stt-service)
 
-// TTS provider: "edge" (default, FREE) or "sarvam" (paid, more natural Indic voices).
-const TTS_PROVIDER = (process.env.TTS_PROVIDER || "edge").toLowerCase()
-const SARVAM_API_KEY = process.env.SARVAM_API_KEY || ""
-const SARVAM_SPEAKER = process.env.SARVAM_SPEAKER || "priya"
+// TTS provider: "svara" (default — self-hosted, one voice across all 3
+// languages, automatically falls back to Edge if unreachable) or "edge"
+// (explicit free-only mode — useful for local dev with no Svara server).
+const TTS_PROVIDER = (process.env.TTS_PROVIDER || "svara").toLowerCase()
 
 if (!API_KEY) {
   console.error("FATAL: WHATSAPP_SERVICE_KEY not set — the voicebot cannot authenticate to the app.")
-  process.exit(1)
-}
-if (TTS_PROVIDER === "sarvam" && !SARVAM_API_KEY) {
-  console.error("FATAL: TTS_PROVIDER=sarvam but SARVAM_API_KEY not set. Get one at https://dashboard.sarvam.ai or switch to TTS_PROVIDER=edge (free).")
   process.exit(1)
 }
 
@@ -81,12 +78,7 @@ async function speechToText(pcm, language) {
   return (data?.text || "").trim()
 }
 
-// ---------- TTS: switchable — Edge (free, default) or Sarvam (paid) ----------
-const LANG_CODES = {
-  english: "en-IN",
-  hindi: "hi-IN",
-  telugu: "te-IN",
-}
+// ---------- TTS: Svara-TTS (self-hosted, primary) with an Edge fallback ----------
 const EDGE_VOICES = {
   english: "en-IN-NeerjaNeural",
   hindi: "hi-IN-SwaraNeural",
@@ -104,25 +96,6 @@ async function edgeSpeech(text, language) {
     audioStream.on("error", reject)
   })
   return Buffer.concat(chunks)
-}
-
-async function sarvamSpeech(text, language) {
-  const res = await fetch("https://api.sarvam.ai/text-to-speech", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "api-subscription-key": SARVAM_API_KEY },
-    body: JSON.stringify({
-      text,
-      target_language_code: LANG_CODES[language] || LANG_CODES.english,
-      model: "bulbul:v3",
-      speaker: SARVAM_SPEAKER,
-      output_audio_codec: "wav",
-    }),
-  })
-  if (!res.ok) throw new Error(`Sarvam TTS HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`)
-  const data = await res.json()
-  const b64 = data?.audios?.[0]
-  if (!b64) throw new Error("Sarvam TTS returned no audio")
-  return Buffer.from(b64, "base64")
 }
 
 // Self-hosted Kenpath Svara-TTS — one voice for Hindi/Telugu/Indian English.
@@ -149,10 +122,14 @@ async function svaraSpeech(text, language) {
   return Buffer.from(await res.arrayBuffer())
 }
 
-function synthesizeSpeech(text, language) {
-  if (TTS_PROVIDER === "sarvam") return sarvamSpeech(text, language)
-  if (TTS_PROVIDER === "svara") return svaraSpeech(text, language)
-  return edgeSpeech(text, language)
+async function synthesizeSpeech(text, language) {
+  if (TTS_PROVIDER === "edge") return edgeSpeech(text, language) // explicit free-only mode, e.g. local dev with no Svara server
+  try {
+    return await svaraSpeech(text, language)
+  } catch (e) {
+    console.error(`Svara TTS unreachable (${e.message}) — falling back to Edge for this line`)
+    return edgeSpeech(text, language)
+  }
 }
 
 /** WAV → 8kHz 16-bit mono PCM via ffmpeg (install once: sudo apt install -y ffmpeg). */
