@@ -61,6 +61,56 @@ ollama run llama3.1:8b "say hello"    # then /bye to exit
 ```
 On a GPU machine, confirm with `ollama ps` during a chat — it should say **100% GPU**.
 
+Fine for development and low call volume. Ollama serves **one conversation at a time** by
+design (`OLLAMA_MAX_CONCURRENT` in `.env`) — if you need several simultaneous live calls,
+skip to STEP 3b instead.
+
+---
+
+## STEP 3b — vLLM instead of Ollama (only if you need real concurrency)
+
+Use this when you expect **multiple simultaneous live calls** (roughly 5+ at once). vLLM does
+continuous batching across in-flight requests, so one GPU serves many concurrent conversations
+far more efficiently than Ollama, which was built for single-user/dev use, not a call center.
+
+Skip this step entirely if Ollama (STEP 3) is enough for your call volume — it's the simpler
+setup and this app runs on either one without any code changes, just an `.env` switch.
+
+```bash
+# On the GPU box (needs a real NVIDIA GPU, 16GB+ VRAM for llama3.1:8b comfortably):
+pip install vllm
+
+# Launch the OpenAI-compatible server. --max-num-seqs controls how many
+# requests it'll batch together — start around 10-16 and raise it once
+# you've load-tested actual latency at that concurrency.
+python -m vllm.entrypoints.openai.api_server \
+  --model meta-llama/Meta-Llama-3.1-8B-Instruct \
+  --port 8000 \
+  --max-num-seqs 16
+
+# verify it's up:
+curl http://localhost:8000/v1/models
+```
+
+Run it under `pm2` or `systemd` like everything else in STEP 8 — it needs to survive restarts too.
+
+In `.env` on the **app server** (not the GPU box, unless they're the same machine):
+
+```bash
+LLM_PROVIDER=vllm
+VLLM_URL=http://<gpu-box-ip>:8000
+VLLM_MODEL=meta-llama/Meta-Llama-3.1-8B-Instruct      # must match --model above exactly
+OLLAMA_MAX_CONCURRENT=10                              # raise to match real GPU throughput — start conservative, load-test, raise
+```
+
+That's the entire switch — nothing else in the app changes. Confirm it's talking to vLLM (not
+Ollama) via the dashboard's system status, or:
+
+```bash
+curl -H "Cookie: rag_session=..." https://your-domain.com/api/system/status
+# {"ollama":{"running":true,"message":"vLLM ready with meta-llama/Meta-Llama-3.1-8B-Instruct"}, ...}
+```
+
 ---
 
 ## STEP 4 — The project

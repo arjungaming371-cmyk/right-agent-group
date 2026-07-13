@@ -9,6 +9,8 @@ import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth"
 // - /api/whatsapp (POST inbound)  → Meta webhook (HMAC-verified)
 // - /api/warmup                   → cron warmup
 // - /api/digest                   → scheduled digest email (x-api-key protected inside, see DIGEST.ps1)
+// - /api/lead-brain/scan-idle     → scheduled Lead Brain scan (x-api-key protected inside, see lib/scheduler.ts)
+// - /api/prompt-tuner/scan        → scheduled Prompt Tuner run (x-api-key protected inside, see lib/scheduler.ts)
 const PUBLIC_PREFIXES = [
   "/login",
   "/api/auth/",
@@ -22,7 +24,10 @@ const PUBLIC_PREFIXES = [
 // (Exotel-credentialed audio proxy), and /api/tts are dashboard-only and
 // MUST require a login session. Only the two telephony webhooks below and
 // the Meta webhook are public.
-const PUBLIC_EXACT = ["/api/whatsapp", "/api/calls/turn", "/api/calls/status", "/api/digest"]
+const PUBLIC_EXACT = [
+  "/api/whatsapp", "/api/calls/turn", "/api/calls/status", "/api/digest",
+  "/api/lead-brain/scan-idle", "/api/prompt-tuner/scan",
+]
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl

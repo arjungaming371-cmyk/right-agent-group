@@ -4,6 +4,7 @@ import { generateLeadSummary } from "@/lib/ollama"
 import { sendCallFollowUp, sendMissedCallFollowUp } from "@/lib/whatsapp"
 import { refreshLeadScore } from "@/lib/scoring"
 import { rateLimit, clientIp } from "@/lib/rate-limit"
+import { runPostCallAnalysis } from "@/lib/lead-brain"
 
 export async function POST(req: NextRequest) {
   try {
@@ -106,6 +107,10 @@ export async function POST(req: NextRequest) {
         summary: `AI call completed (${duration}s). Sentiment: ${sentiment}. ${transcript.length} exchanges.`,
         outcome,
       })
+
+      // Lead Brain: background structured-memory extraction. Fire-and-forget —
+      // never awaited, never allowed to affect this webhook's response.
+      runPostCallAnalysis(callSid)
     }
 
     return new NextResponse("OK", { status: 200 })

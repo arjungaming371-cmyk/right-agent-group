@@ -3,6 +3,7 @@ import { db } from "@/lib/db"
 import { makeCall } from "@/lib/exotel"
 import { requireRole } from "@/lib/auth"
 import { logAudit } from "@/lib/audit"
+import { isDoNotCall } from "@/lib/lead-brain"
 
 export async function POST(req: NextRequest) {
   const session = await requireRole(req, ["admin"])
@@ -43,6 +44,14 @@ export async function POST(req: NextRequest) {
               notes: item.notes, source: "Queue", status: "new"
             }).select().single()
             leadId = lead?.id
+          }
+
+          // Unattended bulk dialer — this is exactly the code path a
+          // do_not_call lead must never reach. Skip (not "failed" — nothing
+          // went wrong, we're deliberately not calling).
+          if (await isDoNotCall({ leadId, phone })) {
+            await db.from("outbound_queue").update({ status: "skipped_do_not_call" }).eq("id", item.id)
+            return
           }
 
           const call = await makeCall(phone, leadId || "", item.language || "english")

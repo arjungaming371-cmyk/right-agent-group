@@ -1,4 +1,14 @@
-// Cross-channel memory — the "wow" feature.
+// Cross-channel memory — the ORIGINAL, simple version.
+//
+// DEPRECATED (but fully functional — nothing here is broken or removed):
+// superseded by lib/lead-brain.ts's buildLeadBrief(), which both
+// lib/voice-conversation.ts and app/api/whatsapp/route.ts now call instead.
+// buildLeadBrief does everything these four functions do (known facts, past
+// calls, WhatsApp history) plus structured extracted facts, a rolling
+// relationship summary, sentiment/objection warnings, and a unified
+// timeline — all pre-computed by a background pipeline instead of read
+// fresh on every call. Kept here, unused by the app, in case anything
+// external still imports these directly.
 //
 // Voice and WhatsApp already share the same lead_id in the database;
 // this module turns that into live conversational awareness:

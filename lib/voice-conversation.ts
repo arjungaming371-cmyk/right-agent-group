@@ -2,7 +2,7 @@ import { randomUUID } from "crypto"
 import { db, query } from "./db"
 import { chatWithOllama, extractLeadInfo, mightBeComplete, type Language } from "./ollama"
 import { sendApplicationLink } from "./whatsapp"
-import { getWhatsAppContext, getKnownLeadContext, getPastCallContext } from "./memory"
+import { buildLeadBrief } from "./lead-brain"
 import { detectFrustration, flagFrustratedCall } from "./frustration"
 
 // Permission-based opener — respect keeps people on the line.
@@ -172,18 +172,15 @@ export async function handleTurn(opts: {
     flagFrustratedCall(callSid, leadId || null, speech)
   }
 
-  // CROSS-CHANNEL MEMORY: brief Priya on known lead details (so she confirms
-  // instead of asking fresh), past calls, and recent WhatsApp chat — only on
-  // the first couple of turns, since after that it's already in the
-  // conversation history and re-injecting would just waste tokens.
+  // LEAD BRAIN: brief Priya with the full cross-channel picture — known
+  // facts, rolling relationship summary, recent interactions, sentiment
+  // warnings — only on the first couple of turns, since after that it's
+  // already in the conversation history and re-injecting would just waste
+  // tokens. One cheap query (lib/lead-brain.ts), no live Ollama analysis.
   let mergedInstructions = instructions || ""
   if (leadId && history.length <= 2) {
-    const [knownContext, pastCallContext, waContext] = await Promise.all([
-      getKnownLeadContext(leadId),
-      getPastCallContext(leadId, callSid),
-      getWhatsAppContext(leadId),
-    ])
-    mergedInstructions = [mergedInstructions, knownContext, pastCallContext, waContext].filter(Boolean).join("\n\n")
+    const brief = await buildLeadBrief(leadId)
+    mergedInstructions = [mergedInstructions, brief].filter(Boolean).join("\n\n")
   }
 
   let reply = ""

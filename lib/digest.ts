@@ -6,9 +6,7 @@
 
 import { query } from "./db"
 import { isMailConfigured, sendMail } from "./mail"
-
-const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434"
-const MODEL = process.env.OLLAMA_MODEL || "llama3.1:8b"
+import { chatWithSystemPrompt } from "./ollama"
 
 type DigestStats = {
   periodLabel: string
@@ -109,19 +107,12 @@ ${stats.negativeSummaries.slice(0, 5).join("\n") || "(none)"}
 
 Write the highlight now — mention what went well, and call out any objection pattern you notice if there is one.`
 
-    const res = await fetch(`${OLLAMA_URL}/api/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: MODEL,
-        messages: [{ role: "user", content: prompt }],
-        stream: false,
-        keep_alive: "30m",
-        options: { temperature: 0.4, num_predict: 200 },
-      }),
-    })
-    const data = await res.json()
-    return (data?.message?.content || "").trim() || "Summary unavailable this period."
+    const text = await chatWithSystemPrompt(
+      [{ role: "user", content: prompt }],
+      "You write short, plain-English business performance highlights. No markdown, no headers.",
+      { numPredict: 200, timeoutMs: 30000 }
+    )
+    return text.trim() || "Summary unavailable this period."
   } catch (e: any) {
     console.error("digest highlight generation error:", e.message)
     return "Summary unavailable — the AI engine could not be reached."

@@ -3,7 +3,7 @@ import crypto from "crypto"
 import pool, { query } from "@/lib/db"
 import { chatWithOllama, detectLanguage, type Language } from "@/lib/ollama"
 import { sendWhatsAppText } from "@/lib/whatsapp"
-import { getVoiceContext, getKnownLeadContext } from "@/lib/memory"
+import { buildLeadBrief } from "@/lib/lead-brain"
 import { detectFrustration, flagFrustratedWhatsApp } from "@/lib/frustration"
 import { createNotification } from "@/lib/notifications"
 import { refreshLeadScore } from "@/lib/scoring"
@@ -188,12 +188,12 @@ async function handleInbound(msg: any, profileName: string | null) {
       flagFrustratedWhatsApp(lead.id, text)
     }
 
-    // CROSS-CHANNEL MEMORY: brief the WhatsApp AI on known lead details (so it
-    // confirms instead of asking fresh) and recent Priya calls.
+    // LEAD BRAIN: brief the WhatsApp AI with the same cross-channel picture
+    // Priya gets on calls — known facts, rolling summary, recent
+    // interactions, sentiment warnings — only on the first couple of turns.
     let extraContext: string | undefined
     if (historyRes.rows.length <= 2) {
-      const [knownContext, voiceContext] = await Promise.all([getKnownLeadContext(lead.id), getVoiceContext(lead.id)])
-      extraContext = [knownContext, voiceContext].filter(Boolean).join("\n\n") || undefined
+      extraContext = (await buildLeadBrief(lead.id)) || undefined
     }
 
     aiReply = await chatWithOllama(messages, lang, extraContext)

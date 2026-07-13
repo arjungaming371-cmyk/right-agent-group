@@ -1,6 +1,6 @@
 "use client"
 import { useEffect, useState } from "react"
-import { Lightbulb, Save, RotateCcw, CalendarClock, Timer, RefreshCw, Languages } from "lucide-react"
+import { Lightbulb, Save, RotateCcw, CalendarClock, Timer, RefreshCw, Languages, Sparkles, Check, X } from "lucide-react"
 
 type Script = {
   language: string
@@ -8,6 +8,20 @@ type Script = {
   updated_at: string
   updated_by: string
 }
+
+type Suggestion = {
+  id: string
+  channel: string
+  short_guideline: string
+  situation: string
+  risk: string
+  source_summary: string
+  status: string
+  applied_to: string[]
+  created_at: string
+}
+
+const RISK_COLOR: Record<string, string> = { low: "#2dd4a0", medium: "#f7b731", high: "#f87171" }
 
 const LANG_LABELS: Record<string, { label: string; short: string; desc: string }> = {
   english: { label: "English",  short: "EN", desc: "Used when customer speaks English" },
@@ -47,6 +61,13 @@ export default function ScriptView() {
   const [msg, setMsg]             = useState<{ type: "ok" | "err"; text: string } | null>(null)
   const [charCount, setCharCount] = useState(0)
 
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([])
+  const [ptLoading, setPtLoading]     = useState(true)
+  const [generating, setGenerating]   = useState(false)
+  const [actingId, setActingId]       = useState<string | null>(null)
+  const [langPicks, setLangPicks]     = useState<Record<string, string[]>>({})
+  const [ptMsg, setPtMsg]             = useState<{ type: "ok" | "err"; text: string } | null>(null)
+
   async function load() {
     setLoading(true)
     try {
@@ -68,6 +89,88 @@ export default function ScriptView() {
   }
 
   useEffect(() => { load() }, [])
+
+  async function loadSuggestions() {
+    setPtLoading(true)
+    try {
+      const res = await fetch("/api/prompt-tuner?status=pending")
+      if (res.ok) {
+        const d = await res.json()
+        setSuggestions(d.suggestions || [])
+      }
+    } catch {}
+    setPtLoading(false)
+  }
+
+  useEffect(() => { loadSuggestions() }, [])
+
+  function toggleLang(id: string, lang: string) {
+    setLangPicks((p) => {
+      const cur = p[id] || []
+      const next = cur.includes(lang) ? cur.filter((l) => l !== lang) : [...cur, lang]
+      return { ...p, [id]: next }
+    })
+  }
+
+  async function generateNow() {
+    setGenerating(true)
+    setPtMsg(null)
+    try {
+      const res = await fetch("/api/prompt-tuner/generate", { method: "POST" })
+      const d = await res.json().catch(() => ({}))
+      if (res.ok) {
+        setPtMsg({ type: "ok", text: d.generated > 0 ? `Found ${d.generated} new suggestion(s) below.` : "No repeated patterns found across recent calls — nothing to suggest right now." })
+        await loadSuggestions()
+      } else {
+        setPtMsg({ type: "err", text: d.error || "Generation failed" })
+      }
+    } catch {
+      setPtMsg({ type: "err", text: "Generation failed — check the server is running" })
+    }
+    setGenerating(false)
+  }
+
+  async function approveSuggestion(id: string) {
+    const languages = langPicks[id] || []
+    if (languages.length === 0) { setPtMsg({ type: "err", text: "Pick at least one language before adding this to the script." }); return }
+    setActingId(id)
+    try {
+      const res = await fetch(`/api/prompt-tuner/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "approve", languages }),
+      })
+      if (res.ok) {
+        setPtMsg({ type: "ok", text: "Added to the script." })
+        await loadSuggestions()
+        // Only pull the freshly-updated script text into the editor if there's
+        // no unsaved edit sitting in the textarea — never silently discard one.
+        if (content === original) await load()
+      } else {
+        const d = await res.json().catch(() => ({}))
+        setPtMsg({ type: "err", text: d.error || "Could not approve" })
+      }
+    } catch {
+      setPtMsg({ type: "err", text: "Could not approve — try again" })
+    }
+    setActingId(null)
+  }
+
+  async function rejectSuggestion(id: string) {
+    setActingId(id)
+    try {
+      const res = await fetch(`/api/prompt-tuner/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "reject" }),
+      })
+      if (res.ok) await loadSuggestions()
+      else { const d = await res.json().catch(() => ({})); setPtMsg({ type: "err", text: d.error || "Could not reject" }) }
+    } catch {
+      setPtMsg({ type: "err", text: "Could not reject — try again" })
+    }
+    setActingId(null)
+  }
 
   function switchLanguage(lang: string) {
     const s = scripts.find(x => x.language === lang)
@@ -178,6 +281,93 @@ export default function ScriptView() {
               <span style={{ color: i < 5 ? "#2dd4a0" : "#f7b731", flexShrink: 0 }}>•</span>{t}
             </div>
           ))}
+        </div>
+      </div>
+
+      {/* Prompt Tuner — background-generated script suggestions, human-reviewed */}
+      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
+        <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ width: 32, height: 32, borderRadius: 9, background: "rgba(139,124,255,0.13)", border: "1px solid rgba(139,124,255,0.3)", display: "inline-flex", alignItems: "center", justifyContent: "center", color: "#a5b0ff" }}>
+              <Sparkles size={15} strokeWidth={1.9} />
+            </span>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 15 }}>Prompt Tuner</div>
+              <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                Reads recent calls weekly for repeated friction — nothing reaches Priya's real script without your approval
+              </div>
+            </div>
+          </div>
+          <button onClick={generateNow} disabled={generating} className="btn-ghost" style={{ height: 34 }}>
+            <Sparkles size={13} strokeWidth={1.9} /> {generating ? "Analyzing recent calls…" : "Generate Suggestions Now"}
+          </button>
+        </div>
+
+        {ptMsg && (
+          <div style={{
+            margin: "12px 20px 0", padding: "10px 16px", borderRadius: 8,
+            background: ptMsg.type === "ok" ? "rgba(34,197,94,0.1)" : "rgba(239,68,68,0.1)",
+            border: `1px solid ${ptMsg.type === "ok" ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)"}`,
+            color: ptMsg.type === "ok" ? "#4ade80" : "#f87171", fontSize: 13, fontWeight: 500,
+          }}>
+            {ptMsg.text}
+          </div>
+        )}
+
+        <div style={{ padding: 20 }}>
+          {ptLoading && <div style={{ textAlign: "center", color: "var(--text-muted)", fontSize: 13, padding: 20 }}>Loading suggestions…</div>}
+          {!ptLoading && suggestions.length === 0 && (
+            <div style={{ textAlign: "center", color: "var(--text-muted)", fontSize: 13, padding: 20 }}>
+              No pending suggestions. Click "Generate Suggestions Now" or wait for Sunday's automatic scan.
+            </div>
+          )}
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {suggestions.map((s) => (
+              <div key={s.id} style={{ border: "1px solid var(--border)", borderRadius: 10, padding: 16, background: "var(--bg-secondary)" }}>
+                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-primary)", flex: 1 }}>{s.short_guideline}</div>
+                  <span style={{
+                    fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em",
+                    color: RISK_COLOR[s.risk] || "#94a3b8", background: `${RISK_COLOR[s.risk] || "#94a3b8"}1f`,
+                    border: `1px solid ${RISK_COLOR[s.risk] || "#94a3b8"}44`, borderRadius: 6, padding: "2px 8px", flexShrink: 0,
+                  }}>{s.risk} risk</span>
+                </div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>
+                  <strong style={{ color: "var(--text-secondary)" }}>When:</strong> {s.situation}
+                </div>
+                <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginBottom: 12 }}>
+                  <strong style={{ color: "var(--text-secondary)" }}>Why:</strong> {s.source_summary} · <span style={{ textTransform: "capitalize" }}>{s.channel}</span> · {timeAgo(s.created_at)}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+                  <div style={{ display: "flex", gap: 10 }}>
+                    {["english", "hindi", "telugu"].map((lang) => (
+                      <label key={lang} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, color: "var(--text-secondary)", cursor: "pointer" }}>
+                        <input
+                          type="checkbox"
+                          checked={(langPicks[s.id] || []).includes(lang)}
+                          onChange={() => toggleLang(s.id, lang)}
+                        />
+                        {LANG_LABELS[lang].label}
+                      </label>
+                    ))}
+                  </div>
+                  <div style={{ flex: 1 }} />
+                  <button
+                    onClick={() => rejectSuggestion(s.id)}
+                    disabled={actingId === s.id}
+                    className="btn-ghost"
+                    style={{ height: 30, fontSize: 12 }}
+                  ><X size={12} strokeWidth={2} /> Dismiss</button>
+                  <button
+                    onClick={() => approveSuggestion(s.id)}
+                    disabled={actingId === s.id}
+                    className="btn-primary"
+                    style={{ height: 30, fontSize: 12, padding: "0 14px" }}
+                  ><Check size={12} strokeWidth={2.2} /> {actingId === s.id ? "Adding…" : "Add to Script"}</button>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 

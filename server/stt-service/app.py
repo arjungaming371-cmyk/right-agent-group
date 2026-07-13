@@ -24,6 +24,7 @@ import time
 
 from fastapi import FastAPI, Request, Query, HTTPException
 from faster_whisper import WhisperModel
+from starlette.concurrency import run_in_threadpool
 
 
 def _load_project_env() -> None:
@@ -87,6 +88,22 @@ async def health(request: Request):
     return {"ok": True, "model": MODEL_NAME, "device": DEVICE, "compute": COMPUTE}
 
 
+def _transcribe_sync(audio: bytes, lang: str | None) -> str:
+    # faster_whisper's transcribe() is lazy — it returns a generator, and the
+    # actual CPU-bound decode work happens when you iterate it. Both steps
+    # must run inside the same threadpool call below, or the blocking work
+    # still lands back on the event loop the moment the generator is consumed.
+    segments, _info = model.transcribe(
+        io.BytesIO(audio),
+        language=lang,
+        beam_size=1,            # greedy: fastest, near-identical accuracy for short utterances
+        vad_filter=True,        # trims silence padding from endpointing
+        condition_on_previous_text=False,
+        temperature=0.0,
+    )
+    return " ".join(s.text.strip() for s in segments).strip()
+
+
 @app.post("/transcribe")
 async def transcribe(request: Request, language: str = Query("english")):
     check_key(request)
@@ -98,14 +115,10 @@ async def transcribe(request: Request, language: str = Query("english")):
 
     lang = LANG_MAP.get(language.lower(), None)  # None = auto-detect
     t0 = time.time()
-    segments, _info = model.transcribe(
-        io.BytesIO(audio),
-        language=lang,
-        beam_size=1,            # greedy: fastest, near-identical accuracy for short utterances
-        vad_filter=True,        # trims silence padding from endpointing
-        condition_on_previous_text=False,
-        temperature=0.0,
-    )
-    text = " ".join(s.text.strip() for s in segments).strip()
+    # Off the event loop and into Starlette's threadpool — without this, one
+    # caller's transcription blocks every other simultaneous caller's audio
+    # from even starting, since this was a synchronous call inside an async
+    # handler with nothing else running the loop.
+    text = await run_in_threadpool(_transcribe_sync, audio, lang)
     print(f"[{lang or 'auto'}] {time.time() - t0:.2f}s: {text[:80]!r}")
     return {"text": text}

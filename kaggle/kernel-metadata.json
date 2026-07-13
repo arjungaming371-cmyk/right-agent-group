@@ -1,0 +1,15 @@
+{
+  "id": "arjungaming/run-on-kaggle",
+  "title": "run-on-kaggle",
+  "code_file": "RUN-ON-KAGGLE.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_tpu": false,
+  "enable_internet": true,
+  "keywords": [],
+  "dataset_sources": [],
+  "kernel_sources": [],
+  "competition_sources": []
+}

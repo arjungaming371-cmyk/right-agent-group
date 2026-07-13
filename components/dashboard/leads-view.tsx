@@ -1,9 +1,10 @@
 "use client"
 import { useEffect, useState } from "react"
-import { Users, Target, IndianRupee, BadgeCheck, Phone, MessageCircle, RotateCcw, Plus, Search, Link2, Check, Download } from "lucide-react"
+import { Users, Target, IndianRupee, BadgeCheck, Phone, MessageCircle, RotateCcw, Plus, Search, Link2, Check, Download, Brain } from "lucide-react"
 import { formatCurrency, timeAgo } from "@/lib/utils"
 import { useToast } from "../ui/toast"
 import { Skeleton } from "../ui/skeleton"
+import LeadMemoryModal from "./lead-memory-modal"
 
 // TODO: replace with the real loan types from rightagentgroupe.com once available
 const LOAN_TYPES = ["Home Loan", "Personal Loan", "Car Loan", "Business Loan", "Term Insurance", "Health Insurance"]
@@ -103,6 +104,8 @@ export default function LeadsView({ role, initialSearch }: { role: "admin" | "ag
   const [waTarget, setWaTarget] = useState<Lead | null>(null)
   const [waText, setWaText] = useState("")
   const [waSending, setWaSending] = useState(false)
+
+  const [memoryLeadId, setMemoryLeadId] = useState<string | null>(null)
 
   async function load() {
     setLoading(true)
@@ -312,24 +315,30 @@ export default function LeadsView({ role, initialSearch }: { role: "admin" | "ag
                   <td style={{ padding: "14px 16px", fontSize: 13, color: "var(--text-secondary)" }}>{lead.call_count ?? 0}</td>
                   <td style={{ padding: "14px 16px", color: "var(--text-muted)", fontSize: 12 }}>{timeAgo(lead.updated_at || lead.created_at)}</td>
                   <td style={{ padding: "14px 16px" }}>
-                    {canEdit ? (
-                      <div style={{ display: "flex", gap: 6 }}>
-                        <button
-                          onClick={() => { setCallTarget(lead); setCallInstructions("") }}
-                          disabled={!lead.phone || calling === lead.id}
-                          title="Call with AI"
-                          style={{ background: "rgba(139,124,255,0.12)", border: "1px solid rgba(139,124,255,0.28)", color: "#a5b0ff", borderRadius: 9, width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center", opacity: calling === lead.id ? 0.5 : 1 }}
-                        ><Phone size={14} strokeWidth={1.9} /></button>
-                        <button
-                          onClick={() => setWaTarget(lead)}
-                          disabled={!lead.phone && !lead.whatsapp_number}
-                          title="Send WhatsApp"
-                          style={{ background: "rgba(45,212,160,0.1)", border: "1px solid rgba(45,212,160,0.28)", color: "#2dd4a0", borderRadius: 9, width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
-                        ><MessageCircle size={14} strokeWidth={1.9} /></button>
-                      </div>
-                    ) : (
-                      <span style={{ fontSize: 12, color: "var(--text-muted)" }}>View only</span>
-                    )}
+                    <div style={{ display: "flex", gap: 6 }}>
+                      {canEdit && (
+                        <>
+                          <button
+                            onClick={() => { setCallTarget(lead); setCallInstructions("") }}
+                            disabled={!lead.phone || calling === lead.id}
+                            title="Call with AI"
+                            style={{ background: "rgba(139,124,255,0.12)", border: "1px solid rgba(139,124,255,0.28)", color: "#a5b0ff", borderRadius: 9, width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center", opacity: calling === lead.id ? 0.5 : 1 }}
+                          ><Phone size={14} strokeWidth={1.9} /></button>
+                          <button
+                            onClick={() => setWaTarget(lead)}
+                            disabled={!lead.phone && !lead.whatsapp_number}
+                            title="Send WhatsApp"
+                            style={{ background: "rgba(45,212,160,0.1)", border: "1px solid rgba(45,212,160,0.28)", color: "#2dd4a0", borderRadius: 9, width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                          ><MessageCircle size={14} strokeWidth={1.9} /></button>
+                        </>
+                      )}
+                      <button
+                        onClick={() => setMemoryLeadId(lead.id)}
+                        title="View Lead Memory"
+                        style={{ background: "rgba(247,183,49,0.1)", border: "1px solid rgba(247,183,49,0.28)", color: "#f7b731", borderRadius: 9, width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                      ><Brain size={14} strokeWidth={1.9} /></button>
+                      {!canEdit && <span style={{ fontSize: 12, color: "var(--text-muted)", alignSelf: "center" }}>View only</span>}
+                    </div>
                   </td>
                 </tr>
               )
@@ -409,6 +418,10 @@ export default function LeadsView({ role, initialSearch }: { role: "admin" | "ag
             </div>
           </div>
         </div>
+      )}
+
+      {memoryLeadId && (
+        <LeadMemoryModal leadId={memoryLeadId} canEdit={canEdit} onClose={() => setMemoryLeadId(null)} />
       )}
     </div>
   )
