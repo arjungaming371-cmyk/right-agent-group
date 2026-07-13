@@ -36,9 +36,9 @@ export default function CommLogView() {
   }
 
   return (
-    <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,height:"calc(100vh-160px)" }}>
+    <div className="grid grid-cols-1 gap-4 md:h-[calc(100vh-160px)] md:grid-cols-2 md:gap-5">
       {/* Auto Calls */}
-      <div style={{ background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:12,display:"flex",flexDirection:"column",overflow:"hidden" }}>
+      <div className="max-h-[400px] md:max-h-none" style={{ background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:12,display:"flex",flexDirection:"column",overflow:"hidden" }}>
         <div style={{ padding:"18px 20px",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center" }}>
           <div style={{ display:"flex",alignItems:"center",gap:10 }}>
             <span style={{ width:28,height:28,borderRadius:8,background:"rgba(139,124,255,0.13)",border:"1px solid rgba(139,124,255,0.28)",display:"inline-flex",alignItems:"center",justifyContent:"center",color:"#a5b0ff" }}>
@@ -92,7 +92,7 @@ export default function CommLogView() {
       </div>
 
       {/* WhatsApp Automation */}
-      <div style={{ background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:12,display:"flex",flexDirection:"column",overflow:"hidden" }}>
+      <div className="max-h-[400px] md:max-h-none" style={{ background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:12,display:"flex",flexDirection:"column",overflow:"hidden" }}>
         <div style={{ padding:"18px 20px",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center" }}>
           <div style={{ display:"flex",alignItems:"center",gap:10 }}>
             <span style={{ width:28,height:28,borderRadius:8,background:"rgba(45,212,160,0.11)",border:"1px solid rgba(45,212,160,0.28)",display:"inline-flex",alignItems:"center",justifyContent:"center",color:"#2dd4a0" }}>

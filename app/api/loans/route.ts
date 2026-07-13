@@ -24,9 +24,14 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  // The customer-facing form (app/api/form/[token]) inserts directly, not
+  // through here — this is the staff/dashboard creation path.
+  const session = await requireRole(req, ["admin", "agent"])
+  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const body = await req.json()
   const { data, error } = await db.from("loan_applications").insert(body).select().single()
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  logAudit("loan application created", session.email, { loanAppId: data?.id, customerName: body.customer_name })
   return NextResponse.json(data)
 }
 

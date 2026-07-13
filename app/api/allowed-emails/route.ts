@@ -31,7 +31,28 @@ export async function POST(req: NextRequest) {
   if (!EMAIL_RE.test(email) || email.length > 254) {
     return NextResponse.json({ error: "invalid email address" }, { status: 400 })
   }
-  const role: Role = VALID_ROLES.includes(body?.role) ? body.role : "agent"
+  let role: Role = VALID_ROLES.includes(body?.role) ? body.role : "agent"
+
+  const adminEmailEnv = (process.env.ADMIN_EMAIL || "").toLowerCase()
+  if (email === adminEmailEnv) {
+    // The creator's account is always admin via ADMIN_EMAIL regardless of
+    // this table — keep the row consistent with that so the Team Access
+    // list never shows the creator as anything else.
+    role = "admin"
+  } else if (role === "admin") {
+    // Max 2 admins total: the bootstrap ADMIN_EMAIL (always admin, doesn't
+    // occupy a table row necessarily) + at most 1 more from this table.
+    const existingAdmins = await query(
+      `SELECT COUNT(*)::int AS n FROM allowed_emails WHERE role = 'admin' AND lower(email) != $1`,
+      [email]
+    )
+    if (existingAdmins.rows[0].n >= 1) {
+      return NextResponse.json(
+        { error: "Only 2 admins are allowed in total (including the creator account). Remove the other admin first, or assign a different role." },
+        { status: 400 }
+      )
+    }
+  }
 
   await query(
     `INSERT INTO allowed_emails (email, added_by, role) VALUES ($1, $2, $3)

@@ -15,7 +15,7 @@ type Role = "admin" | "agent" | "viewer"
 type AllowedEmail = { email: string; added_by: string | null; role: Role; created_at: string }
 
 const ROLE_META: Record<Role, { label: string; desc: string; color: string; icon: typeof Shield }> = {
-  admin:  { label: "Admin",        desc: "Full access, including this page",                          color: "#8b7cff", icon: Shield },
+  admin:  { label: "Admin",        desc: "Full access, including this page. Max 2 admins total.",     color: "#8b7cff", icon: Shield },
   agent:  { label: "Loan Officer", desc: "Leads, loans, calls, WhatsApp, analytics — no settings",    color: "#38bdf8", icon: UserCog },
   viewer: { label: "Viewer",       desc: "Same views as Loan Officer, strictly read-only",            color: "#64708c", icon: Eye },
 }

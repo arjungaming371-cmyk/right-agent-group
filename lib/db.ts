@@ -29,6 +29,21 @@ function serialize(val: any): any {
   return val
 }
 
+// Column/table identifiers get interpolated directly into SQL (Postgres has
+// no way to parameterize an identifier). insert()/update() are frequently
+// called with `req.json()`'s keys as the values object (e.g. app/api/leads
+// POST/PATCH) — without this check, a request body like
+// {"status = (SELECT ...), foo": "x"} becomes a real injected column
+// expression. Every column name is validated against a strict identifier
+// pattern before it ever reaches a query string.
+const SAFE_IDENTIFIER_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/
+function assertSafeIdentifier(name: string): string {
+  if (!SAFE_IDENTIFIER_RE.test(name)) {
+    throw new Error(`Unsafe column name: ${JSON.stringify(name)}`)
+  }
+  return name
+}
+
 type Filter = { column: string; op: "eq" | "ilike"; value: any }
 
 // ---- INSERT builder ----
@@ -57,7 +72,7 @@ class InsertBuilder implements PromiseLike<{ data: any; error: any }> {
   private async exec(): Promise<{ data: any; error: any }> {
     try {
       if (this.rows.length === 0) return { data: null, error: { message: "No values" } }
-      const cols = Object.keys(this.rows[0])
+      const cols = Object.keys(this.rows[0]).map(assertSafeIdentifier)
       const params: any[] = []
       const placeholders = this.rows.map((row, rIdx) => {
         const ph = cols.map((col, cIdx) => {
@@ -117,7 +132,7 @@ class UpdateBuilder implements PromiseLike<{ data: any; error: any }> {
 
   private async exec(): Promise<{ data: any; error: any }> {
     try {
-      const cols = Object.keys(this.values)
+      const cols = Object.keys(this.values).map(assertSafeIdentifier)
       if (cols.length === 0) return { data: null, error: { message: "No values to update" } }
 
       const setParts = cols.map((c, i) => `${c} = $${i + 1}`)
@@ -173,7 +188,7 @@ class UpsertBuilder implements PromiseLike<{ data: any; error: any }> {
 
   private async exec(): Promise<{ data: any; error: any }> {
     try {
-      const cols = Object.keys(this.values)
+      const cols = Object.keys(this.values).map(assertSafeIdentifier)
       const placeholders = cols.map((_, i) => `$${i + 1}`)
       const params = cols.map((c) => serialize(this.values[c]))
       const updateParts = cols.filter((c) => c !== this.conflictCol).map((c) => `${c} = EXCLUDED.${c}`)

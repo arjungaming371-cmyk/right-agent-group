@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
-import { chatWithSystemPrompt } from "@/lib/ollama"
+import { chatWithSystemPromptStream } from "@/lib/ollama"
 import { getSessionFromRequest } from "@/lib/auth"
 
 export const dynamic = "force-dynamic"
@@ -224,47 +224,59 @@ export async function POST(req: NextRequest) {
   const session = await getSessionFromRequest(req)
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
-  try {
-    const { message, history, chatId } = await req.json()
-    if (typeof message !== "string" || !message.trim() || message.length > 2000) {
-      return NextResponse.json({ reply: "Please send a valid message." }, { status: 400 })
-    }
-
-    // Verify the chat belongs to this user before persisting anything to it.
-    let ownedChatId: string | null = null
-    if (typeof chatId === "string" && chatId) {
-      const owns = await query(`SELECT 1 FROM assistant_chats WHERE id = $1 AND user_email = $2`, [chatId, session.email])
-      if (owns.rowCount) ownedChatId = chatId
-    }
-
-    const [snapshot, searchResults] = await Promise.all([getStatsSnapshot(), searchDatabase(message)])
-    const fullContext = [SYSTEM_PROMPT, snapshot, searchResults].filter(Boolean).join("\n\n")
-    const messages = [...(Array.isArray(history) ? history.slice(-10) : []), { role: "user", content: message }]
-    // Not a live phone call — staff can tolerate a slower, richer answer.
-    // Bigger context window so the full snapshot above actually fits.
-    const reply = await chatWithSystemPrompt(messages, fullContext, {
-      numCtx: 8192,
-      numPredict: 400,
-      timeoutMs: 90000,
-      historyTurns: 12,
-    })
-
-    if (ownedChatId) {
-      await query(
-        `INSERT INTO assistant_messages (chat_id, role, content) VALUES ($1, 'user', $2), ($1, 'assistant', $3)`,
-        [ownedChatId, message, reply]
-      )
-      // Auto-title from the first message so the history list is readable
-      // instead of a list of identical "New chat" entries.
-      await query(
-        `UPDATE assistant_chats SET updated_at = now(), title = CASE WHEN title = 'New chat' THEN $2 ELSE title END WHERE id = $1`,
-        [ownedChatId, message.trim().slice(0, 60)]
-      )
-    }
-
-    return NextResponse.json({ reply })
-  } catch (e: any) {
-    console.error("assistant chat error:", e.message)
-    return NextResponse.json({ reply: "Sorry, something went wrong. Please try again." }, { status: 500 })
+  const { message, history, chatId } = await req.json().catch(() => ({}) as any)
+  if (typeof message !== "string" || !message.trim() || message.length > 2000) {
+    return NextResponse.json({ reply: "Please send a valid message." }, { status: 400 })
   }
+
+  // Verify the chat belongs to this user before persisting anything to it.
+  let ownedChatId: string | null = null
+  if (typeof chatId === "string" && chatId) {
+    const owns = await query(`SELECT 1 FROM assistant_chats WHERE id = $1 AND user_email = $2`, [chatId, session.email])
+    if (owns.rowCount) ownedChatId = chatId
+  }
+
+  const [snapshot, searchResults] = await Promise.all([getStatsSnapshot(), searchDatabase(message)])
+  const fullContext = [SYSTEM_PROMPT, snapshot, searchResults].filter(Boolean).join("\n\n")
+  const messages = [...(Array.isArray(history) ? history.slice(-10) : []), { role: "user", content: message }]
+
+  // Streamed as plain text chunks (not SSE/JSON) — the client just appends
+  // each chunk to the growing reply. This is a dashboard chat a human is
+  // watching, not a live phone call, so streaming turns a 20-50s silent
+  // wait into text appearing within a couple of seconds.
+  const encoder = new TextEncoder()
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      try {
+        // Not a live phone call — staff can tolerate a slower, richer
+        // answer. Bigger context window so the full snapshot above fits.
+        const fullReply = await chatWithSystemPromptStream(
+          messages,
+          fullContext,
+          (delta) => controller.enqueue(encoder.encode(delta)),
+          { numCtx: 8192, numPredict: 400, timeoutMs: 90000, historyTurns: 12 }
+        )
+
+        if (ownedChatId) {
+          await query(
+            `INSERT INTO assistant_messages (chat_id, role, content) VALUES ($1, 'user', $2), ($1, 'assistant', $3)`,
+            [ownedChatId, message, fullReply]
+          )
+          // Auto-title from the first message so the history list is
+          // readable instead of a list of identical "New chat" entries.
+          await query(
+            `UPDATE assistant_chats SET updated_at = now(), title = CASE WHEN title = 'New chat' THEN $2 ELSE title END WHERE id = $1`,
+            [ownedChatId, message.trim().slice(0, 60)]
+          )
+        }
+      } catch (e: any) {
+        console.error("assistant chat error:", e.message)
+        controller.enqueue(encoder.encode("Sorry, something went wrong. Please try again."))
+      } finally {
+        controller.close()
+      }
+    },
+  })
+
+  return new Response(stream, { headers: { "Content-Type": "text/plain; charset=utf-8" } })
 }

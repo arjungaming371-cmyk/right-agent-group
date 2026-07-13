@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { makeCall } from "@/lib/exotel"
+import { requireRole } from "@/lib/auth"
 
 export async function GET() {
   const { data } = await db.from("outbound_queue").select("*").order("created_at", { ascending: false }).limit(200)
@@ -8,6 +9,9 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  // Both modes below either queue contacts for a real outbound call campaign
+  // or trigger one immediately — same privilege level as /api/calls POST.
+  if (!(await requireRole(req, ["admin", "agent"]))) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const body = await req.json()
 
   // Batch mode: { contacts: [...] } — queue without calling

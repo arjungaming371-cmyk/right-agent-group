@@ -107,14 +107,14 @@ export default function AnalyticsView() {
       </div>
 
       {/* Stat tiles */}
-      <div style={{ display: "flex", gap: 16 }}>
+      <div className="grid grid-cols-2 gap-3 md:flex md:gap-4">
         <StatTile icon={Users} label="Total Leads" value={String(totals.total_leads)} tone={CAT.violet} />
         <StatTile icon={Phone} label="Total Calls" value={String(totals.total_calls)} tone={CAT.blue} />
         <StatTile icon={BadgeCheck} label="Qualified" value={String(totals.qualified_leads)} tone={STATUS.good} />
         <StatTile icon={Timer} label="Avg. Call Length" value={`${Math.floor(avgDur / 60)}m ${avgDur % 60}s`} tone={CAT.aqua} />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1.6fr 1fr", gap: 16 }}>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-[1.6fr_1fr] md:gap-4">
         {/* Calls per day */}
         <div style={CARD}>
           <div style={{ fontSize: 13.5, fontWeight: 700, marginBottom: 4 }}>Calls per day</div>
@@ -156,7 +156,7 @@ export default function AnalyticsView() {
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1.4fr", gap: 16 }}>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-[1fr_1fr_1.4fr] md:gap-4">
         {/* Language split */}
         <div style={CARD}>
           <div style={{ fontSize: 13.5, fontWeight: 700, marginBottom: 14 }}>Calls by language</div>

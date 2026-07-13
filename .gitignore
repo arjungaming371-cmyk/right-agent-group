@@ -12,6 +12,7 @@ out/
 .env
 .env.local
 .env.production
+.claude/settings.local.json
 
 
 # logs & OS junk

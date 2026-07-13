@@ -99,7 +99,7 @@ export default function VoiceLogsView({ role }: { role: "admin" | "agent" | "vie
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
       {/* Stat cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 16 }}>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-4">
         {[
           { label: "Calls Today",      value: callsToday.toString() },
           { label: "Avg. Handle Time", value: `${Math.floor(avgDur/60)}m ${avgDur%60}s` },

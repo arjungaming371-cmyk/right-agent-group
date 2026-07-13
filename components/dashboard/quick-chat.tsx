@@ -112,8 +112,32 @@ export default function QuickChat() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: q, history, chatId: activeChatId }),
       })
-      const data = await res.json()
-      setMessages([...newMessages, { role: "assistant", content: data.reply || "Sorry, I couldn't process that." }])
+      if (!res.body) throw new Error("no response stream")
+
+      // Streaming reply — append a growing placeholder and fill it in as
+      // chunks arrive, instead of waiting 20-50s for the whole thing.
+      setMessages([...newMessages, { role: "assistant", content: "" }])
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let acc = ""
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        acc += decoder.decode(value, { stream: true })
+        const textSoFar = acc
+        setMessages(prev => {
+          const copy = [...prev]
+          copy[copy.length - 1] = { role: "assistant", content: textSoFar }
+          return copy
+        })
+      }
+      if (!acc.trim()) {
+        setMessages(prev => {
+          const copy = [...prev]
+          copy[copy.length - 1] = { role: "assistant", content: "Sorry, I couldn't process that." }
+          return copy
+        })
+      }
     } catch {
       setMessages([...newMessages, { role: "assistant", content: "Something went wrong. Please try again." }])
     }
@@ -140,7 +164,9 @@ export default function QuickChat() {
 
   return (
     <div className="glass" style={{
-      position: "fixed", bottom: 24, right: 24, width: 400, height: 560,
+      position: "fixed", bottom: 12, right: 12, left: 12, top: 12,
+      width: "auto", height: "auto", maxWidth: 400, maxHeight: 560,
+      marginLeft: "auto", marginTop: "auto",
       borderRadius: 18, boxShadow: "0 20px 60px -12px rgba(0,0,0,0.65), 0 0 0 1px rgba(255,255,255,0.05)",
       display: "flex", flexDirection: "column", zIndex: 999, overflow: "hidden",
       animation: "fadeInUp 0.2s ease",
@@ -215,25 +241,27 @@ export default function QuickChat() {
         /* ---------- Chat panel ---------- */
         <>
           <div style={{ flex: 1, overflowY: "auto", padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
-            {messages.map((msg, i) => (
-              <div key={i} style={{ display: "flex", justifyContent: msg.role === "user" ? "flex-end" : "flex-start" }}>
-                <div style={{
-                  maxWidth: "88%", padding: "9px 13px", borderRadius: 12, fontSize: 13, lineHeight: 1.45, whiteSpace: "pre-wrap",
-                  background: msg.role === "user" ? "var(--gradient-brand)" : "var(--bg-secondary)",
-                  border: msg.role === "user" ? "none" : "1px solid var(--border)",
-                  color: msg.role === "user" ? "white" : "var(--text-primary)",
-                }}>
-                  {msg.content}
+            {messages.map((msg, i) => {
+              // Streaming placeholder: last message, empty, still loading —
+              // show the bounce dots in place of blank text.
+              const isPendingStream = loading && i === messages.length - 1 && msg.role === "assistant" && msg.content === ""
+              return (
+                <div key={i} style={{ display: "flex", justifyContent: msg.role === "user" ? "flex-end" : "flex-start" }}>
+                  <div style={{
+                    maxWidth: "88%", padding: isPendingStream ? "10px 13px" : "9px 13px", borderRadius: 12, fontSize: 13, lineHeight: 1.45, whiteSpace: "pre-wrap",
+                    background: msg.role === "user" ? "var(--gradient-brand)" : "var(--bg-secondary)",
+                    border: msg.role === "user" ? "none" : "1px solid var(--border)",
+                    color: msg.role === "user" ? "white" : "var(--text-primary)",
+                  }}>
+                    {isPendingStream ? (
+                      <div style={{ display: "flex", gap: 4 }}>
+                        {[0,1,2].map(d => <span key={d} style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--text-muted)", animation: `bounce 1s ${d*0.15}s infinite` }} />)}
+                      </div>
+                    ) : msg.content}
+                  </div>
                 </div>
-              </div>
-            ))}
-            {loading && (
-              <div style={{ display: "flex", justifyContent: "flex-start" }}>
-                <div style={{ padding: "8px 12px", borderRadius: 10, background: "var(--bg-secondary)", display: "flex", gap: 4 }}>
-                  {[0,1,2].map(i => <span key={i} style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--text-muted)", animation: `bounce 1s ${i*0.15}s infinite` }} />)}
-                </div>
-              </div>
-            )}
+              )
+            })}
             <div ref={bottomRef} />
           </div>
 

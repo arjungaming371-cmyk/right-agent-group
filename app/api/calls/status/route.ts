@@ -3,9 +3,14 @@ import { db } from "@/lib/db"
 import { generateLeadSummary } from "@/lib/ollama"
 import { sendCallFollowUp, sendMissedCallFollowUp } from "@/lib/whatsapp"
 import { refreshLeadScore } from "@/lib/scoring"
+import { rateLimit, clientIp } from "@/lib/rate-limit"
 
 export async function POST(req: NextRequest) {
   try {
+    if (!rateLimit(`call-status:${clientIp(req)}`, 60, 60000)) {
+      return new NextResponse("OK", { status: 200 })
+    }
+
     // Exotel sends JSON (StatusCallbackContentType=application/json);
     // form-encoded is kept as a fallback for older configurations.
     let callSid = "", callStatus = "", duration = 0

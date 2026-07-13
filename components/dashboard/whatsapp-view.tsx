@@ -1,6 +1,6 @@
 "use client"
 import { useEffect, useRef, useState, useCallback } from "react"
-import { Search, Send, Bot, MessageCircle, AlertTriangle } from "lucide-react"
+import { Search, Send, Bot, MessageCircle, AlertTriangle, ChevronLeft } from "lucide-react"
 import { useToast } from "../ui/toast"
 
 type Lead = { id: string; name: string; phone: string; last_message?: string; last_message_time?: string; last_direction?: string; unread?: number }
@@ -159,8 +159,13 @@ export default function WhatsAppView({ role }: { role: "admin" | "agent" | "view
 
       <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
 
-        {/* LEFT — Contact list */}
-        <div style={{ width: 360, borderRight: "1px solid #2a3942", display: "flex", flexDirection: "column", background: "#111b21", flexShrink: 0 }}>
+        {/* LEFT — Contact list. Mobile: full-width, hidden once a chat is
+            open (classic master-detail — WhatsApp Web itself does this).
+            Desktop (md+): always visible at a fixed width alongside the chat. */}
+        <div
+          className={`${selected ? "hidden md:flex" : "flex"} w-full md:w-[360px]`}
+          style={{ borderRight: "1px solid #2a3942", flexDirection: "column", background: "#111b21", flexShrink: 0 }}
+        >
 
           {/* Header */}
           <div style={{ padding: "14px 16px", background: "#202c33", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -238,6 +243,14 @@ export default function WhatsAppView({ role }: { role: "admin" | "agent" | "view
             {/* Chat header */}
             <div style={{ padding: "10px 16px", background: "#202c33", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #2a3942" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <button
+                  onClick={() => setSelected(null)}
+                  aria-label="Back to chat list"
+                  className="md:hidden"
+                  style={{ background: "none", border: "none", color: "#e9edef", cursor: "pointer", display: "flex", padding: 2, marginRight: -2, flexShrink: 0 }}
+                >
+                  <ChevronLeft size={22} strokeWidth={2} />
+                </button>
                 <Avatar name={selected.name} size={40} />
                 <div>
                   <div style={{ fontWeight: 600, fontSize: 15, color: "#e9edef" }}>{selected.name}</div>
@@ -332,7 +345,9 @@ export default function WhatsAppView({ role }: { role: "admin" | "agent" | "view
             )}
           </div>
         ) : (
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "#0b141a", color: "#8696a0" }}>
+          // Hidden on mobile — the contact list already fills the screen when
+          // nothing's selected, this placeholder is only useful next to it on desktop.
+          <div className="hidden md:flex" style={{ flex: 1, flexDirection: "column", alignItems: "center", justifyContent: "center", background: "#0b141a", color: "#8696a0" }}>
             <MessageCircle size={56} strokeWidth={1.2} style={{ marginBottom: 16, opacity: 0.5 }} />
             <div style={{ fontSize: 18, fontWeight: 600, color: "#e9edef", marginBottom: 8 }}>WhatsApp Chat</div>
             <div style={{ fontSize: 14 }}>Select a contact to start messaging</div>

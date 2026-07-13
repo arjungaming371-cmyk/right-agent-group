@@ -69,7 +69,7 @@ export default function SecurityView() {
   const grade = score === 100 ? "A+" : score >= 75 ? "A" : score >= 50 ? "B" : "C"
 
   return (
-    <div style={{ display:"grid",gridTemplateColumns:"1fr 320px",gap:20,alignItems:"start" }}>
+    <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-[1fr_320px] md:gap-5">
       {/* Left */}
       <div style={{ display:"flex",flexDirection:"column",gap:16 }}>
         {/* Access Controls */}

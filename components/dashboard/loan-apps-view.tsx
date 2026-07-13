@@ -57,9 +57,11 @@ export default function LoanAppsView({ role, initialSearch }: { role: "admin" | 
   }
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "340px 1fr", gap: 16, height: "calc(100vh - 160px)" }}>
+    // Mobile: stack list above detail, both naturally scrolling with the page.
+    // Desktop (md+): side-by-side 340px list + flexible detail, fixed height.
+    <div className="grid grid-cols-1 gap-4 md:h-[calc(100vh-160px)] md:grid-cols-[340px_1fr]">
       {/* List */}
-      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      <div className="max-h-[360px] md:max-h-none" style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         <div style={{ padding: "16px 18px", borderBottom: "1px solid var(--border)" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
             <div style={{ fontWeight: 600, fontSize: 15 }}>Loan Applications</div>

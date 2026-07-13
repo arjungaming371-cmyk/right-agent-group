@@ -188,7 +188,7 @@ export default function LeadsView({ role, initialSearch }: { role: "admin" | "ag
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 16 }}>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-4">
         <Card label="Total Leads" value={totalLeads.toLocaleString()} icon={Users} tone="#8b7cff" />
         <Card label="Interested" value={interestedCount.toLocaleString()} icon={Target} tone="#38bdf8" />
         <Card label="Pipeline Value" value={formatCurrency(pipelineValue)} icon={IndianRupee} tone="#f7b731" />
@@ -254,7 +254,11 @@ export default function LeadsView({ role, initialSearch }: { role: "admin" | "ag
           </div>
         </div>
 
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        {/* Horizontal scroll container — a 10-column table can't fit a phone
+            screen; this keeps the overflow contained to the table itself
+            instead of the whole page scrolling sideways. */}
+        <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", minWidth: 780, borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ borderBottom: "1px solid var(--border)" }}>
               {["LEAD", "SCORE", "ADDRESS", "LOAN TYPE", "VALUE", "STATUS", "FORM", "CALLS", "UPDATED", "ACTIONS"].map((h) => (
@@ -332,6 +336,7 @@ export default function LeadsView({ role, initialSearch }: { role: "admin" | "ag
             })}
           </tbody>
         </table>
+        </div>
       </div>
 
       {/* Add Lead modal */}

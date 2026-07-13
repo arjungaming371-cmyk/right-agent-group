@@ -132,6 +132,86 @@ export async function chatWithSystemPrompt(
   return runOllamaChat(messages, systemPrompt, opts)
 }
 
+/**
+ * Same as chatWithSystemPrompt, but streams tokens to onChunk as they
+ * arrive instead of waiting for the full reply — for UIs where a human is
+ * watching (e.g. the Ops Assistant chat), so text starts appearing in
+ * seconds instead of after the full 20-50s generation. Not used for Priya's
+ * live-call turns, which speak the whole reply at once via TTS anyway.
+ * Returns the full accumulated text once generation finishes.
+ */
+export async function chatWithSystemPromptStream(
+  messages: { role: "user" | "model"; content: string }[],
+  systemPrompt: string,
+  onChunk: (delta: string) => void,
+  opts?: { numCtx?: number; numPredict?: number; timeoutMs?: number; historyTurns?: number }
+): Promise<string> {
+  if (!messages?.length) return "Hello! How can I help you today?"
+
+  const recentMessages = messages.slice(-(opts?.historyTurns ?? 6))
+  const ollamaMessages = toOllamaMessages(recentMessages, systemPrompt)
+
+  const controller = new AbortController()
+  const timeoutMs = opts?.timeoutMs ?? (IS_GPU ? 35000 : 25000)
+
+  await acquireSlot()
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+
+  let fullText = ""
+  try {
+    const response = await fetch(`${OLLAMA_URL}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: MODEL,
+        messages: ollamaMessages,
+        stream: true,
+        keep_alive: "30m",
+        options: IS_GPU
+          ? { num_predict: opts?.numPredict ?? 120, temperature: 0.6, num_ctx: opts?.numCtx ?? 2048, num_gpu: 99 }
+          : { num_predict: opts?.numPredict ?? 80, temperature: 0.6, num_ctx: opts?.numCtx ?? 1536, num_thread: 8 },
+      }),
+    })
+    if (!response.ok || !response.body) throw new Error(`Ollama HTTP ${response.status}`)
+
+    // Ollama's streaming format is newline-delimited JSON objects, each
+    // { message: { content: "..." }, done: bool }, not SSE.
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ""
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split("\n")
+      buffer = lines.pop() || "" // last (possibly incomplete) line carries over
+      for (const line of lines) {
+        if (!line.trim()) continue
+        try {
+          const obj = JSON.parse(line)
+          const delta = obj?.message?.content
+          if (delta) {
+            fullText += delta
+            onChunk(delta)
+          }
+        } catch {
+          // Malformed/partial line — skip rather than abort the whole stream.
+        }
+      }
+    }
+    clearTimeout(timeoutId)
+    if (!fullText.trim()) throw new Error("Empty Ollama response")
+    return fullText.trim()
+  } catch (e: any) {
+    clearTimeout(timeoutId)
+    console.error("Ollama stream error:", e.message)
+    throw e
+  } finally {
+    releaseSlot()
+  }
+}
+
 async function runOllamaChat(
   messages: { role: "user" | "model"; content: string }[],
   systemPrompt: string,

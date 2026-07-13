@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react"
 import {
   Users, FileText, Phone, MessageCircle, Activity, ShieldCheck, UploadCloud,
-  ScrollText, LogOut, Mic, BarChart3, UserCog, Search, type LucideIcon,
+  ScrollText, LogOut, Mic, BarChart3, UserCog, Search, Menu, X, type LucideIcon,
 } from "lucide-react"
 import { ToastProvider } from "../ui/toast"
 import CommandPalette from "../ui/command-palette"
@@ -89,6 +89,8 @@ export default function DashboardShell() {
   const [paletteOpen, setPaletteOpen] = useState(false)
   // Search text seeded into a view when jumping there from the command palette.
   const [seedSearch, setSeedSearch] = useState<{ view: ViewKey; q: string } | null>(null)
+  // Sidebar is a slide-in drawer below the md breakpoint — closed by default.
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
 
   // Global Ctrl+K / Cmd+K opens the command palette.
   useEffect(() => {
@@ -150,9 +152,32 @@ export default function DashboardShell() {
 
   return (
     <ToastProvider>
-    <div className="flex h-screen bg-[var(--bg-primary)]">
+    <div className="flex h-screen bg-[var(--bg-primary)] overflow-hidden">
+      {/* Backdrop — mobile only, closes the drawer on tap outside it */}
+      {mobileNavOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/60 md:hidden"
+          onClick={() => setMobileNavOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
       {/* ======= Sidebar ======= */}
-      <aside className="flex w-[258px] flex-shrink-0 flex-col border-r border-[var(--border)] bg-[var(--bg-sidebar)]">
+      {/* Below md: fixed slide-in drawer, off-screen until opened.
+          At md+: back in normal flow as a static sidebar, always visible.
+          NOTE: the slide uses a plain inline `transform`, not Tailwind's
+          translate-x-* utilities — Tailwind v4 compiles those to the CSS
+          `translate` property driven by a `--tw-translate-x` custom
+          property, and swapping between two utility classes (translate-x-0
+          <-> -translate-x-full) updates the custom property correctly but
+          the derived `translate` shorthand doesn't reliably recompute
+          across the class swap in this environment (verified: `--tw-
+          translate-x` reads correctly, `translate` does not). Plain inline
+          transform sidesteps that entirely. */}
+      <aside
+        className="mobile-nav-drawer fixed inset-y-0 left-0 z-50 flex w-[258px] flex-shrink-0 flex-col border-r border-[var(--border)] bg-[var(--bg-sidebar)] md:static"
+        style={{ transform: mobileNavOpen ? "translateX(0)" : "translateX(-100%)", transition: "transform 200ms ease-out" }}
+      >
         {/* Brand */}
         <div className="flex h-16 items-center gap-3 border-b border-[var(--border-light)] px-5">
           <div
@@ -161,10 +186,17 @@ export default function DashboardShell() {
           >
             R
           </div>
-          <div className="min-w-0 leading-tight">
+          <div className="min-w-0 flex-1 leading-tight">
             <div className="truncate text-[13.5px] font-bold tracking-tight text-[var(--text-primary)]">Right Agent Group</div>
             <div className="text-[9.5px] font-semibold tracking-[0.18em] text-[var(--text-muted)]">OPERATIONS CONSOLE</div>
           </div>
+          <button
+            onClick={() => setMobileNavOpen(false)}
+            aria-label="Close menu"
+            className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-white/[0.05] md:hidden"
+          >
+            <X size={16} strokeWidth={2} />
+          </button>
         </div>
 
         {/* Navigation */}
@@ -181,7 +213,7 @@ export default function DashboardShell() {
                   return (
                     <button
                       key={key}
-                      onClick={() => setView(key)}
+                      onClick={() => { setView(key); setMobileNavOpen(false) }}
                       aria-current={active ? "page" : undefined}
                       className={`group flex h-9 w-full items-center gap-3 rounded-[10px] px-3 text-left text-[13px] transition-colors ${
                         active
@@ -266,10 +298,17 @@ export default function DashboardShell() {
       {/* ======= Main ======= */}
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Topbar */}
-        <header className="glass z-10 flex h-16 flex-shrink-0 items-center gap-3 border-b border-[var(--border)] px-6">
+        <header className="glass z-10 flex h-16 flex-shrink-0 items-center gap-2 border-b border-[var(--border)] px-3 md:gap-3 md:px-6">
+          <button
+            onClick={() => setMobileNavOpen(true)}
+            aria-label="Open menu"
+            className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[10px] text-[var(--text-secondary)] hover:bg-white/[0.04] md:hidden"
+          >
+            <Menu size={19} strokeWidth={2} />
+          </button>
           <div className="min-w-0 flex-1 leading-tight">
-            <div className="truncate text-[16px] font-bold tracking-tight text-[var(--text-primary)]">{title}</div>
-            <div className="truncate text-[12px] text-[var(--text-muted)]">{sub}</div>
+            <div className="truncate text-[15px] font-bold tracking-tight text-[var(--text-primary)] md:text-[16px]">{title}</div>
+            <div className="truncate text-[11px] text-[var(--text-muted)] md:text-[12px]">{sub}</div>
           </div>
 
           <StatusPill icon={Mic} label="Voice Bot" />
@@ -293,7 +332,7 @@ export default function DashboardShell() {
         </header>
 
         {/* Content */}
-        <main key={view} className="flex-1 overflow-auto p-6" style={{ animation: "fadeInUp 0.25s ease" }}>
+        <main key={view} className="flex-1 overflow-auto p-3 md:p-6" style={{ animation: "fadeInUp 0.25s ease" }}>
           {view === "analytics" && <AnalyticsView />}
           {view === "leads"    && <LeadsView role={role} initialSearch={seedSearch?.view === "leads" ? seedSearch.q : undefined} />}
           {view === "loans"    && <LoanAppsView role={role} initialSearch={seedSearch?.view === "loans" ? seedSearch.q : undefined} />}
@@ -306,6 +345,9 @@ export default function DashboardShell() {
         </main>
       </div>
       <QuickChat />
+      {/* Neutralizes the mobile slide-in transform at md+ so the sidebar is
+          always visible on desktop regardless of mobileNavOpen state. */}
+      <style>{`@media (min-width: 768px) { .mobile-nav-drawer { transform: none !important; } }`}</style>
       <CommandPalette
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}
