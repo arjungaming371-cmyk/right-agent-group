@@ -396,3 +396,12 @@ ALTER TABLE knowledge_base ADD COLUMN IF NOT EXISTS search_vector tsvector
   ) STORED;
 CREATE INDEX IF NOT EXISTS idx_kb_search ON knowledge_base USING GIN (search_vector);
 CREATE INDEX IF NOT EXISTS idx_kb_active ON knowledge_base (is_active);
+
+-- Ingestion provenance — CSV bulk-import, PDF upload (chunked), URL fetch
+-- with refresh support. See migrations/2026-07-14_kb_ingestion.sql.
+ALTER TABLE knowledge_base ADD COLUMN IF NOT EXISTS source_type TEXT NOT NULL DEFAULT 'manual'
+  CHECK (source_type IN ('manual', 'csv', 'pdf', 'url'));
+ALTER TABLE knowledge_base ADD COLUMN IF NOT EXISTS source_url TEXT;
+ALTER TABLE knowledge_base ADD COLUMN IF NOT EXISTS source_filename TEXT;
+ALTER TABLE knowledge_base ADD COLUMN IF NOT EXISTS last_fetched_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_kb_source_url ON knowledge_base (source_url) WHERE source_url IS NOT NULL;

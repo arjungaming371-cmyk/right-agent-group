@@ -1,6 +1,6 @@
 "use client"
-import { useEffect, useState } from "react"
-import { BookOpen, Plus, Pencil, Trash2, X, Check } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
+import { BookOpen, Plus, Pencil, Trash2, X, Check, FileUp, FileText, Link2, RefreshCw } from "lucide-react"
 import { useToast } from "../ui/toast"
 import { Skeleton } from "../ui/skeleton"
 
@@ -10,11 +10,22 @@ type Entry = {
   content: string
   category: string | null
   is_active: boolean
+  source_type: "manual" | "csv" | "pdf" | "url"
+  source_url: string | null
+  source_filename: string | null
+  last_fetched_at: string | null
   created_at: string
   updated_at: string
 }
 
 const EMPTY_FORM = { title: "", content: "", category: "" }
+
+const SOURCE_BADGE: Record<Entry["source_type"], { label: string; color: string }> = {
+  manual: { label: "Manual", color: "#94a3b8" },
+  csv: { label: "CSV", color: "#38bdf8" },
+  pdf: { label: "PDF", color: "#f87171" },
+  url: { label: "URL", color: "#2dd4a0" },
+}
 
 export default function KnowledgeBaseView({ role }: { role: "admin" | "agent" | "viewer" }) {
   const canEdit = role !== "viewer"
@@ -26,6 +37,14 @@ export default function KnowledgeBaseView({ role }: { role: "admin" | "agent" | 
   const [form, setForm] = useState(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+
+  const csvInputRef = useRef<HTMLInputElement>(null)
+  const pdfInputRef = useRef<HTMLInputElement>(null)
+  const [csvUploading, setCsvUploading] = useState(false)
+  const [pdfUploading, setPdfUploading] = useState(false)
+  const [urlInput, setUrlInput] = useState("")
+  const [urlFetching, setUrlFetching] = useState(false)
+  const [refreshingUrl, setRefreshingUrl] = useState<string | null>(null)
 
   async function load() {
     setLoading(true)
@@ -104,6 +123,65 @@ export default function KnowledgeBaseView({ role }: { role: "admin" | "agent" | 
     setConfirmDelete(null)
   }
 
+  async function handleCsvFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = "" // allow re-selecting the same file later
+    if (!file) return
+    setCsvUploading(true)
+    try {
+      const fd = new FormData()
+      fd.append("file", file)
+      const res = await fetch("/api/knowledge-base/upload-csv", { method: "POST", body: fd })
+      const d = await res.json().catch(() => ({}))
+      if (res.ok) { toast.success(`Imported ${d.created} of ${d.total} rows from ${file.name}`); await load() }
+      else toast.error(d.error || "CSV import failed")
+    } catch {
+      toast.error("CSV import failed")
+    }
+    setCsvUploading(false)
+  }
+
+  async function handlePdfFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ""
+    if (!file) return
+    setPdfUploading(true)
+    try {
+      const fd = new FormData()
+      fd.append("file", file)
+      const res = await fetch("/api/knowledge-base/upload-pdf", { method: "POST", body: fd })
+      const d = await res.json().catch(() => ({}))
+      if (res.ok) { toast.success(`Extracted ${d.created} section(s) from ${file.name}`); await load() }
+      else toast.error(d.error || "PDF import failed")
+    } catch {
+      toast.error("PDF import failed")
+    }
+    setPdfUploading(false)
+  }
+
+  async function fetchUrl(url: string, isRefresh = false) {
+    if (!url.trim()) return
+    if (isRefresh) setRefreshingUrl(url); else setUrlFetching(true)
+    try {
+      const res = await fetch("/api/knowledge-base/fetch-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: url.trim() }),
+      })
+      const d = await res.json().catch(() => ({}))
+      if (res.ok) {
+        toast.success(d.refreshed ? "Page refreshed" : "Page added to knowledge base")
+        if (!isRefresh) setUrlInput("")
+        await load()
+      } else {
+        toast.error(d.error || "Could not fetch that page")
+      }
+    } catch {
+      toast.error("Could not fetch that page")
+    }
+    if (isRefresh) setRefreshingUrl(null); else setUrlFetching(false)
+  }
+
   const activeCount = entries.filter((e) => e.is_active).length
 
   return (
@@ -113,9 +191,42 @@ export default function KnowledgeBaseView({ role }: { role: "admin" | "agent" | 
           <BookOpen size={14} strokeWidth={2} /> How this works
         </div>
         <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6 }}>
-          Add facts here — documents needed, minimum/maximum loan amounts, eligibility, processing time — and Priya searches this on every single turn of a call or WhatsApp chat, not just the opening. She uses matches naturally without reading them out verbatim or mentioning "knowledge base." Inactive entries are never searched.
+          Add facts here — documents needed, minimum/maximum loan amounts, eligibility, processing time — and Priya searches this on every single turn of a call or WhatsApp chat, not just the opening. She uses matches naturally without reading them out verbatim or mentioning "knowledge base." Inactive entries are never searched. This is keyword search, not AI-semantic search — word entries the way customers actually ask (include "get", "apply", "eligible", not just formal terms).
         </div>
       </div>
+
+      {canEdit && (
+        <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: 18 }}>
+          <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 12 }}>Bulk Import</div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+            <input ref={csvInputRef} type="file" accept=".csv,.txt" onChange={handleCsvFile} style={{ display: "none" }} />
+            <button onClick={() => csvInputRef.current?.click()} disabled={csvUploading} className="btn-ghost" style={{ height: 34 }}>
+              <FileUp size={14} strokeWidth={2} /> {csvUploading ? "Importing…" : "Upload CSV"}
+            </button>
+
+            <input ref={pdfInputRef} type="file" accept=".pdf" onChange={handlePdfFile} style={{ display: "none" }} />
+            <button onClick={() => pdfInputRef.current?.click()} disabled={pdfUploading} className="btn-ghost" style={{ height: 34 }}>
+              <FileText size={14} strokeWidth={2} /> {pdfUploading ? "Extracting…" : "Upload PDF"}
+            </button>
+
+            <div style={{ display: "flex", gap: 6, flex: 1, minWidth: 220 }}>
+              <input
+                value={urlInput}
+                onChange={(e) => setUrlInput(e.target.value)}
+                placeholder="https://your-site.com/faq"
+                style={{ flex: 1, height: 34, fontSize: 12.5 }}
+                onKeyDown={(e) => { if (e.key === "Enter") fetchUrl(urlInput) }}
+              />
+              <button onClick={() => fetchUrl(urlInput)} disabled={urlFetching || !urlInput.trim()} className="btn-ghost" style={{ height: 34 }}>
+                <Link2 size={14} strokeWidth={2} /> {urlFetching ? "Fetching…" : "Fetch URL"}
+              </button>
+            </div>
+          </div>
+          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 8 }}>
+            CSV needs title/question + content/answer columns. PDF is split into sections automatically. A fetched URL can be re-fetched later with the refresh button on its entry below to pick up page changes.
+          </div>
+        </div>
+      )}
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ fontSize: 13, color: "var(--text-muted)" }}>{entries.length} entries · {activeCount} active</div>
@@ -135,44 +246,64 @@ export default function KnowledgeBaseView({ role }: { role: "admin" | "agent" | 
         ))}
         {!loading && entries.length === 0 && (
           <div style={{ textAlign: "center", color: "var(--text-muted)", fontSize: 13, padding: 40, background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12 }}>
-            No entries yet. Add the questions customers ask most.
+            No entries yet. Add the questions customers ask most, or bulk-import a CSV/PDF/URL above.
           </div>
         )}
-        {entries.map((entry) => (
-          <div key={entry.id} style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: 18, opacity: entry.is_active ? 1 : 0.55 }}>
-            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: 6 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                <div style={{ fontWeight: 600, fontSize: 14 }}>{entry.title}</div>
-                {entry.category && (
-                  <span style={{ fontSize: 10.5, background: "rgba(139,124,255,0.12)", color: "#a5b0ff", borderRadius: 6, padding: "2px 8px" }}>{entry.category}</span>
-                )}
-                {!entry.is_active && (
-                  <span style={{ fontSize: 10.5, background: "rgba(148,163,184,0.15)", color: "#94a3b8", borderRadius: 6, padding: "2px 8px" }}>Inactive</span>
+        {entries.map((entry) => {
+          const badge = SOURCE_BADGE[entry.source_type] || SOURCE_BADGE.manual
+          return (
+            <div key={entry.id} style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: 18, opacity: entry.is_active ? 1 : 0.55 }}>
+              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: 6 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <div style={{ fontWeight: 600, fontSize: 14 }}>{entry.title}</div>
+                  {entry.category && (
+                    <span style={{ fontSize: 10.5, background: "rgba(139,124,255,0.12)", color: "#a5b0ff", borderRadius: 6, padding: "2px 8px" }}>{entry.category}</span>
+                  )}
+                  <span style={{ fontSize: 10.5, background: `${badge.color}1f`, color: badge.color, borderRadius: 6, padding: "2px 8px" }}>{badge.label}</span>
+                  {!entry.is_active && (
+                    <span style={{ fontSize: 10.5, background: "rgba(148,163,184,0.15)", color: "#94a3b8", borderRadius: 6, padding: "2px 8px" }}>Inactive</span>
+                  )}
+                </div>
+                {canEdit && (
+                  <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                    {entry.source_type === "url" && entry.source_url && (
+                      <button
+                        onClick={() => fetchUrl(entry.source_url as string, true)}
+                        disabled={refreshingUrl === entry.source_url}
+                        className="icon-btn"
+                        title="Re-fetch this page"
+                        style={{ width: 28, height: 28 }}
+                      >
+                        <RefreshCw size={13} strokeWidth={2} className={refreshingUrl === entry.source_url ? "spin" : ""} />
+                      </button>
+                    )}
+                    <button onClick={() => toggleActive(entry)} className="icon-btn" title={entry.is_active ? "Deactivate" : "Activate"} style={{ width: 28, height: 28 }}>
+                      {entry.is_active ? <X size={13} strokeWidth={2} /> : <Check size={13} strokeWidth={2} />}
+                    </button>
+                    <button onClick={() => openEdit(entry)} className="icon-btn" title="Edit" style={{ width: 28, height: 28 }}>
+                      <Pencil size={13} strokeWidth={2} />
+                    </button>
+                    {confirmDelete === entry.id ? (
+                      <button onClick={() => remove(entry.id)} style={{ fontSize: 11, background: "rgba(239,68,68,0.15)", color: "#f87171", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 8, padding: "0 10px" }}>
+                        Confirm?
+                      </button>
+                    ) : (
+                      <button onClick={() => setConfirmDelete(entry.id)} className="icon-btn" title="Delete" style={{ width: 28, height: 28 }}>
+                        <Trash2 size={13} strokeWidth={2} />
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
-              {canEdit && (
-                <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                  <button onClick={() => toggleActive(entry)} className="icon-btn" title={entry.is_active ? "Deactivate" : "Activate"} style={{ width: 28, height: 28 }}>
-                    {entry.is_active ? <X size={13} strokeWidth={2} /> : <Check size={13} strokeWidth={2} />}
-                  </button>
-                  <button onClick={() => openEdit(entry)} className="icon-btn" title="Edit" style={{ width: 28, height: 28 }}>
-                    <Pencil size={13} strokeWidth={2} />
-                  </button>
-                  {confirmDelete === entry.id ? (
-                    <button onClick={() => remove(entry.id)} style={{ fontSize: 11, background: "rgba(239,68,68,0.15)", color: "#f87171", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 8, padding: "0 10px" }}>
-                      Confirm?
-                    </button>
-                  ) : (
-                    <button onClick={() => setConfirmDelete(entry.id)} className="icon-btn" title="Delete" style={{ width: 28, height: 28 }}>
-                      <Trash2 size={13} strokeWidth={2} />
-                    </button>
-                  )}
+              <div style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.5 }}>{entry.content}</div>
+              {entry.source_url && (
+                <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 8, wordBreak: "break-all" }}>
+                  {entry.source_url}{entry.last_fetched_at ? ` · fetched ${new Date(entry.last_fetched_at).toLocaleString()}` : ""}
                 </div>
               )}
             </div>
-            <div style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.5 }}>{entry.content}</div>
-          </div>
-        ))}
+          )
+        })}
       </div>
 
       {showForm && (
