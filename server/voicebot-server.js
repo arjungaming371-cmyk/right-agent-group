@@ -6,7 +6,7 @@
 //
 //   caller audio → silence-based endpointing → STT (self-hosted Whisper)
 //     → Next.js /api/calls/turn (Ollama = Priya's brain, DB, WhatsApp link)
-//     → TTS (self-hosted Svara-TTS ONLY — no fallback provider)
+//     → TTS (free Microsoft Edge neural voices — no GPU server needed)
 //     → downsample to 8kHz PCM → streamed back to the caller.
 //
 // Exotel setup: Voicebot applet URL = wss://YOUR-DOMAIN/voicebot
@@ -19,6 +19,7 @@
 require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") })
 
 const { WebSocketServer } = require("ws")
+const { MsEdgeTTS, OUTPUT_FORMAT } = require("msedge-tts")
 const { spawn } = require("child_process")
 
 const PORT = parseInt(process.env.VOICEBOT_PORT || "3002")
@@ -71,33 +72,24 @@ async function speechToText(pcm, language) {
   return (data?.text || "").trim()
 }
 
-// ---------- TTS: Svara-TTS only (self-hosted, no fallback provider) ----------
-// Self-hosted Kenpath Svara-TTS — one voice for Hindi/Telugu/Indian English.
-// See github.com/Kenpath/svara-tts-inference. OpenAI-compatible endpoint.
-const SVARA_URL = process.env.SVARA_TTS_URL || "http://127.0.0.1:8080"
-const SVARA_VOICES = {
-  english: process.env.SVARA_VOICE_ENGLISH || "en_female",
-  hindi: process.env.SVARA_VOICE_HINDI || "hi_female",
-  telugu: process.env.SVARA_VOICE_TELUGU || "te_female",
-}
-
-async function svaraSpeech(text, language) {
-  const res = await fetch(`${SVARA_URL}/v1/audio/speech`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "svara-tts-v1",
-      voice: SVARA_VOICES[language] || SVARA_VOICES.english,
-      input: text,
-      response_format: "wav",
-    }),
-  })
-  if (!res.ok) throw new Error(`Svara TTS HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`)
-  return Buffer.from(await res.arrayBuffer())
+// ---------- TTS: free Microsoft Edge neural voices (no GPU server) ----------
+const EDGE_VOICES = {
+  english: "en-IN-NeerjaNeural",
+  hindi: "hi-IN-SwaraNeural",
+  telugu: "te-IN-ShrutiNeural",
 }
 
 async function synthesizeSpeech(text, language) {
-  return svaraSpeech(text, language)
+  const tts = new MsEdgeTTS()
+  await tts.setMetadata(EDGE_VOICES[language] || EDGE_VOICES.english, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3)
+  const { audioStream } = tts.toStream(text)
+  const chunks = []
+  await new Promise((resolve, reject) => {
+    audioStream.on("data", (c) => chunks.push(c))
+    audioStream.on("end", resolve)
+    audioStream.on("error", reject)
+  })
+  return Buffer.concat(chunks)
 }
 
 /** WAV → 8kHz 16-bit mono PCM via ffmpeg (install once: sudo apt install -y ffmpeg). */
@@ -288,4 +280,4 @@ wss.on("connection", (ws) => {
   ws.on("error", (e) => console.error("ws error:", e.message))
 })
 
-console.log(`Voicebot server listening on ws://127.0.0.1:${PORT}/voicebot (put nginx wss in front) — TTS: svara only`)
+console.log(`Voicebot server listening on ws://127.0.0.1:${PORT}/voicebot (put nginx wss in front) — TTS: edge`)
