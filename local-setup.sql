@@ -345,3 +345,31 @@ CREATE TABLE IF NOT EXISTS prompt_suggestions (
   created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_prompt_suggestions_status ON prompt_suggestions (status, created_at DESC);
+
+-- ============================================================
+-- Regulatory compliance guardrails — calling-window enforcement
+-- (TRAI TCCCPR / RBI Fair Practices Code) + DND/opt-out suppression list.
+-- See migrations/2026-07-14_compliance.sql (rollback in the same folder).
+-- NOTE: dnd_suppression is a list YOU control, not a live NCPR sync —
+-- real NCPR access requires RTM/DLT registration, a business step.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS compliance_settings (
+  key        TEXT PRIMARY KEY,
+  value      TEXT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_by TEXT
+);
+INSERT INTO compliance_settings (key, value) VALUES
+  ('calling_window_enabled', 'true'),
+  ('calling_window_start_hour', '8'),
+  ('calling_window_end_hour', '19'),
+  ('calling_window_days', 'mon,tue,wed,thu,fri,sat')
+ON CONFLICT (key) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS dnd_suppression (
+  phone      TEXT PRIMARY KEY,
+  reason     TEXT,
+  source     TEXT NOT NULL DEFAULT 'manual' CHECK (source IN ('manual', 'csv_upload', 'lead_do_not_call')),
+  added_by   TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

@@ -1,10 +1,26 @@
 "use client"
 import { useEffect, useState } from "react"
-import { ShieldCheck, AlertTriangle, RotateCcw, FileLock2 } from "lucide-react"
+import { ShieldCheck, AlertTriangle, RotateCcw, FileLock2, PhoneOff, Clock, X, Plus } from "lucide-react"
 import { SkeletonList } from "../ui/skeleton"
+import { useToast } from "../ui/toast"
 
 type Setting = { key: string; enabled: boolean }
 type AuditLog = { id: string; action: string; performed_by: string; created_at: string }
+
+type ComplianceSettings = { enabled: boolean; startHour: number; endHour: number; days: string[] }
+type DndEntry = { phone: string; reason: string | null; source: string; created_at: string }
+
+const DAY_OPTIONS = [
+  { code: "mon", label: "Mon" }, { code: "tue", label: "Tue" }, { code: "wed", label: "Wed" },
+  { code: "thu", label: "Thu" }, { code: "fri", label: "Fri" }, { code: "sat", label: "Sat" },
+  { code: "sun", label: "Sun" },
+]
+
+function hourLabel(h: number) {
+  const period = h < 12 ? "AM" : "PM"
+  const hr12 = h % 12 === 0 ? 12 : h % 12
+  return `${hr12}:00 ${period}`
+}
 
 const LABELS: Record<string, { label: string; desc: string }> = {
   two_factor_auth: { label: "Two-Factor Authentication", desc: "Require a one-time code for every admin sign-in." },
@@ -27,10 +43,20 @@ function timeAgo(dateStr: string) {
 }
 
 export default function SecurityView() {
+  const toast = useToast()
   const [settings, setSettings] = useState<Setting[]>([])
   const [logs, setLogs] = useState<AuditLog[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState<string | null>(null)
+
+  const [compliance, setCompliance] = useState<ComplianceSettings>({ enabled: true, startHour: 8, endHour: 19, days: [] })
+  const [dndCount, setDndCount] = useState(0)
+  const [complianceLoading, setComplianceLoading] = useState(true)
+  const [savingWindow, setSavingWindow] = useState(false)
+  const [dndEntries, setDndEntries] = useState<DndEntry[]>([])
+  const [showDndList, setShowDndList] = useState(false)
+  const [dndPaste, setDndPaste] = useState("")
+  const [addingDnd, setAddingDnd] = useState(false)
 
   async function load() {
     setLoading(true)
@@ -43,7 +69,90 @@ export default function SecurityView() {
     setLoading(false)
   }
 
-  useEffect(() => { load() }, [])
+  async function loadCompliance() {
+    setComplianceLoading(true)
+    try {
+      const res = await fetch("/api/compliance")
+      const data = await res.json()
+      if (data.settings) setCompliance(data.settings)
+      setDndCount(data.dndCount ?? 0)
+    } catch {}
+    setComplianceLoading(false)
+  }
+
+  async function loadDndEntries() {
+    try {
+      const res = await fetch("/api/compliance/dnd")
+      const data = await res.json()
+      setDndEntries(data.entries ?? [])
+    } catch {}
+  }
+
+  useEffect(() => { load(); loadCompliance() }, [])
+
+  function toggleDay(code: string) {
+    setCompliance((c) => ({
+      ...c,
+      days: c.days.includes(code) ? c.days.filter((d) => d !== code) : [...c.days, code],
+    }))
+  }
+
+  async function saveCallingWindow() {
+    setSavingWindow(true)
+    try {
+      const res = await fetch("/api/compliance", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(compliance),
+      })
+      if (res.ok) { toast.success("Calling-window settings saved"); await loadCompliance() }
+      else { const d = await res.json().catch(() => ({})); toast.error(d.error || "Save failed") }
+    } catch {
+      toast.error("Save failed")
+    }
+    setSavingWindow(false)
+  }
+
+  async function addDndNumbers() {
+    const phones = dndPaste.split(/[\n,]/).map((s) => s.trim()).filter(Boolean)
+    if (phones.length === 0) return
+    setAddingDnd(true)
+    try {
+      const res = await fetch("/api/compliance/dnd", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phones }),
+      })
+      const d = await res.json().catch(() => ({}))
+      if (res.ok) {
+        toast.success(`Added ${d.added} number(s) to the suppression list${d.added < d.total ? ` (${d.total - d.added} already present)` : ""}`)
+        setDndPaste("")
+        await loadCompliance()
+        if (showDndList) await loadDndEntries()
+      } else {
+        toast.error(d.error || "Could not add numbers")
+      }
+    } catch {
+      toast.error("Could not add numbers")
+    }
+    setAddingDnd(false)
+  }
+
+  async function removeDndNumber(phone: string) {
+    try {
+      const res = await fetch(`/api/compliance/dnd?phone=${encodeURIComponent(phone)}`, { method: "DELETE" })
+      if (res.ok) { toast.success("Removed from suppression list"); await loadCompliance(); await loadDndEntries() }
+      else toast.error("Could not remove number")
+    } catch {
+      toast.error("Could not remove number")
+    }
+  }
+
+  async function toggleDndList() {
+    const next = !showDndList
+    setShowDndList(next)
+    if (next && dndEntries.length === 0) await loadDndEntries()
+  }
 
   async function toggle(key: string, current: boolean) {
     setSaving(key)
@@ -96,6 +205,119 @@ export default function SecurityView() {
               </div>
             )
           })}
+        </div>
+
+        {/* Regulatory Compliance — TRAI/RBI calling-window + DND suppression */}
+        <div style={{ background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:12 }}>
+          <div style={{ padding:"18px 24px",borderBottom:"1px solid var(--border)" }}>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+              <div style={{ fontWeight:600,fontSize:15,display:"flex",alignItems:"center",gap:8 }}><Clock size={15} strokeWidth={2} style={{ color:"var(--text-muted)" }} /> Regulatory Compliance</div>
+              <span style={{ background:"rgba(139,124,255,0.11)",color:"#a5b0ff",border:"1px solid rgba(139,124,255,0.3)",borderRadius:6,padding:"4px 12px",fontSize:12,fontWeight:600,display:"inline-flex",alignItems:"center",gap:5 }}><PhoneOff size={12} strokeWidth={2} /> {dndCount} suppressed</span>
+            </div>
+            <div style={{ fontSize:12,color:"var(--text-muted)",marginTop:6,lineHeight:1.5 }}>
+              Blocks outbound calls outside the configured hours (TRAI/RBI) and against the suppression list below. This is not a live sync with TRAI's National Customer Preference Register — that requires Registered Telemarketer (RTM) registration. Verify these defaults with your compliance advisor.
+            </div>
+          </div>
+
+          {complianceLoading && <SkeletonList rows={3} />}
+          {!complianceLoading && (
+            <>
+              <div style={{ padding:"18px 24px",borderBottom:"1px solid var(--border-light)" }}>
+                <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14 }}>
+                  <div style={{ fontWeight:500,fontSize:14 }}>Enforce calling window</div>
+                  <button
+                    className={`toggle ${compliance.enabled ? "on" : ""}`}
+                    onClick={() => setCompliance((c) => ({ ...c, enabled: !c.enabled }))}
+                  />
+                </div>
+                <div style={{ display:"flex", gap: 12, flexWrap: "wrap", marginBottom: 14, opacity: compliance.enabled ? 1 : 0.5 }}>
+                  <div>
+                    <label style={{ fontSize:11,color:"var(--text-muted)",display:"block",marginBottom:4 }}>Start</label>
+                    <select
+                      value={compliance.startHour}
+                      disabled={!compliance.enabled}
+                      onChange={(e) => setCompliance((c) => ({ ...c, startHour: parseInt(e.target.value, 10) }))}
+                      style={{ height:32,fontSize:12.5,width:110 }}
+                    >
+                      {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{hourLabel(h)}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize:11,color:"var(--text-muted)",display:"block",marginBottom:4 }}>End</label>
+                    <select
+                      value={compliance.endHour}
+                      disabled={!compliance.enabled}
+                      onChange={(e) => setCompliance((c) => ({ ...c, endHour: parseInt(e.target.value, 10) }))}
+                      style={{ height:32,fontSize:12.5,width:110 }}
+                    >
+                      {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{hourLabel(h)}</option>)}
+                    </select>
+                  </div>
+                  <div style={{ flex:1, minWidth: 180 }}>
+                    <label style={{ fontSize:11,color:"var(--text-muted)",display:"block",marginBottom:4 }}>Allowed days (IST)</label>
+                    <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
+                      {DAY_OPTIONS.map((d) => (
+                        <button
+                          key={d.code}
+                          disabled={!compliance.enabled}
+                          onClick={() => toggleDay(d.code)}
+                          style={{
+                            fontSize:11, padding:"5px 9px", borderRadius:6, cursor: compliance.enabled ? "pointer" : "default",
+                            border: `1px solid ${compliance.days.includes(d.code) ? "rgba(139,124,255,0.5)" : "var(--border)"}`,
+                            background: compliance.days.includes(d.code) ? "rgba(139,124,255,0.15)" : "transparent",
+                            color: compliance.days.includes(d.code) ? "#a5b0ff" : "var(--text-muted)",
+                          }}
+                        >{d.label}</button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <button onClick={saveCallingWindow} disabled={savingWindow} className="btn-primary" style={{ height:32, fontSize:12.5 }}>
+                  {savingWindow ? "Saving…" : "Save Calling Window"}
+                </button>
+              </div>
+
+              <div style={{ padding:"18px 24px" }}>
+                <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10 }}>
+                  <div style={{ fontWeight:500,fontSize:14 }}>DND / Opt-out Suppression List</div>
+                  <button onClick={toggleDndList} className="btn-ghost" style={{ height:28,padding:"0 10px",fontSize:11.5 }}>
+                    {showDndList ? "Hide list" : "View list"}
+                  </button>
+                </div>
+                <div style={{ display:"flex", gap: 8, alignItems: "flex-start" }}>
+                  <textarea
+                    value={dndPaste}
+                    onChange={(e) => setDndPaste(e.target.value)}
+                    placeholder="Paste phone numbers to suppress, one per line (or an NCPR extract if you're a Registered Telemarketer)…"
+                    rows={2}
+                    style={{ flex:1, background:"#0d1422", border:"1px solid var(--border)", color:"var(--text-primary)", borderRadius:8, padding:8, fontSize:12.5, resize:"vertical" }}
+                  />
+                  <button
+                    onClick={addDndNumbers}
+                    disabled={addingDnd || !dndPaste.trim()}
+                    className="btn-primary"
+                    style={{ height:32, fontSize:12, padding:"0 12px", alignSelf:"flex-start", opacity: addingDnd || !dndPaste.trim() ? 0.5 : 1 }}
+                  ><Plus size={12} strokeWidth={2.2} /> Add</button>
+                </div>
+
+                {showDndList && (
+                  <div style={{ marginTop:14, maxHeight:220, overflowY:"auto", border:"1px solid var(--border-light)", borderRadius:8 }}>
+                    {dndEntries.length === 0 && <div style={{ padding:16, textAlign:"center", color:"var(--text-muted)", fontSize:12.5 }}>Suppression list is empty.</div>}
+                    {dndEntries.map((e) => (
+                      <div key={e.phone} style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 12px", borderBottom:"1px solid var(--border-light)", fontSize:12.5 }}>
+                        <span style={{ fontFamily:"monospace", color:"var(--text-primary)" }}>{e.phone}</span>
+                        <span style={{ color:"var(--text-muted)", fontSize:11 }}>{e.source}</span>
+                        <div style={{ flex:1 }} />
+                        <button onClick={() => removeDndNumber(e.phone)} title="Remove" className="icon-btn" style={{ width:24, height:24 }}>
+                          <X size={12} strokeWidth={2} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
         </div>
 
         {/* Audit Log */}

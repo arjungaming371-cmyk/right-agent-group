@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { makeCall } from "@/lib/exotel"
 import { requireRole } from "@/lib/auth"
-import { isDoNotCall } from "@/lib/lead-brain"
+import { checkCallCompliance } from "@/lib/compliance"
 
 export async function GET() {
   const { data } = await db.from("outbound_queue").select("*").order("created_at", { ascending: false }).limit(200)
@@ -51,8 +51,9 @@ export async function POST(req: NextRequest) {
   // Single contact mode: { name, phone, language, ... } — call immediately
   const { name, phone, language, product_interest, notes } = body
   if (!phone) return NextResponse.json({ error: "phone required" }, { status: 400 })
-  if (await isDoNotCall({ phone })) {
-    return NextResponse.json({ error: "This lead is marked Do Not Call — outbound calling is blocked." }, { status: 403 })
+  const compliance = await checkCallCompliance({ phone })
+  if (!compliance.allowed) {
+    return NextResponse.json({ error: compliance.reason }, { status: 403 })
   }
 
   try {
