@@ -1,21 +1,15 @@
 import { NextRequest, NextResponse } from "next/server"
 import { rateLimit, clientIp } from "@/lib/rate-limit"
 
-const LLM_PROVIDER = (process.env.LLM_PROVIDER || "ollama").toLowerCase()
 const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434"
 const MODEL = process.env.OLLAMA_MODEL || "llama3.1:8b"
 
 // Call this before triggering a call to pre-load the model into memory.
 // Ollama unloads models after 5 min idle - first call after idle is SLOW.
-// This warmup ping is Ollama-specific — a vLLM server keeps its model
-// loaded persistently once started, so there's nothing to warm up there.
 // PUBLIC endpoint → rate-limited so it can't be spammed to burn CPU.
 export async function POST(req: NextRequest) {
   if (!rateLimit(`warmup:${clientIp(req)}`, 5, 60_000)) {
     return NextResponse.json({ ok: false, error: "Too many requests" }, { status: 429 })
-  }
-  if (LLM_PROVIDER === "vllm") {
-    return NextResponse.json({ ok: true, skipped: "vLLM stays loaded — no warmup needed" })
   }
   try {
     const start = Date.now()

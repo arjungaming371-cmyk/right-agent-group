@@ -10,33 +10,10 @@ const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434"
 const MODEL = process.env.OLLAMA_MODEL || "llama3.1:8b"
 const IS_GPU = process.env.OLLAMA_GPU === "true"
 
-// ---- LLM backend switch ---------------------------------------------------
-// "ollama" (default) talks to a local Ollama daemon — simplest path for dev
-// on a laptop/CPU, but Ollama serves one request at a time by design here
-// (see MAX_CONCURRENT below) — it was never meant to be a high-concurrency
-// production server.
-// "vllm" talks to a vLLM OpenAI-compatible server instead — the production
-// path once real concurrency (10+ simultaneous live calls) matters. vLLM
-// does continuous batching across in-flight requests, so one GPU serves
-// many concurrent conversations far more efficiently than N separate Ollama
-// calls queuing behind each other.
-// Every AI function below is built on ONE shared pair of primitives
-// (runCompletion / runCompletionStream), so this single env var is the only
-// thing that needs to change to swap backends — no caller anywhere in this
-// codebase (voice-conversation, the WhatsApp route, Lead Brain, Prompt
-// Tuner, the Ops Assistant) needs to know or care which one is running.
-const LLM_PROVIDER = (process.env.LLM_PROVIDER || "ollama").toLowerCase()
-const VLLM_URL = process.env.VLLM_URL || "http://localhost:8000"
-const VLLM_MODEL = process.env.VLLM_MODEL || MODEL
-const VLLM_API_KEY = process.env.VLLM_API_KEY || ""
-
 // ---- Concurrency cap ----------------------------------------------------
-// How many completions this app will have in flight AT ONCE, regardless of
-// backend. For Ollama on a laptop, 1-2 is realistic — without a cap, three
-// simultaneous calls each take 3x longer and ALL of them blow the per-turn
-// timeout. For vLLM, raise this to match what your GPU can actually serve
-// well (vLLM batches internally, but this cap still protects against
-// firing more requests than your hardware has real throughput for).
+// How many completions this app will have in flight AT ONCE. On a laptop,
+// 1-2 is realistic — without a cap, three simultaneous calls each take 3x
+// longer and ALL of them blow the per-turn timeout.
 const MAX_CONCURRENT = Math.max(1, parseInt(process.env.OLLAMA_MAX_CONCURRENT || (IS_GPU ? "2" : "1")))
 const MAX_QUEUE_WAIT_MS = 8000 // give up waiting rather than stall a live call
 
@@ -162,38 +139,17 @@ async function ollamaChatRequest(messages: OllamaMessage[], opts: CompletionOpts
   return data?.message?.content || ""
 }
 
-async function vllmChatRequest(messages: OllamaMessage[], opts: CompletionOpts, signal: AbortSignal): Promise<string> {
-  const response = await fetch(`${VLLM_URL}/v1/chat/completions`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...(VLLM_API_KEY ? { Authorization: `Bearer ${VLLM_API_KEY}` } : {}) },
-    signal,
-    body: JSON.stringify({
-      model: VLLM_MODEL,
-      messages,
-      stream: false,
-      temperature: opts.temperature ?? 0.6,
-      max_tokens: opts.numPredict ?? 120,
-      ...(opts.json ? { response_format: { type: "json_object" } } : {}),
-    }),
-  })
-  if (!response.ok) throw new Error(`vLLM HTTP ${response.status}`)
-  const data = await response.json()
-  return data?.choices?.[0]?.message?.content || ""
-}
-
 /** Non-streaming completion. Used by every function that just needs the final text (or JSON) back. */
 async function runCompletion(messages: OllamaMessage[], opts: CompletionOpts): Promise<string> {
   const controller = new AbortController()
   await acquireSlot()
   const timeoutId = setTimeout(() => controller.abort(), opts.timeoutMs)
   try {
-    const text = LLM_PROVIDER === "vllm"
-      ? await vllmChatRequest(messages, opts, controller.signal)
-      : await ollamaChatRequest(messages, opts, controller.signal)
-    if (!text || !text.trim()) throw new Error(`Empty ${LLM_PROVIDER} response`)
+    const text = await ollamaChatRequest(messages, opts, controller.signal)
+    if (!text || !text.trim()) throw new Error("Empty Ollama response")
     return text.trim()
   } catch (e: any) {
-    console.error(`${LLM_PROVIDER} error:`, e.message)
+    console.error("Ollama error:", e.message)
     throw e
   } finally {
     clearTimeout(timeoutId)
@@ -204,10 +160,8 @@ async function runCompletion(messages: OllamaMessage[], opts: CompletionOpts): P
 /**
  * Streaming completion — for UIs where a human is watching (the Ops
  * Assistant), so text appears as it's generated instead of after the full
- * reply. Ollama's stream is newline-delimited JSON; vLLM's OpenAI-compatible
- * stream is SSE ("data: {...}\n\n", terminated by "data: [DONE]") — the two
- * formats genuinely differ, so each gets its own parse loop below rather
- * than forcing a shared abstraction that would obscure both.
+ * reply. Ollama's stream is newline-delimited JSON objects, each
+ * { message: { content: "..." }, done: bool }, not SSE.
  */
 async function runCompletionStream(messages: OllamaMessage[], opts: CompletionOpts, onChunk: (delta: string) => void): Promise<string> {
   const controller = new AbortController()
@@ -215,86 +169,45 @@ async function runCompletionStream(messages: OllamaMessage[], opts: CompletionOp
   const timeoutId = setTimeout(() => controller.abort(), opts.timeoutMs)
   let fullText = ""
   try {
-    if (LLM_PROVIDER === "vllm") {
-      const response = await fetch(`${VLLM_URL}/v1/chat/completions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...(VLLM_API_KEY ? { Authorization: `Bearer ${VLLM_API_KEY}` } : {}) },
-        signal: controller.signal,
-        body: JSON.stringify({
-          model: VLLM_MODEL,
-          messages,
-          stream: true,
-          temperature: opts.temperature ?? 0.6,
-          max_tokens: opts.numPredict ?? 120,
-        }),
-      })
-      if (!response.ok || !response.body) throw new Error(`vLLM HTTP ${response.status}`)
-      const reader = response.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ""
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split("\n")
-        buffer = lines.pop() || ""
-        for (const line of lines) {
-          const trimmed = line.trim()
-          if (!trimmed.startsWith("data:")) continue
-          const payload = trimmed.slice(5).trim()
-          if (!payload || payload === "[DONE]") continue
-          try {
-            const obj = JSON.parse(payload)
-            const delta = obj?.choices?.[0]?.delta?.content
-            if (delta) { fullText += delta; onChunk(delta) }
-          } catch {
-            // Malformed/partial SSE chunk — skip rather than abort the whole stream.
-          }
-        }
-      }
-    } else {
-      const response = await fetch(`${OLLAMA_URL}/api/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        signal: controller.signal,
-        body: JSON.stringify({
-          model: MODEL,
-          messages,
-          stream: true,
-          keep_alive: "30m",
-          options: IS_GPU
-            ? { num_predict: opts.numPredict ?? 120, temperature: opts.temperature ?? 0.6, num_ctx: opts.numCtx ?? 2048, num_gpu: 99 }
-            : { num_predict: opts.numPredict ?? 80, temperature: opts.temperature ?? 0.6, num_ctx: opts.numCtx ?? 1536, num_thread: 8 },
-        }),
-      })
-      if (!response.ok || !response.body) throw new Error(`Ollama HTTP ${response.status}`)
-      // Ollama's streaming format is newline-delimited JSON objects, each
-      // { message: { content: "..." }, done: bool }, not SSE.
-      const reader = response.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ""
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split("\n")
-        buffer = lines.pop() || "" // last (possibly incomplete) line carries over
-        for (const line of lines) {
-          if (!line.trim()) continue
-          try {
-            const obj = JSON.parse(line)
-            const delta = obj?.message?.content
-            if (delta) { fullText += delta; onChunk(delta) }
-          } catch {
-            // Malformed/partial line — skip rather than abort the whole stream.
-          }
+    const response = await fetch(`${OLLAMA_URL}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: MODEL,
+        messages,
+        stream: true,
+        keep_alive: "30m",
+        options: IS_GPU
+          ? { num_predict: opts.numPredict ?? 120, temperature: opts.temperature ?? 0.6, num_ctx: opts.numCtx ?? 2048, num_gpu: 99 }
+          : { num_predict: opts.numPredict ?? 80, temperature: opts.temperature ?? 0.6, num_ctx: opts.numCtx ?? 1536, num_thread: 8 },
+      }),
+    })
+    if (!response.ok || !response.body) throw new Error(`Ollama HTTP ${response.status}`)
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ""
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split("\n")
+      buffer = lines.pop() || "" // last (possibly incomplete) line carries over
+      for (const line of lines) {
+        if (!line.trim()) continue
+        try {
+          const obj = JSON.parse(line)
+          const delta = obj?.message?.content
+          if (delta) { fullText += delta; onChunk(delta) }
+        } catch {
+          // Malformed/partial line — skip rather than abort the whole stream.
         }
       }
     }
-    if (!fullText.trim()) throw new Error(`Empty ${LLM_PROVIDER} response`)
+    if (!fullText.trim()) throw new Error("Empty Ollama response")
     return fullText.trim()
   } catch (e: any) {
-    console.error(`${LLM_PROVIDER} stream error:`, e.message)
+    console.error("Ollama stream error:", e.message)
     throw e
   } finally {
     clearTimeout(timeoutId)
@@ -693,17 +606,6 @@ export function detectLanguage(text: string): Language {
 
 export async function checkOllamaHealth(): Promise<{ ok: boolean; message: string }> {
   try {
-    if (LLM_PROVIDER === "vllm") {
-      const res = await fetch(`${VLLM_URL}/v1/models`, {
-        headers: VLLM_API_KEY ? { Authorization: `Bearer ${VLLM_API_KEY}` } : {},
-        signal: AbortSignal.timeout(3000),
-      })
-      if (!res.ok) return { ok: false, message: `vLLM not responding: HTTP ${res.status}` }
-      const data = await res.json()
-      const hasModel = data?.data?.some((m: any) => m.id === VLLM_MODEL)
-      if (!hasModel) return { ok: false, message: `Model ${VLLM_MODEL} not loaded on the vLLM server at ${VLLM_URL}` }
-      return { ok: true, message: `vLLM ready with ${VLLM_MODEL}` }
-    }
     const res = await fetch(`${OLLAMA_URL}/api/tags`, { signal: AbortSignal.timeout(3000) })
     if (!res.ok) return { ok: false, message: `Ollama not responding: HTTP ${res.status}` }
     const data = await res.json()
@@ -711,6 +613,6 @@ export async function checkOllamaHealth(): Promise<{ ok: boolean; message: strin
     if (!hasModel) return { ok: false, message: `Model ${MODEL} not found. Run: ollama pull ${MODEL}` }
     return { ok: true, message: `Ollama ready with ${MODEL}` }
   } catch (e: any) {
-    return { ok: false, message: `Cannot reach ${LLM_PROVIDER === "vllm" ? `vLLM at ${VLLM_URL}` : `Ollama at ${OLLAMA_URL}`}. Error: ${e.message}` }
+    return { ok: false, message: `Cannot reach Ollama at ${OLLAMA_URL}. Error: ${e.message}` }
   }
 }
