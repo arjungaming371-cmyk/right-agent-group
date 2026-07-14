@@ -373,3 +373,26 @@ CREATE TABLE IF NOT EXISTS dnd_suppression (
   added_by   TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- ============================================================
+-- Knowledge base — grounds Priya's answers to arbitrary questions via the
+-- same Postgres full-text search pattern already used for leads/loan_apps.
+-- See migrations/2026-07-14_knowledge_base.sql (rollback in the same folder).
+-- ============================================================
+CREATE TABLE IF NOT EXISTS knowledge_base (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  title       TEXT NOT NULL,
+  content     TEXT NOT NULL,
+  category    TEXT,
+  is_active   BOOLEAN NOT NULL DEFAULT true,
+  created_by  TEXT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE knowledge_base ADD COLUMN IF NOT EXISTS search_vector tsvector
+  GENERATED ALWAYS AS (
+    setweight(to_tsvector('english', coalesce(title, '')), 'A') ||
+    setweight(to_tsvector('english', coalesce(content, '')), 'B')
+  ) STORED;
+CREATE INDEX IF NOT EXISTS idx_kb_search ON knowledge_base USING GIN (search_vector);
+CREATE INDEX IF NOT EXISTS idx_kb_active ON knowledge_base (is_active);

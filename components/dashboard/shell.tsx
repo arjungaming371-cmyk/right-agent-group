@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react"
 import {
   Users, FileText, Phone, MessageCircle, Activity, ShieldCheck, UploadCloud,
-  ScrollText, LogOut, Mic, BarChart3, UserCog, Search, Menu, X, type LucideIcon,
+  ScrollText, LogOut, Mic, BarChart3, UserCog, Search, Menu, X, BookOpen, type LucideIcon,
 } from "lucide-react"
 import { ToastProvider } from "../ui/toast"
 import CommandPalette from "../ui/command-palette"
@@ -14,11 +14,12 @@ import CommLogView   from "./comm-log-view"
 import SecurityView  from "./security-view"
 import UploadView    from "./upload-view"
 import ScriptView    from "./script-view"
+import KnowledgeBaseView from "./knowledge-base-view"
 import AnalyticsView from "./analytics-view"
 import QuickChat     from "./quick-chat"
 import NotificationBell from "./notification-bell"
 
-export type ViewKey = "leads" | "loans" | "voice" | "whatsapp" | "comms" | "security" | "upload" | "script" | "analytics"
+export type ViewKey = "leads" | "loans" | "voice" | "whatsapp" | "comms" | "security" | "upload" | "script" | "knowledge" | "analytics"
 export type Role = "admin" | "agent" | "viewer"
 
 const ROLE_LABEL: Record<Role, string> = { admin: "Administrator", agent: "Loan Officer", viewer: "Viewer" }
@@ -52,6 +53,7 @@ const NAV_SECTIONS: NavSection[] = [
       { key: "security", label: "Security",       icon: ShieldCheck,  roles: ["admin"] },
       { key: "upload",   label: "Upload & Data",  icon: UploadCloud,  roles: ["admin"] },
       { key: "script",   label: "Priya's Script", icon: ScrollText,   roles: ["admin"] },
+      { key: "knowledge",label: "Knowledge Base", icon: BookOpen,     roles: ["admin", "agent"] },
     ],
   },
 ]
@@ -66,6 +68,7 @@ const VIEW_TITLES: Record<ViewKey, { title: string; sub: string }> = {
   security: { title: "Security",           sub: "Access control and audit policy" },
   upload:   { title: "Upload & Data",      sub: "Upload contacts, scripts, and files for AI campaigns" },
   script:   { title: "Priya's Script",     sub: "View and edit what Priya says on every call" },
+  knowledge:{ title: "Knowledge Base",     sub: "Facts Priya can pull into any call or chat, on any turn" },
 }
 
 function StatusPill({ icon: Icon, label }: { icon: LucideIcon; label: string }) {
@@ -342,6 +345,7 @@ export default function DashboardShell() {
           {view === "security" && role === "admin" && <SecurityView />}
           {view === "upload"   && role === "admin" && <UploadView />}
           {view === "script"   && role === "admin" && <ScriptView />}
+          {view === "knowledge" && (role === "admin" || role === "agent") && <KnowledgeBaseView role={role} />}
         </main>
       </div>
       <QuickChat />

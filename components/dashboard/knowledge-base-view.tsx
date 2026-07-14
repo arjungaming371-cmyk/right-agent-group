@@ -1,0 +1,219 @@
+"use client"
+import { useEffect, useState } from "react"
+import { BookOpen, Plus, Pencil, Trash2, X, Check } from "lucide-react"
+import { useToast } from "../ui/toast"
+import { Skeleton } from "../ui/skeleton"
+
+type Entry = {
+  id: string
+  title: string
+  content: string
+  category: string | null
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+const EMPTY_FORM = { title: "", content: "", category: "" }
+
+export default function KnowledgeBaseView({ role }: { role: "admin" | "agent" | "viewer" }) {
+  const canEdit = role !== "viewer"
+  const toast = useToast()
+  const [entries, setEntries] = useState<Entry[]>([])
+  const [loading, setLoading] = useState(true)
+  const [showForm, setShowForm] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [form, setForm] = useState(EMPTY_FORM)
+  const [saving, setSaving] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+
+  async function load() {
+    setLoading(true)
+    try {
+      const res = await fetch("/api/knowledge-base")
+      if (res.ok) setEntries(await res.json())
+    } catch {}
+    setLoading(false)
+  }
+
+  useEffect(() => { load() }, [])
+
+  function openAdd() {
+    setForm(EMPTY_FORM)
+    setEditingId(null)
+    setShowForm(true)
+  }
+
+  function openEdit(entry: Entry) {
+    setForm({ title: entry.title, content: entry.content, category: entry.category || "" })
+    setEditingId(entry.id)
+    setShowForm(true)
+  }
+
+  async function save() {
+    if (!form.title.trim() || !form.content.trim()) return
+    setSaving(true)
+    try {
+      const res = editingId
+        ? await fetch("/api/knowledge-base", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: editingId, ...form }),
+          })
+        : await fetch("/api/knowledge-base", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(form),
+          })
+      if (res.ok) {
+        toast.success(editingId ? "Entry updated" : "Entry added")
+        setShowForm(false)
+        await load()
+      } else {
+        const d = await res.json().catch(() => ({}))
+        toast.error(d.error || "Save failed")
+      }
+    } catch {
+      toast.error("Save failed")
+    }
+    setSaving(false)
+  }
+
+  async function toggleActive(entry: Entry) {
+    try {
+      const res = await fetch("/api/knowledge-base", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: entry.id, is_active: !entry.is_active }),
+      })
+      if (res.ok) await load()
+      else toast.error("Could not update")
+    } catch {
+      toast.error("Could not update")
+    }
+  }
+
+  async function remove(id: string) {
+    try {
+      const res = await fetch(`/api/knowledge-base?id=${id}`, { method: "DELETE" })
+      if (res.ok) { toast.success("Entry removed"); await load() }
+      else toast.error("Could not remove")
+    } catch {
+      toast.error("Could not remove")
+    }
+    setConfirmDelete(null)
+  }
+
+  const activeCount = entries.filter((e) => e.is_active).length
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div style={{ background: "rgba(59,130,246,0.06)", border: "1px solid rgba(59,130,246,0.2)", borderRadius: 12, padding: "14px 20px" }}>
+        <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4, color: "#8ba3ff", display: "flex", alignItems: "center", gap: 6 }}>
+          <BookOpen size={14} strokeWidth={2} /> How this works
+        </div>
+        <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6 }}>
+          Add facts here — documents needed, minimum/maximum loan amounts, eligibility, processing time — and Priya searches this on every single turn of a call or WhatsApp chat, not just the opening. She uses matches naturally without reading them out verbatim or mentioning "knowledge base." Inactive entries are never searched.
+        </div>
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ fontSize: 13, color: "var(--text-muted)" }}>{entries.length} entries · {activeCount} active</div>
+        {canEdit && (
+          <button onClick={openAdd} className="btn-primary" style={{ height: 34 }}>
+            <Plus size={15} strokeWidth={2.2} /> Add Entry
+          </button>
+        )}
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {loading && Array.from({ length: 3 }).map((_, i) => (
+          <div key={i} style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: 18 }}>
+            <Skeleton w={200} h={16} />
+            <div style={{ marginTop: 8 }}><Skeleton w="100%" h={12} /></div>
+          </div>
+        ))}
+        {!loading && entries.length === 0 && (
+          <div style={{ textAlign: "center", color: "var(--text-muted)", fontSize: 13, padding: 40, background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12 }}>
+            No entries yet. Add the questions customers ask most.
+          </div>
+        )}
+        {entries.map((entry) => (
+          <div key={entry.id} style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: 18, opacity: entry.is_active ? 1 : 0.55 }}>
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: 6 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <div style={{ fontWeight: 600, fontSize: 14 }}>{entry.title}</div>
+                {entry.category && (
+                  <span style={{ fontSize: 10.5, background: "rgba(139,124,255,0.12)", color: "#a5b0ff", borderRadius: 6, padding: "2px 8px" }}>{entry.category}</span>
+                )}
+                {!entry.is_active && (
+                  <span style={{ fontSize: 10.5, background: "rgba(148,163,184,0.15)", color: "#94a3b8", borderRadius: 6, padding: "2px 8px" }}>Inactive</span>
+                )}
+              </div>
+              {canEdit && (
+                <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                  <button onClick={() => toggleActive(entry)} className="icon-btn" title={entry.is_active ? "Deactivate" : "Activate"} style={{ width: 28, height: 28 }}>
+                    {entry.is_active ? <X size={13} strokeWidth={2} /> : <Check size={13} strokeWidth={2} />}
+                  </button>
+                  <button onClick={() => openEdit(entry)} className="icon-btn" title="Edit" style={{ width: 28, height: 28 }}>
+                    <Pencil size={13} strokeWidth={2} />
+                  </button>
+                  {confirmDelete === entry.id ? (
+                    <button onClick={() => remove(entry.id)} style={{ fontSize: 11, background: "rgba(239,68,68,0.15)", color: "#f87171", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 8, padding: "0 10px" }}>
+                      Confirm?
+                    </button>
+                  ) : (
+                    <button onClick={() => setConfirmDelete(entry.id)} className="icon-btn" title="Delete" style={{ width: 28, height: 28 }}>
+                      <Trash2 size={13} strokeWidth={2} />
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+            <div style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.5 }}>{entry.content}</div>
+          </div>
+        ))}
+      </div>
+
+      {showForm && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}>
+          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, padding: 28, width: 520, maxWidth: "100%" }}>
+            <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 20 }}>{editingId ? "Edit Entry" : "Add Knowledge Base Entry"}</div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Question / Title *</label>
+              <input
+                value={form.title}
+                onChange={(e) => setForm({ ...form, title: e.target.value })}
+                placeholder="e.g. Minimum loan amount"
+              />
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Answer / Facts *</label>
+              <textarea
+                value={form.content}
+                onChange={(e) => setForm({ ...form, content: e.target.value })}
+                placeholder="e.g. The minimum home loan amount is ₹5,00,000 and maximum is ₹75,00,000, subject to eligibility."
+                rows={5}
+                style={{ width: "100%", background: "#0d1422", border: "1px solid var(--border)", color: "var(--text-primary)", borderRadius: 8, padding: 10, fontSize: 13, resize: "vertical" }}
+              />
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Category (optional)</label>
+              <input
+                value={form.category}
+                onChange={(e) => setForm({ ...form, category: e.target.value })}
+                placeholder="e.g. Home Loan, Eligibility, Documents"
+              />
+            </div>
+            <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+              <button onClick={() => setShowForm(false)} style={{ flex: 1, padding: 10, background: "transparent", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text-secondary)" }}>Cancel</button>
+              <button onClick={save} disabled={saving || !form.title.trim() || !form.content.trim()} className="btn-primary" style={{ flex: 1, height: 40 }}>
+                {saving ? "Saving…" : editingId ? "Save Changes" : "Add Entry"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

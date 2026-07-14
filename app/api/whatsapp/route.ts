@@ -4,6 +4,7 @@ import pool, { query } from "@/lib/db"
 import { chatWithOllama, detectLanguage, type Language } from "@/lib/ollama"
 import { sendWhatsAppText } from "@/lib/whatsapp"
 import { buildLeadBrief } from "@/lib/lead-brain"
+import { searchKnowledgeBase } from "@/lib/knowledge-base"
 import { detectFrustration, flagFrustratedWhatsApp } from "@/lib/frustration"
 import { createNotification } from "@/lib/notifications"
 import { refreshLeadScore } from "@/lib/scoring"
@@ -195,6 +196,11 @@ async function handleInbound(msg: any, profileName: string | null) {
     if (historyRes.rows.length <= 2) {
       extraContext = (await buildLeadBrief(lead.id)) || undefined
     }
+
+    // KNOWLEDGE BASE: every turn, same reasoning as the voice path — a
+    // question can arrive at any point in the chat, not just the opener.
+    const kbContext = await searchKnowledgeBase(text)
+    if (kbContext) extraContext = [extraContext, kbContext].filter(Boolean).join("\n\n")
 
     aiReply = await chatWithOllama(messages, lang, extraContext)
 

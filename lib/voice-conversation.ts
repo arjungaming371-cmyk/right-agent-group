@@ -3,6 +3,7 @@ import { db, query } from "./db"
 import { chatWithOllama, extractLeadInfo, mightBeComplete, type Language } from "./ollama"
 import { sendApplicationLink } from "./whatsapp"
 import { buildLeadBrief } from "./lead-brain"
+import { searchKnowledgeBase } from "./knowledge-base"
 import { detectFrustration, flagFrustratedCall } from "./frustration"
 
 // Permission-based opener — respect keeps people on the line.
@@ -182,6 +183,12 @@ export async function handleTurn(opts: {
     const brief = await buildLeadBrief(leadId)
     mergedInstructions = [mergedInstructions, brief].filter(Boolean).join("\n\n")
   }
+
+  // KNOWLEDGE BASE: unlike the Lead Brain brief above, this runs on EVERY
+  // turn — a question about documents/eligibility/rates can land at any
+  // point in the call, not just the opening. One cheap indexed query.
+  const kbContext = await searchKnowledgeBase(speech)
+  if (kbContext) mergedInstructions = [mergedInstructions, kbContext].filter(Boolean).join("\n\n")
 
   let reply = ""
   try {
