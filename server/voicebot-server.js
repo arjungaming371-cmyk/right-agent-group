@@ -6,8 +6,7 @@
 //
 //   caller audio → silence-based endpointing → STT (self-hosted Whisper)
 //     → Next.js /api/calls/turn (Ollama = Priya's brain, DB, WhatsApp link)
-//     → TTS (self-hosted Svara-TTS, with an automatic fallback to free Edge
-//       TTS if Svara is unreachable — a call never goes silent on TTS)
+//     → TTS (self-hosted Svara-TTS ONLY — no fallback provider)
 //     → downsample to 8kHz PCM → streamed back to the caller.
 //
 // Exotel setup: Voicebot applet URL = wss://YOUR-DOMAIN/voicebot
@@ -20,18 +19,12 @@
 require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") })
 
 const { WebSocketServer } = require("ws")
-const { MsEdgeTTS, OUTPUT_FORMAT } = require("msedge-tts")
 const { spawn } = require("child_process")
 
 const PORT = parseInt(process.env.VOICEBOT_PORT || "3002")
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "http://127.0.0.1:3000"
 const API_KEY = process.env.WHATSAPP_SERVICE_KEY || "" // shared internal service key
 const STT_URL = process.env.STT_URL || process.env.STT_SERVICE_URL || "http://127.0.0.1:3003" // self-hosted Whisper (server/stt-service)
-
-// TTS provider: "svara" (default — self-hosted, one voice across all 3
-// languages, automatically falls back to Edge if unreachable) or "edge"
-// (explicit free-only mode — useful for local dev with no Svara server).
-const TTS_PROVIDER = (process.env.TTS_PROVIDER || "svara").toLowerCase()
 
 if (!API_KEY) {
   console.error("FATAL: WHATSAPP_SERVICE_KEY not set — the voicebot cannot authenticate to the app.")
@@ -78,26 +71,7 @@ async function speechToText(pcm, language) {
   return (data?.text || "").trim()
 }
 
-// ---------- TTS: Svara-TTS (self-hosted, primary) with an Edge fallback ----------
-const EDGE_VOICES = {
-  english: "en-IN-NeerjaNeural",
-  hindi: "hi-IN-SwaraNeural",
-  telugu: "te-IN-ShrutiNeural",
-}
-
-async function edgeSpeech(text, language) {
-  const tts = new MsEdgeTTS()
-  await tts.setMetadata(EDGE_VOICES[language] || EDGE_VOICES.english, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3)
-  const { audioStream } = tts.toStream(text)
-  const chunks = []
-  await new Promise((resolve, reject) => {
-    audioStream.on("data", (c) => chunks.push(c))
-    audioStream.on("end", resolve)
-    audioStream.on("error", reject)
-  })
-  return Buffer.concat(chunks)
-}
-
+// ---------- TTS: Svara-TTS only (self-hosted, no fallback provider) ----------
 // Self-hosted Kenpath Svara-TTS — one voice for Hindi/Telugu/Indian English.
 // See github.com/Kenpath/svara-tts-inference. OpenAI-compatible endpoint.
 const SVARA_URL = process.env.SVARA_TTS_URL || "http://127.0.0.1:8080"
@@ -123,13 +97,7 @@ async function svaraSpeech(text, language) {
 }
 
 async function synthesizeSpeech(text, language) {
-  if (TTS_PROVIDER === "edge") return edgeSpeech(text, language) // explicit free-only mode, e.g. local dev with no Svara server
-  try {
-    return await svaraSpeech(text, language)
-  } catch (e) {
-    console.error(`Svara TTS unreachable (${e.message}) — falling back to Edge for this line`)
-    return edgeSpeech(text, language)
-  }
+  return svaraSpeech(text, language)
 }
 
 /** WAV → 8kHz 16-bit mono PCM via ffmpeg (install once: sudo apt install -y ffmpeg). */
@@ -320,4 +288,4 @@ wss.on("connection", (ws) => {
   ws.on("error", (e) => console.error("ws error:", e.message))
 })
 
-console.log(`Voicebot server listening on ws://127.0.0.1:${PORT}/voicebot (put nginx wss in front) — TTS: ${TTS_PROVIDER}`)
+console.log(`Voicebot server listening on ws://127.0.0.1:${PORT}/voicebot (put nginx wss in front) — TTS: svara only`)

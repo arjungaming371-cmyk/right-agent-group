@@ -20,7 +20,7 @@ See **DEPLOYMENT-GUIDE.md** (full deployment) and **SETUP-GUIDE-CLOUD-API.md** (
 - **AI Brain**: Ollama (Llama 3.1 8B) — fully local, zero cost
 - **Voice**: Exotel telephony → self-hosted WebSocket voicebot
 - **STT**: Whisper (faster-whisper) — `small` on CPU, `large-v3` on GPU
-- **TTS**: self-hosted Kenpath Svara-TTS (default, one voice across English/Hindi/Telugu) with automatic fallback to free Microsoft Edge neural voices if Svara is unreachable; set `TTS_PROVIDER` in .env
+- **TTS**: self-hosted Kenpath Svara-TTS only (one voice across English/Hindi/Telugu); set `SVARA_TTS_URL` in .env — no fallback provider
 - **WhatsApp**: Official Meta WhatsApp Business Cloud API — no QR, no ban risk. Replies inside the 24h service window are free; form-link templates ≈ ₹0.115 + GST per send
 - **Login**: Google OAuth with Gmail allowlist
 
