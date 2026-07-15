@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db, query } from "@/lib/db"
-import { startCall, handleTurn } from "@/lib/voice-conversation"
+import { startCall, handleTurn, handleTurnStream } from "@/lib/voice-conversation"
 import { detectLanguage, type Language } from "@/lib/ollama"
 
 export const dynamic = "force-dynamic"
@@ -120,14 +120,42 @@ export async function POST(req: NextRequest) {
         if (call?.lead_id) db.from("leads").update({ language }).eq("id", call.lead_id).catch(() => {})
       }
 
-      const result = await handleTurn({
+      const turnOpts = {
         leadId: call?.lead_id || "",
         callSid,
         speech,
         language,
         callerPhone: call?.phone || undefined,
         instructions: typeof body?.instructions === "string" ? body.instructions.slice(0, 1000) : undefined,
-      })
+      }
+
+      // STREAMING MODE (body.stream === true): NDJSON, one object per line.
+      //   {"type":"sentence","text":"..."}   — speak this NOW
+      //   {"type":"done","language","hangup"} — turn finished
+      // The voicebot starts TTS on sentence 1 while the model is still
+      // writing sentence 2 — this is what makes Priya feel instant instead
+      // of "think for 8 seconds, then talk".
+      if (body?.stream === true) {
+        const encoder = new TextEncoder()
+        const stream = new ReadableStream({
+          async start(controller) {
+            const emit = (obj: any) => controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"))
+            try {
+              const result = await handleTurnStream(turnOpts, (sentence) => emit({ type: "sentence", text: sentence }))
+              emit({ type: "done", language, hangup: result.hangup })
+            } catch (e: any) {
+              console.error("turn stream error:", e.message)
+              emit({ type: "done", language, hangup: false })
+            }
+            controller.close()
+          },
+        })
+        return new NextResponse(stream, {
+          headers: { "Content-Type": "application/x-ndjson", "Cache-Control": "no-cache" },
+        })
+      }
+
+      const result = await handleTurn(turnOpts)
       return NextResponse.json({ ...result, language })
     }
 

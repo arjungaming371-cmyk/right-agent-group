@@ -234,6 +234,33 @@ export async function chatWithOllama(
 }
 
 /**
+ * Streaming variant of chatWithOllama for the LIVE CALL path: same Priya
+ * script + per-call context, but tokens flow to onChunk as they generate.
+ * The voicebot cuts them into sentences and starts TTS on sentence 1 while
+ * the model is still writing sentence 2 — this is what makes replies feel
+ * immediate instead of "generate everything, then speak".
+ * Returns the full reply text once generation completes.
+ */
+export async function chatWithOllamaStream(
+  messages: { role: "user" | "model"; content: string }[],
+  language: Language = "english",
+  extraInstructions: string | undefined,
+  onChunk: (delta: string) => void
+): Promise<string> {
+  if (!messages?.length) return "Hello! How can I help you today?"
+
+  let systemPrompt = await getSystemPrompt(language)
+  if (extraInstructions?.trim()) {
+    systemPrompt += `\n\nAdditional context for this specific call (from the operations team): ${extraInstructions.trim()}`
+  }
+  const recentMessages = messages.slice(-6)
+  const chatMessages = toOllamaMessages(recentMessages, systemPrompt)
+  const timeoutMs = IS_GPU ? 35000 : 25000
+  // numPredict 90: same cap as the non-streaming live path — see chatWithOllama.
+  return runCompletionStream(chatMessages, { numPredict: 90, timeoutMs }, onChunk)
+}
+
+/**
  * Same Ollama call machinery (timeouts, concurrency slot, GPU options) as
  * chatWithOllama, but with a FULLY REPLACED system prompt instead of
  * Priya's customer-facing loan script + appended context. For callers that

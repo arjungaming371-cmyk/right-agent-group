@@ -70,7 +70,13 @@ t0 = time.time()
 from transformers import AutoModel  # noqa: E402
 
 model = AutoModel.from_pretrained("ai4bharat/IndicF5", trust_remote_code=True)
-model = model.to(DEVICE)
+# IndicF5 is custom remote code — .to() should move it like any nn.Module, but
+# if the wrapper manages devices internally this must not kill the service.
+# The warmup timing below exposes a silent CPU fallback immediately (30s+ vs ~3s).
+try:
+    model = model.to(DEVICE)
+except Exception as e:  # noqa: BLE001
+    print(f"WARNING: model.to({DEVICE}) failed ({e}) — model may manage its own device")
 print(f"Model loaded in {time.time() - t0:.1f}s")
 
 

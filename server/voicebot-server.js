@@ -23,7 +23,10 @@ const { WebSocketServer } = require("ws")
 const { spawn } = require("child_process")
 
 const PORT = parseInt(process.env.VOICEBOT_PORT || "3002")
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "http://127.0.0.1:3000"
+// APP_INTERNAL_URL first: the app runs on the same machine, and going through
+// the public tunnel URL adds a Cloudflare round-trip per turn AND risks the
+// proxy buffering the NDJSON stream (which would undo sentence streaming).
+const APP_URL = process.env.APP_INTERNAL_URL || process.env.NEXT_PUBLIC_APP_URL || "http://127.0.0.1:3000"
 const API_KEY = process.env.WHATSAPP_SERVICE_KEY || "" // shared internal service key
 const STT_URL = process.env.STT_URL || process.env.STT_SERVICE_URL || "http://127.0.0.1:3003" // self-hosted Whisper (server/stt-service)
 
@@ -142,6 +145,61 @@ async function callTurnApi(payload) {
   return res.json()
 }
 
+// Streaming turn: the app sends NDJSON — {"type":"sentence","text"} lines as
+// the model writes them, then {"type":"done",language,hangup}. Each sentence
+// goes to TTS the moment it arrives, so playback of sentence 1 overlaps
+// generation of sentence 2 — the caller stops waiting for the full reply.
+async function callTurnApiStream(payload, onEvent) {
+  const res = await fetch(`${APP_URL}/api/calls/turn`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+    body: JSON.stringify({ ...payload, stream: true }),
+  })
+  if (!res.ok) throw new Error(`turn API HTTP ${res.status}`)
+  const ct = res.headers.get("content-type") || ""
+  if (!ct.includes("ndjson")) {
+    // App build without streaming — degrade gracefully to one big sentence.
+    const r = await res.json()
+    if (r.text) onEvent({ type: "sentence", text: r.text })
+    onEvent({ type: "done", language: r.language, hangup: r.hangup })
+    return
+  }
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buf = ""
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buf += decoder.decode(value, { stream: true })
+    const lines = buf.split("\n")
+    buf = lines.pop() || ""
+    for (const line of lines) {
+      if (!line.trim()) continue
+      try { onEvent(JSON.parse(line)) } catch {}
+    }
+  }
+  if (buf.trim()) { try { onEvent(JSON.parse(buf)) } catch {} }
+}
+
+// JS mirror of lib/sentences.ts — used to pipeline FIXED texts (greeting,
+// closings) through the same sentence-by-sentence playback as streamed turns.
+function splitIntoSentences(text) {
+  const out = []
+  let start = 0
+  for (let i = 0; i < text.length; i++) {
+    if (!/[.!?…।॥]/.test(text[i])) continue
+    const next = text[i + 1]
+    if (next !== undefined && !/\s/.test(next)) continue
+    const candidate = text.slice(start, i + 1).trim()
+    if (candidate.length < 8) continue
+    out.push(candidate)
+    start = i + 1
+  }
+  const rest = text.slice(start).trim()
+  if (rest) out.push(rest)
+  return out.length ? out : [text.trim()].filter(Boolean)
+}
+
 // ---------- Per-call session ----------
 class CallSession {
   constructor(ws) {
@@ -161,6 +219,12 @@ class CallSession {
     this.processing = false
     this.closed = false
     this.started = false      // guards against a duplicate Exotel "start" event replaying the greeting mid-call
+    // Two-stage playback pipeline: synthChain serializes GPU synthesis (one
+    // F5 inference at a time), sendChain serializes playback. Synthesis of
+    // sentence N+1 runs WHILE sentence N is playing out to the caller —
+    // that overlap is where the "instant reply" feel comes from.
+    this.synthChain = Promise.resolve()
+    this.sendChain = Promise.resolve()
   }
 
   avgEnergy(frame) {
@@ -247,10 +311,24 @@ class CallSession {
       console.log(`👂 [${this.language}] "${transcript}"`)
       if (!transcript) return
 
-      const r = await callTurnApi({ event: "turn", callSid: this.callSid || "unknown", speech: transcript, language: this.language })
-      if (r.language) this.language = r.language
-      await this.speak(r.text)
-      if (r.hangup) this.hangupAfterAudio()
+      // STREAMED turn: sentences arrive while the model is still writing and
+      // go straight into the TTS/playback pipeline. The caller hears sentence
+      // 1 while sentence 2 is still being generated.
+      let hangup = false
+      await callTurnApiStream(
+        { event: "turn", callSid: this.callSid || "unknown", speech: transcript, language: this.language },
+        (ev) => {
+          if (ev.type === "sentence" && ev.text) {
+            console.log(`🗣 ${ev.text}`)
+            this.queueSentence(ev.text)
+          } else if (ev.type === "done") {
+            if (ev.language) this.language = ev.language
+            hangup = !!ev.hangup
+          }
+        }
+      )
+      await this.drainSpeech()
+      if (hangup) this.hangupAfterAudio()
     } catch (e) {
       console.error("turn error:", e.message)
     } finally {
@@ -258,33 +336,62 @@ class CallSession {
     }
   }
 
+  /** Sends synthesized PCM to the caller and waits out its real duration. */
+  async playPcm(pcm8k) {
+    // stream in 100ms chunks, padded to whole frames
+    const CHUNK = FRAME_BYTES * 5
+    for (let off = 0; off < pcm8k.length; off += CHUNK) {
+      if (this.closed) return
+      let chunk = pcm8k.subarray(off, Math.min(off + CHUNK, pcm8k.length))
+      if (chunk.length % FRAME_BYTES !== 0) {
+        chunk = Buffer.concat([chunk, Buffer.alloc(FRAME_BYTES - (chunk.length % FRAME_BYTES))])
+      }
+      this.ws.send(JSON.stringify({
+        event: "media",
+        stream_sid: this.streamSid,
+        media: { payload: chunk.toString("base64") },
+      }))
+    }
+    // keep mic muted until playback roughly finishes on the caller's side;
+    // the 200ms tail doubles as a natural inter-sentence pause.
+    const durationMs = (pcm8k.length / (SAMPLE_RATE * BYTES_PER_SAMPLE)) * 1000
+    await new Promise((r) => setTimeout(r, durationMs + 200))
+  }
+
+  /**
+   * Queue one sentence into the playback pipeline. Returns immediately —
+   * synthesis is chained after the previous synthesis (one GPU inference at
+   * a time), playback after the previous playback. Callers await
+   * drainSpeech() when they need "everything has been said".
+   */
+  queueSentence(text) {
+    const clean = (text || "").trim()
+    if (!clean || this.closed) return
+    this.botTalking = true
+    const synth = this.synthChain.then(() =>
+      this.closed ? null : textToSpeechPcm8k(clean, this.language).catch((e) => {
+        console.error("TTS error:", e.message)
+        return null
+      })
+    )
+    this.synthChain = synth
+    this.sendChain = this.sendChain.then(async () => {
+      const pcm = await synth
+      if (pcm && pcm.length > 0 && !this.closed) await this.playPcm(pcm)
+    })
+  }
+
+  /** Wait until every queued sentence has fully played, then unmute the mic. */
+  async drainSpeech() {
+    await this.sendChain
+    this.botTalking = false
+  }
+
+  /** Speak a fixed text (greeting/closing): pipelined sentence-by-sentence. */
   async speak(text) {
     if (!text || this.closed) return
-    this.botTalking = true
-    try {
-      const pcm8k = await textToSpeechPcm8k(text, this.language)
-      // stream in 100ms chunks, padded to whole frames
-      const CHUNK = FRAME_BYTES * 5
-      for (let off = 0; off < pcm8k.length; off += CHUNK) {
-        if (this.closed) return
-        let chunk = pcm8k.subarray(off, Math.min(off + CHUNK, pcm8k.length))
-        if (chunk.length % FRAME_BYTES !== 0) {
-          chunk = Buffer.concat([chunk, Buffer.alloc(FRAME_BYTES - (chunk.length % FRAME_BYTES))])
-        }
-        this.ws.send(JSON.stringify({
-          event: "media",
-          stream_sid: this.streamSid,
-          media: { payload: chunk.toString("base64") },
-        }))
-      }
-      // keep mic muted until playback roughly finishes on the caller's side
-      const durationMs = (pcm8k.length / (SAMPLE_RATE * BYTES_PER_SAMPLE)) * 1000
-      await new Promise((r) => setTimeout(r, durationMs + 200))
-    } catch (e) {
-      console.error("TTS error:", e.message)
-    } finally {
-      this.botTalking = false
-    }
+    for (const s of splitIntoSentences(text)) this.queueSentence(s)
+    await this.drainSpeech()
   }
 
   hangupAfterAudio() {

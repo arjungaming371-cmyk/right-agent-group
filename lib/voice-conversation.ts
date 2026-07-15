@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto"
 import { db, query } from "./db"
-import { chatWithOllama, extractLeadInfo, mightBeComplete, type Language } from "./ollama"
+import { chatWithOllama, chatWithOllamaStream, extractLeadInfo, mightBeComplete, type Language } from "./ollama"
+import { splitSentences } from "./sentences"
 import { sendApplicationLink } from "./whatsapp"
 import { buildLeadBrief } from "./lead-brain"
 import { searchKnowledgeBase } from "./knowledge-base"
@@ -172,6 +173,113 @@ function updateTranscriptAsync(leadId: string | null, callSid: string | null, sp
     .catch((e: any) => console.error("transcript update error:", e))
 }
 
+/** Per-turn context assembly shared by both turn paths (blocking + streaming). */
+async function buildTurnInstructions(
+  leadId: string,
+  history: { role: "user" | "model"; content: string }[],
+  instructions: string | undefined,
+  speech: string,
+  callerPhone: string | undefined
+): Promise<string> {
+  // LEAD BRAIN: brief Priya with the full cross-channel picture — known
+  // facts, rolling relationship summary, recent interactions, sentiment
+  // warnings — only on the first couple of turns, since after that it's
+  // already in the conversation history and re-injecting would just waste
+  // tokens. One cheap query (lib/lead-brain.ts), no live Ollama analysis.
+  let merged = instructions || ""
+  if (leadId && history.length <= 2) {
+    const brief = await buildLeadBrief(leadId)
+    merged = [merged, brief].filter(Boolean).join("\n\n")
+  }
+
+  // GROUNDING: give Priya the real caller number every turn. Without it, a
+  // customer saying "same number / this number" left the model with nothing
+  // to anchor on — observed live inventing "9888888888" out of thin air.
+  // A single short line per turn; costs a handful of tokens.
+  if (callerPhone) {
+    merged = [
+      merged,
+      `The customer is calling from ${callerPhone}. If they say their WhatsApp is this same number, use it — never say or invent any phone number yourself.`,
+    ].filter(Boolean).join("\n\n")
+  }
+
+  // KNOWLEDGE BASE: unlike the Lead Brain brief above, this runs on EVERY
+  // turn — a question about documents/eligibility/rates can land at any
+  // point in the call, not just the opening. One cheap indexed query.
+  const kbContext = await searchKnowledgeBase(speech)
+  if (kbContext) merged = [merged, kbContext].filter(Boolean).join("\n\n")
+
+  return merged
+}
+
+/**
+ * Post-reply completion check shared by both turn paths. Returns true when
+ * the lead just became complete (name + city + WhatsApp all known): saves the
+ * lead, creates the one-time form link, sends/logs the WhatsApp message.
+ *
+ * SPEED FIX: a lead can only be complete once a WhatsApp number exists in
+ * the transcript. Skip the second (expensive) Ollama extraction call until a
+ * phone-number-like string actually appears — most turns stay at ONE model
+ * call. The caller-phone header both grounds the extractor for "same number"
+ * answers AND lets mightBeComplete() pass without spoken digits.
+ */
+async function completeLeadIfReady(opts: {
+  leadId: string
+  callSid: string | null
+  callerPhone?: string
+  messages: { role: "user" | "model"; content: string }[]
+  reply: string
+}): Promise<boolean> {
+  const { leadId, callSid, callerPhone, messages, reply } = opts
+  const allTurns = [...messages, { role: "model" as const, content: reply }]
+  const transcriptText =
+    (callerPhone ? `(The customer is calling from: ${callerPhone}. If they said WhatsApp is the same number, that is their WhatsApp number.)\n` : "") +
+    allTurns.map((m) => `${m.role === "model" ? "Priya" : "Customer"}: ${m.content}`).join("\n")
+
+  if (!mightBeComplete(transcriptText)) return false
+  const extracted = await extractLeadInfo(transcriptText)
+  if (!extracted.complete || !leadId) return false
+
+  try {
+    const updates: Record<string, any> = {
+      status: "contacted",
+      updated_at: new Date().toISOString(),
+      interested: extracted.interested === true ? "interested" : extracted.interested === false ? "not_interested" : "unknown",
+    }
+    if (extracted.name) updates.name = extracted.name
+    if (extracted.address) updates.address = extracted.address
+    if (extracted.whatsapp_number) updates.whatsapp_number = extracted.whatsapp_number
+    await db.from("leads").update(updates).eq("id", leadId)
+
+    const token = randomUUID()
+    await db.from("form_links").insert({ token, lead_id: leadId })
+
+    const waNumber = extracted.whatsapp_number
+    if (waNumber) {
+      const result = await sendApplicationLink(waNumber, extracted.name || "there", token)
+      if (!result.ok) console.error("WhatsApp link send failed:", result.error)
+      // Mark this call as already followed-up so the status webhook doesn't
+      // ALSO send the generic post-call WhatsApp message once the call ends.
+      if (callSid) {
+        db.from("voice_calls").update({ followup_sent: true }).eq("twilio_call_sid", callSid).catch(() => {})
+      }
+      // Surface the exact link in the dashboard's Communication Log.
+      const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "")
+      db.from("comm_logs").insert({
+        lead_id: leadId,
+        type: "whatsapp",
+        summary: result.ok
+          ? `Application form link sent on WhatsApp to ${waNumber}: ${appUrl}/form/${token}`
+          : `Application form link generated but WhatsApp send FAILED (${result.error}) — share manually: ${appUrl}/form/${token}`,
+        outcome: result.ok ? "sent" : "failed",
+      }).catch(() => {})
+    }
+  } catch (e) {
+    console.error("lead completion error:", e)
+  }
+  return true
+}
+
 export async function handleTurn(opts: {
   leadId: string
   callSid: string | null
@@ -200,33 +308,7 @@ export async function handleTurn(opts: {
     flagFrustratedCall(callSid, leadId || null, speech)
   }
 
-  // LEAD BRAIN: brief Priya with the full cross-channel picture — known
-  // facts, rolling relationship summary, recent interactions, sentiment
-  // warnings — only on the first couple of turns, since after that it's
-  // already in the conversation history and re-injecting would just waste
-  // tokens. One cheap query (lib/lead-brain.ts), no live Ollama analysis.
-  let mergedInstructions = instructions || ""
-  if (leadId && history.length <= 2) {
-    const brief = await buildLeadBrief(leadId)
-    mergedInstructions = [mergedInstructions, brief].filter(Boolean).join("\n\n")
-  }
-
-  // GROUNDING: give Priya the real caller number every turn. Without it, a
-  // customer saying "same number / this number" left the model with nothing
-  // to anchor on — observed live inventing "9888888888" out of thin air.
-  // A single short line per turn; costs a handful of tokens.
-  if (callerPhone) {
-    mergedInstructions = [
-      mergedInstructions,
-      `The customer is calling from ${callerPhone}. If they say their WhatsApp is this same number, use it — never say or invent any phone number yourself.`,
-    ].filter(Boolean).join("\n\n")
-  }
-
-  // KNOWLEDGE BASE: unlike the Lead Brain brief above, this runs on EVERY
-  // turn — a question about documents/eligibility/rates can land at any
-  // point in the call, not just the opening. One cheap indexed query.
-  const kbContext = await searchKnowledgeBase(speech)
-  if (kbContext) mergedInstructions = [mergedInstructions, kbContext].filter(Boolean).join("\n\n")
+  const mergedInstructions = await buildTurnInstructions(leadId, history, instructions, speech, callerPhone)
 
   let reply = ""
   try {
@@ -239,61 +321,83 @@ export async function handleTurn(opts: {
 
   updateTranscriptAsync(leadId || null, callSid, speech, reply)
 
-  // SPEED FIX: a lead can only be complete once a WhatsApp number exists in
-  // the transcript. Skip the second (expensive) Ollama extraction call until
-  // a phone-number-like string actually appears — most turns stay at ONE
-  // model call, which roughly halves per-turn latency.
-  // The caller-phone header both grounds the extractor for "same number"
-  // answers AND lets mightBeComplete() pass without spoken digits.
-  const allTurns = [...messages, { role: "model" as const, content: reply }]
-  const transcriptText =
-    (callerPhone ? `(The customer is calling from: ${callerPhone}. If they said WhatsApp is the same number, that is their WhatsApp number.)\n` : "") +
-    allTurns.map((m) => `${m.role === "model" ? "Priya" : "Customer"}: ${m.content}`).join("\n")
-
-  if (mightBeComplete(transcriptText)) {
-    const extracted = await extractLeadInfo(transcriptText)
-
-    if (extracted.complete && leadId) {
-      try {
-        const updates: Record<string, any> = {
-          status: "contacted",
-          updated_at: new Date().toISOString(),
-          interested: extracted.interested === true ? "interested" : extracted.interested === false ? "not_interested" : "unknown",
-        }
-        if (extracted.name) updates.name = extracted.name
-        if (extracted.address) updates.address = extracted.address
-        if (extracted.whatsapp_number) updates.whatsapp_number = extracted.whatsapp_number
-        await db.from("leads").update(updates).eq("id", leadId)
-
-        const token = randomUUID()
-        await db.from("form_links").insert({ token, lead_id: leadId })
-
-        const waNumber = extracted.whatsapp_number
-        if (waNumber) {
-          const result = await sendApplicationLink(waNumber, extracted.name || "there", token)
-          if (!result.ok) console.error("WhatsApp link send failed:", result.error)
-          // Mark this call as already followed-up so the status webhook doesn't
-          // ALSO send the generic post-call WhatsApp message once the call ends.
-          if (callSid) {
-            db.from("voice_calls").update({ followup_sent: true }).eq("twilio_call_sid", callSid).catch(() => {})
-          }
-          // Surface the exact link in the dashboard's Communication Log.
-          const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "")
-          db.from("comm_logs").insert({
-            lead_id: leadId,
-            type: "whatsapp",
-            summary: result.ok
-              ? `Application form link sent on WhatsApp to ${waNumber}: ${appUrl}/form/${token}`
-              : `Application form link generated but WhatsApp send FAILED (${result.error}) — share manually: ${appUrl}/form/${token}`,
-            outcome: result.ok ? "sent" : "failed",
-          }).catch(() => {})
-        }
-      } catch (e) {
-        console.error("lead completion error:", e)
-      }
-      return { text: CLOSING[language], hangup: true }
-    }
-  }
+  const completed = await completeLeadIfReady({ leadId, callSid, callerPhone, messages, reply })
+  if (completed) return { text: CLOSING[language], hangup: true }
 
   return { text: reply, hangup: GOODBYE_RE.test(reply) }
+}
+
+/**
+ * Streaming twin of handleTurn for the live voicebot: sentences are pushed to
+ * onSentence AS THE MODEL WRITES THEM, so TTS + playback of sentence 1
+ * overlaps generation of sentence 2. Same context, same rules, same post-turn
+ * logic. Differences by design:
+ *  - on lead completion the CLOSING line is emitted as an EXTRA sentence
+ *    (the reply already streamed out — it can't be replaced retroactively).
+ *  - returns only control data; the text has already been delivered.
+ */
+export async function handleTurnStream(
+  opts: {
+    leadId: string
+    callSid: string | null
+    speech: string
+    language: Language
+    callerPhone?: string
+    instructions?: string
+  },
+  onSentence: (sentence: string) => void
+): Promise<{ hangup: boolean }> {
+  const { leadId, callSid, speech, language, callerPhone, instructions } = opts
+
+  const history = callSid ? await getHistory(callSid) : []
+
+  if (history.length > 0 && CUSTOMER_BYE_RE.test(speech)) {
+    const reply = GOODBYE_REPLY[language]
+    updateTranscriptAsync(leadId || null, callSid, speech, reply)
+    onSentence(reply)
+    return { hangup: true }
+  }
+
+  const messages = [...history, { role: "user" as const, content: speech }]
+
+  if (detectFrustration(speech, history.map((h) => ({ role: h.role === "model" ? "model" : "user", content: h.content })))) {
+    flagFrustratedCall(callSid, leadId || null, speech)
+  }
+
+  const mergedInstructions = await buildTurnInstructions(leadId, history, instructions, speech, callerPhone)
+
+  let reply = ""
+  let pending = ""
+  try {
+    reply = (
+      await chatWithOllamaStream(messages, language, mergedInstructions || undefined, (delta) => {
+        pending += delta
+        const { complete, rest } = splitSentences(pending)
+        for (const s of complete) onSentence(s)
+        pending = rest
+      })
+    ).trim()
+    const tail = pending.trim()
+    if (tail) onSentence(tail)
+    if (!reply) {
+      reply = GREETINGS[language]
+      onSentence(reply)
+    }
+  } catch (e) {
+    console.error("Ollama error:", e)
+    const msg = RETRY_MSG[language]
+    updateTranscriptAsync(leadId || null, callSid, speech, msg)
+    onSentence(msg)
+    return { hangup: false }
+  }
+
+  updateTranscriptAsync(leadId || null, callSid, speech, reply)
+
+  const completed = await completeLeadIfReady({ leadId, callSid, callerPhone, messages, reply })
+  if (completed) {
+    onSentence(CLOSING[language])
+    return { hangup: true }
+  }
+
+  return { hangup: GOODBYE_RE.test(reply) }
 }
