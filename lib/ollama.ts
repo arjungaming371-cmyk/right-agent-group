@@ -1,6 +1,13 @@
-// Local AI via Ollama — Priya, the Right Agent Group voice agent.
-// Job on calls: build trust fast, handle objections, and collect
-// name + address + WhatsApp number, then hand off to the WhatsApp form link.
+// Priya's brain — Groq API (llama-3.3-70b, streaming) with automatic
+// fallback to local Ollama. Job on calls: build trust fast, handle
+// objections, and collect name + address + WhatsApp number, then hand off
+// to the WhatsApp form link.
+//
+// Why two backends: Groq is a much smarter/faster model (first token in
+// ~300-500ms), but it's an external free-tier API — it can be down, rate
+// limited, or out of daily tokens. Ollama is slower but always there. Every
+// completion tries Groq first and silently degrades to Ollama, so a Groq
+// outage makes calls slower, never silent.
 
 export type Language = "english" | "hindi" | "telugu"
 
@@ -9,6 +16,13 @@ import { DEFAULT_SCRIPTS as SHARED_DEFAULT_SCRIPTS } from "./default-scripts"
 const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434"
 const MODEL = process.env.OLLAMA_MODEL || "llama3.1:8b"
 const IS_GPU = process.env.OLLAMA_GPU === "true"
+
+// Groq (OpenAI-compatible). Set GROQ_API_KEY to enable; LLM_PROVIDER=ollama
+// forces local-only even with a key present.
+const GROQ_API_KEY = process.env.GROQ_API_KEY || ""
+const GROQ_URL = (process.env.GROQ_URL || "https://api.groq.com/openai/v1").replace(/\/$/, "")
+const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile"
+const USE_GROQ = !!GROQ_API_KEY && process.env.LLM_PROVIDER !== "ollama"
 
 // ---- Concurrency cap ----------------------------------------------------
 // How many completions this app will have in flight AT ONCE. On a laptop,
@@ -116,6 +130,76 @@ type CompletionOpts = {
   json?: boolean
 }
 
+// ---- Groq (OpenAI-compatible chat completions) ----
+
+function groqBody(messages: OllamaMessage[], opts: CompletionOpts, stream: boolean) {
+  return JSON.stringify({
+    model: GROQ_MODEL,
+    messages,
+    stream,
+    temperature: opts.temperature ?? 0.6,
+    max_tokens: opts.numPredict ?? 300,
+    // Groq's JSON mode requires the word "JSON" in a message — all our JSON
+    // prompts start with "Return ONLY valid JSON", so this is safe to map.
+    ...(opts.json ? { response_format: { type: "json_object" } } : {}),
+  })
+}
+
+const GROQ_HEADERS = { "Content-Type": "application/json", Authorization: `Bearer ${GROQ_API_KEY}` }
+
+async function groqChatRequest(messages: OllamaMessage[], opts: CompletionOpts, signal: AbortSignal): Promise<string> {
+  const res = await fetch(`${GROQ_URL}/chat/completions`, {
+    method: "POST",
+    headers: GROQ_HEADERS,
+    signal,
+    body: groqBody(messages, opts, false),
+  })
+  if (!res.ok) throw new Error(`Groq HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`)
+  const data = await res.json()
+  return data?.choices?.[0]?.message?.content || ""
+}
+
+/** Streaming Groq completion (SSE). Returns full text; deltas go to onChunk. */
+async function groqChatStream(
+  messages: OllamaMessage[],
+  opts: CompletionOpts,
+  signal: AbortSignal,
+  onChunk: (delta: string) => void
+): Promise<string> {
+  const res = await fetch(`${GROQ_URL}/chat/completions`, {
+    method: "POST",
+    headers: GROQ_HEADERS,
+    signal,
+    body: groqBody(messages, opts, true),
+  })
+  if (!res.ok || !res.body) throw new Error(`Groq HTTP ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`)
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ""
+  let fullText = ""
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split("\n")
+    buffer = lines.pop() || ""
+    for (const line of lines) {
+      const payload = line.startsWith("data: ") ? line.slice(6).trim() : ""
+      if (!payload || payload === "[DONE]") continue
+      try {
+        const delta = JSON.parse(payload)?.choices?.[0]?.delta?.content
+        if (delta) {
+          fullText += delta
+          onChunk(delta)
+        }
+      } catch {
+        // partial/keepalive line — skip
+      }
+    }
+  }
+  return fullText
+}
+
 async function ollamaChatRequest(messages: OllamaMessage[], opts: CompletionOpts, signal: AbortSignal): Promise<string> {
   const response = await fetch(`${OLLAMA_URL}/api/chat`, {
     method: "POST",
@@ -141,6 +225,22 @@ async function ollamaChatRequest(messages: OllamaMessage[], opts: CompletionOpts
 
 /** Non-streaming completion. Used by every function that just needs the final text (or JSON) back. */
 async function runCompletion(messages: OllamaMessage[], opts: CompletionOpts): Promise<string> {
+  // Groq first (no concurrency slot — the API handles parallelism; slots
+  // exist to protect the LOCAL machine). Any failure falls through to Ollama.
+  if (USE_GROQ) {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), Math.min(opts.timeoutMs, 20000))
+    try {
+      const text = await groqChatRequest(messages, opts, controller.signal)
+      if (text.trim()) return text.trim()
+      throw new Error("Empty Groq response")
+    } catch (e: any) {
+      console.error("Groq error — falling back to Ollama:", e.message)
+    } finally {
+      clearTimeout(timeoutId)
+    }
+  }
+
   const controller = new AbortController()
   await acquireSlot()
   const timeoutId = setTimeout(() => controller.abort(), opts.timeoutMs)
@@ -164,6 +264,29 @@ async function runCompletion(messages: OllamaMessage[], opts: CompletionOpts): P
  * { message: { content: "..." }, done: bool }, not SSE.
  */
 async function runCompletionStream(messages: OllamaMessage[], opts: CompletionOpts, onChunk: (delta: string) => void): Promise<string> {
+  // Groq first. Fallback rule for streams: only fall back to Ollama if NO
+  // chunks were emitted yet — once the caller has spoken half a sentence,
+  // replaying from a different model would duplicate text mid-call.
+  if (USE_GROQ) {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), Math.min(opts.timeoutMs, 25000))
+    let emitted = false
+    try {
+      const text = await groqChatStream(messages, opts, controller.signal, (delta) => {
+        emitted = true
+        onChunk(delta)
+      })
+      if (text.trim()) return text.trim()
+      throw new Error("Empty Groq response")
+    } catch (e: any) {
+      console.error("Groq stream error:", e.message)
+      if (emitted) throw e
+      console.error("— no chunks emitted yet, falling back to Ollama")
+    } finally {
+      clearTimeout(timeoutId)
+    }
+  }
+
   const controller = new AbortController()
   await acquireSlot()
   const timeoutId = setTimeout(() => controller.abort(), opts.timeoutMs)
@@ -636,6 +759,19 @@ export function detectLanguage(text: string): Language {
 }
 
 export async function checkOllamaHealth(): Promise<{ ok: boolean; message: string }> {
+  // Groq active → report the API brain (with the Ollama fallback's state noted).
+  if (USE_GROQ) {
+    try {
+      const res = await fetch(`${GROQ_URL}/models/${GROQ_MODEL}`, {
+        headers: { Authorization: `Bearer ${GROQ_API_KEY}` },
+        signal: AbortSignal.timeout(5000),
+      })
+      if (res.ok) return { ok: true, message: `Groq ready with ${GROQ_MODEL} (Ollama fallback: ${MODEL})` }
+      return { ok: false, message: `Groq HTTP ${res.status} — check GROQ_API_KEY (calls fall back to Ollama)` }
+    } catch (e: any) {
+      return { ok: false, message: `Cannot reach Groq: ${e.message} (calls fall back to Ollama)` }
+    }
+  }
   try {
     const res = await fetch(`${OLLAMA_URL}/api/tags`, { signal: AbortSignal.timeout(3000) })
     if (!res.ok) return { ok: false, message: `Ollama not responding: HTTP ${res.status}` }
