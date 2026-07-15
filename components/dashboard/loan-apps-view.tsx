@@ -24,6 +24,7 @@ export default function LoanAppsView({ role, initialSearch }: { role: "admin" | 
   const canEdit = role !== "viewer"
   const [apps, setApps] = useState<LoanApp[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState("")
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [search, setSearch] = useState(initialSearch || "")
 
@@ -32,11 +33,20 @@ export default function LoanAppsView({ role, initialSearch }: { role: "admin" | 
 
   async function load() {
     setLoading(true)
-    const res = await fetch("/api/loans")
-    if (res.ok) {
-      const data = await res.json()
-      setApps(data)
-      if (data.length > 0 && !selectedId) setSelectedId(data[0].id)
+    setLoadError("")
+    try {
+      const res = await fetch("/api/loans")
+      if (res.ok) {
+        const data = await res.json()
+        setApps(data)
+        if (data.length > 0 && !selectedId) setSelectedId(data[0].id)
+      } else {
+        // A failed fetch is NOT "no applications" — say so, or a server bug
+        // reads as an empty database (which is exactly what happened once).
+        setLoadError(`Could not load applications (HTTP ${res.status}). Check server logs.`)
+      }
+    } catch {
+      setLoadError("Could not load applications — network error.")
     }
     setLoading(false)
   }
@@ -73,7 +83,8 @@ export default function LoanAppsView({ role, initialSearch }: { role: "admin" | 
         </div>
         <div style={{ flex: 1, overflowY: "auto" }}>
           {loading && <SkeletonList rows={4} />}
-          {!loading && filtered.length === 0 && <div style={{ padding: 30, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>No applications submitted yet.</div>}
+          {!loading && loadError && <div style={{ padding: 30, textAlign: "center", color: "#f87171", fontSize: 13 }}>{loadError}</div>}
+          {!loading && !loadError && filtered.length === 0 && <div style={{ padding: 30, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>No applications submitted yet.</div>}
           {filtered.map((app) => (
             <div
               key={app.id}

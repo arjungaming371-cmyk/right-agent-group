@@ -68,6 +68,11 @@ function pcmToWav(pcm) {
   return Buffer.concat([header, pcm])
 }
 
+// language="auto" → Whisper auto-detects per utterance. This is what makes
+// mid-call language switching work: the transcript comes back in the script
+// the caller actually spoke (Telugu/Devanagari/Latin), and the turn API
+// switches Priya's language from that. Forcing the current call language here
+// would transliterate English speech into Telugu script and lock the call.
 async function speechToText(pcm, language) {
   const res = await fetch(`${STT_URL}/transcribe?language=${encodeURIComponent(language)}`, {
     method: "POST",
@@ -99,10 +104,19 @@ async function synthesizeSpeech(text, language) {
   return Buffer.concat(chunks)
 }
 
+// Playback loudness. Edge TTS output downsampled to 8kHz lands quiet on a
+// phone line ("low voice" — caller feedback), so boost by default. alimiter
+// caps peaks so the gain can't clip into distortion. Tune per deployment
+// with VOICEBOT_TTS_VOLUME (1 = no boost).
+const TTS_VOLUME = Math.max(0.5, Math.min(4, parseFloat(process.env.VOICEBOT_TTS_VOLUME || "2.0") || 2.0))
+
 /** WAV → 8kHz 16-bit mono PCM via ffmpeg (install once: sudo apt install -y ffmpeg). */
 function audioToPcm8k(audio) {
   return new Promise((resolve, reject) => {
-    const ff = spawn("ffmpeg", ["-hide_banner", "-loglevel", "error", "-i", "pipe:0", "-f", "s16le", "-ar", String(SAMPLE_RATE), "-ac", "1", "pipe:1"])
+    const args = ["-hide_banner", "-loglevel", "error", "-i", "pipe:0"]
+    if (TTS_VOLUME !== 1) args.push("-af", `volume=${TTS_VOLUME},alimiter=limit=0.95`)
+    args.push("-f", "s16le", "-ar", String(SAMPLE_RATE), "-ac", "1", "pipe:1")
+    const ff = spawn("ffmpeg", args)
     const out = []
     const err = []
     ff.stdout.on("data", (c) => out.push(c))
@@ -138,7 +152,8 @@ class CallSession {
     this.ws = ws
     this.streamSid = null
     this.callSid = null
-    this.language = "english"
+    this.language = "telugu"   // Telugu-first; the turn API confirms/switches per caller
+    this.startedAt = Date.now() // for real call duration (Voice Logs showed 0:00 without it)
     this.buffer = []          // PCM chunks of current utterance
     this.speechMs = 0
     this.silenceMs = 0
@@ -232,7 +247,7 @@ class CallSession {
           console.log(`   saved ${f}`)
         } catch (e) { console.error("   dump failed:", e.message) }
       }
-      const transcript = await speechToText(pcm, this.language)
+      const transcript = await speechToText(pcm, "auto")
       console.log(`👂 [${this.language}] "${transcript}"`)
       if (!transcript) return
 
@@ -281,6 +296,19 @@ class CallSession {
     console.log(`⏹ hangup sid=${this.callSid}`)
     setTimeout(() => { try { this.ws.close() } catch {} }, 500)
   }
+
+  // Report the real call duration to the app. Exotel's status webhook does not
+  // fire for inbound voicebot calls, so without this every inbound call showed
+  // 0:00 in Voice Logs. Idempotent (flag + GREATEST() server-side), called from
+  // both "stop" and the socket close handler — whichever happens first wins.
+  reportEnd() {
+    if (this.endReported || !this.callSid) return
+    this.endReported = true
+    const duration = Math.round((Date.now() - this.startedAt) / 1000)
+    callTurnApi({ event: "end", callSid: this.callSid, duration }).catch((e) =>
+      console.error("end report error:", e.message)
+    )
+  }
 }
 
 // ---------- WebSocket server ----------
@@ -301,11 +329,12 @@ wss.on("connection", (ws) => {
         // audio never registered as speech and the threshold needs lowering. If it's
         // high but transcripts were empty, the problem is capture/format, not volume.
         console.log(`■ call stop sid=${session.callSid}  frames=${session.frameCount}  callMaxEnergy=${session.callMaxEnergy.toFixed(0)}  threshold=${ENERGY_THRESHOLD}`)
+        session.reportEnd()
         try { ws.close() } catch {}
         break
     }
   })
-  ws.on("close", () => { session.closed = true })
+  ws.on("close", () => { session.closed = true; session.reportEnd() })
   ws.on("error", (e) => console.error("ws error:", e.message))
 })
 

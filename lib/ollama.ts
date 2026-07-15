@@ -226,7 +226,11 @@ export async function chatWithOllama(
   if (extraInstructions?.trim()) {
     systemPrompt += `\n\nAdditional context for this specific call (from the operations team): ${extraInstructions.trim()}`
   }
-  return runOllamaChat(messages, systemPrompt)
+  // numPredict 90: live phone replies are capped at two short sentences by the
+  // script, so ~90 tokens is generous headroom — while cutting the worst-case
+  // generation time vs. the old 120 default. Every token generated is time the
+  // caller spends listening to silence.
+  return runOllamaChat(messages, systemPrompt, { numPredict: 90 })
 }
 
 /**

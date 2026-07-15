@@ -69,6 +69,22 @@ const RETRY_MSG: Record<Language, string> = {
 const GOODBYE_RE =
   /goodbye|bye[- ]?bye|have a (great|good|nice) day|अलविदा|फिर मिलेंगे|दिन शुभ हो|వీడ్కోలు|సెలవు|మంచి రోజు జరగాలి/i
 
+// CUSTOMER-side goodbye: when the CALLER says bye, the call is over — full
+// stop. Observed live: customer said "Thank you. Bye." and Priya kept
+// probing for a WhatsApp number, which reads as pushy and disrespectful.
+// \b keeps "bye" from matching inside other words; Telugu/Hindi phrases are
+// the common phone sign-offs ("I'll hang up now", "I'll take leave").
+const CUSTOMER_BYE_RE =
+  /\b(bye|goodbye|bye[- ]?bye)\b|రేపు మాట్లాడుదాం|సెలవు|ఉంటాను మరి|పెట్టేస్తున్నాను|फोन रखत[ाी] हूँ?|रखत[ाी] हूँ?|अलविदा|बाय/i
+
+// Short, warm sign-off — NOT the link-sending CLOSING above, which promises a
+// WhatsApp message that may not exist yet.
+const GOODBYE_REPLY: Record<Language, string> = {
+  english: "Thank you for your time! Have a great day. Goodbye!",
+  hindi: "आपके समय के लिए धन्यवाद! आपका दिन शुभ हो। नमस्ते!",
+  telugu: "మీ సమయానికి ధన్యవాదాలు! మీకు మంచి రోజు జరగాలి. నమస్కారం!",
+}
+
 /** Called on the first webhook hit of a call (before any speech). Bumps call_count once per call. */
 export async function startCall(
   leadId: string,
@@ -161,12 +177,23 @@ export async function handleTurn(opts: {
   callSid: string | null
   speech: string
   language: Language
+  callerPhone?: string
   instructions?: string
 }): Promise<{ text: string; hangup: boolean }> {
-  const { leadId, callSid, speech, language, instructions } = opts
+  const { leadId, callSid, speech, language, callerPhone, instructions } = opts
 
   const history = callSid ? await getHistory(callSid) : []
   const messages = [...history, { role: "user" as const, content: speech }]
+
+  // The CALLER said goodbye → say a short goodbye back and end the call.
+  // No LLM turn: asking anything more after "bye" is exactly the pushy
+  // behavior a human agent would never do. History must be non-empty so a
+  // first-utterance misfire can't kill a call that just connected.
+  if (history.length > 0 && CUSTOMER_BYE_RE.test(speech)) {
+    const reply = GOODBYE_REPLY[language]
+    updateTranscriptAsync(leadId || null, callSid, speech, reply)
+    return { text: reply, hangup: true }
+  }
 
   // FRUSTRATION RADAR: zero-latency keyword pass; flagging is fire-and-forget.
   if (detectFrustration(speech, history.map((h) => ({ role: h.role === "model" ? "model" : "user", content: h.content })))) {
@@ -182,6 +209,17 @@ export async function handleTurn(opts: {
   if (leadId && history.length <= 2) {
     const brief = await buildLeadBrief(leadId)
     mergedInstructions = [mergedInstructions, brief].filter(Boolean).join("\n\n")
+  }
+
+  // GROUNDING: give Priya the real caller number every turn. Without it, a
+  // customer saying "same number / this number" left the model with nothing
+  // to anchor on — observed live inventing "9888888888" out of thin air.
+  // A single short line per turn; costs a handful of tokens.
+  if (callerPhone) {
+    mergedInstructions = [
+      mergedInstructions,
+      `The customer is calling from ${callerPhone}. If they say their WhatsApp is this same number, use it — never say or invent any phone number yourself.`,
+    ].filter(Boolean).join("\n\n")
   }
 
   // KNOWLEDGE BASE: unlike the Lead Brain brief above, this runs on EVERY
@@ -205,8 +243,12 @@ export async function handleTurn(opts: {
   // the transcript. Skip the second (expensive) Ollama extraction call until
   // a phone-number-like string actually appears — most turns stay at ONE
   // model call, which roughly halves per-turn latency.
+  // The caller-phone header both grounds the extractor for "same number"
+  // answers AND lets mightBeComplete() pass without spoken digits.
   const allTurns = [...messages, { role: "model" as const, content: reply }]
-  const transcriptText = allTurns.map((m) => `${m.role === "model" ? "Priya" : "Customer"}: ${m.content}`).join("\n")
+  const transcriptText =
+    (callerPhone ? `(The customer is calling from: ${callerPhone}. If they said WhatsApp is the same number, that is their WhatsApp number.)\n` : "") +
+    allTurns.map((m) => `${m.role === "model" ? "Priya" : "Customer"}: ${m.content}`).join("\n")
 
   if (mightBeComplete(transcriptText)) {
     const extracted = await extractLeadInfo(transcriptText)

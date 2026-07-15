@@ -18,7 +18,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(data)
   }
 
-  const { data, error } = await db.from("loan_applications").select("*").order("created_at", { ascending: false })
+  // NOTE: loan_applications has submitted_at, NOT created_at — ordering by the
+  // nonexistent column made this whole query 500 while the count query above
+  // succeeded, so the sidebar badge said "1" while the list showed empty.
+  const { data, error } = await db.from("loan_applications").select("*").order("submitted_at", { ascending: false })
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json(data)
 }
