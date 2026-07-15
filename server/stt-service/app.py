@@ -88,6 +88,16 @@ async def health(request: Request):
     return {"ok": True, "model": MODEL_NAME, "device": DEVICE, "compute": COMPUTE}
 
 
+# Whisper's built-in Silero VAD is OFF by default here. The voicebot already
+# does its own energy-based endpointing before it ever sends audio, so this VAD
+# is redundant — and on real 8kHz telephony audio (quiet, noisy) it frequently
+# discards the entire utterance as "non-speech", returning an empty transcript
+# even though the words are clearly there. That was the live-call failure: clean
+# synthetic 8kHz audio transcribed fine, real phone audio came back "". Set
+# STT_VAD_FILTER=1 to re-enable it only if you ever feed un-endpointed audio.
+VAD_FILTER = os.environ.get("STT_VAD_FILTER", "0").strip().lower() in ("1", "true", "yes")
+
+
 def _transcribe_sync(audio: bytes, lang: str | None) -> str:
     # faster_whisper's transcribe() is lazy — it returns a generator, and the
     # actual CPU-bound decode work happens when you iterate it. Both steps
@@ -97,7 +107,7 @@ def _transcribe_sync(audio: bytes, lang: str | None) -> str:
         io.BytesIO(audio),
         language=lang,
         beam_size=1,            # greedy: fastest, near-identical accuracy for short utterances
-        vad_filter=True,        # trims silence padding from endpointing
+        vad_filter=VAD_FILTER,  # off by default — voicebot already endpoints; see note above
         condition_on_previous_text=False,
         temperature=0.0,
     )

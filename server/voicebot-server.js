@@ -40,7 +40,14 @@ const FRAME_BYTES = (SAMPLE_RATE * BYTES_PER_SAMPLE * FRAME_MS) / 1000 // 320
 const SILENCE_END_MS = 800      // this much silence after speech = end of utterance
 const MIN_SPEECH_MS = 250       // ignore blips shorter than this
 const MAX_UTTERANCE_MS = 15000  // hard cap per utterance
-const ENERGY_THRESHOLD = 500    // avg abs amplitude above this = speech
+// avg abs amplitude (0..32767) above this counts as speech. 500 was too high for
+// real phone lines — quieter callers never crossed it. 300 is a safer default;
+// override per-deployment with VOICEBOT_ENERGY_THRESHOLD once you see the live
+// energy numbers the diagnostic log prints for each utterance.
+const ENERGY_THRESHOLD = parseInt(process.env.VOICEBOT_ENERGY_THRESHOLD || "300")
+// When set, every captured utterance is written to /kaggle/working (or DEBUG_DIR)
+// as a .wav so you can play it back / re-feed STT. Off by default.
+const DEBUG_DIR = process.env.VOICEBOT_DEBUG_DIR || ""
 
 // ---------- STT: self-hosted faster-whisper (server/stt-service.py) ----------
 function pcmToWav(pcm) {
@@ -135,6 +142,9 @@ class CallSession {
     this.buffer = []          // PCM chunks of current utterance
     this.speechMs = 0
     this.silenceMs = 0
+    this.maxEnergy = 0        // loudest frame in the current utterance (diagnostics)
+    this.callMaxEnergy = 0    // loudest frame in the whole call (diagnostics)
+    this.frameCount = 0       // total media frames received this call (diagnostics)
     this.speaking = false     // caller currently speaking
     this.botTalking = false   // we're currently sending audio (mic muted)
     this.processing = false
@@ -180,6 +190,9 @@ class CallSession {
     const frame = Buffer.from(payload, "base64")
     const energy = this.avgEnergy(frame)
     const ms = (frame.length / (SAMPLE_RATE * BYTES_PER_SAMPLE)) * 1000
+    this.frameCount++
+    if (energy > this.maxEnergy) this.maxEnergy = energy
+    if (energy > this.callMaxEnergy) this.callMaxEnergy = energy
 
     if (energy > ENERGY_THRESHOLD) {
       this.speaking = true
@@ -198,14 +211,27 @@ class CallSession {
   async endUtterance() {
     const pcm = Buffer.concat(this.buffer)
     const hadRealSpeech = this.speechMs >= MIN_SPEECH_MS
+    const durationMs = (pcm.length / (SAMPLE_RATE * BYTES_PER_SAMPLE)) * 1000
+    const maxEnergy = this.maxEnergy
     this.buffer = []
     this.speaking = false
     this.speechMs = 0
     this.silenceMs = 0
+    this.maxEnergy = 0
     if (!hadRealSpeech || this.processing) return
 
     this.processing = true
     try {
+      // Always-on diagnostics: if a call ever goes silent again, these numbers
+      // say exactly why (threshold too high vs. empty/garbled capture).
+      console.log(`🎙 utterance: ${durationMs.toFixed(0)}ms  maxEnergy=${maxEnergy.toFixed(0)}  threshold=${ENERGY_THRESHOLD}  bytes=${pcm.length}`)
+      if (DEBUG_DIR) {
+        try {
+          const f = require("path").join(DEBUG_DIR, `utt-${Date.now()}.wav`)
+          require("fs").writeFileSync(f, pcmToWav(pcm))
+          console.log(`   saved ${f}`)
+        } catch (e) { console.error("   dump failed:", e.message) }
+      }
       const transcript = await speechToText(pcm, this.language)
       console.log(`👂 [${this.language}] "${transcript}"`)
       if (!transcript) return
@@ -271,7 +297,10 @@ wss.on("connection", (ws) => {
       case "media": session.onMedia(msg); break
       case "stop":
         session.closed = true
-        console.log(`■ call stop sid=${session.callSid}`)
+        // Call-wide peak energy: if this is well below ENERGY_THRESHOLD, the caller's
+        // audio never registered as speech and the threshold needs lowering. If it's
+        // high but transcripts were empty, the problem is capture/format, not volume.
+        console.log(`■ call stop sid=${session.callSid}  frames=${session.frameCount}  callMaxEnergy=${session.callMaxEnergy.toFixed(0)}  threshold=${ENERGY_THRESHOLD}`)
         try { ws.close() } catch {}
         break
     }
