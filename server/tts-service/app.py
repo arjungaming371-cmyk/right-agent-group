@@ -1,32 +1,41 @@
-# Right Agent Group — self-hosted TTS service (Edge TTS / Microsoft neural voices).
+# Right Agent Group — self-hosted TTS service (IndicF5).
 #
-# Uses Microsoft Edge TTS — free, no API key, no GPU needed, runs on any CPU.
-# Voices used:
-#   Telugu  → te-IN-ShrutiNeural  (female, clear, natural)
-#   Hindi   → hi-IN-SwaraNeural   (female)
-#   English → en-IN-NeerjaNeural  (female, Indian accent)
+# AI4Bharat's IndicF5 (F5-TTS trained on 11 Indian languages, incl. Telugu,
+# Hindi, and Indian-accented English): near-human prosody, and — because it
+# clones a reference voice — Priya keeps ONE consistent voice across every
+# language instead of switching speakers per language.
 #
-# Returns MP3 audio — ffmpeg in the voicebot converts to 8kHz PCM for Exotel.
+# The reference voice lives in ref/priya_ref.wav + ref/priya_ref.txt (a ~10s
+# Telugu sample; the transcript file must match the audio EXACTLY — F5 uses
+# the pair to learn the speaker, so a mismatch degrades every synthesis).
 #
 # Setup:
-#   pip install edge-tts fastapi uvicorn
+#   pip install git+https://github.com/ai4bharat/IndicF5.git soundfile
 #   cd server/tts-service
 #   uvicorn app:app --host 127.0.0.1 --port 3004
+#   (first start downloads the model from HF, ~1.5GB)
 #
 # Env:
-#   TTS_API_KEY   shared secret (falls back to WHATSAPP_SERVICE_KEY)
+#   TTS_API_KEY        shared secret (falls back to WHATSAPP_SERVICE_KEY)
+#   TTS_DEVICE         optional: "cuda" or "cpu" (default: auto-detect)
+#
+# GPU note: needs ~3GB VRAM. On Kaggle T4 x2 it gets GPU 1 to itself
+# (CUDA_VISIBLE_DEVICES set by the launcher). Expect ~2-5s per short
+# utterance on a T4 — slower than a cloud API, but natural Telugu.
 
-import asyncio
 import io
 import os
 import time
 
-import edge_tts
+import numpy as np
+import soundfile as sf
 from fastapi import FastAPI, HTTPException, Request
-from starlette.responses import Response
+from starlette.concurrency import run_in_threadpool
 
 
 def _load_project_env() -> None:
+    """Load ../../.env so manual startup works without exporting vars.
+    Real environment variables always win over .env values."""
     env_path = os.path.join(os.path.dirname(__file__), "..", "..", ".env")
     try:
         with open(env_path, encoding="utf-8") as f:
@@ -47,13 +56,54 @@ _load_project_env()
 
 API_KEY = os.environ.get("TTS_API_KEY") or os.environ.get("WHATSAPP_SERVICE_KEY", "")
 
-VOICE_MAP = {
-    "telugu":  "te-IN-ShrutiNeural",
-    "hindi":   "hi-IN-SwaraNeural",
-    "english": "en-IN-NeerjaNeural",
-}
+REF_DIR = os.path.join(os.path.dirname(__file__), "ref")
+REF_AUDIO = os.path.join(REF_DIR, "priya_ref.wav")
+with open(os.path.join(REF_DIR, "priya_ref.txt"), encoding="utf-8") as f:
+    REF_TEXT = f.read().strip()
 
-app = FastAPI(title="RAG TTS (Edge TTS)", docs_url=None, redoc_url=None)
+import torch  # noqa: E402
+
+DEVICE = os.environ.get("TTS_DEVICE", "").strip().lower() or ("cuda" if torch.cuda.is_available() else "cpu")
+
+print(f"Loading IndicF5 on {DEVICE} ...")
+t0 = time.time()
+from transformers import AutoModel  # noqa: E402
+
+model = AutoModel.from_pretrained("ai4bharat/IndicF5", trust_remote_code=True)
+# IndicF5 is custom remote code — .to() should move it like any nn.Module, but
+# if the wrapper manages devices internally this must not kill the service.
+# The warmup timing below exposes a silent CPU fallback immediately (30s+ vs ~3s).
+try:
+    model = model.to(DEVICE)
+except Exception as e:  # noqa: BLE001
+    print(f"WARNING: model.to({DEVICE}) failed ({e}) — model may manage its own device")
+print(f"Model loaded in {time.time() - t0:.1f}s")
+
+
+def _synthesize_sync(text: str) -> bytes:
+    # IndicF5 inference is synchronous CPU/GPU work — must run inside the
+    # threadpool (same reasoning as the STT service: blocking the event loop
+    # stalls every concurrent caller's request).
+    audio = model(text, ref_audio_path=REF_AUDIO, ref_text=REF_TEXT)
+    audio = np.asarray(audio)
+    if audio.dtype == np.int16:
+        audio = audio.astype(np.float32) / 32768.0
+    audio = np.clip(audio.astype(np.float32).squeeze(), -1.0, 1.0)
+    buf = io.BytesIO()
+    sf.write(buf, audio, samplerate=24000, format="WAV", subtype="PCM_16")
+    return buf.getvalue()
+
+
+# Warm up at import time: the first F5 generation pays one-off setup costs
+# (CUDA kernels, vocoder init). Doing it here means the poll loop in the
+# launcher only reports "up" once real synthesis actually works — and the
+# first caller never eats the cold-start.
+print("Warmup synthesis ...")
+t0 = time.time()
+_warmup = _synthesize_sync("నమస్కారం!")
+print(f"Warmup done in {time.time() - t0:.1f}s ({len(_warmup)} bytes)")
+
+app = FastAPI(title="RAG TTS (IndicF5)", docs_url=None, redoc_url=None)
 
 
 def check_key(request: Request) -> None:
@@ -63,20 +113,10 @@ def check_key(request: Request) -> None:
         raise HTTPException(401, "unauthorized")
 
 
-async def _synthesize(text: str, language: str) -> bytes:
-    voice = VOICE_MAP.get(language, VOICE_MAP["telugu"])
-    communicate = edge_tts.Communicate(text, voice)
-    buf = io.BytesIO()
-    async for chunk in communicate.stream():
-        if chunk["type"] == "audio":
-            buf.write(chunk["data"])
-    return buf.getvalue()
-
-
 @app.get("/health")
 async def health(request: Request):
     check_key(request)
-    return {"ok": True, "engine": "edge-tts", "voices": VOICE_MAP}
+    return {"ok": True, "model": "ai4bharat/IndicF5", "device": DEVICE, "voice": "priya (cloned, all languages)"}
 
 
 @app.post("/synthesize")
@@ -84,12 +124,15 @@ async def synthesize(request: Request):
     check_key(request)
     body = await request.json()
     text = str(body.get("text") or "").strip()
-    language = str(body.get("language") or "telugu").strip().lower()
     if not text:
         raise HTTPException(400, "text required")
+    # Phone replies are two short sentences by script; anything huge is a bug
+    # upstream, and F5 generation time scales with output length.
     text = text[:800]
 
     t0 = time.time()
-    mp3 = await _synthesize(text, language)
-    print(f"synth {time.time() - t0:.2f}s  {language}  {len(text)}ch: {text[:60]!r}")
-    return Response(content=mp3, media_type="audio/mpeg")
+    wav = await run_in_threadpool(_synthesize_sync, text)
+    print(f"synth {time.time() - t0:.2f}s for {len(text)} chars: {text[:60]!r}")
+    from starlette.responses import Response
+
+    return Response(content=wav, media_type="audio/wav")

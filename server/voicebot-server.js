@@ -87,14 +87,16 @@ async function speechToText(pcm, language) {
   return (data?.text || "").trim()
 }
 
-// ---------- TTS: Edge TTS (server/tts-service, Microsoft neural voices, CPU-only) ----------
+// ---------- TTS: self-hosted IndicF5 (server/tts-service, no fallback) ----------
+// One cloned voice (Priya) across Telugu/Hindi/English — the language of the
+// output follows the script of the text itself, so no per-language voice map.
 const TTS_URL = process.env.TTS_SERVICE_URL || "http://127.0.0.1:3004"
 
-async function synthesizeSpeech(text, language) {
+async function synthesizeSpeech(text, _language) {
   const res = await fetch(`${TTS_URL}/synthesize`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
-    body: JSON.stringify({ text, language: language || "telugu" }),
+    body: JSON.stringify({ text }),
     signal: AbortSignal.timeout(30000),
   })
   if (!res.ok) throw new Error(`TTS service HTTP ${res.status} — is server/tts-service running?`)
@@ -439,4 +441,4 @@ wss.on("connection", (ws) => {
   ws.on("error", (e) => console.error("ws error:", e.message))
 })
 
-console.log(`Voicebot server listening on ws://127.0.0.1:${PORT}/voicebot (put nginx wss in front) — TTS: edge-tts @ ${TTS_URL}`)
+console.log(`Voicebot server listening on ws://127.0.0.1:${PORT}/voicebot (put nginx wss in front) — TTS: indicf5 @ ${TTS_URL}`)
