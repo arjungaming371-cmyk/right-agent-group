@@ -20,7 +20,7 @@ See **DEPLOYMENT-GUIDE.md** (full deployment) and **SETUP-GUIDE-CLOUD-API.md** (
 - **AI Brain**: Ollama (Llama 3.1 8B) — fully local, zero cost
 - **Voice**: Exotel telephony → self-hosted WebSocket voicebot
 - **STT**: Whisper (faster-whisper) — `small` on CPU, `large-v3` on GPU
-- **TTS**: free Microsoft Edge neural voices — native Indian voices for English/Hindi/Telugu, no API key or GPU server needed
+- **TTS**: self-hosted IndicF5 (AI4Bharat F5-TTS, `server/tts-service`) — ONE cloned Priya voice across English/Hindi/Telugu; needs a GPU, no fallback provider
 - **WhatsApp**: Official Meta WhatsApp Business Cloud API — no QR, no ban risk. Replies inside the 24h service window are free; form-link templates ≈ ₹0.115 + GST per send
 - **Login**: Google OAuth with Gmail allowlist
 

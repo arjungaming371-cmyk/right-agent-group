@@ -6,7 +6,8 @@
 //
 //   caller audio → silence-based endpointing → STT (self-hosted Whisper)
 //     → Next.js /api/calls/turn (Ollama = Priya's brain, DB, WhatsApp link)
-//     → TTS (free Microsoft Edge neural voices — no GPU server needed)
+//     → TTS (self-hosted IndicF5, server/tts-service — ONE cloned voice
+//       across Telugu/Hindi/English, no fallback provider)
 //     → downsample to 8kHz PCM → streamed back to the caller.
 //
 // Exotel setup: Voicebot applet URL = wss://YOUR-DOMAIN/voicebot
@@ -19,7 +20,6 @@
 require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") })
 
 const { WebSocketServer } = require("ws")
-const { MsEdgeTTS, OUTPUT_FORMAT } = require("msedge-tts")
 const { spawn } = require("child_process")
 
 const PORT = parseInt(process.env.VOICEBOT_PORT || "3002")
@@ -84,24 +84,20 @@ async function speechToText(pcm, language) {
   return (data?.text || "").trim()
 }
 
-// ---------- TTS: free Microsoft Edge neural voices (no GPU server) ----------
-const EDGE_VOICES = {
-  english: "en-IN-NeerjaNeural",
-  hindi: "hi-IN-SwaraNeural",
-  telugu: "te-IN-ShrutiNeural",
-}
+// ---------- TTS: self-hosted IndicF5 (server/tts-service, no fallback) ----------
+// One cloned voice (Priya) across Telugu/Hindi/English — the language of the
+// output follows the script of the text itself, so no per-language voice map.
+const TTS_URL = process.env.TTS_SERVICE_URL || "http://127.0.0.1:3004"
 
-async function synthesizeSpeech(text, language) {
-  const tts = new MsEdgeTTS()
-  await tts.setMetadata(EDGE_VOICES[language] || EDGE_VOICES.english, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3)
-  const { audioStream } = tts.toStream(text)
-  const chunks = []
-  await new Promise((resolve, reject) => {
-    audioStream.on("data", (c) => chunks.push(c))
-    audioStream.on("end", resolve)
-    audioStream.on("error", reject)
+async function synthesizeSpeech(text, _language) {
+  const res = await fetch(`${TTS_URL}/synthesize`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+    body: JSON.stringify({ text }),
+    signal: AbortSignal.timeout(30000),
   })
-  return Buffer.concat(chunks)
+  if (!res.ok) throw new Error(`TTS service HTTP ${res.status} — is server/tts-service running?`)
+  return Buffer.from(await res.arrayBuffer())
 }
 
 // Playback loudness. Edge TTS output downsampled to 8kHz lands quiet on a
@@ -338,4 +334,4 @@ wss.on("connection", (ws) => {
   ws.on("error", (e) => console.error("ws error:", e.message))
 })
 
-console.log(`Voicebot server listening on ws://127.0.0.1:${PORT}/voicebot (put nginx wss in front) — TTS: edge`)
+console.log(`Voicebot server listening on ws://127.0.0.1:${PORT}/voicebot (put nginx wss in front) — TTS: indicf5 @ ${TTS_URL}`)
