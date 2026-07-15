@@ -69,7 +69,13 @@ print(f"Loading IndicF5 on {DEVICE} ...")
 t0 = time.time()
 from transformers import AutoModel  # noqa: E402
 
-model = AutoModel.from_pretrained("ai4bharat/IndicF5", trust_remote_code=True)
+# low_cpu_mem_usage=False: newer transformers builds models on the "meta"
+# device (empty weights) first, but IndicF5's custom __init__ constructs its
+# vocoder with real tensor ops — impossible on meta tensors
+# ("Tensor.item() cannot be called on meta tensors").
+model = AutoModel.from_pretrained(
+    "ai4bharat/IndicF5", trust_remote_code=True, low_cpu_mem_usage=False
+)
 # IndicF5 is custom remote code — .to() should move it like any nn.Module, but
 # if the wrapper manages devices internally this must not kill the service.
 # The warmup timing below exposes a silent CPU fallback immediately (30s+ vs ~3s).
