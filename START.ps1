@@ -1,4 +1,4 @@
-# RIGHT AGENT GROUP - ONE CLICK STARTUP (all 6 services)
+# RIGHT AGENT GROUP - ONE CLICK STARTUP (all 7 services)
 # Run: PowerShell -ExecutionPolicy Bypass -File START.ps1
 
 $ProjectDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -79,15 +79,26 @@ if (Test-Path $venvPython) {
     Write-Host "      Setup: cd server\stt-service; python -m venv venv; venv\Scripts\pip install -r requirements.txt" -ForegroundColor Yellow
 }
 
-# 4. Voicebot Server (port 3002) - the phone call brain
-Write-Host "[5/6] Starting Voicebot..." -ForegroundColor Yellow
+# 4. Edge TTS Service (port 3004) - Priya's voice for phone calls
+Write-Host "[5/7] Starting Edge TTS service..." -ForegroundColor Yellow
+$ttsProcess = $null
+$ttsDir = Join-Path $ProjectDir "server\tts-service"
+$ttsVenvPython = Join-Path $ttsDir "venv\Scripts\python.exe"
+$ttsPython = if (Test-Path $ttsVenvPython) { $ttsVenvPython } else { "python" }
+Stop-Port 3004
+$ttsProcess = Start-Process $ttsPython -ArgumentList "-m","uvicorn","app:app","--host","127.0.0.1","--port","3004" -WorkingDirectory $ttsDir -WindowStyle Hidden -PassThru
+Start-Sleep -Seconds 1
+Write-Host "      OK Edge TTS started (PID: $($ttsProcess.Id))" -ForegroundColor Green
+
+# 5. Voicebot Server (port 3002) - the phone call brain
+Write-Host "[6/7] Starting Voicebot..." -ForegroundColor Yellow
 Stop-Port 3002
 $vbProcess = Start-Process "node" -ArgumentList "server\voicebot-server.js" -WorkingDirectory $ProjectDir -WindowStyle Hidden -PassThru
 Start-Sleep -Seconds 1
 Write-Host "      OK Voicebot started (PID: $($vbProcess.Id))" -ForegroundColor Green
 
-# 5. Website (port 3000)
-Write-Host "[6/6] Starting Website..." -ForegroundColor Yellow
+# 6. Website (port 3000)
+Write-Host "[7/7] Starting Website..." -ForegroundColor Yellow
 Stop-Port 3000
 $webProcess = Start-Process "cmd" -ArgumentList "/c npm start" -WorkingDirectory $ProjectDir -WindowStyle Hidden -PassThru
 Start-Sleep -Seconds 5
@@ -140,7 +151,7 @@ try {
 } finally {
     Write-Host ""
     Write-Host "Stopping all services..." -ForegroundColor Yellow
-    foreach ($p in @($waProcess, $vbProcess, $sttProcess, $webProcess, $cfProcess)) {
+    foreach ($p in @($waProcess, $ttsProcess, $vbProcess, $sttProcess, $webProcess, $cfProcess)) {
         if ($p) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
     }
     Write-Host "All stopped." -ForegroundColor Green

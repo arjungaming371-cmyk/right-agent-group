@@ -24,6 +24,20 @@ const GROQ_URL = (process.env.GROQ_URL || "https://api.groq.com/openai/v1").repl
 const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile"
 const USE_GROQ = !!GROQ_API_KEY && process.env.LLM_PROVIDER !== "ollama"
 
+/**
+ * Whether it's safe to spend one extra small completion call mid-turn
+ * (used by the knowledge-base agentic retrieval retry). True when Groq is
+ * configured — a fast external API call that never touches the local
+ * Ollama queue — or when running on GPU, which has real concurrency
+ * headroom (MAX_CONCURRENT defaults to 2). On a bare CPU-only Ollama box
+ * (MAX_CONCURRENT=1), a second completion mid-turn would compete for the
+ * SAME slot the live call's main reply is about to need, risking added
+ * lag or queue timeouts on a real phone call — not worth it there.
+ */
+export function canAffordExtraCompletion(): boolean {
+  return USE_GROQ || IS_GPU
+}
+
 // ---- Concurrency cap ----------------------------------------------------
 // How many completions this app will have in flight AT ONCE. On a laptop,
 // 1-2 is realistic — without a cap, three simultaneous calls each take 3x
@@ -494,6 +508,46 @@ export async function extractLeadInfo(transcriptText: string): Promise<Extracted
   } catch (e) {
     console.error("extractLeadInfo error:", e)
     return empty
+  }
+}
+
+/**
+ * Agentic RAG step: called ONLY when a first-pass knowledge-base search
+ * came back empty or weak (see lib/knowledge-base.ts). Raw caller speech is
+ * often indirect or STT-garbled ("emi kotha thakuva cheyocha" / "can it come
+ * down some more") and never matches FAQ wording via full-text search. This
+ * turns that into a short, clean, keyword-style query — or returns null if
+ * the turn genuinely isn't a fact question (small talk, an answer to
+ * Priya's own question, etc.), so the retry doesn't fire a second useless
+ * search. Kept to one tiny, low-token call so the bounded retrieval loop
+ * (search → grade → reformulate → search once) stays cheap enough for
+ * call-turn latency.
+ */
+export async function rewriteKnowledgeQuery(rawQuery: string): Promise<string | null> {
+  try {
+    const text = await runCompletion(
+      [
+        {
+          role: "system",
+          content:
+            "Return ONLY valid JSON, no other text. The user text is one turn from a phone/WhatsApp " +
+            "conversation with a loan sales AI. Decide: is the customer asking a factual question " +
+            "(eligibility, documents, interest rate, EMI, loan amount, process, timelines, etc.)? " +
+            'If yes, return {"is_question": true, "query": "<3-6 keyword search query capturing what they want to know>"}. ' +
+            'If it is small talk, a greeting, or personal info (name/address/number), return {"is_question": false, "query": null}.',
+        },
+        { role: "user", content: rawQuery.slice(0, 300) },
+      ],
+      { timeoutMs: 4000, temperature: 0.1, numPredict: 60, json: true }
+    )
+    const parsed = JSON.parse(text || "{}")
+    if (parsed.is_question && typeof parsed.query === "string" && parsed.query.trim().length >= 3) {
+      return parsed.query.trim().slice(0, 200)
+    }
+    return null
+  } catch (e: any) {
+    console.error("rewriteKnowledgeQuery error:", e.message)
+    return null
   }
 }
 

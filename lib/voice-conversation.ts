@@ -153,7 +153,7 @@ async function getHistory(callSid: string): Promise<{ role: "user" | "model"; co
   }
 }
 
-function updateTranscriptAsync(leadId: string | null, callSid: string | null, speech: string, reply: string): void {
+function updateTranscriptAsync(callSid: string | null, speech: string, reply: string): void {
   if (!callSid) return
   db.from("voice_calls")
     .select("transcript")
@@ -299,7 +299,7 @@ export async function handleTurn(opts: {
   // first-utterance misfire can't kill a call that just connected.
   if (history.length > 0 && CUSTOMER_BYE_RE.test(speech)) {
     const reply = GOODBYE_REPLY[language]
-    updateTranscriptAsync(leadId || null, callSid, speech, reply)
+    updateTranscriptAsync(callSid, speech, reply)
     return { text: reply, hangup: true }
   }
 
@@ -319,7 +319,7 @@ export async function handleTurn(opts: {
     reply = RETRY_MSG[language]
   }
 
-  updateTranscriptAsync(leadId || null, callSid, speech, reply)
+  updateTranscriptAsync(callSid, speech, reply)
 
   const completed = await completeLeadIfReady({ leadId, callSid, callerPhone, messages, reply })
   if (completed) return { text: CLOSING[language], hangup: true }
@@ -353,7 +353,7 @@ export async function handleTurnStream(
 
   if (history.length > 0 && CUSTOMER_BYE_RE.test(speech)) {
     const reply = GOODBYE_REPLY[language]
-    updateTranscriptAsync(leadId || null, callSid, speech, reply)
+    updateTranscriptAsync(callSid, speech, reply)
     onSentence(reply)
     return { hangup: true }
   }
@@ -386,12 +386,12 @@ export async function handleTurnStream(
   } catch (e) {
     console.error("Ollama error:", e)
     const msg = RETRY_MSG[language]
-    updateTranscriptAsync(leadId || null, callSid, speech, msg)
+    updateTranscriptAsync(callSid, speech, msg)
     onSentence(msg)
     return { hangup: false }
   }
 
-  updateTranscriptAsync(leadId || null, callSid, speech, reply)
+  updateTranscriptAsync(callSid, speech, reply)
 
   const completed = await completeLeadIfReady({ leadId, callSid, callerPhone, messages, reply })
   if (completed) {

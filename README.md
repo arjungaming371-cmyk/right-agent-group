@@ -9,7 +9,7 @@ See **DEPLOYMENT-GUIDE.md** (full deployment) and **SETUP-GUIDE-CLOUD-API.md** (
 2. `ollama pull llama3.1:8b`
 3. Copy `.env.example` → `.env` and fill every ❌ value (Google login keys are REQUIRED; `WHATSAPP_APP_SECRET` is REQUIRED — the webhook is publicly abusable without it)
 4. `npm install && npm run db:setup`   ← creates the database + all tables automatically
-5. `cd server && npm install && cd stt-service && python -m venv venv && venv\Scripts\pip install -r requirements.txt && cd ..\..`
+5. `cd server && npm install && cd stt-service && python -m venv venv && venv\Scripts\pip install -r requirements.txt && cd ..\tts-service && python -m venv venv && venv\Scripts\pip install -r requirements.txt && cd ..\..`
 6. Set up a **named Cloudflare tunnel** (see `cloudflared-config.example.yml`) — a quick tunnel breaks Google login, the Meta webhook, Exotel callbacks, and never exposes the voicebot WebSocket on port 3002
 7. `npm run build`
 8. `PowerShell -ExecutionPolicy Bypass -File START.ps1`  ← starts everything (Postgres check, Ollama, STT, voicebot, website, tunnel)
@@ -20,7 +20,7 @@ See **DEPLOYMENT-GUIDE.md** (full deployment) and **SETUP-GUIDE-CLOUD-API.md** (
 - **AI Brain**: Ollama (Llama 3.1 8B) — fully local, zero cost
 - **Voice**: Exotel telephony → self-hosted WebSocket voicebot
 - **STT**: Whisper (faster-whisper) — `small` on CPU, `large-v3` on GPU
-- **TTS**: self-hosted IndicF5 (AI4Bharat F5-TTS, `server/tts-service`) — ONE cloned Priya voice across English/Hindi/Telugu; needs a GPU, no fallback provider
+- **TTS**: phone calls use self-hosted Edge TTS (`server/tts-service`, free Microsoft neural voices, no GPU/API key needed); the dashboard "speak" button uses `lib/tts.ts` (`TTS_PROVIDER=edge` by default, or `elevenlabs` if you set `ELEVENLABS_API_KEY`)
 - **WhatsApp**: Official Meta WhatsApp Business Cloud API — no QR, no ban risk. Replies inside the 24h service window are free; form-link templates ≈ ₹0.115 + GST per send
 - **Login**: Google OAuth with Gmail allowlist
 

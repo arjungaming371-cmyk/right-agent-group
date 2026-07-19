@@ -114,7 +114,7 @@ class UpdateBuilder implements PromiseLike<{ data: any; error: any }> {
   }
 
   eq(column: string, value: any) {
-    this.filters.push({ column, op: "eq", value })
+    this.filters.push({ column: assertSafeIdentifier(column), op: "eq", value })
     return this
   }
 
@@ -223,7 +223,7 @@ class DeleteBuilder implements PromiseLike<{ data: any; error: any }> {
   }
 
   eq(column: string, value: any) {
-    this.filters.push({ column, op: "eq", value })
+    this.filters.push({ column: assertSafeIdentifier(column), op: "eq", value })
     return this
   }
 
@@ -281,17 +281,17 @@ class SelectBuilder implements PromiseLike<{ data: any; error: any; count?: numb
   }
 
   eq(column: string, value: any) {
-    this.filters.push({ column, op: "eq", value })
+    this.filters.push({ column: assertSafeIdentifier(column), op: "eq", value })
     return this
   }
 
   ilike(column: string, pattern: string) {
-    this.filters.push({ column, op: "ilike", value: pattern.replace(/%/g, "") })
+    this.filters.push({ column: assertSafeIdentifier(column), op: "ilike", value: pattern.replace(/%/g, "") })
     return this
   }
 
   order(column: string, opts?: { ascending?: boolean }) {
-    this.orderCol = column
+    this.orderCol = assertSafeIdentifier(column)
     this.orderAsc = opts?.ascending ?? true
     return this
   }
