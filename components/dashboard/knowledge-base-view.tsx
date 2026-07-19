@@ -27,7 +27,7 @@ const SOURCE_BADGE: Record<Entry["source_type"], { label: string; color: string 
   url: { label: "URL", color: "#2dd4a0" },
 }
 
-export default function KnowledgeBaseView({ role }: { role: "admin" | "agent" | "viewer" }) {
+export default function KnowledgeBaseView({ role }: { role: "admin" | "agent" | "viewer" | "developer" }) {
   const canEdit = role !== "viewer"
   const toast = useToast()
   const [entries, setEntries] = useState<Entry[]>([])

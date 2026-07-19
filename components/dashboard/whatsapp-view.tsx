@@ -24,7 +24,7 @@ function Tick({ status }: { status?: string }) {
   return <span style={{ color: "#9ca3af" }}>✓</span>
 }
 
-export default function WhatsAppView({ role }: { role: "admin" | "agent" | "viewer" }) {
+export default function WhatsAppView({ role }: { role: "admin" | "agent" | "viewer" | "developer" }) {
   const canEdit = role !== "viewer"
   const toast = useToast()
   const [leads, setLeads]       = useState<Lead[]>([])

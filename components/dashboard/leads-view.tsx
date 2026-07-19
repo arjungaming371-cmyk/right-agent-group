@@ -79,7 +79,7 @@ function Avatar({ name }: { name: string }) {
   )
 }
 
-export default function LeadsView({ role, initialSearch }: { role: "admin" | "agent" | "viewer"; initialSearch?: string }) {
+export default function LeadsView({ role, initialSearch }: { role: "admin" | "agent" | "viewer" | "developer"; initialSearch?: string }) {
   const canEdit = role !== "viewer"
   const toast = useToast()
   const [leads, setLeads] = useState<Lead[]>([])

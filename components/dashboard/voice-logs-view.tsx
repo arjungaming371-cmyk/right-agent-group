@@ -34,7 +34,7 @@ function proxyRecordingUrl(url: string | null): string | null {
   return url
 }
 
-export default function VoiceLogsView({ role }: { role: "admin" | "agent" | "viewer" }) {
+export default function VoiceLogsView({ role }: { role: "admin" | "agent" | "viewer" | "developer" }) {
   const canEdit = role !== "viewer"
   const toast = useToast()
   const [calls, setCalls]   = useState<Call[]>([])

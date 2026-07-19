@@ -20,7 +20,7 @@ function Avatar({ name }: { name: string }) {
   )
 }
 
-export default function LoanAppsView({ role, initialSearch }: { role: "admin" | "agent" | "viewer"; initialSearch?: string }) {
+export default function LoanAppsView({ role, initialSearch }: { role: "admin" | "agent" | "viewer" | "developer"; initialSearch?: string }) {
   const canEdit = role !== "viewer"
   const [apps, setApps] = useState<LoanApp[]>([])
   const [loading, setLoading] = useState(true)
