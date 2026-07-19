@@ -2,8 +2,8 @@
 import { useEffect, useState } from "react"
 import { useParams } from "next/navigation"
 
-// TODO: replace with the real loan types from rightagentgroupe.com once available
-const LOAN_TYPES = ["Home Loan", "Personal Loan", "Car Loan", "Business Loan", "Term Insurance", "Health Insurance"]
+import { PRODUCT_GROUPS } from "@/lib/products"
+
 const EMPLOYMENT_TYPES = ["Salaried", "Self-Employed", "Business Owner", "Retired", "Other"]
 
 export default function ApplicationFormPage() {
@@ -127,7 +127,11 @@ export default function ApplicationFormPage() {
 
         <label style={label}>Loan Type</label>
         <select style={input} value={form.loan_type} onChange={(e) => setForm({ ...form, loan_type: e.target.value })}>
-          {LOAN_TYPES.map((t) => <option key={t}>{t}</option>)}
+          {PRODUCT_GROUPS.map((g) => (
+            <optgroup key={g.label} label={g.label}>
+              {g.products.map((t) => <option key={t}>{t}</option>)}
+            </optgroup>
+          ))}
         </select>
 
         <label style={label}>Loan Amount (₹)</label>

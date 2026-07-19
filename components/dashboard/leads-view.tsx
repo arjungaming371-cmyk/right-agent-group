@@ -6,8 +6,7 @@ import { useToast } from "../ui/toast"
 import { Skeleton } from "../ui/skeleton"
 import LeadMemoryModal from "./lead-memory-modal"
 
-// TODO: replace with the real loan types from rightagentgroupe.com once available
-const LOAN_TYPES = ["Home Loan", "Personal Loan", "Car Loan", "Business Loan", "Term Insurance", "Health Insurance"]
+import { PRODUCT_GROUPS, LOAN_TYPES } from "@/lib/products"
 
 type Lead = {
   id: string; name: string; phone: string; address: string; whatsapp_number: string
@@ -362,7 +361,11 @@ export default function LeadsView({ role, initialSearch }: { role: "admin" | "ag
             <div style={{ marginBottom: 12 }}>
               <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Loan Type</label>
               <select value={form.product_interest} onChange={(e) => setForm({ ...form, product_interest: e.target.value })}>
-                {LOAN_TYPES.map((t) => <option key={t}>{t}</option>)}
+                {PRODUCT_GROUPS.map((g) => (
+                  <optgroup key={g.label} label={g.label}>
+                    {g.products.map((t) => <option key={t}>{t}</option>)}
+                  </optgroup>
+                ))}
               </select>
             </div>
             <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
