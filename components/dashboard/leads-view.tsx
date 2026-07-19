@@ -10,7 +10,7 @@ import { PRODUCT_GROUPS, LOAN_TYPES } from "@/lib/products"
 
 type Lead = {
   id: string; name: string; phone: string; address: string; whatsapp_number: string
-  product_interest: string; status: string; interested: string; loan_amount: number
+  product_interest: string; status: string; interested: string; loan_amount: number; language: string
   call_count: number; created_at: string; updated_at: string; score: number
   form_token: string | null; form_used_at: string | null; form_sent_at: string | null
   form_completed: boolean
@@ -94,7 +94,7 @@ export default function LeadsView({ role, initialSearch }: { role: "admin" | "ag
   const [interestedFilter, setInterestedFilter] = useState("all")
 
   const [showAdd, setShowAdd] = useState(false)
-  const [form, setForm] = useState({ name: "", phone: "", address: "", product_interest: "Home Loan", loan_amount: "", language: "english" })
+  const [form, setForm] = useState({ name: "", phone: "", address: "", product_interest: "Home Loan", loan_amount: "", language: "telugu" })
 
   const [callTarget, setCallTarget] = useState<Lead | null>(null)
   const [callInstructions, setCallInstructions] = useState("")
@@ -136,7 +136,7 @@ export default function LeadsView({ role, initialSearch }: { role: "admin" | "ag
     const res = await fetch("/api/calls", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ leadId: callTarget.id, phone: callTarget.phone, language: "english", instructions: callInstructions }),
+      body: JSON.stringify({ leadId: callTarget.id, phone: callTarget.phone, language: callTarget.language || "telugu", instructions: callInstructions }),
     })
     const data = await res.json()
     setCalling(null)

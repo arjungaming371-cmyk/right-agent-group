@@ -80,9 +80,9 @@ export async function POST(req: NextRequest) {
           leadId = lead.id
           if (lead.language) language = normalizeLanguage(lead.language)
         } else {
-          // language telugu explicitly — the DB column default is english,
-          // which would silently lock every new inbound caller out of the
-          // Telugu-first greeting on their next call.
+          // language telugu explicitly — belt-and-braces with the DB column
+          // default (also telugu since the Tenglish-first change), so an old
+          // database that predates the migration still behaves correctly.
           const { data: newLead } = await db
             .from("leads")
             .insert({ name: `Caller ${digits.slice(-4)}`, phone, source: "inbound_call", status: "new", language: "telugu" })

@@ -10,7 +10,7 @@ export default function UploadView() {
   const toast = useToast()
   const [files, setFiles] = useState<UploadedFile[]>([])
   const [uploading, setUploading] = useState(false)
-  const [queueForm, setQueueForm] = useState({ name: "", phone: "", language: "english", product_interest: "Home Loan", notes: "" })
+  const [queueForm, setQueueForm] = useState({ name: "", phone: "", language: "telugu", product_interest: "Home Loan", notes: "" })
   const [preview, setPreview] = useState<{ uploadId: string; contacts: Contact[] } | null>(null)
   const [confirming, setConfirming] = useState(false)
   const csvRef = useRef<HTMLInputElement>(null)
@@ -81,7 +81,7 @@ export default function UploadView() {
 
   async function addToQueue() {
     const res = await fetch("/api/outbound", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(queueForm) })
-    if (res.ok) { toast.success("Added to outbound queue"); setQueueForm({ name: "", phone: "", language: "english", product_interest: "Home Loan", notes: "" }); load() }
+    if (res.ok) { toast.success("Added to outbound queue"); setQueueForm({ name: "", phone: "", language: "telugu", product_interest: "Home Loan", notes: "" }); load() }
     else { const d = await res.json(); toast.error(d.error || "Could not add to queue") }
   }
 
@@ -171,7 +171,7 @@ export default function UploadView() {
           <div>
             <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Language</label>
             <select value={queueForm.language} onChange={(e) => setQueueForm({ ...queueForm, language: e.target.value })}>
-              <option value="english">English</option><option value="hindi">Hinglish</option><option value="telugu">Tenglish</option>
+              <option value="telugu">Tenglish</option><option value="hindi">Hinglish</option><option value="english">English</option>
             </select>
           </div>
         </div>

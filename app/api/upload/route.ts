@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
 
       const name    = obj.name || obj["full name"] || obj["customer name"] || "Unknown"
       const phone   = obj.phone || obj["phone number"] || obj.mobile || ""
-      const lang    = obj.language || obj.lang || "english"
+      const lang    = obj.language || obj.lang || "telugu"
       const product = obj.product_interest || obj.product || "Home Loan"
       const notes   = obj.notes || obj.note || ""
 

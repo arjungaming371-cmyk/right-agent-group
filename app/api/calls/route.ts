@@ -28,13 +28,13 @@ export async function POST(req: NextRequest) {
     const internal = process.env.APP_INTERNAL_URL || "http://127.0.0.1:3000"
     fetch(`${internal}/api/warmup`, { method: "POST" }).catch(() => {})
 
-    const call = await makeCall(phone, leadId ?? "", language ?? "english", instructions)
+    const call = await makeCall(phone, leadId ?? "", language ?? "telugu", instructions)
     await db.from("voice_calls").insert({
       lead_id: leadId ?? null,
       twilio_call_sid: call.sid,
       direction: "outbound",
       status: "initiated",
-      language: language ?? "english",
+      language: language ?? "telugu",
       phone,
     })
     if (leadId) {
