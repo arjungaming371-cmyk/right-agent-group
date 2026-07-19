@@ -390,7 +390,10 @@ export async function chatWithOllamaStream(
   if (extraInstructions?.trim()) {
     systemPrompt += `\n\nAdditional context for this specific call (from the operations team): ${extraInstructions.trim()}`
   }
-  const recentMessages = messages.slice(-6)
+  // 12 messages = 6 exchanges of live-call context. Call turns are 1-2 short
+  // sentences each, so this fits comfortably in num_ctx even on CPU — and on
+  // Groq (the primary brain) the extra prompt tokens cost no noticeable time.
+  const recentMessages = messages.slice(-12)
   const chatMessages = toOllamaMessages(recentMessages, systemPrompt)
   const timeoutMs = IS_GPU ? 35000 : 25000
   // numPredict 90: same cap as the non-streaming live path — see chatWithOllama.
@@ -441,7 +444,9 @@ async function runOllamaChat(
   systemPrompt: string,
   opts?: { numCtx?: number; numPredict?: number; timeoutMs?: number; historyTurns?: number }
 ): Promise<string> {
-  const recentMessages = messages.slice(-(opts?.historyTurns ?? 6))
+  // Default 12 (was 6): Priya's call + WhatsApp turns are short, and 3
+  // exchanges of memory made her re-ask things said moments earlier.
+  const recentMessages = messages.slice(-(opts?.historyTurns ?? 12))
   const chatMessages = toOllamaMessages(recentMessages, systemPrompt)
   // GPU is normally much faster than CPU, but cold model loads (first
   // inference after a fresh pull/restart, or Kaggle's shared dual-GPU

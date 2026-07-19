@@ -1,6 +1,6 @@
 # Right Agent Group — Operations Console (FINAL_10.1, Cloud API)
 
-AI-powered loan lead management system. Priya (the AI) handles outbound/inbound calls in English, Hindi, and Telugu, collects lead details, and sends the application form link via the **official Meta WhatsApp Business Cloud API**.
+AI-powered loan lead management system. Priya (the AI) handles outbound/inbound calls in English, Hinglish, and Tenglish (Hindi/Telugu spoken naturally, written in Roman script — one consistent en-IN voice), collects lead details, and sends the application form link via the **official Meta WhatsApp Business Cloud API**.
 
 ## Quick Start
 See **DEPLOYMENT-GUIDE.md** (full deployment) and **SETUP-GUIDE-CLOUD-API.md** (WhatsApp/Meta setup).

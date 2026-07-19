@@ -22,8 +22,12 @@ const PROVIDER = (process.env.TTS_PROVIDER || "edge").toLowerCase()
 // ---------- Edge TTS (default — free, no key) ----------
 const EDGE_VOICES: Record<Language, string> = {
   english: "en-IN-NeerjaNeural",
-  hindi: "hi-IN-SwaraNeural",
-  telugu: "te-IN-ShrutiNeural",
+  // Hinglish/Tenglish are written in Roman script, so the Indian-English
+  // voice pronounces them naturally — and Priya keeps ONE consistent voice
+  // across all three languages. (hi-IN/te-IN voices read Latin text with
+  // English word rules, which sounds wrong for romanized Hindi/Telugu.)
+  hindi: "en-IN-NeerjaNeural",
+  telugu: "en-IN-NeerjaNeural",
 }
 
 async function edgeSpeech(text: string, language: Language): Promise<Buffer | null> {

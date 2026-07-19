@@ -5,7 +5,7 @@ import { Phone, MessageCircle, ShieldCheck, Sparkles } from "lucide-react"
 export const dynamic = "force-dynamic"
 
 const FEATURES = [
-  { icon: Phone,         title: "AI Voice Agent",       desc: "Priya calls leads in English, Hindi & Telugu" },
+  { icon: Phone,         title: "AI Voice Agent",       desc: "Priya calls leads in English, Hinglish & Tenglish" },
   { icon: MessageCircle, title: "WhatsApp Automation",  desc: "Official Meta Cloud API — instant follow-ups" },
   { icon: ShieldCheck,   title: "Enterprise Security",  desc: "Signed sessions, audit trail, allowlisted access" },
 ]

@@ -171,7 +171,7 @@ export default function UploadView() {
           <div>
             <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Language</label>
             <select value={queueForm.language} onChange={(e) => setQueueForm({ ...queueForm, language: e.target.value })}>
-              <option value="english">English</option><option value="hindi">Hindi</option><option value="telugu">Telugu</option>
+              <option value="english">English</option><option value="hindi">Hinglish</option><option value="telugu">Tenglish</option>
             </select>
           </div>
         </div>

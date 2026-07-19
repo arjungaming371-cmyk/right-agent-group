@@ -175,8 +175,12 @@ async function handleInbound(msg: any, profileName: string | null) {
   let aiReply: string | null = null
   try {
     const lang = detectLanguage(text) as Language
+    // Newest 15 rows, flipped back to chronological — ASC LIMIT would pin the
+    // context to the oldest 15 messages forever once a chat outgrows the limit.
     const historyRes = await query(
-      `SELECT role, content FROM ai_conversations WHERE lead_id = $1 ORDER BY created_at ASC LIMIT 15`,
+      `SELECT role, content FROM (
+         SELECT role, content, created_at FROM ai_conversations WHERE lead_id = $1 ORDER BY created_at DESC LIMIT 15
+       ) recent ORDER BY created_at ASC`,
       [lead.id]
     )
     const messages = [

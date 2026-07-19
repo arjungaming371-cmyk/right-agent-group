@@ -145,8 +145,8 @@ export default function VoiceLogsView({ role }: { role: "admin" | "agent" | "vie
             )}
             <select value={language} onChange={e => setLanguage(e.target.value)} style={{ width: 140 }}>
               <option value="english">English</option>
-              <option value="hindi">Hindi</option>
-              <option value="telugu">Telugu</option>
+              <option value="hindi">Hinglish</option>
+              <option value="telugu">Tenglish</option>
             </select>
           </div>
 

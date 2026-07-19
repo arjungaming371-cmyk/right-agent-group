@@ -6,6 +6,7 @@ import { sendApplicationLink } from "./whatsapp"
 import { buildLeadBrief } from "./lead-brain"
 import { searchKnowledgeBase } from "./knowledge-base"
 import { detectFrustration, flagFrustratedCall } from "./frustration"
+import { createNotification } from "./notifications"
 
 // Permission-based opener — respect keeps people on the line.
 // Neutral/informational by design: this is an intake call, not a sales
@@ -14,9 +15,9 @@ export const GREETINGS: Record<Language, string> = {
   english:
     "Hello, good morning! This is Priya calling from Right Agent Group, Hyderabad. This will take just one minute — I'm calling to note down a few details for a loan application: your name, city, and a WhatsApp number to send the application link. May I have your full name, please?",
   hindi:
-    "नमस्ते! मैं Priya बोल रही हूं, Right Agent Group, Hyderabad से। सिर्फ एक मिनट लगेगा — मैं लोन आवेदन के लिए कुछ जानकारी नोट करने के लिए कॉल कर रही हूं: आपका नाम, शहर और आवेदन लिंक भेजने के लिए WhatsApp नंबर। कृपया अपना पूरा नाम बताएं?",
+    "Namaste, good morning! Main Priya bol rahi hoon Right Agent Group, Hyderabad se. Sirf ek minute lagega — main loan application ke liye kuch details note karne ke liye call kar rahi hoon: aapka naam, city, aur application link bhejne ke liye WhatsApp number. Aapka poora naam bata sakte hain?",
   telugu:
-    "నమస్కారం! నేను Priya, Right Agent Group, Hyderabad నుండి మాట్లాడుతున్నాను. ఒక్క నిమిషం చాలు — లోన్ అప్లికేషన్ కోసం కొన్ని వివరాలు నోట్ చేయడానికి కాల్ చేస్తున్నాను: మీ పేరు, ఊరు, మరియు అప్లికేషన్ లింక్ పంపడానికి WhatsApp నంబర్. దయచేసి మీ పూర్తి పేరు చెప్పండి?",
+    "Namaskaram! Nenu Priya, Right Agent Group, Hyderabad nunchi matladutunnanu. Okka nimisham chalu — loan application kosam konni details note cheyadaniki call chestunnanu: mee peru, ooru, mariyu application link pampadaniki WhatsApp number. Mee full name cheppagalara?",
 }
 
 // Inbound calls are the customer's initiative — greet like a receptionist,
@@ -25,15 +26,15 @@ export const INBOUND_GREETINGS: Record<Language, string> = {
   english:
     "Hello! Thank you for calling Right Agent Group, Hyderabad. This is Priya. How can I help you today?",
   hindi:
-    "नमस्ते! Right Agent Group, Hyderabad में कॉल करने के लिए धन्यवाद। मैं Priya बोल रही हूं। बताइए, मैं आपकी क्या मदद कर सकती हूं?",
+    "Namaste! Right Agent Group, Hyderabad ko call karne ke liye dhanyavad. Main Priya bol rahi hoon. Batayiye, main aapki kya madad kar sakti hoon?",
   telugu:
-    "నమస్కారం! Right Agent Group, Hyderabad కి కాల్ చేసినందుకు ధన్యవాదాలు. నేను Priya. చెప్పండి, మీకు ఎలా సహాయం చేయగలను?",
+    "Namaskaram! Right Agent Group, Hyderabad ki call chesinanduku dhanyavadalu. Nenu Priya. Cheppandi, meeku ela help cheyagalanu?",
 }
 
 const CLOSING: Record<Language, string> = {
   english: "Thank you! I'm sending the application link to your WhatsApp right now. Our loan officer will confirm your best offer soon. Have a great day!",
-  hindi: "धन्यवाद! मैं अभी आपके WhatsApp पर आवेदन लिंक भेज रही हूं। हमारे लोन ऑफिसर जल्द आपका बेस्ट ऑफर कन्फर्म करेंगे। आपका दिन शुभ हो!",
-  telugu: "ధన్యవాదాలు! నేను ఇప్పుడు మీ WhatsApp కి అప్లికేషన్ లింక్ పంపుతున్నాను. మా లోన్ ఆఫీసర్ త్వరలో మీ బెస్ట్ ఆఫర్ కన్ఫర్మ్ చేస్తారు. మీకు మంచి రోజు జరగాలి!",
+  hindi: "Dhanyavad! Main abhi aapke WhatsApp pe application link bhej rahi hoon. Hamare loan officer jald aapka best offer confirm karenge. Aapka din shubh ho!",
+  telugu: "Dhanyavadalu! Nenu ippude mee WhatsApp ki application link pampistunnanu. Maa loan officer tvaralo mee best offer confirm chestaru. Meeku manchi roju!",
 }
 
 // Inbound calls auto-create a lead with a placeholder like "Caller 8090"
@@ -43,8 +44,8 @@ const PLACEHOLDER_NAME_RE = /^Caller \d+$/
 function personalizedGreeting(language: Language, name: string): string {
   const templates: Record<Language, string> = {
     english: `Hello ${name}! This is Priya calling from Right Agent Group, Hyderabad. This will take just a minute — I just need to confirm a couple of details and get a WhatsApp number to send your application link.`,
-    hindi: `नमस्ते ${name} जी! मैं Priya बोल रही हूं, Right Agent Group, Hyderabad से। सिर्फ एक मिनट लगेगा — मुझे बस कुछ जानकारी कन्फर्म करनी है और आवेदन लिंक भेजने के लिए WhatsApp नंबर चाहिए।`,
-    telugu: `నమస్కారం ${name} గారు! నేను Priya, Right Agent Group, Hyderabad నుండి మాట్లాడుతున్నాను. ఒక్క నిమిషం చాలు — నేను కొన్ని వివరాలు నిర్ధారించి, అప్లికేషన్ లింక్ పంపడానికి WhatsApp నంబర్ తీసుకోవాలి.`,
+    hindi: `Namaste ${name} ji! Main Priya bol rahi hoon, Right Agent Group, Hyderabad se. Sirf ek minute lagega — mujhe bas kuch details confirm karni hain aur application link bhejne ke liye WhatsApp number chahiye.`,
+    telugu: `Namaskaram ${name} garu! Nenu Priya, Right Agent Group, Hyderabad nunchi matladutunnanu. Okka nimisham chalu — nenu konni details confirm chesi, application link pampadaniki WhatsApp number teesukovali.`,
   }
   return templates[language]
 }
@@ -52,23 +53,23 @@ function personalizedGreeting(language: Language, name: string): string {
 function personalizedInboundGreeting(language: Language, name: string): string {
   const templates: Record<Language, string> = {
     english: `Hello ${name}! Thank you for calling Right Agent Group, Hyderabad. This is Priya. How can I help you today?`,
-    hindi: `नमस्ते ${name} जी! Right Agent Group, Hyderabad में कॉल करने के लिए धन्यवाद। मैं Priya बोल रही हूं। बताइए, मैं आपकी क्या मदद कर सकती हूं?`,
-    telugu: `నమస్కారం ${name} గారు! Right Agent Group, Hyderabad కి కాల్ చేసినందుకు ధన్యవాదాలు. నేను Priya. చెప్పండి, మీకు ఎలా సహాయం చేయగలను?`,
+    hindi: `Namaste ${name} ji! Right Agent Group, Hyderabad ko call karne ke liye dhanyavad. Main Priya bol rahi hoon. Batayiye, main aapki kya madad kar sakti hoon?`,
+    telugu: `Namaskaram ${name} garu! Right Agent Group, Hyderabad ki call chesinanduku dhanyavadalu. Nenu Priya. Cheppandi, meeku ela help cheyagalanu?`,
   }
   return templates[language]
 }
 
 const RETRY_MSG: Record<Language, string> = {
   english: "Sorry, I had a small technical moment. Could you please share your name so I can send your loan application link?",
-  hindi:   "माफ कीजिए, छोटी तकनीकी समस्या हुई। कृपया अपना नाम बताएं ताकि मैं आपका लोन आवेदन लिंक भेज सकूं।",
-  telugu:  "క్షమించండి, చిన్న సాంకేతిక సమస్య వచ్చింది. దయచేసి మీ పేరు చెప్పండి, మీ లోన్ అప్లికేషన్ లింక్ పంపుతాను.",
+  hindi:   "Maaf kijiye, chhoti technical problem hui. Kripya apna naam batayein taaki main aapka loan application link bhej sakoon.",
+  telugu:  "Sorry, chinna technical problem vachindi. Dayachesi mee peru cheppandi, mee loan application link pampistanu.",
 }
 
 // FIXED: only real goodbye phrases end the call.
 // Plain "thank you" / "धन्यवाद" / "ధన్యవాదాలు" must NOT hang up —
 // Priya says thanks naturally in the middle of a conversation.
 const GOODBYE_RE =
-  /goodbye|bye[- ]?bye|have a (great|good|nice) day|अलविदा|फिर मिलेंगे|दिन शुभ हो|వీడ్కోలు|సెలవు|మంచి రోజు జరగాలి/i
+  /goodbye|bye[- ]?bye|have a (great|good|nice) day|din shubh ho|phir milenge|alvida|manchi roju|selavu|veedkolu|अलविदा|फिर मिलेंगे|दिन शुभ हो|వీడ్కోలు|సెలవు|మంచి రోజు జరగాలి/i
 
 // CUSTOMER-side goodbye: when the CALLER says bye, the call is over — full
 // stop. Observed live: customer said "Thank you. Bye." and Priya kept
@@ -82,8 +83,8 @@ const CUSTOMER_BYE_RE =
 // WhatsApp message that may not exist yet.
 const GOODBYE_REPLY: Record<Language, string> = {
   english: "Thank you for your time! Have a great day. Goodbye!",
-  hindi: "आपके समय के लिए धन्यवाद! आपका दिन शुभ हो। नमस्ते!",
-  telugu: "మీ సమయానికి ధన్యవాదాలు! మీకు మంచి రోజు జరగాలి. నమస్కారం!",
+  hindi: "Aapke samay ke liye dhanyavad! Aapka din shubh ho. Namaste!",
+  telugu: "Mee time ki dhanyavadalu! Meeku manchi roju. Namaskaram!",
 }
 
 /** Called on the first webhook hit of a call (before any speech). Bumps call_count once per call. */
@@ -260,7 +261,9 @@ async function completeLeadIfReady(opts: {
       if (!result.ok) console.error("WhatsApp link send failed:", result.error)
       // Mark this call as already followed-up so the status webhook doesn't
       // ALSO send the generic post-call WhatsApp message once the call ends.
-      if (callSid) {
+      // Only on SUCCESS — if the link send failed, the post-call fallback
+      // template is the customer's only remaining automatic touchpoint.
+      if (callSid && result.ok) {
         db.from("voice_calls").update({ followup_sent: true }).eq("twilio_call_sid", callSid).catch(() => {})
       }
       // Surface the exact link in the dashboard's Communication Log.
@@ -273,6 +276,17 @@ async function completeLeadIfReady(opts: {
           : `Application form link generated but WhatsApp send FAILED (${result.error}) — share manually: ${appUrl}/form/${token}`,
         outcome: result.ok ? "sent" : "failed",
       }).catch(() => {})
+      // Priya just told the customer "the link is on its way" — if the send
+      // actually failed, ping the operator to share it manually before the
+      // customer gives up waiting.
+      if (!result.ok) {
+        createNotification({
+          type: "whatsapp_message",
+          title: "Form link send FAILED — share manually",
+          body: `${extracted.name || waNumber}: WhatsApp send failed (${result.error}). Link: ${appUrl}/form/${token}`,
+          linkView: "leads",
+        })
+      }
     }
   } catch (e) {
     console.error("lead completion error:", e)

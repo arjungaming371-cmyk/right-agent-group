@@ -2,9 +2,12 @@
 #
 # Uses Microsoft Edge TTS — free, no API key, no GPU needed, runs on any CPU.
 # Voices used:
-#   Telugu  → te-IN-ShrutiNeural  (female, clear, natural)
-#   Hindi   → hi-IN-SwaraNeural   (female)
-#   English → en-IN-NeerjaNeural  (female, Indian accent)
+#   Telugu (Tenglish, Roman script)  → en-IN-NeerjaNeural
+#   Hindi (Hinglish, Roman script)   → en-IN-NeerjaNeural
+#   English                          → en-IN-NeerjaNeural
+# One voice for all three: Priya now speaks Hinglish/Tenglish written in
+# English letters, which the Indian-English voice pronounces naturally —
+# and the caller hears the same consistent voice in every language.
 #
 # Returns MP3 audio — ffmpeg in the voicebot converts to 8kHz PCM for Exotel.
 #
@@ -48,8 +51,8 @@ _load_project_env()
 API_KEY = os.environ.get("TTS_API_KEY") or os.environ.get("WHATSAPP_SERVICE_KEY", "")
 
 VOICE_MAP = {
-    "telugu":  "te-IN-ShrutiNeural",
-    "hindi":   "hi-IN-SwaraNeural",
+    "telugu":  "en-IN-NeerjaNeural",
+    "hindi":   "en-IN-NeerjaNeural",
     "english": "en-IN-NeerjaNeural",
 }
 

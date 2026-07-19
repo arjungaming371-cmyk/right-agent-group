@@ -25,8 +25,8 @@ const RISK_COLOR: Record<string, string> = { low: "#2dd4a0", medium: "#f7b731", 
 
 const LANG_LABELS: Record<string, { label: string; short: string; desc: string }> = {
   english: { label: "English",  short: "EN", desc: "Used when customer speaks English" },
-  hindi:   { label: "Hindi",    short: "हि",  desc: "Used when customer speaks Hindi" },
-  telugu:  { label: "Telugu",   short: "తె",  desc: "Used when customer speaks Telugu" },
+  hindi:   { label: "Hinglish", short: "HG", desc: "Used when customer speaks Hindi — Priya replies in Roman-script Hinglish" },
+  telugu:  { label: "Tenglish", short: "TG", desc: "Used when customer speaks Telugu — Priya replies in Roman-script Tenglish" },
 }
 
 const TIPS = [
