@@ -5,7 +5,7 @@ import { requireRole, type Role } from "@/lib/auth"
 export const dynamic = "force-dynamic"
 
 const EMAIL_RE = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/
-const VALID_ROLES: Role[] = ["admin", "agent", "viewer"]
+const VALID_ROLES: Role[] = ["admin", "agent", "viewer", "developer"]
 
 // Team access management is admin-only. Middleware already blocks
 // unauthenticated calls, but we verify the role again here — never trust a
@@ -70,10 +70,23 @@ export async function DELETE(req: NextRequest) {
   if (!EMAIL_RE.test(email)) return NextResponse.json({ error: "invalid email" }, { status: 400 })
 
   // Safety: a user cannot remove their own access (prevents locking everyone out one by one),
-  // and the ADMIN_EMAIL bootstrap account can never be removed.
+  // the ADMIN_EMAIL bootstrap account can never be removed, and admins cannot remove developers
+  // (to protect developer privacy and prevent accidental access revocation).
   if (email === session.email) return NextResponse.json({ error: "you cannot remove your own access" }, { status: 400 })
   if (email === (process.env.ADMIN_EMAIL || "").toLowerCase()) {
     return NextResponse.json({ error: "the admin email cannot be removed" }, { status: 400 })
+  }
+
+  // Prevent admins from deleting developers — developers' roles are protected
+  const targetUser = await query(
+    `SELECT role FROM allowed_emails WHERE lower(email) = $1 LIMIT 1`,
+    [email]
+  )
+  if (targetUser.rows.length > 0 && targetUser.rows[0].role === "developer") {
+    return NextResponse.json(
+      { error: "Developers cannot be removed by admins. Only developers can remove themselves." },
+      { status: 400 }
+    )
   }
 
   await query(`DELETE FROM allowed_emails WHERE lower(email) = $1`, [email])

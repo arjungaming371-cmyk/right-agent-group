@@ -4,7 +4,7 @@
 // Cookie format:  base64url(payloadJSON) + "." + base64url(hmacSignature)
 // Payload: { email, role, exp } — exp is a unix-seconds expiry.
 
-export type Role = "admin" | "agent" | "viewer"
+export type Role = "admin" | "agent" | "viewer" | "developer"
 
 export const SESSION_COOKIE = "rag_session"
 const SESSION_DAYS = 7

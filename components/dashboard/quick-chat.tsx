@@ -4,8 +4,14 @@ import { MessageSquareText, Bot, X, Send, Sparkles, Plus, History, Trash2, Arrow
 
 type Message = { role: "user" | "assistant"; content: string }
 type ChatSummary = { id: string; title: string; created_at: string; updated_at: string }
+type UserRole = "admin" | "agent" | "viewer" | "developer"
 
-const GREETING: Message = { role: "assistant", content: "Hi! I'm the internal ops assistant with full read access to leads, calls, loan applications, WhatsApp activity, security, and the audit log. I'm not Priya, so I don't handle customer calls or messages — just reporting." }
+const GREETINGS: Record<UserRole, string> = {
+  admin: "Hi! I'm the ops assistant with full read access to leads, calls, loan applications, WhatsApp activity, security, analytics, and the audit log. How can I help you today?",
+  agent: "Hi! I'm the ops assistant. I can help with leads, calls, and WhatsApp insights. What would you like to know?",
+  viewer: "Hi! I'm the ops assistant. I can show you reporting and insights. What would you like to know?",
+  developer: "Hi! I'm your private developer assistant with full console access. I can help with system queries, logs, and development tasks. This chat is private and hidden from admins.",
+}
 
 const QUICK_COMMANDS = [
   { label: "How many leads today?", query: "How many new leads were added today?" },
@@ -24,10 +30,11 @@ function timeAgoShort(dateStr: string) {
   return `${Math.floor(hrs / 24)}d`
 }
 
-export default function QuickChat() {
+export default function QuickChat({ role = "agent", userEmail = "" }: { role?: UserRole; userEmail?: string }) {
   const [open, setOpen] = useState(false)
   const [view, setView] = useState<"chat" | "history">("chat")
-  const [messages, setMessages] = useState<Message[]>([GREETING])
+  const greeting: Message = { role: "assistant", content: GREETINGS[role] || GREETINGS.agent }
+  const [messages, setMessages] = useState<Message[]>([greeting])
   const [chatId, setChatId] = useState<string | null>(null)
   const [chats, setChats] = useState<ChatSummary[]>([])
   const [chatsLoading, setChatsLoading] = useState(false)
@@ -58,7 +65,7 @@ export default function QuickChat() {
 
   function startNewChat() {
     setChatId(null)
-    setMessages([GREETING])
+    setMessages([greeting])
     setView("chat")
   }
 
@@ -70,9 +77,9 @@ export default function QuickChat() {
       const res = await fetch(`/api/assistant/chats/${c.id}`)
       const data = await res.json()
       const loaded: Message[] = (data.messages || []).map((m: any) => ({ role: m.role, content: m.content }))
-      setMessages(loaded.length ? loaded : [GREETING])
+      setMessages(loaded.length ? loaded : [greeting])
     } catch {
-      setMessages([GREETING])
+      setMessages([greeting])
     }
     setLoading(false)
   }
@@ -98,7 +105,7 @@ export default function QuickChat() {
       // empty clutter in the history list.
       let activeChatId = chatId
       if (!activeChatId) {
-        const created = await fetch("/api/assistant/chats", { method: "POST" }).then(r => r.json())
+        const created = await fetch("/api/assistant/chats", { method: "POST", body: JSON.stringify({ role }) }).then(r => r.json())
         activeChatId = created.chat?.id || null
         if (activeChatId) setChatId(activeChatId)
       }
@@ -110,7 +117,7 @@ export default function QuickChat() {
       const res = await fetch("/api/assistant", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: q, history, chatId: activeChatId }),
+        body: JSON.stringify({ message: q, history, chatId: activeChatId, role, userEmail }),
       })
       if (!res.body) throw new Error("no response stream")
 

@@ -28,7 +28,7 @@
 import { query } from "./db"
 import { rewriteKnowledgeQuery, canAffordExtraCompletion } from "./ollama"
 
-const MAX_SNIPPET = 300 // richer than Lead Brain's 90-char clip — these are factual answers, not brief mentions
+const MAX_SNIPPET = 800 // must fit the longest KB entry whole — clipping mid-entry (e.g. a rate table) makes the model invent the cut-off facts
 const MAX_RESULTS = 3
 const MIN_RANK = 0.02 // ts_rank floor below which a "match" is treated as noise, not a real hit
 

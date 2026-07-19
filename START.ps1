@@ -116,8 +116,10 @@ if ($cfFound) {
         $cfProcess = Start-Process "cloudflared" -ArgumentList "tunnel run $namedTunnel" -WindowStyle Minimized -PassThru
         Write-Host "      OK Named tunnel '$namedTunnel' started (stable URL)" -ForegroundColor Green
     } else {
-        $cfProcess = Start-Process "cloudflared" -ArgumentList "tunnel --url http://localhost:3000" -WindowStyle Minimized -PassThru
-        Write-Host "      OK Quick tunnel started - URL CHANGES EVERY RESTART (set CF_TUNNEL_NAME for a stable one)" -ForegroundColor Yellow
+        # Quick tunnel + auto-fix: scripts/tunnel-autofix.ps1 starts the tunnel,
+        # then re-points the Meta WhatsApp webhook at whatever new URL it got —
+        # so WhatsApp auto-reply survives restarts even without a domain.
+        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ProjectDir "scripts\tunnel-autofix.ps1") -ProjectDir $ProjectDir
     }
 } else {
     Write-Host "      SKIP cloudflared not found - run: winget install Cloudflare.cloudflared" -ForegroundColor Yellow

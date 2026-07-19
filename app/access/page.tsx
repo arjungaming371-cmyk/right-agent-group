@@ -11,13 +11,14 @@ import { ArrowLeft, LogOut, Shield, UserCog, Eye, UserPlus, Users, Trash2 } from
 import { ToastProvider, useToast } from "@/components/ui/toast"
 import { SkeletonList } from "@/components/ui/skeleton"
 
-type Role = "admin" | "agent" | "viewer"
+type Role = "admin" | "agent" | "viewer" | "developer"
 type AllowedEmail = { email: string; added_by: string | null; role: Role; created_at: string }
 
 const ROLE_META: Record<Role, { label: string; desc: string; color: string; icon: typeof Shield }> = {
   admin:  { label: "Admin",        desc: "Full access, including this page. Max 2 admins total.",     color: "#8b7cff", icon: Shield },
   agent:  { label: "Loan Officer", desc: "Leads, loans, calls, WhatsApp, analytics — no settings",    color: "#38bdf8", icon: UserCog },
   viewer: { label: "Viewer",       desc: "Same views as Loan Officer, strictly read-only",            color: "#64708c", icon: Eye },
+  developer: { label: "Developer", desc: "Full console access. Private logs hidden from admins.",       color: "#10b981", icon: Shield },
 }
 
 function RoleBadge({ role }: { role: Role }) {
@@ -186,6 +187,7 @@ function AccessPageInner() {
             >
               <option value="agent">Loan Officer</option>
               <option value="viewer">Viewer</option>
+              <option value="developer">Developer</option>
               <option value="admin">Admin</option>
             </select>
             <button type="submit" disabled={busy} className="btn-primary" style={{ height: 40, padding: "0 22px", opacity: busy ? 0.6 : 1 }}>

@@ -193,12 +193,28 @@ async function handleInbound(msg: any, profileName: string | null) {
       flagFrustratedWhatsApp(lead.id, text)
     }
 
+    // CHANNEL OVERRIDE: the shared script is written for live phone calls —
+    // without this the AI "speaks" on WhatsApp (call greetings, hold-style
+    // brevity) instead of texting like a chat agent.
+    let extraContext: string | undefined =
+      "IMPORTANT — CHANNEL: This conversation is a WhatsApp TEXT CHAT, not a phone call. " +
+      "Never use call phrases (no 'thanks for calling', 'I'll call you back', 'on this call'). " +
+      "The phone-call-only rules DO NOT apply here: on WhatsApp you SHOULD discuss interest " +
+      "rates, EMI, eligibility, and loan details directly — you ARE the WhatsApp follow-up the " +
+      "call script promises, so never say a loan officer will send details 'on WhatsApp' later. " +
+      "Answer the customer's question yourself, completely, using the knowledge-base context when " +
+      "provided. Quote rates, amounts, and tenures EXACTLY as written in the knowledge context — " +
+      "never invent, round, or adjust numbers; if a detail isn't in the context, say the loan " +
+      "officer will confirm it. Reply like a professional WhatsApp chat agent: friendly and " +
+      "complete answers, WhatsApp formatting allowed (single-asterisk *bold* only — never " +
+      "**double** — and bullet lists), as long as needed to answer properly."
+
     // LEAD BRAIN: brief the WhatsApp AI with the same cross-channel picture
     // Priya gets on calls — known facts, rolling summary, recent
     // interactions, sentiment warnings — only on the first couple of turns.
-    let extraContext: string | undefined
     if (historyRes.rows.length <= 2) {
-      extraContext = (await buildLeadBrief(lead.id)) || undefined
+      const brief = await buildLeadBrief(lead.id)
+      if (brief) extraContext = [extraContext, brief].join("\n\n")
     }
 
     // KNOWLEDGE BASE: every turn, same reasoning as the voice path — a
@@ -206,7 +222,11 @@ async function handleInbound(msg: any, profileName: string | null) {
     const kbContext = await searchKnowledgeBase(text)
     if (kbContext) extraContext = [extraContext, kbContext].filter(Boolean).join("\n\n")
 
-    aiReply = await chatWithOllama(messages, lang, extraContext)
+    // numPredict 400: text chat has no caller waiting in silence — let Priya
+    // write full answers (rate tables, loan lists) instead of call-length ones.
+    aiReply = await chatWithOllama(messages, lang, extraContext, { numPredict: 400 })
+    // WhatsApp bold is *single*; the model still slips in markdown ** sometimes.
+    if (aiReply) aiReply = aiReply.replace(/\*\*/g, "*")
 
     await query(
       `INSERT INTO ai_conversations (lead_id, role, content, language) VALUES ($1, 'user', $2, $3), ($1, 'model', $4, $3)`,

@@ -355,7 +355,8 @@ async function runCompletionStream(messages: OllamaMessage[], opts: CompletionOp
 export async function chatWithOllama(
   messages: { role: "user" | "model"; content: string }[],
   language: Language = "english",
-  extraInstructions?: string
+  extraInstructions?: string,
+  opts?: { numPredict?: number }
 ): Promise<string> {
   if (!messages?.length) return "Hello! How can I help you today?"
 
@@ -366,8 +367,9 @@ export async function chatWithOllama(
   // numPredict 90: live phone replies are capped at two short sentences by the
   // script, so ~90 tokens is generous headroom — while cutting the worst-case
   // generation time vs. the old 120 default. Every token generated is time the
-  // caller spends listening to silence.
-  return runOllamaChat(messages, systemPrompt, { numPredict: 90 })
+  // caller spends listening to silence. Text channels (WhatsApp) pass a
+  // higher cap since nobody is waiting on hold there.
+  return runOllamaChat(messages, systemPrompt, { numPredict: opts?.numPredict ?? 90 })
 }
 
 /**

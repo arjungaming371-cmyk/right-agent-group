@@ -18,11 +18,12 @@ import KnowledgeBaseView from "./knowledge-base-view"
 import AnalyticsView from "./analytics-view"
 import QuickChat     from "./quick-chat"
 import NotificationBell from "./notification-bell"
+import DeveloperLogsView from "./developer-logs-view"
 
-export type ViewKey = "leads" | "loans" | "voice" | "whatsapp" | "comms" | "security" | "upload" | "script" | "knowledge" | "analytics"
-export type Role = "admin" | "agent" | "viewer"
+export type ViewKey = "leads" | "loans" | "voice" | "whatsapp" | "comms" | "security" | "upload" | "script" | "knowledge" | "analytics" | "dev-logs"
+export type Role = "admin" | "agent" | "viewer" | "developer"
 
-const ROLE_LABEL: Record<Role, string> = { admin: "Administrator", agent: "Loan Officer", viewer: "Viewer" }
+const ROLE_LABEL: Record<Role, string> = { admin: "Administrator", agent: "Loan Officer", viewer: "Viewer", developer: "Developer" }
 
 type NavItem = { key: ViewKey; label: string; icon: LucideIcon; roles: Role[] }
 type NavSection = { title: string; items: NavItem[] }
@@ -56,6 +57,12 @@ const NAV_SECTIONS: NavSection[] = [
       { key: "knowledge",label: "Knowledge Base", icon: BookOpen,     roles: ["admin", "agent"] },
     ],
   },
+  {
+    title: "Developer",
+    items: [
+      { key: "dev-logs", label: "Developer Logs", icon: ScrollText,   roles: ["developer"] },
+    ],
+  },
 ]
 
 const VIEW_TITLES: Record<ViewKey, { title: string; sub: string }> = {
@@ -69,6 +76,7 @@ const VIEW_TITLES: Record<ViewKey, { title: string; sub: string }> = {
   upload:   { title: "Upload & Data",      sub: "Upload contacts, scripts, and files for AI campaigns" },
   script:   { title: "Priya's Script",     sub: "View and edit what Priya says on every call" },
   knowledge:{ title: "Knowledge Base",     sub: "Facts Priya can pull into any call or chat, on any turn" },
+  "dev-logs": { title: "Developer Logs",   sub: "Your activity, login history, and system events" },
 }
 
 function StatusPill({ icon: Icon, label }: { icon: LucideIcon; label: string }) {
@@ -346,9 +354,10 @@ export default function DashboardShell() {
           {view === "upload"   && role === "admin" && <UploadView />}
           {view === "script"   && role === "admin" && <ScriptView />}
           {view === "knowledge" && (role === "admin" || role === "agent") && <KnowledgeBaseView role={role} />}
+          {view === "dev-logs" && role === "developer" && <DeveloperLogsView userEmail={userEmail} />}
         </main>
       </div>
-      <QuickChat />
+      <QuickChat role={role} userEmail={userEmail} />
       {/* Neutralizes the mobile slide-in transform at md+ so the sidebar is
           always visible on desktop regardless of mobileNavOpen state. */}
       <style>{`@media (min-width: 768px) { .mobile-nav-drawer { transform: none !important; } }`}</style>
