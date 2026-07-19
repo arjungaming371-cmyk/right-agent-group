@@ -9,9 +9,9 @@
   "enable_tpu": false,
   "enable_internet": true,
   "keywords": [],
-  "dataset_sources": [
-    "arjungaming/rag-project"
+  "dataset_sources": [],
+  "kernel_sources": [
+    "arjungaming/rag-code"
   ],
-  "kernel_sources": [],
   "competition_sources": []
 }
