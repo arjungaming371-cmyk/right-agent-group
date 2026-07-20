@@ -100,8 +100,13 @@ export default async function LoginPage({
         </div>
 
         {/* Footer note */}
-        <div className="relative text-[11.5px] text-[#64708c]">
-          © {new Date().getFullYear()} Right Agent Group · Hyderabad
+        <div className="relative space-y-2">
+          <div className="text-[11.5px] text-[#64708c]">
+            © {new Date().getFullYear()} Right Agent Group · Hyderabad
+          </div>
+          <a href="/about" className="inline-flex text-[11.5px] text-[#8b7cff] hover:text-[#a5b0ff] transition">
+            About this Platform →
+          </a>
         </div>
       </section>
 

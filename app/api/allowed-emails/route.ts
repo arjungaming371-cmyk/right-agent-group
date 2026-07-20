@@ -52,6 +52,18 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       )
     }
+  } else if (role === "developer") {
+    // Max 2 developers total: same protection as admins
+    const existingDevs = await query(
+      `SELECT COUNT(*)::int AS n FROM allowed_emails WHERE role = 'developer' AND lower(email) != $1`,
+      [email]
+    )
+    if (existingDevs.rows[0].n >= 1) {
+      return NextResponse.json(
+        { error: "Only 2 developers are allowed in total. Remove the other developer first, or assign a different role." },
+        { status: 400 }
+      )
+    }
   }
 
   await query(
