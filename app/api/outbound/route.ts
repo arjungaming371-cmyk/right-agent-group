@@ -3,6 +3,7 @@ import { db } from "@/lib/db"
 import { makeCall } from "@/lib/exotel"
 import { requireRole } from "@/lib/auth"
 import { checkCallCompliance } from "@/lib/compliance"
+import { normalizePhone } from "@/lib/phone"
 
 export async function GET() {
   const { data } = await db.from("outbound_queue").select("*").order("created_at", { ascending: false }).limit(200)
@@ -20,6 +21,7 @@ export async function POST(req: NextRequest) {
     let queued = 0
     for (const contact of body.contacts) {
       if (!contact.phone) continue
+      contact.phone = normalizePhone(contact.phone)
       try {
         // Dedupe — one lead per phone
         const { data: existing } = await db.from("leads").select("id").eq("phone", contact.phone).single()
@@ -49,7 +51,8 @@ export async function POST(req: NextRequest) {
   }
 
   // Single contact mode: { name, phone, language, ... } — call immediately
-  const { name, phone, language, product_interest, notes } = body
+  const { name, language, product_interest, notes } = body
+  const phone = normalizePhone(body.phone)
   if (!phone) return NextResponse.json({ error: "phone required" }, { status: 400 })
   const compliance = await checkCallCompliance({ phone })
   if (!compliance.allowed) {

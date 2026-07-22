@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { db, query } from "@/lib/db"
 import { requireRole } from "@/lib/auth"
 import { logAudit } from "@/lib/audit"
+import { normalizePhone, phoneLast10, PHONE_MATCH_SQL } from "@/lib/phone"
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
@@ -88,11 +89,14 @@ export async function POST(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const body = await req.json()
   if (!body.phone) return NextResponse.json({ error: "phone required" }, { status: 400 })
+  // Store every phone the same way (+91XXXXXXXXXX) so calls/WhatsApp/manual
+  // entries for the same person always land on the same lead.
+  body.phone = normalizePhone(body.phone)
 
-  // Dedupe: one lead per phone number. Repeated calls/imports update the
-  // existing lead instead of creating a duplicate row.
+  // Dedupe: one lead per phone number, matched on the last 10 digits so
+  // format differences never create a duplicate row.
   try {
-    const existing = await query(`SELECT id FROM leads WHERE phone = $1`, [body.phone])
+    const existing = await query(`SELECT id FROM leads WHERE ${PHONE_MATCH_SQL}`, [phoneLast10(body.phone)])
     if (existing.rows.length > 0) {
       const id = existing.rows[0].id
       const { data, error } = await db.from("leads").update({ ...body, updated_at: new Date().toISOString() }).eq("id", id).select().single()

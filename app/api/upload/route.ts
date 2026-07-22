@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
-import { db } from "@/lib/db"
+import { db, query } from "@/lib/db"
 import { requireRole } from "@/lib/auth"
+import { normalizePhone, phoneLast10, PHONE_MATCH_SQL } from "@/lib/phone"
 
 // STEP 1: Upload + PARSE ONLY — does NOT call anyone automatically.
 // Creates leads + queues them as "pending". Use /api/upload/confirm to trigger calls.
@@ -36,7 +37,7 @@ export async function POST(req: NextRequest) {
       headers.forEach((h, i) => { obj[h] = cols[i] ?? "" })
 
       const name    = obj.name || obj["full name"] || obj["customer name"] || "Unknown"
-      const phone   = obj.phone || obj["phone number"] || obj.mobile || ""
+      const phone   = normalizePhone(obj.phone || obj["phone number"] || obj.mobile || "")
       const lang    = obj.language || obj.lang || "telugu"
       const product = obj.product_interest || obj.product || "Home Loan"
       const notes   = obj.notes || obj.note || ""
@@ -44,10 +45,17 @@ export async function POST(req: NextRequest) {
       if (!phone) continue
 
       try {
-        const { data: lead } = await db.from("leads").insert({
-          name, phone, language: lang, product_interest: product,
-          notes, source: "CSV Upload", status: "new"
-        }).select().single()
+        // Dedupe on last-10 digits — re-uploading a CSV (or a contact that
+        // already called in) must not create a second lead row.
+        const existing = await query(`SELECT id FROM leads WHERE ${PHONE_MATCH_SQL} LIMIT 1`, [phoneLast10(phone)])
+        let lead = existing.rows[0] || null
+        if (!lead) {
+          const created = await db.from("leads").insert({
+            name, phone, language: lang, product_interest: product,
+            notes, source: "CSV Upload", status: "new"
+          }).select().single()
+          lead = created.data
+        }
 
         // Queue as PENDING — NOT called yet, waits for explicit confirmation
         await db.from("outbound_queue").insert({

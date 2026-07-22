@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
-import { db } from "@/lib/db"
+import { db, query } from "@/lib/db"
 import { makeCall } from "@/lib/exotel"
+import { normalizePhone, phoneLast10, PHONE_MATCH_SQL } from "@/lib/phone"
 import { requireRole } from "@/lib/auth"
 import { logAudit } from "@/lib/audit"
 import { checkCallCompliance } from "@/lib/compliance"
@@ -33,17 +34,22 @@ export async function POST(req: NextRequest) {
         try {
           // Get lead details for AI context
           let leadId = item.lead_id || null
-          let phone = item.phone
+          let phone = normalizePhone(item.phone)
 
           if (!leadId) {
-            // Create lead if not exists
-            const { data: lead } = await db.from("leads").insert({
-              name: item.name, phone: item.phone,
-              language: item.language || "english",
-              product_interest: item.product_interest,
-              notes: item.notes, source: "Queue", status: "new"
-            }).select().single()
-            leadId = lead?.id
+            // Find-or-create — match on last-10 digits so a queue row for a
+            // number already in leads (any format) reuses that lead.
+            const existing = await query(`SELECT id FROM leads WHERE ${PHONE_MATCH_SQL} LIMIT 1`, [phoneLast10(phone)])
+            leadId = existing.rows[0]?.id || null
+            if (!leadId) {
+              const { data: lead } = await db.from("leads").insert({
+                name: item.name, phone,
+                language: item.language || "english",
+                product_interest: item.product_interest,
+                notes: item.notes, source: "Queue", status: "new"
+              }).select().single()
+              leadId = lead?.id
+            }
           }
 
           // Unattended bulk dialer — this is exactly the code path a

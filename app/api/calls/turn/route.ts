@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { db, query } from "@/lib/db"
 import { startCall, handleTurn, handleTurnStream } from "@/lib/voice-conversation"
 import { detectLanguage, type Language } from "@/lib/llm"
+import { PHONE_MATCH_SQL } from "@/lib/phone"
 
 export const dynamic = "force-dynamic"
 
@@ -75,7 +76,14 @@ export async function POST(req: NextRequest) {
         direction = "inbound"
         const digits = String(body.from).replace(/\D/g, "")
         const phone = digits.length === 10 ? `+91${digits}` : `+${digits}`
-        const { data: lead } = await db.from("leads").select("id, language").eq("phone", phone).single()
+        // Match on the last 10 digits, not exact string — a manually added
+        // lead may be stored as "9908838090" while the caller ID arrives as
+        // "+919908838090"; exact match would create a duplicate lead.
+        const found = await query(
+          `SELECT id, language FROM leads WHERE ${PHONE_MATCH_SQL} LIMIT 1`,
+          [digits.slice(-10)]
+        )
+        const lead = found.rows[0]
         if (lead) {
           leadId = lead.id
           if (lead.language) language = normalizeLanguage(lead.language)
