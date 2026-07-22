@@ -23,10 +23,10 @@ function hourLabel(h: number) {
 }
 
 const LABELS: Record<string, { label: string; desc: string }> = {
-  two_factor_auth: { label: "Two-Factor Authentication", desc: "Require a one-time code for every admin sign-in." },
-  single_sign_on:  { label: "Single Sign-On (SSO)",        desc: "Authenticate through your corporate identity provider." },
-  ip_allowlist:    { label: "IP Allowlist",                desc: "Restrict console access to approved network ranges." },
-  call_recording_encryption: { label: "Call Recording Encryption", desc: "Encrypt voice recordings at rest with AES-256." },
+  two_factor_auth: { label: "Two-Factor Authentication", desc: "Email a one-time code on every admin sign-in (needs SMTP_* set in .env)." },
+  single_sign_on:  { label: "Single Sign-On (SSO)",        desc: "Google SSO is the only sign-in method — always enforced, allowlisted emails only." },
+  ip_allowlist:    { label: "IP Allowlist",                desc: "Block console access from IPs not in the IP_ALLOWLIST list in .env." },
+  call_recording_encryption: { label: "Call Recording Encryption", desc: "Recordings stay encrypted at the provider; when on, playback is never cached to disk." },
 }
 
 const ORDER = ["two_factor_auth", "single_sign_on", "ip_allowlist", "call_recording_encryption"]

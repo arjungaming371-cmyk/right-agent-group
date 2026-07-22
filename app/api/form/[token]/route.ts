@@ -101,10 +101,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
     }
 
     if (link.lead_id) {
-      await db
-        .from("leads")
-        .update({ form_completed: true, status: "qualified", updated_at: new Date().toISOString() })
-        .eq("id", link.lead_id)
+      // Backfill what the application told us onto the lead itself, so the
+      // Leads table (VALUE, ADDRESS, LOAN TYPE columns) reflects the
+      // submitted application instead of showing "—" forever.
+      const backfill: Record<string, any> = {
+        form_completed: true,
+        status: "qualified",
+        updated_at: new Date().toISOString(),
+      }
+      if (loan_amount && Number(loan_amount) > 0) backfill.loan_amount = Number(loan_amount)
+      if (address) backfill.address = address
+      else if (city) backfill.address = city
+      if (whatsapp_number) backfill.whatsapp_number = whatsapp_number
+      if (loan_type) backfill.product_interest = /loan|insurance|card/i.test(loan_type) ? loan_type : `${loan_type} Loan`
+      await db.from("leads").update(backfill).eq("id", link.lead_id)
     }
 
     createNotification({

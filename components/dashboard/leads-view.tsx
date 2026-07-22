@@ -107,8 +107,8 @@ export default function LeadsView({ role, initialSearch }: { role: "admin" | "ag
 
   const [memoryLeadId, setMemoryLeadId] = useState<string | null>(null)
 
-  async function load() {
-    setLoading(true)
+  async function load(silent = false) {
+    if (!silent) setLoading(true)
     const params = new URLSearchParams()
     if (search) params.set("search", search)
     if (ageFilter !== "all") params.set("age", ageFilter)
@@ -141,7 +141,13 @@ export default function LeadsView({ role, initialSearch }: { role: "admin" | "ag
     }
   }
 
-  useEffect(() => { load() }, [search, ageFilter, amountFilter, loanTypeFilter, interestedFilter])
+  useEffect(() => {
+    load()
+    // Background refresh — scores, statuses, form badges, and call counts
+    // change from calls/WhatsApp/form submissions without any user action.
+    const t = setInterval(() => load(true), 15000)
+    return () => clearInterval(t)
+  }, [search, ageFilter, amountFilter, loanTypeFilter, interestedFilter])
 
   const totalLeads = leads.length
   const qualified = leads.filter((l) => l.status === "qualified").length

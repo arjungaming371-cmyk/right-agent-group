@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { isSecurityEnabled } from "@/lib/security"
 
 // Proxy Exotel recording audio through our server
 // This avoids the browser Basic Auth popup on protected recording URLs
@@ -35,10 +36,15 @@ export async function GET(req: NextRequest) {
     }
 
     const audio = await res.arrayBuffer()
+    // Call Recording Encryption toggle: recordings live encrypted at the
+    // provider and are only ever streamed through this authenticated proxy
+    // over TLS — when the toggle is ON we additionally forbid any caching,
+    // so no decrypted copy is ever written to browser or proxy disk.
+    const noStore = await isSecurityEnabled("call_recording_encryption")
     return new NextResponse(audio, {
       headers: {
         "Content-Type": res.headers.get("Content-Type") || "audio/mpeg",
-        "Cache-Control": "private, max-age=3600",
+        "Cache-Control": noStore ? "no-store" : "private, max-age=3600",
       },
     })
   } catch (e: any) {

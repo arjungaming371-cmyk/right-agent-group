@@ -28,8 +28,40 @@ const PUBLIC_PREFIXES = [
 const PUBLIC_EXACT = [
   "/api/whatsapp", "/api/calls/turn", "/api/calls/status", "/api/digest",
   "/api/system/status", // coarse booleans only — no error details (see route)
+  "/api/security/flags", // one boolean, read back by this middleware itself
   "/api/lead-brain/scan-idle", "/api/prompt-tuner/scan",
 ]
+
+// ---- IP allowlist (Access Controls toggle) ----
+// The toggle lives in Postgres, which Edge middleware can't query — so the
+// enabled flag is fetched from /api/security/flags and cached 30s. The
+// approved addresses come from the IP_ALLOWLIST env var (comma-separated;
+// exact IPs, or prefixes ending in "." for whole ranges). Fail-open when
+// the toggle is on but no list is configured — an empty list must never
+// lock the admin out.
+let _ipFlagCache = false
+let _ipFlagAt = 0
+
+async function ipAllowlistEnabled(origin: string): Promise<boolean> {
+  if (Date.now() - _ipFlagAt < 30_000) return _ipFlagCache
+  try {
+    const res = await fetch(`${origin}/api/security/flags`, { cache: "no-store" })
+    if (res.ok) {
+      _ipFlagCache = !!(await res.json())?.ip_allowlist
+      _ipFlagAt = Date.now()
+    }
+  } catch {
+    // flags endpoint unreachable — keep last known value
+  }
+  return _ipFlagCache
+}
+
+function ipAllowed(clientIp: string): boolean {
+  const entries = (process.env.IP_ALLOWLIST || "").split(",").map((s) => s.trim()).filter(Boolean)
+  if (entries.length === 0) return true
+  if (clientIp === "127.0.0.1" || clientIp === "::1" || clientIp === "") return true
+  return entries.some((e) => (e.endsWith(".") ? clientIp.startsWith(e) : clientIp === e))
+}
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
@@ -39,6 +71,15 @@ export async function middleware(req: NextRequest) {
     PUBLIC_PREFIXES.some((p) => pathname === p.replace(/\/$/, "") || pathname.startsWith(p))
   ) {
     return NextResponse.next()
+  }
+
+  // Console (session-protected) surface only — webhooks and the customer
+  // form above are never IP-restricted.
+  if (await ipAllowlistEnabled(req.nextUrl.origin)) {
+    const clientIp = (req.headers.get("x-forwarded-for") || "").split(",")[0].trim()
+    if (!ipAllowed(clientIp)) {
+      return new NextResponse("Access restricted to approved network ranges.", { status: 403 })
+    }
   }
 
   const session = await verifySessionToken(req.cookies.get(SESSION_COOKIE)?.value)

@@ -51,8 +51,8 @@ export default function LoanAppsView({ role, initialSearch }: { role: "admin" | 
   // Command-palette jumps re-seed the search box.
   useEffect(() => { if (initialSearch !== undefined) setSearch(initialSearch) }, [initialSearch])
 
-  async function load() {
-    setLoading(true)
+  async function load(silent = false) {
+    if (!silent) setLoading(true)
     setLoadError("")
     try {
       const res = await fetch("/api/loans")
@@ -82,7 +82,9 @@ export default function LoanAppsView({ role, initialSearch }: { role: "admin" | 
   useEffect(() => {
     load()
     loadPendingEdits()
-    const t = setInterval(loadPendingEdits, 15000)
+    // Background refresh — new submissions and AI edit proposals arrive
+    // from customer activity without any user action.
+    const t = setInterval(() => { load(true); loadPendingEdits() }, 15000)
     return () => clearInterval(t)
   }, [])
 

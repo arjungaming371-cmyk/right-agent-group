@@ -1,6 +1,7 @@
 // Verified login page — Google Sign-In only, restricted to allowlisted emails.
 // Server component: reads ?error= and ?next= from the URL (Next 15 async searchParams).
 import { Phone, MessageCircle, ShieldCheck, Sparkles } from "lucide-react"
+import OtpForm from "./otp-form"
 
 export const dynamic = "force-dynamic"
 
@@ -13,11 +14,12 @@ const FEATURES = [
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; next?: string }>
+  searchParams: Promise<{ error?: string; next?: string; otp?: string }>
 }) {
   const params = await searchParams
   const error = params?.error
   const next = params?.next && params.next.startsWith("/") ? params.next : "/"
+  const otpStep = params?.otp === "1"
 
   return (
     <main
@@ -135,9 +137,9 @@ export default async function LoginPage({
               boxShadow: "0 24px 70px -18px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.04)",
             }}
           >
-            <h2 className="text-[22px] font-bold tracking-tight text-white">Welcome back</h2>
+            <h2 className="text-[22px] font-bold tracking-tight text-white">{otpStep ? "Check your email" : "Welcome back"}</h2>
             <p className="mt-1.5 text-[13.5px] text-[#9aa5bd]">
-              Sign in to access the operations console
+              {otpStep ? "Two-factor authentication is on for admin sign-ins" : "Sign in to access the operations console"}
             </p>
 
             {error && (
@@ -146,6 +148,7 @@ export default async function LoginPage({
               </div>
             )}
 
+            {otpStep ? <OtpForm /> : (
             <a
               href={`/api/auth/google?next=${encodeURIComponent(next)}`}
               className="mt-7 flex w-full items-center justify-center gap-3 rounded-[11px] bg-white px-4 py-[13px] text-[14px] font-semibold text-[#1a1d24] transition hover:bg-[#e8eaef]"
@@ -159,6 +162,7 @@ export default async function LoginPage({
               </svg>
               Continue with Google
             </a>
+            )}
 
             <div className="mt-7 flex items-center gap-3">
               <div className="h-px flex-1 bg-white/[0.07]" />

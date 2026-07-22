@@ -67,7 +67,7 @@ export async function verifySessionToken(token: string | undefined | null): Prom
     if (payload.exp < Math.floor(Date.now() / 1000)) return null
     // Sessions signed before the role field existed: treat as agent, the
     // least-privileged non-viewer role, rather than silently trusting admin.
-    if (payload.role !== "admin" && payload.role !== "agent" && payload.role !== "viewer") payload.role = "agent"
+    if (payload.role !== "admin" && payload.role !== "agent" && payload.role !== "viewer" && payload.role !== "developer") payload.role = "agent"
     return payload
   } catch {
     return null
@@ -81,6 +81,41 @@ export function sessionCookieOptions(secure: boolean) {
     sameSite: "lax" as const,
     path: "/",
     maxAge: SESSION_DAYS * 86400,
+  }
+}
+
+// ---- Short-lived signed tokens for the 2FA (email OTP) step ------------
+// Same HMAC scheme as sessions, different shape: issued by the OAuth
+// callback when two_factor_auth is on, consumed by /api/auth/otp once the
+// user types the emailed code. 10-minute expiry, single purpose.
+
+export type OtpPending = { kind: "otp"; email: string; role: Role; next: string; exp: number }
+
+export async function createOtpPendingToken(email: string, role: Role, next: string): Promise<string> {
+  const payload: OtpPending = { kind: "otp", email, role, next, exp: Math.floor(Date.now() / 1000) + 600 }
+  const payloadB64 = toBase64Url(enc.encode(JSON.stringify(payload)))
+  const sig = await crypto.subtle.sign("HMAC", await hmacKey(), enc.encode(payloadB64))
+  return `${payloadB64}.${toBase64Url(new Uint8Array(sig))}`
+}
+
+export async function verifyOtpPendingToken(token: string | undefined | null): Promise<OtpPending | null> {
+  if (!token) return null
+  const parts = token.split(".")
+  if (parts.length !== 2) return null
+  try {
+    const valid = await crypto.subtle.verify(
+      "HMAC",
+      await hmacKey(),
+      fromBase64Url(parts[1]) as unknown as ArrayBuffer,
+      enc.encode(parts[0])
+    )
+    if (!valid) return null
+    const payload = JSON.parse(new TextDecoder().decode(fromBase64Url(parts[0]))) as OtpPending
+    if (payload?.kind !== "otp" || !payload.email || typeof payload.exp !== "number") return null
+    if (payload.exp < Math.floor(Date.now() / 1000)) return null
+    return payload
+  } catch {
+    return null
   }
 }
 

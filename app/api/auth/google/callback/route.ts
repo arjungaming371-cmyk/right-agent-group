@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
-import { createSessionToken, SESSION_COOKIE, sessionCookieOptions, type Role } from "@/lib/auth"
+import { createSessionToken, createOtpPendingToken, SESSION_COOKIE, sessionCookieOptions, type Role } from "@/lib/auth"
 import { createNotification } from "@/lib/notifications"
+import { isSecurityEnabled } from "@/lib/security"
+import { isMailConfigured, sendMail } from "@/lib/mail"
+import { createHash, randomInt } from "crypto"
 
 export const dynamic = "force-dynamic"
 
@@ -66,10 +69,45 @@ export async function GET(req: NextRequest) {
       return fail("This email is not authorized. Ask the admin to add it.")
     }
 
+    const safeNext = nextPath.startsWith("/") && !nextPath.startsWith("//") ? nextPath : "/"
+
+    // ---- TWO-FACTOR AUTH (Access Controls toggle) ----
+    // Admin sign-ins get an emailed 6-digit code before the session cookie
+    // is issued. Requires SMTP; if mail isn't configured the sign-in
+    // proceeds (fail-open, audit-logged) rather than locking the admin out.
+    if (role === "admin" && (await isSecurityEnabled("two_factor_auth"))) {
+      if (isMailConfigured()) {
+        const code = String(randomInt(100000, 1000000))
+        const codeHash = createHash("sha256").update(code).digest("hex")
+        await query(
+          `INSERT INTO login_otps (email, code_hash, attempts, expires_at)
+           VALUES ($1, $2, 0, now() + interval '10 minutes')
+           ON CONFLICT (email) DO UPDATE SET code_hash = $2, attempts = 0, expires_at = now() + interval '10 minutes', created_at = now()`,
+          [email, codeHash]
+        )
+        sendMail({
+          to: email,
+          subject: `${code} is your Right Agent Group sign-in code`,
+          html: `<p>Your one-time sign-in code is:</p><p style="font-size:28px;font-weight:700;letter-spacing:4px">${code}</p><p>It expires in 10 minutes. If you didn't try to sign in, you can ignore this email.</p>`,
+        }).catch((e) => console.error("2FA mail error:", e.message))
+
+        const pending = await createOtpPendingToken(email, role, safeNext)
+        const res = NextResponse.redirect(`${appUrl}/login?otp=1`)
+        res.cookies.set("otp_pending", pending, { httpOnly: true, secure: appUrl.startsWith("https"), sameSite: "lax", path: "/", maxAge: 600 })
+        res.cookies.delete("oauth_state")
+        res.cookies.delete("oauth_next")
+        return res
+      }
+      console.warn("2FA is enabled but SMTP is not configured — admin sign-in proceeding without a code")
+      query(
+        `INSERT INTO audit_logs (action, performed_by, metadata) VALUES ('2FA skipped — SMTP not configured', $1, '{"source":"login"}')`,
+        [email]
+      ).catch(() => {})
+    }
+
     createNotification({ type: "login", title: "Team member signed in", body: `${email} (${role})` })
 
     const token = await createSessionToken(email, role)
-    const safeNext = nextPath.startsWith("/") && !nextPath.startsWith("//") ? nextPath : "/"
     const res = NextResponse.redirect(`${appUrl}${safeNext}`)
     res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions(appUrl.startsWith("https")))
     res.cookies.delete("oauth_state")

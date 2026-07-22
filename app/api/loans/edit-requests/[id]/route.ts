@@ -51,6 +51,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     `UPDATE loan_applications SET ${field} = $1, last_edited_at = now() WHERE id = $2`,
     [value, editRequest.loan_application_id]
   )
+
+  // Keep the lead row in sync so the Leads table (VALUE / LOAN TYPE /
+  // ADDRESS columns) reflects the approved correction immediately.
+  if (editRequest.lead_id) {
+    if (field === "loan_amount") {
+      await query(`UPDATE leads SET loan_amount = $1, updated_at = now() WHERE id = $2`, [value, editRequest.lead_id]).catch(() => {})
+    } else if (field === "loan_type") {
+      await query(`UPDATE leads SET product_interest = $1, updated_at = now() WHERE id = $2`, [value, editRequest.lead_id]).catch(() => {})
+    } else if (field === "city") {
+      await query(`UPDATE leads SET address = $1, updated_at = now() WHERE id = $2 AND (address IS NULL OR address = '')`, [value, editRequest.lead_id]).catch(() => {})
+    }
+  }
   const updated = await query(
     `UPDATE loan_application_edit_requests SET status = 'approved', reviewed_by = $1, reviewed_at = now() WHERE id = $2 RETURNING *`,
     [session.email, id]
