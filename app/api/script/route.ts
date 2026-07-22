@@ -27,11 +27,14 @@ const DEFAULTS: Record<string, string> = DEFAULT_SCRIPTS
 export async function GET() {
   try {
     await ensureTable()
-    // Seed the base script if missing (from the English default).
+    // Seed the base script if missing. Uses the pure base (no language
+    // rule baked in) — lib/llm.ts appends the right one per request, so
+    // seeding with DEFAULTS.english here would permanently bake an
+    // English-only instruction into every language's calls.
     await query(
       `INSERT INTO ai_scripts (language, content) VALUES ('base', $1)
        ON CONFLICT (language) DO NOTHING`,
-      [DEFAULTS.english]
+      [DEFAULTS.base]
     )
     const result = await query(
       `SELECT language, content, updated_at, updated_by FROM ai_scripts WHERE language = 'base'`
@@ -79,13 +82,14 @@ export async function DELETE(req: NextRequest) {
     if (!language || !["base", "english", "hindi", "telugu"].includes(language)) {
       return NextResponse.json({ error: "invalid language" }, { status: 400 })
     }
-    // Reset to default instead of hard delete (base resets to the English default)
+    // Reset to default instead of hard delete — 'base' resets to the pure
+    // base default (no language rule baked in, see GET above).
     await query(
       `INSERT INTO ai_scripts (language, content, updated_at, updated_by)
        VALUES ($1, $2, now(), $3)
        ON CONFLICT (language) DO UPDATE
        SET content = $2, updated_at = now(), updated_by = $3`,
-      [language, DEFAULTS[language] || DEFAULTS.english, session.email]
+      [language, DEFAULTS[language] || DEFAULTS.base, session.email]
     )
     logAudit("Priya script reset to default", session.email, { language })
     return NextResponse.json({ ok: true, message: "Reset to default script" })

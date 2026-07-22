@@ -200,9 +200,9 @@ export default function AboutPage() {
               GitHub Repository
             </a>
             <span>•</span>
-            <a href="https://rightagentgroup.com" style={{ color: "#8b7cff", textDecoration: "none", display: "flex", alignItems: "center", gap: 6 }}>
+            <a href="https://rightagentgroup.in" style={{ color: "#8b7cff", textDecoration: "none", display: "flex", alignItems: "center", gap: 6 }}>
               <Globe size={14} />
-              rightagentgroup.com
+              rightagentgroup.in
             </a>
           </div>
         </div>
