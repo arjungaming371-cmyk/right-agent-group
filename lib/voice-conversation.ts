@@ -40,7 +40,7 @@ const CLOSING: Record<Language, string> = {
 
 // Inbound calls auto-create a lead with a placeholder like "Caller 8090"
 // before we know the real name — never greet someone by that fake name.
-const PLACEHOLDER_NAME_RE = /^Caller \d+$/
+const PLACEHOLDER_NAME_RE = /^(Caller \d+|Unknown|WA \d+)$/i
 
 function personalizedGreeting(language: Language, name: string): string {
   const templates: Record<Language, string> = {

@@ -58,7 +58,7 @@ export async function getWhatsAppContext(leadId: string): Promise<string> {
 
 // Inbound calls auto-create a lead with a placeholder like "Caller 8090"
 // before we know the real name — never treat that as "known" info to confirm.
-const PLACEHOLDER_NAME_RE = /^Caller \d+$/
+const PLACEHOLDER_NAME_RE = /^(Caller \d+|Unknown|WA \d+)$/i
 
 /**
  * Known lead fields (name/city/product) — used so Priya CONFIRMS details we
