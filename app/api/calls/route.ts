@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: compliance.reason }, { status: 403 })
   }
   try {
-    // Warm up Ollama BEFORE the call starts (so it's ready when caller picks up).
+    // Warm up the AI brain BEFORE the call starts (so it's ready when caller picks up).
     // Loopback — never route this through the public tunnel.
     const internal = process.env.APP_INTERNAL_URL || "http://127.0.0.1:3000"
     fetch(`${internal}/api/warmup`, { method: "POST" }).catch(() => {})

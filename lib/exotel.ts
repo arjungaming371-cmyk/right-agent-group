@@ -3,7 +3,7 @@
 // Architecture: calls run through an Exotel FLOW containing a VOICEBOT APPLET.
 // The Voicebot applet opens a bidirectional WebSocket to our own
 // server/voicebot-server.js, which streams audio both ways:
-//   caller audio → our STT → Ollama (Priya) → our TTS → caller.
+//   caller audio → our STT → Groq (Priya) → our TTS → caller.
 //
 // One-time Exotel dashboard setup (App Bazaar):
 //   1. Create a new Call Flow (Custom App).

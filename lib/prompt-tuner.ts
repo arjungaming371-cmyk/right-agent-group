@@ -1,4 +1,4 @@
-// Prompt Tuner — reads a batch of recent conversations, asks Ollama whether
+// Prompt Tuner — reads a batch of recent conversations, asks the LLM whether
 // the same friction shows up repeatedly, and stores any suggestions as
 // "pending" rows for a human admin to approve or reject. Nothing here EVER
 // writes to ai_scripts directly — applySuggestion() only runs from an
@@ -8,7 +8,7 @@
 // as lib/lead-brain.ts's background jobs — never on any live-call path.
 
 import { query } from "./db"
-import { generatePromptSuggestions } from "./ollama"
+import { generatePromptSuggestions } from "./llm"
 import { DEFAULT_SCRIPTS } from "./default-scripts"
 
 const BATCH_SIZE = 25 // recent calls to sample per run — enough to spot a real repeat, not so many the prompt gets huge
@@ -42,7 +42,7 @@ async function buildConversationBatch(): Promise<string> {
 }
 
 /**
- * One run: sample recent calls, ask Ollama for repeat-pattern suggestions,
+ * One run: sample recent calls, ask the LLM for repeat-pattern suggestions,
  * insert each as a pending row. Dedupes against existing PENDING suggestions
  * by near-identical guideline text so a weekly cron doesn't pile up the same
  * suggestion over and over while nobody's reviewed it yet.
@@ -53,7 +53,7 @@ export async function runPromptTuner(): Promise<{ generated: number }> {
 
   const suggestions = await generatePromptSuggestions(batch)
   if (!suggestions) {
-    console.error("[prompt-tuner] generation failed — Ollama did not return valid JSON")
+    console.error("[prompt-tuner] generation failed — the model did not return valid JSON")
     return { generated: 0 }
   }
   if (suggestions.length === 0) return { generated: 0 }

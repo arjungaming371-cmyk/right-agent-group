@@ -40,7 +40,7 @@ type ComplianceSettings = {
 
 // Settings rarely change, but a dashboard edit should take effect fast —
 // short cache + explicit invalidation from the PATCH route, same shape as
-// lib/ollama.ts's script cache.
+// lib/llm.ts's script cache.
 let _cache: ComplianceSettings | null = null
 let _cacheTime = 0
 const CACHE_TTL = 60 * 1000

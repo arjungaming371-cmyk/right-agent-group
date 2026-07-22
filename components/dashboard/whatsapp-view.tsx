@@ -1,9 +1,9 @@
 "use client"
 import { useEffect, useRef, useState, useCallback } from "react"
-import { Search, Send, Bot, MessageCircle, AlertTriangle, ChevronLeft, CheckCircle2, Zap, Lock } from "lucide-react"
+import { Search, Send, MessageCircle, AlertTriangle, ChevronLeft, CheckCircle2, Zap, Lock, Pin } from "lucide-react"
 import { useToast } from "../ui/toast"
 
-type Lead = { id: string; name: string; phone: string; last_message?: string; last_message_time?: string; last_direction?: string; unread?: number }
+type Lead = { id: string; name: string; phone: string; last_message?: string; last_message_time?: string; last_direction?: string; unread?: number; pinned?: boolean; pinned_at?: string | null }
 type Msg  = { id: string; direction: string; content: string; created_at: string; status?: string }
 
 function Avatar({ name, size = 40 }: { name: string; size?: number }) {
@@ -34,10 +34,15 @@ export default function WhatsAppView({ role }: { role: "admin" | "agent" | "view
   const [sending, setSending]   = useState(false)
   const [ready, setReady]       = useState<boolean | null>(null)
   const [search, setSearch]     = useState("")
-  const [aiTyping, setAiTyping] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef  = useRef<HTMLInputElement>(null)
   const prevMsgCount = useRef(0)
+  // Auto-select the first chat ONCE (initial load only). Without this
+  // one-time flag, the 4s poll would treat "no chat selected" as always
+  // meaning "nothing picked yet" and re-force the first chat — which is
+  // wrong on mobile, where hitting the back button intentionally sets
+  // selected to null to show the contact list again.
+  const didInitialSelect = useRef(false)
 
   const checkStatus = useCallback(async () => {
     try {
@@ -54,10 +59,18 @@ export default function WhatsAppView({ role }: { role: "admin" | "agent" | "view
       const data = await res.json()
       if (Array.isArray(data)) {
         setLeads(data)
-        if (data.length > 0 && !selected) setSelected(data[0])
+        // Only ever auto-select once (initial load). Using the functional
+        // form avoids the stale-closure bug from before, but gating on
+        // didInitialSelect on top of that is what stops mobile's "back to
+        // list" button (which intentionally sets selected to null) from
+        // getting overridden by the next 4s poll.
+        if (data.length > 0 && !didInitialSelect.current) {
+          didInitialSelect.current = true
+          setSelected(prev => prev || data[0])
+        }
       }
     } catch {}
-  }, [selected])
+  }, [])
 
   const loadMessages = useCallback(async (leadId: string, scroll = false) => {
     try {
@@ -107,21 +120,25 @@ export default function WhatsAppView({ role }: { role: "admin" | "agent" | "view
     inputRef.current?.focus()
   }
 
-  async function aiReply() {
-    if (!selected || aiTyping) return
-    const lastInbound = [...messages].reverse().find(m => m.direction === "inbound")
-    if (!lastInbound) { toast.info("No customer message to reply to"); return }
-    setAiTyping(true)
+  async function togglePin(lead: Lead, e: React.MouseEvent) {
+    e.stopPropagation() // don't also select the chat when clicking the pin icon
+    const nextPinned = !lead.pinned
+    setLeads(prev => {
+      const updated = prev.map(l => l.id === lead.id ? { ...l, pinned: nextPinned, pinned_at: nextPinned ? new Date().toISOString() : null } : l)
+      return [...updated].sort((a, b) => {
+        if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1
+        if (a.pinned && b.pinned) return (b.pinned_at || "").localeCompare(a.pinned_at || "")
+        return 0
+      })
+    })
+    if (selected?.id === lead.id) setSelected(prev => prev ? { ...prev, pinned: nextPinned, pinned_at: nextPinned ? new Date().toISOString() : null } : prev)
     try {
-      const history = messages.slice(-10).map(m => ({ role: m.direction === "inbound" ? "user" : "model", content: m.content }))
-      const r       = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: lastInbound.content, language: "english", history }) })
-      const { reply } = await r.json()
-      if (!reply) throw new Error("No reply from AI")
-      await fetch("/api/whatsapp/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ to: selected.phone, message: reply, leadId: selected.id }) })
-      await loadMessages(selected.id)
-      await loadLeads()
-    } catch (e: any) { toast.error(`AI reply failed: ${e.message}`) }
-    setAiTyping(false)
+      const res = await fetch(`/api/leads/${lead.id}/pin`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pinned: nextPinned }) })
+      if (!res.ok) throw new Error()
+    } catch {
+      toast.error("Couldn't update pin — refreshing")
+      loadLeads()
+    }
   }
 
   function formatTime(dateStr: string) {
@@ -145,12 +162,12 @@ export default function WhatsAppView({ role }: { role: "admin" | "agent" | "view
   return (
     <div style={{ height: "calc(100vh - 120px)", display: "flex", flexDirection: "column", borderRadius: 16, overflow: "hidden", border: "1px solid rgba(255,255,255,0.08)", background: "linear-gradient(135deg, #0f172a 0%, #1a1f35 100%)", boxShadow: "0 20px 40px rgba(0,0,0,0.3)" }}>
 
-      {/* TOP STATUS BANNER — Modern, sleek design */}
-      <div style={{ background: "linear-gradient(90deg, #10b981 0%, #059669 100%)", padding: "12px 16px", display: "flex", alignItems: "center", gap: 12, borderBottom: "1px solid rgba(0,0,0,0.2)" }}>
+      {/* TOP STATUS BANNER — driven by live /api/whatsapp/status check */}
+      <div style={{ background: ready ? "linear-gradient(90deg, #10b981 0%, #059669 100%)" : "linear-gradient(90deg, #ef4444 0%, #b91c1c 100%)", padding: "12px 16px", display: "flex", alignItems: "center", gap: 12, borderBottom: "1px solid rgba(0,0,0,0.2)" }}>
         <CheckCircle2 size={18} strokeWidth={2.5} style={{ color: "white", flexShrink: 0 }} />
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: "white" }}>WhatsApp Connected & Configured</div>
-          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.8)", marginTop: 2 }}>Authentication keys provided • Auto-reply enabled • Real-time messaging active</div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "white" }}>{ready ? "WhatsApp Connected & Configured" : "WhatsApp Disconnected"}</div>
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.8)", marginTop: 2 }}>{ready ? "Authentication keys provided • Auto-reply enabled • Real-time messaging active" : "Check WHATSAPP_TOKEN and WHATSAPP_PHONE_NUMBER_ID in .env — messages will not send"}</div>
         </div>
         <Zap size={16} style={{ color: "white", opacity: 0.8, flexShrink: 0 }} />
       </div>
@@ -203,8 +220,8 @@ export default function WhatsAppView({ role }: { role: "admin" | "agent" | "view
                 }}
                 style={{
                   padding: "12px 12px", cursor: "pointer", margin: "4px 8px", borderRadius: 10,
-                  background: selected?.id === lead.id ? "rgba(16,185,129,0.15)" : "transparent",
-                  border: selected?.id === lead.id ? "1px solid rgba(16,185,129,0.3)" : "1px solid transparent",
+                  background: lead.pinned ? "rgba(247,183,49,0.08)" : selected?.id === lead.id ? "rgba(16,185,129,0.15)" : "transparent",
+                  border: selected?.id === lead.id ? "1px solid rgba(16,185,129,0.3)" : lead.pinned ? "1px solid rgba(247,183,49,0.2)" : "1px solid transparent",
                   display: "flex", alignItems: "center", gap: 12,
                   transition: "all 0.2s ease",
                 }}
@@ -212,13 +229,25 @@ export default function WhatsAppView({ role }: { role: "admin" | "agent" | "view
                 <Avatar name={lead.name} size={44} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                    <div style={{ fontWeight: 600, fontSize: 14, color: "#f1f5f9", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{lead.name}</div>
+                    <div style={{ fontWeight: 600, fontSize: 14, color: "#f1f5f9", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 5 }}>
+                      {lead.pinned && <Pin size={11} strokeWidth={2.2} style={{ color: "#f7b731", fill: "#f7b731", flexShrink: 0 }} />}
+                      {lead.name}
+                    </div>
                     <div style={{ fontSize: 11, color: (lead.unread ?? 0) > 0 ? "#10b981" : "#64748b", flexShrink: 0 }}>{lead.last_message_time ? formatTime(lead.last_message_time) : ""}</div>
                   </div>
                   <div style={{ fontSize: 12, color: "#94a3b8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {(lead.unread ?? 0) > 0 && <span style={{ fontWeight: 600, color: "#10b981" }}>●</span>} {lead.last_message ? lead.last_message.slice(0, 40) : lead.phone}
                   </div>
                 </div>
+                {canEdit && (
+                  <button
+                    onClick={(e) => togglePin(lead, e)}
+                    title={lead.pinned ? "Unpin" : "Pin to top"}
+                    style={{ background: "transparent", border: "none", cursor: "pointer", padding: 4, display: "flex", alignItems: "center", flexShrink: 0, opacity: lead.pinned ? 1 : 0.4 }}
+                  >
+                    <Pin size={15} strokeWidth={2} style={{ color: lead.pinned ? "#f7b731" : "#64748b", fill: lead.pinned ? "#f7b731" : "none" }} />
+                  </button>
+                )}
               </div>
             ))}
           </div>
@@ -246,14 +275,6 @@ export default function WhatsAppView({ role }: { role: "admin" | "agent" | "view
                   </div>
                 </div>
               </div>
-              <button
-                onClick={aiReply}
-                disabled={aiTyping || ready === false}
-                style={{ background: ready ? "linear-gradient(135deg, #10b981 0%, #059669 100%)" : "rgba(107,114,128,0.3)", border: "none", borderRadius: 10, padding: "8px 16px", color: "white", fontSize: 12, fontWeight: 600, cursor: "pointer", opacity: (aiTyping || ready === false) ? 0.6 : 1, display: "flex", alignItems: "center", gap: 6, transition: "all 0.2s ease", boxShadow: ready ? "0 4px 12px rgba(16,185,129,0.3)" : "none" }}
-              >
-                <Bot size={14} strokeWidth={2} style={{ flexShrink: 0 }} />
-                {aiTyping ? "Priya typing…" : "AI Reply"}
-              </button>
             </div>
 
             {/* Messages */}
@@ -296,13 +317,6 @@ export default function WhatsAppView({ role }: { role: "admin" | "agent" | "view
                   </div>
                 )
               })}
-              {aiTyping && (
-                <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                  <div style={{ background: "linear-gradient(135deg, #10b981 0%, #059669 100%)", borderRadius: "16px 16px 4px 16px", padding: "12px 16px", color: "white", fontSize: 13 }}>
-                    Priya is thinking…
-                  </div>
-                </div>
-              )}
               <div ref={bottomRef} />
             </div>
 

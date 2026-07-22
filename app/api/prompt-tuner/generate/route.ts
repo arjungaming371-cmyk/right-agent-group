@@ -6,7 +6,7 @@ import { logAudit } from "@/lib/audit"
 export const dynamic = "force-dynamic"
 
 // POST — "Generate Suggestions Now" button in the Script Manager. A real
-// (awaited) Ollama call, admin-only, not on any hot path — same shape as
+// (awaited) Groq call, admin-only, not on any hot path — same shape as
 // app/api/leads/[id]/memory/reanalyze.
 export async function POST(req: NextRequest) {
   const session = await requireRole(req, ["admin"])

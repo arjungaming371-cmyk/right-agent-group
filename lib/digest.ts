@@ -1,12 +1,12 @@
 // AI performance digest — one email, sent daily or weekly, summarizing
 // what happened across calls + WhatsApp. All the numbers come straight from
-// SQL (fast, exact); a single Ollama call turns them into a short written
+// SQL (fast, exact); a single Groq call turns them into a short written
 // highlight paragraph. Nothing here blocks a live call or chat — this is
 // only ever invoked by a scheduled job or a manual dashboard button.
 
 import { query } from "./db"
 import { isMailConfigured, sendMail } from "./mail"
-import { chatWithSystemPrompt } from "./ollama"
+import { chatWithSystemPrompt } from "./llm"
 
 type DigestStats = {
   periodLabel: string

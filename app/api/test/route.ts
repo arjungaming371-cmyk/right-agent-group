@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { checkOllamaHealth } from "@/lib/ollama"
+import { checkLLMHealth } from "@/lib/llm"
 import { checkDbHealth } from "@/lib/db"
 import { checkTtsHealth } from "@/lib/tts"
 
@@ -8,9 +8,8 @@ export async function GET() {
 
   results.PG_HOST       = process.env.PG_HOST       ?? "❌ NOT SET"
   results.PG_DATABASE   = process.env.PG_DATABASE   ?? "❌ NOT SET"
-  results.OLLAMA_URL    = process.env.OLLAMA_URL     ?? "❌ NOT SET"
-  results.OLLAMA_MODEL  = process.env.OLLAMA_MODEL   ?? "❌ NOT SET"
-  results.OLLAMA_GPU    = process.env.OLLAMA_GPU     ?? "false"
+  results.GROQ_API_KEY  = process.env.GROQ_API_KEY ? "✅ set" : "❌ NOT SET (AI brain will fail)"
+  results.GROQ_MODEL    = process.env.GROQ_MODEL   ?? "llama-3.3-70b-versatile (default)"
   results.CALL_PROVIDER = "exotel"
   results.EXOTEL_SID    = process.env.EXOTEL_SID ? "✅ set" : "❌ NOT SET"
   results.EXOTEL_CALLER = process.env.EXOTEL_CALLER_ID ?? "❌ NOT SET"
@@ -27,18 +26,18 @@ export async function GET() {
   const dbHealth = await checkDbHealth()
   results.postgresql = dbHealth.ok ? `✅ ${dbHealth.message}` : `❌ ${dbHealth.message}`
 
-  // Test Ollama
-  const ollamaHealth = await checkOllamaHealth()
-  results.ollama = ollamaHealth.ok ? `✅ ${ollamaHealth.message}` : `❌ ${ollamaHealth.message}`
+  // Test Groq
+  const llmHealth = await checkLLMHealth()
+  results.groq = llmHealth.ok ? `✅ ${llmHealth.message}` : `❌ ${llmHealth.message}`
 
-  // Test Ollama generation
-  if (ollamaHealth.ok) {
+  // Test Groq generation
+  if (llmHealth.ok) {
     try {
-      const { chatWithOllama } = await import("@/lib/ollama")
-      const reply = await chatWithOllama([{ role: "user", content: "Say: Hello I am Priya" }], "english")
-      results.ollama_test = `✅ Working: "${reply.slice(0, 60)}"`
+      const { chatWithLLM } = await import("@/lib/llm")
+      const reply = await chatWithLLM([{ role: "user", content: "Say: Hello I am Priya" }], "english")
+      results.groq_test = `✅ Working: "${reply.slice(0, 60)}"`
     } catch (e: any) {
-      results.ollama_test = `❌ ${e.message}`
+      results.groq_test = `❌ ${e.message}`
     }
   }
 

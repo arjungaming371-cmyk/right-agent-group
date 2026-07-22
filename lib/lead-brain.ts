@@ -5,7 +5,7 @@
 // WhatsApp conversation into a structured lead_memory row (facts, rolling
 // summary, sentiment, stage) plus a unified lead_interactions timeline. The
 // live call/WhatsApp path only ever does ONE cheap read (buildLeadBrief) —
-// all the expensive Ollama analysis happens after the fact, in the
+// all the expensive LLM analysis happens after the fact, in the
 // background, and can never slow down or break a live conversation.
 //
 // lib/memory.ts's getKnownLeadContext / getPastCallContext / getWhatsAppContext
@@ -13,7 +13,7 @@
 // them but nothing here deletes or breaks them.
 
 import { db, query } from "./db"
-import { analyzeLeadTranscript, type LeadFacts, type LeadAnalysisResult } from "./ollama"
+import { analyzeLeadTranscript, type LeadFacts, type LeadAnalysisResult } from "./llm"
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 export function isValidUUID(id: any): id is string {
@@ -134,7 +134,7 @@ export async function insertInteraction(
 // ---------------------------------------------------------------------------
 // Post-call analysis — fired after every call ends (app/api/calls/status).
 // Never awaited by the caller; wraps its own try/catch so a bad transcript
-// or a Ollama hiccup can never surface as an error in the call-status
+// or an LLM hiccup can never surface as an error in the call-status
 // webhook response.
 // ---------------------------------------------------------------------------
 export function runPostCallAnalysis(callSid: string): void {
@@ -219,8 +219,8 @@ export async function runPostWhatsAppAnalysis(leadId: string): Promise<void> {
  * Finds leads whose WhatsApp thread went idle 10+ minutes ago and hasn't
  * been analyzed since the last message arrived. Called from a cron tick
  * (lib/scheduler.ts) via app/api/lead-brain/scan-idle. Capped to 10 leads
- * per scan and processed sequentially — Ollama's own concurrency queue
- * (lib/ollama.ts) is the real bottleneck, no point racing it.
+ * per scan and processed sequentially — the LLM call pipeline
+ * (lib/llm.ts) is the shared path, no point racing it.
  */
 export async function scanIdleWhatsAppConversations(): Promise<{ scanned: number }> {
   const res = await query(
@@ -290,7 +290,7 @@ export async function buildLeadBrief(leadId: string): Promise<string> {
   try {
     const res = await query(
       `SELECT
-         l.name, l.address, l.language,
+         l.name, l.address, l.language, l.whatsapp_number,
          lm.facts, lm.summary, lm.sentiment, lm.stage,
          COALESCE(
            (SELECT json_agg(t) FROM (
@@ -322,6 +322,7 @@ export async function buildLeadBrief(leadId: string): Promise<string> {
       safeName ? `name: ${safeName}` : null,
       row.address ? `city: ${row.address}` : null,
       row.language ? `language: ${row.language}` : null,
+      row.whatsapp_number ? `whatsapp_number: ${row.whatsapp_number} (already known — never ask for it)` : null,
       `stage: ${stage}`,
     ].filter(Boolean).join(", ")
     if (identity) lines.push(`IDENTITY — ${identity}`)

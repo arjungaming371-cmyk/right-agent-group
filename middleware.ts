@@ -13,6 +13,7 @@ import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth"
 // - /api/prompt-tuner/scan        → scheduled Prompt Tuner run (x-api-key protected inside, see lib/scheduler.ts)
 const PUBLIC_PREFIXES = [
   "/login",
+  "/about",
   "/api/auth/",
   "/form/",
   "/api/form/",
@@ -26,6 +27,7 @@ const PUBLIC_PREFIXES = [
 // the Meta webhook are public.
 const PUBLIC_EXACT = [
   "/api/whatsapp", "/api/calls/turn", "/api/calls/status", "/api/digest",
+  "/api/system/status", // coarse booleans only — no error details (see route)
   "/api/lead-brain/scan-idle", "/api/prompt-tuner/scan",
 ]
 

@@ -3,13 +3,13 @@
 // loan applications, escalations, team logins, and new WhatsApp contacts.
 
 import { useEffect, useRef, useState } from "react"
-import { Bell, FileText, AlertTriangle, LogIn, MessageCircle, Check } from "lucide-react"
+import { Bell, FileText, AlertTriangle, LogIn, MessageCircle, Check, PenLine } from "lucide-react"
 import { timeAgo } from "@/lib/utils"
 import type { ViewKey } from "./shell"
 
 type Notification = {
   id: string
-  type: "loan_application" | "escalation" | "login" | "whatsapp_message"
+  type: "loan_application" | "escalation" | "login" | "whatsapp_message" | "loan_edit_request"
   title: string
   body: string | null
   link_view: ViewKey | null
@@ -22,6 +22,7 @@ const TYPE_META: Record<Notification["type"], { icon: typeof Bell; color: string
   escalation: { icon: AlertTriangle, color: "#fb5670" },
   login: { icon: LogIn, color: "#a5b0ff" },
   whatsapp_message: { icon: MessageCircle, color: "#2dd4a0" },
+  loan_edit_request: { icon: PenLine, color: "#f7b731" },
 }
 
 export default function NotificationBell({ onNavigate }: { onNavigate: (view: ViewKey) => void }) {

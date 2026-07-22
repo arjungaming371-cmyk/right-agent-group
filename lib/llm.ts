@@ -1,87 +1,24 @@
-// Priya's brain — Groq API (llama-3.3-70b, streaming) with automatic
-// fallback to local Ollama. Job on calls: build trust fast, handle
-// objections, and collect name + address + WhatsApp number, then hand off
-// to the WhatsApp form link.
-//
-// Why two backends: Groq is a much smarter/faster model (first token in
-// ~300-500ms), but it's an external free-tier API — it can be down, rate
-// limited, or out of daily tokens. Ollama is slower but always there. Every
-// completion tries Groq first and silently degrades to Ollama, so a Groq
-// outage makes calls slower, never silent.
+// Priya's brain — Groq API (llama-3.3-70b, streaming). Job on calls: build
+// trust fast, handle objections, and collect name + address + WhatsApp
+// number, then hand off to the WhatsApp form link.
 
 export type Language = "english" | "hindi" | "telugu"
 
 import { DEFAULT_SCRIPTS as SHARED_DEFAULT_SCRIPTS } from "./default-scripts"
 
-const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434"
-const MODEL = process.env.OLLAMA_MODEL || "llama3.1:8b"
-const IS_GPU = process.env.OLLAMA_GPU === "true"
-
-// Groq (OpenAI-compatible). Set GROQ_API_KEY to enable; LLM_PROVIDER=ollama
-// forces local-only even with a key present.
 const GROQ_API_KEY = process.env.GROQ_API_KEY || ""
 const GROQ_URL = (process.env.GROQ_URL || "https://api.groq.com/openai/v1").replace(/\/$/, "")
 const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile"
-const USE_GROQ = !!GROQ_API_KEY && process.env.LLM_PROVIDER !== "ollama"
 
 /**
  * Whether it's safe to spend one extra small completion call mid-turn
- * (used by the knowledge-base agentic retrieval retry). True when Groq is
- * configured — a fast external API call that never touches the local
- * Ollama queue — or when running on GPU, which has real concurrency
- * headroom (MAX_CONCURRENT defaults to 2). On a bare CPU-only Ollama box
- * (MAX_CONCURRENT=1), a second completion mid-turn would compete for the
- * SAME slot the live call's main reply is about to need, risking added
- * lag or queue timeouts on a real phone call — not worth it there.
+ * (used by the knowledge-base agentic retrieval retry). Always true on
+ * Groq — a fast external API with real concurrency headroom.
  */
 export function canAffordExtraCompletion(): boolean {
-  return USE_GROQ || IS_GPU
+  return true
 }
 
-// ---- Concurrency cap ----------------------------------------------------
-// How many completions this app will have in flight AT ONCE. On a laptop,
-// 1-2 is realistic — without a cap, three simultaneous calls each take 3x
-// longer and ALL of them blow the per-turn timeout.
-const MAX_CONCURRENT = Math.max(1, parseInt(process.env.OLLAMA_MAX_CONCURRENT || (IS_GPU ? "2" : "1")))
-const MAX_QUEUE_WAIT_MS = 8000 // give up waiting rather than stall a live call
-
-let active = 0
-const waiters: { resolve: () => void; reject: (e: Error) => void; timer: NodeJS.Timeout }[] = []
-
-async function acquireSlot(): Promise<void> {
-  if (active < MAX_CONCURRENT) {
-    active++
-    return
-  }
-  return new Promise((resolve, reject) => {
-    const entry = {
-      resolve: () => {
-        active++
-        resolve()
-      },
-      reject,
-      timer: setTimeout(() => {
-        const i = waiters.indexOf(entry)
-        if (i >= 0) waiters.splice(i, 1)
-        reject(new Error("Ollama busy — queue wait exceeded"))
-      }, MAX_QUEUE_WAIT_MS),
-    }
-    waiters.push(entry)
-  })
-}
-
-function releaseSlot(): void {
-  active = Math.max(0, active - 1)
-  const next = waiters.shift()
-  if (next) {
-    clearTimeout(next.timer)
-    next.resolve()
-  }
-}
-// -------------------------------------------------------------------------
-
-// Compact conversation script. Kept tight on purpose — every extra token
-// slows down llama3.1:8b replies during a live call.
 // Default fallback scripts (used when DB is unavailable)
 const DEFAULT_SCRIPTS = SHARED_DEFAULT_SCRIPTS
 
@@ -112,12 +49,13 @@ async function getSystemPrompt(language: Language): Promise<string> {
   }
   return DEFAULT_SCRIPTS[language] || DEFAULT_SCRIPTS.english
 }
-interface OllamaMessage { role: "system" | "user" | "assistant"; content: string }
 
-function toOllamaMessages(
+interface ChatMessage { role: "system" | "user" | "assistant"; content: string }
+
+function toChatMessages(
   messages: { role: "user" | "model"; content: string }[],
   systemPrompt: string
-): OllamaMessage[] {
+): ChatMessage[] {
   return [
     { role: "system", content: systemPrompt },
     ...messages.map((m) => ({
@@ -129,10 +67,9 @@ function toOllamaMessages(
 
 // ---------------------------------------------------------------------------
 // Shared completion primitives — the ONLY two places that actually issue an
-// HTTP request to an LLM backend. Every function in this file (Priya's live
+// HTTP request to the LLM backend. Every function in this file (Priya's live
 // replies, the Ops Assistant, Lead Brain extraction, Prompt Tuner) goes
-// through one of these two. Adding a third backend later means adding one
-// more branch here, not touching six call sites.
+// through one of these two.
 // ---------------------------------------------------------------------------
 
 type CompletionOpts = {
@@ -140,13 +77,11 @@ type CompletionOpts = {
   numPredict?: number
   timeoutMs: number
   temperature?: number
-  /** Ask the backend for strict JSON output (Ollama's format:"json" / vLLM's response_format). */
+  /** Ask the backend for strict JSON output (response_format json_object). */
   json?: boolean
 }
 
-// ---- Groq (OpenAI-compatible chat completions) ----
-
-function groqBody(messages: OllamaMessage[], opts: CompletionOpts, stream: boolean) {
+function groqBody(messages: ChatMessage[], opts: CompletionOpts, stream: boolean) {
   return JSON.stringify({
     model: GROQ_MODEL,
     messages,
@@ -161,7 +96,11 @@ function groqBody(messages: OllamaMessage[], opts: CompletionOpts, stream: boole
 
 const GROQ_HEADERS = { "Content-Type": "application/json", Authorization: `Bearer ${GROQ_API_KEY}` }
 
-async function groqChatRequest(messages: OllamaMessage[], opts: CompletionOpts, signal: AbortSignal): Promise<string> {
+function assertGroqConfigured(): void {
+  if (!GROQ_API_KEY) throw new Error("GROQ_API_KEY is not set — the AI brain cannot run without it")
+}
+
+async function groqChatRequest(messages: ChatMessage[], opts: CompletionOpts, signal: AbortSignal): Promise<string> {
   const res = await fetch(`${GROQ_URL}/chat/completions`, {
     method: "POST",
     headers: GROQ_HEADERS,
@@ -175,7 +114,7 @@ async function groqChatRequest(messages: OllamaMessage[], opts: CompletionOpts, 
 
 /** Streaming Groq completion (SSE). Returns full text; deltas go to onChunk. */
 async function groqChatStream(
-  messages: OllamaMessage[],
+  messages: ChatMessage[],
   opts: CompletionOpts,
   signal: AbortSignal,
   onChunk: (delta: string) => void
@@ -214,173 +153,71 @@ async function groqChatStream(
   return fullText
 }
 
-async function ollamaChatRequest(messages: OllamaMessage[], opts: CompletionOpts, signal: AbortSignal): Promise<string> {
-  const response = await fetch(`${OLLAMA_URL}/api/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    signal,
-    body: JSON.stringify({
-      model: MODEL,
-      messages,
-      stream: false,
-      // keep_alive keeps the model loaded in RAM between turns — without
-      // it, every reply pays a multi-second model reload.
-      keep_alive: "30m",
-      ...(opts.json ? { format: "json" } : {}),
-      options: IS_GPU
-        ? { num_predict: opts.numPredict ?? 120, temperature: opts.temperature ?? 0.6, num_ctx: opts.numCtx ?? 2048, num_gpu: 99 }
-        : { num_predict: opts.numPredict ?? 80, temperature: opts.temperature ?? 0.6, num_ctx: opts.numCtx ?? 1536, num_thread: 8 },
-    }),
-  })
-  if (!response.ok) throw new Error(`Ollama HTTP ${response.status}`)
-  const data = await response.json()
-  return data?.message?.content || ""
-}
-
 /** Non-streaming completion. Used by every function that just needs the final text (or JSON) back. */
-async function runCompletion(messages: OllamaMessage[], opts: CompletionOpts): Promise<string> {
-  // Groq first (no concurrency slot — the API handles parallelism; slots
-  // exist to protect the LOCAL machine). Any failure falls through to Ollama.
-  if (USE_GROQ) {
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), Math.min(opts.timeoutMs, 20000))
-    try {
-      const text = await groqChatRequest(messages, opts, controller.signal)
-      if (text.trim()) return text.trim()
-      throw new Error("Empty Groq response")
-    } catch (e: any) {
-      console.error("Groq error — falling back to Ollama:", e.message)
-    } finally {
-      clearTimeout(timeoutId)
-    }
-  }
-
+async function runCompletion(messages: ChatMessage[], opts: CompletionOpts): Promise<string> {
+  assertGroqConfigured()
   const controller = new AbortController()
-  await acquireSlot()
   const timeoutId = setTimeout(() => controller.abort(), opts.timeoutMs)
   try {
-    const text = await ollamaChatRequest(messages, opts, controller.signal)
-    if (!text || !text.trim()) throw new Error("Empty Ollama response")
+    const text = await groqChatRequest(messages, opts, controller.signal)
+    if (!text.trim()) throw new Error("Empty Groq response")
     return text.trim()
   } catch (e: any) {
-    console.error("Ollama error:", e.message)
+    console.error("Groq error:", e.message)
     throw e
   } finally {
     clearTimeout(timeoutId)
-    releaseSlot()
   }
 }
 
 /**
- * Streaming completion — for UIs where a human is watching (the Ops
- * Assistant), so text appears as it's generated instead of after the full
- * reply. Ollama's stream is newline-delimited JSON objects, each
- * { message: { content: "..." }, done: bool }, not SSE.
+ * Streaming completion — for the live call path and UIs where a human is
+ * watching (the Ops Assistant), so text appears as it's generated instead
+ * of after the full reply.
  */
-async function runCompletionStream(messages: OllamaMessage[], opts: CompletionOpts, onChunk: (delta: string) => void): Promise<string> {
-  // Groq first. Fallback rule for streams: only fall back to Ollama if NO
-  // chunks were emitted yet — once the caller has spoken half a sentence,
-  // replaying from a different model would duplicate text mid-call.
-  if (USE_GROQ) {
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), Math.min(opts.timeoutMs, 25000))
-    let emitted = false
-    try {
-      const text = await groqChatStream(messages, opts, controller.signal, (delta) => {
-        emitted = true
-        onChunk(delta)
-      })
-      if (text.trim()) return text.trim()
-      throw new Error("Empty Groq response")
-    } catch (e: any) {
-      console.error("Groq stream error:", e.message)
-      if (emitted) throw e
-      console.error("— no chunks emitted yet, falling back to Ollama")
-    } finally {
-      clearTimeout(timeoutId)
-    }
-  }
-
+async function runCompletionStream(messages: ChatMessage[], opts: CompletionOpts, onChunk: (delta: string) => void): Promise<string> {
+  assertGroqConfigured()
   const controller = new AbortController()
-  await acquireSlot()
   const timeoutId = setTimeout(() => controller.abort(), opts.timeoutMs)
-  let fullText = ""
   try {
-    const response = await fetch(`${OLLAMA_URL}/api/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      signal: controller.signal,
-      body: JSON.stringify({
-        model: MODEL,
-        messages,
-        stream: true,
-        keep_alive: "30m",
-        options: IS_GPU
-          ? { num_predict: opts.numPredict ?? 120, temperature: opts.temperature ?? 0.6, num_ctx: opts.numCtx ?? 2048, num_gpu: 99 }
-          : { num_predict: opts.numPredict ?? 80, temperature: opts.temperature ?? 0.6, num_ctx: opts.numCtx ?? 1536, num_thread: 8 },
-      }),
-    })
-    if (!response.ok || !response.body) throw new Error(`Ollama HTTP ${response.status}`)
-    const reader = response.body.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ""
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split("\n")
-      buffer = lines.pop() || "" // last (possibly incomplete) line carries over
-      for (const line of lines) {
-        if (!line.trim()) continue
-        try {
-          const obj = JSON.parse(line)
-          const delta = obj?.message?.content
-          if (delta) { fullText += delta; onChunk(delta) }
-        } catch {
-          // Malformed/partial line — skip rather than abort the whole stream.
-        }
-      }
-    }
-    if (!fullText.trim()) throw new Error("Empty Ollama response")
-    return fullText.trim()
+    const text = await groqChatStream(messages, opts, controller.signal, onChunk)
+    if (!text.trim()) throw new Error("Empty Groq response")
+    return text.trim()
   } catch (e: any) {
-    console.error("Ollama stream error:", e.message)
+    console.error("Groq stream error:", e.message)
     throw e
   } finally {
     clearTimeout(timeoutId)
-    releaseSlot()
   }
 }
 
-export async function chatWithOllama(
+export async function chatWithLLM(
   messages: { role: "user" | "model"; content: string }[],
   language: Language = "english",
   extraInstructions?: string,
-  opts?: { numPredict?: number }
+  opts?: { numPredict?: number; timeoutMs?: number }
 ): Promise<string> {
   if (!messages?.length) return "Hello! How can I help you today?"
 
   let systemPrompt = await getSystemPrompt(language)
   if (extraInstructions?.trim()) {
-    systemPrompt += `\n\nAdditional context for this specific call (from the operations team): ${extraInstructions.trim()}`
+    systemPrompt += `\n\n=== READ THIS BEFORE YOUR NEXT REPLY — overrides the generic GOAL step order above ===\n${extraInstructions.trim()}\n=== If IDENTITY or KNOWN FACTS above already answers a GOAL step, that step is DONE — do not ask for it, at most confirm it in passing. ===`
   }
   // numPredict 90: live phone replies are capped at two short sentences by the
-  // script, so ~90 tokens is generous headroom — while cutting the worst-case
-  // generation time vs. the old 120 default. Every token generated is time the
-  // caller spends listening to silence. Text channels (WhatsApp) pass a
-  // higher cap since nobody is waiting on hold there.
-  return runOllamaChat(messages, systemPrompt, { numPredict: opts?.numPredict ?? 90 })
+  // script, so ~90 tokens is generous headroom. Text channels (WhatsApp) pass
+  // a higher cap since nobody is waiting on hold there.
+  return runChat(messages, systemPrompt, { numPredict: opts?.numPredict ?? 90, timeoutMs: opts?.timeoutMs })
 }
 
 /**
- * Streaming variant of chatWithOllama for the LIVE CALL path: same Priya
+ * Streaming variant of chatWithLLM for the LIVE CALL path: same Priya
  * script + per-call context, but tokens flow to onChunk as they generate.
  * The voicebot cuts them into sentences and starts TTS on sentence 1 while
  * the model is still writing sentence 2 — this is what makes replies feel
  * immediate instead of "generate everything, then speak".
  * Returns the full reply text once generation completes.
  */
-export async function chatWithOllamaStream(
+export async function chatWithLLMStream(
   messages: { role: "user" | "model"; content: string }[],
   language: Language = "english",
   extraInstructions: string | undefined,
@@ -390,26 +227,20 @@ export async function chatWithOllamaStream(
 
   let systemPrompt = await getSystemPrompt(language)
   if (extraInstructions?.trim()) {
-    systemPrompt += `\n\nAdditional context for this specific call (from the operations team): ${extraInstructions.trim()}`
+    systemPrompt += `\n\n=== READ THIS BEFORE YOUR NEXT REPLY — overrides the generic GOAL step order above ===\n${extraInstructions.trim()}\n=== If IDENTITY or KNOWN FACTS above already answers a GOAL step, that step is DONE — do not ask for it, at most confirm it in passing. ===`
   }
-  // 12 messages = 6 exchanges of live-call context. Call turns are 1-2 short
-  // sentences each, so this fits comfortably in num_ctx even on CPU — and on
-  // Groq (the primary brain) the extra prompt tokens cost no noticeable time.
+  // 12 messages = 6 exchanges of live-call context — the extra prompt tokens
+  // cost no noticeable time on Groq.
   const recentMessages = messages.slice(-12)
-  const chatMessages = toOllamaMessages(recentMessages, systemPrompt)
-  const timeoutMs = IS_GPU ? 35000 : 25000
-  // numPredict 90: same cap as the non-streaming live path — see chatWithOllama.
-  return runCompletionStream(chatMessages, { numPredict: 90, timeoutMs }, onChunk)
+  const chatMessages = toChatMessages(recentMessages, systemPrompt)
+  return runCompletionStream(chatMessages, { numPredict: 90, timeoutMs: 25000 }, onChunk)
 }
 
 /**
- * Same Ollama call machinery (timeouts, concurrency slot, GPU options) as
- * chatWithOllama, but with a FULLY REPLACED system prompt instead of
- * Priya's customer-facing loan script + appended context. For callers that
- * are not Priya and must not inherit her persona — e.g. the internal staff
- * dashboard assistant (app/api/assistant/route.ts). Keeping this separate
- * from chatWithOllama is deliberate: each has its own job and its own
- * meaning, they should not be combined.
+ * Same call machinery (timeouts) as chatWithLLM, but with a FULLY REPLACED
+ * system prompt instead of Priya's customer-facing loan script + appended
+ * context. For callers that are not Priya and must not inherit her persona
+ * — e.g. the internal staff dashboard assistant (app/api/assistant/route.ts).
  */
 export async function chatWithSystemPrompt(
   messages: { role: "user" | "model"; content: string }[],
@@ -417,15 +248,13 @@ export async function chatWithSystemPrompt(
   opts?: { numCtx?: number; numPredict?: number; timeoutMs?: number; historyTurns?: number }
 ): Promise<string> {
   if (!messages?.length) return "Hello! How can I help you today?"
-  return runOllamaChat(messages, systemPrompt, opts)
+  return runChat(messages, systemPrompt, opts)
 }
 
 /**
  * Same as chatWithSystemPrompt, but streams tokens to onChunk as they
  * arrive instead of waiting for the full reply — for UIs where a human is
- * watching (e.g. the Ops Assistant chat), so text starts appearing in
- * seconds instead of after the full 20-50s generation. Not used for Priya's
- * live-call turns, which speak the whole reply at once via TTS anyway.
+ * watching (e.g. the Ops Assistant chat).
  * Returns the full accumulated text once generation finishes.
  */
 export async function chatWithSystemPromptStream(
@@ -436,12 +265,12 @@ export async function chatWithSystemPromptStream(
 ): Promise<string> {
   if (!messages?.length) return "Hello! How can I help you today?"
   const recentMessages = messages.slice(-(opts?.historyTurns ?? 6))
-  const chatMessages = toOllamaMessages(recentMessages, systemPrompt)
-  const timeoutMs = opts?.timeoutMs ?? (IS_GPU ? 35000 : 25000)
+  const chatMessages = toChatMessages(recentMessages, systemPrompt)
+  const timeoutMs = opts?.timeoutMs ?? 25000
   return runCompletionStream(chatMessages, { numCtx: opts?.numCtx, numPredict: opts?.numPredict, timeoutMs }, onChunk)
 }
 
-async function runOllamaChat(
+async function runChat(
   messages: { role: "user" | "model"; content: string }[],
   systemPrompt: string,
   opts?: { numCtx?: number; numPredict?: number; timeoutMs?: number; historyTurns?: number }
@@ -449,17 +278,8 @@ async function runOllamaChat(
   // Default 12 (was 6): Priya's call + WhatsApp turns are short, and 3
   // exchanges of memory made her re-ask things said moments earlier.
   const recentMessages = messages.slice(-(opts?.historyTurns ?? 12))
-  const chatMessages = toOllamaMessages(recentMessages, systemPrompt)
-  // GPU is normally much faster than CPU, but cold model loads (first
-  // inference after a fresh pull/restart, or Kaggle's shared dual-GPU
-  // scheduling) keep landing right at the wire — observed TWICE now:
-  // 10.171s (old 10000ms cutoff) and 20.178s (old 20000ms cutoff). A tight
-  // timeout that matches the "normal" case keeps getting blown by cold
-  // starts, so give it real headroom instead of chasing the exact number.
-  // Callers that aren't live phone calls (e.g. the staff dashboard
-  // assistant) can pass a longer timeoutMs — a human reading a dashboard
-  // reply tolerates a slower answer far better than someone on hold.
-  const timeoutMs = opts?.timeoutMs ?? (IS_GPU ? 35000 : 25000)
+  const chatMessages = toChatMessages(recentMessages, systemPrompt)
+  const timeoutMs = opts?.timeoutMs ?? 25000
   return runCompletion(chatMessages, { numCtx: opts?.numCtx, numPredict: opts?.numPredict, timeoutMs })
 }
 
@@ -474,7 +294,7 @@ export type ExtractedLead = {
 /**
  * Cheap pre-check before running lead extraction. Since a lead can only be
  * "complete" once a WhatsApp number exists, there is no point paying for an
- * extra Ollama round-trip until the transcript actually contains a
+ * extra completion round-trip until the transcript actually contains a
  * phone-number-looking string. This keeps most turns to ONE model call.
  */
 export function mightBeComplete(transcriptText: string): boolean {
@@ -558,6 +378,60 @@ export async function rewriteKnowledgeQuery(rawQuery: string): Promise<string | 
   }
 }
 
+// Fields the AI is allowed to PROPOSE a change to. Deliberately excludes
+// identity-sensitive fields (pan_number, phone, email, whatsapp_number) —
+// those stay manual-only edits via the dashboard, never something a chat
+// message alone can move even with staff approval as a gate.
+export const AI_EDITABLE_LOAN_FIELDS = ["loan_type", "loan_amount", "city", "employment_type", "monthly_income"] as const
+export type AiEditableLoanField = (typeof AI_EDITABLE_LOAN_FIELDS)[number]
+
+export type LoanEditProposal = { field: AiEditableLoanField; new_value: string | number; reason: string } | null
+
+/**
+ * Called after a normal reply, on a turn that might be a correction request
+ * ("I entered the wrong loan type", "actually it's 20 lakhs not 16") — NOT
+ * on every turn, since this costs one extra completion. Never applies
+ * anything itself: returns a proposal for lib/loan-edit-requests.ts to turn
+ * into a pending row, which only takes effect once a human approves it.
+ */
+export async function detectLoanEditRequest(
+  customerMessage: string,
+  currentApplication: Record<string, any>
+): Promise<LoanEditProposal> {
+  try {
+    const snapshot = AI_EDITABLE_LOAN_FIELDS.map((f) => `${f}: ${currentApplication[f] ?? "(not set)"}`).join(", ")
+    const text = await runCompletion(
+      [
+        {
+          role: "system",
+          content:
+            "Return ONLY valid JSON, no other text. The customer has an already-SUBMITTED loan application " +
+            `with these current values: ${snapshot}. Decide: is the customer's message asking to CORRECT one ` +
+            "of these fields on their existing application (not just chatting about it)? " +
+            `Only these fields can be corrected: ${AI_EDITABLE_LOAN_FIELDS.join(", ")}. ` +
+            'If yes, return {"is_correction": true, "field": "<one of the allowed fields>", "new_value": "<the corrected value>", "reason": "<one short sentence quoting/paraphrasing what the customer said>"}. ' +
+            'If no (general question, small talk, or a field not in the allowed list), return {"is_correction": false}.',
+        },
+        { role: "user", content: customerMessage.slice(0, 500) },
+      ],
+      { timeoutMs: 6000, temperature: 0.1, numPredict: 120, json: true }
+    )
+    const parsed = JSON.parse(text || "{}")
+    if (
+      parsed.is_correction &&
+      AI_EDITABLE_LOAN_FIELDS.includes(parsed.field) &&
+      (typeof parsed.new_value === "string" || typeof parsed.new_value === "number") &&
+      String(parsed.new_value).trim()
+    ) {
+      return { field: parsed.field, new_value: parsed.new_value, reason: typeof parsed.reason === "string" ? parsed.reason.slice(0, 200) : "" }
+    }
+    return null
+  } catch (e: any) {
+    console.error("detectLoanEditRequest error:", e.message)
+    return null
+  }
+}
+
 export async function generateLeadSummary(transcript: string): Promise<string> {
   try {
     const text = await runCompletion(
@@ -565,7 +439,7 @@ export async function generateLeadSummary(transcript: string): Promise<string> {
         { role: "system", content: "Return ONLY valid JSON, no other text." },
         { role: "user", content: `Summarize this call with keys: lead_name, address, whatsapp_number, next_action, sentiment.\n\n${transcript}` },
       ],
-      { timeoutMs: IS_GPU ? 20000 : 30000, temperature: 0.2, numPredict: 150, json: true }
+      { timeoutMs: 20000, temperature: 0.2, numPredict: 150, json: true }
     )
     return text && text.trim() ? text.trim() : "{}"
   } catch (e) {
@@ -577,7 +451,7 @@ export async function generateLeadSummary(transcript: string): Promise<string> {
 // ---------------------------------------------------------------------------
 // Lead Brain — post-conversation analysis (never runs on the live-call path;
 // always called in the background after a call ends or a WhatsApp thread
-// goes idle). Same format:"json" + strict-parse pattern as extractLeadInfo /
+// goes idle). Same json + strict-parse pattern as extractLeadInfo /
 // generateLeadSummary above, just a richer extraction shape.
 // ---------------------------------------------------------------------------
 
@@ -685,21 +559,17 @@ function normalizeAnalysisResult(parsed: any): LeadAnalysisResult {
 }
 
 /**
- * Background-only lead analysis. Retries once on invalid/unparseable JSON
- * (llama3.1:8b occasionally wraps output in prose despite format:"json").
+ * Background-only lead analysis. Retries once on invalid/unparseable JSON.
  * Never throws — returns null on total failure so callers can log and skip
  * the merge rather than crashing whatever triggered them (a call ending, a
- * cron tick). Always runs off the live-call critical path — unlike Priya's
- * live conversational replies (25-35s timeout, ~80-120 tokens), this asks
- * for a much bigger structured JSON payload (up to 500 tokens), which on
- * CPU-only Ollama genuinely needs more wall-clock time. There is no live
- * caller waiting on this, so a generous timeout costs nothing.
+ * cron tick). Always runs off the live-call critical path — there is no
+ * live caller waiting on this, so a generous timeout costs nothing.
  */
 export async function analyzeLeadTranscript(transcriptText: string, existingSummary: string): Promise<LeadAnalysisResult | null> {
   const userContent =
     `PREVIOUS RELATIONSHIP SUMMARY:\n${existingSummary?.trim() || "(none yet — first contact)"}\n\n` +
     `NEW CONVERSATION TO ANALYZE:\n${transcriptText.slice(0, 8000)}`
-  const timeoutMs = IS_GPU ? 45000 : 120000
+  const timeoutMs = 45000
 
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
@@ -721,9 +591,9 @@ export async function analyzeLeadTranscript(transcriptText: string, existingSumm
 }
 
 // ---------------------------------------------------------------------------
-// Prompt Tuner \u2014 background-only, weekly. Reads a batch of recent
+// Prompt Tuner — background-only, weekly. Reads a batch of recent
 // conversations and proposes SMALL script-rule additions when the same
-// friction shows up repeatedly. Never writes to ai_scripts itself \u2014 every
+// friction shows up repeatedly. Never writes to ai_scripts itself — every
 // suggestion lands in prompt_suggestions as "pending" and only an admin's
 // explicit approve action (app/api/prompt-tuner) ever changes Priya's real
 // script. See lib/prompt-tuner.ts for the batching + apply logic.
@@ -742,9 +612,9 @@ export type PromptSuggestion = {
 
 export const PROMPT_TUNER_PROMPT = `Return ONLY valid JSON, no other text, no markdown fences.
 
-You are reviewing a batch of recent conversations between Priya (an AI loan-intake agent for Right Agent Group, Hyderabad) and customers, across phone calls and WhatsApp. Priya's job is to collect name, city, and WhatsApp number so a human loan officer can follow up \u2014 this is an information call, NOT a sales pitch, and Priya must never discuss interest rates, promise approval, or ask for OTP/payment. Her behavior is controlled by an editable plain-English script.
+You are reviewing a batch of recent conversations between Priya (an AI loan-intake agent for Right Agent Group, Hyderabad) and customers, across phone calls and WhatsApp. Priya's job is to collect name, city, and WhatsApp number so a human loan officer can follow up — this is an information call, NOT a sales pitch, and Priya must never discuss interest rates, promise approval, or ask for OTP/payment. Her behavior is controlled by an editable plain-English script.
 
-Look for REPEATED patterns across the conversations below \u2014 not a single unusual case \u2014 where a small, low-risk rule addition would clearly have helped. Propose at most 3 suggestions. If nothing repeats clearly, return an empty array \u2014 that is a valid and often correct answer.
+Look for REPEATED patterns across the conversations below — not a single unusual case — where a small, low-risk rule addition would clearly have helped. Propose at most 3 suggestions. If nothing repeats clearly, return an empty array — that is a valid and often correct answer.
 
 Return exactly this JSON shape:
 {
@@ -754,7 +624,7 @@ Return exactly this JSON shape:
       "channel": "voice" or "whatsapp" or "both",
       "situation": string (short description of when this rule should apply),
       "risk": "low" or "medium" or "high",
-      "source_summary": string (max ~150 chars \u2014 what pattern across the conversations prompted this)
+      "source_summary": string (max ~150 chars — what pattern across the conversations prompted this)
     }
   ]
 }
@@ -762,7 +632,7 @@ Return exactly this JSON shape:
 Rules:
 - Only propose a change if the SAME kind of friction appears in at least two separate conversations below.
 - "risk" is "high" if the suggestion touches consent, do-not-call handling, interest rates, guarantees, or anything that could sound like a compliance promise. "medium" if it changes how Priya handles frustration or objections. Everything else is "low".
-- Never propose removing or weakening an existing safety rule (no OTP, no guaranteed approval, no interest-rate discussion, do-not-call handling) \u2014 only propose additions that help collection or reduce friction.
+- Never propose removing or weakening an existing safety rule (no OTP, no guaranteed approval, no interest-rate discussion, do-not-call handling) — only propose additions that help collection or reduce friction.
 - Output raw JSON only. No explanations, no markdown code fences.`
 
 const VALID_CHANNELS = new Set(["voice", "whatsapp", "both"])
@@ -787,12 +657,12 @@ function normalizePromptSuggestions(parsed: any): PromptSuggestion[] {
 
 /**
  * Background-only, called at most weekly (lib/prompt-tuner.ts). Retries once
- * on invalid JSON. Never throws \u2014 returns null on total failure. A generous
+ * on invalid JSON. Never throws — returns null on total failure. A generous
  * timeout is fine: nothing is waiting on this synchronously, same reasoning
  * as analyzeLeadTranscript above.
  */
 export async function generatePromptSuggestions(batchText: string): Promise<PromptSuggestion[] | null> {
-  const timeoutMs = IS_GPU ? 60000 : 150000
+  const timeoutMs = 60000
 
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
@@ -814,33 +684,21 @@ export async function generatePromptSuggestions(batchText: string): Promise<Prom
 }
 
 export function detectLanguage(text: string): Language {
-  if (/[\u0C00-\u0C7F]/.test(text)) return "telugu"
-  if (/[\u0900-\u097F]/.test(text)) return "hindi"
+  if (/[ఀ-౿]/.test(text)) return "telugu"
+  if (/[ऀ-ॿ]/.test(text)) return "hindi"
   return "english"
 }
 
-export async function checkOllamaHealth(): Promise<{ ok: boolean; message: string }> {
-  // Groq active → report the API brain (with the Ollama fallback's state noted).
-  if (USE_GROQ) {
-    try {
-      const res = await fetch(`${GROQ_URL}/models/${GROQ_MODEL}`, {
-        headers: { Authorization: `Bearer ${GROQ_API_KEY}` },
-        signal: AbortSignal.timeout(5000),
-      })
-      if (res.ok) return { ok: true, message: `Groq ready with ${GROQ_MODEL} (Ollama fallback: ${MODEL})` }
-      return { ok: false, message: `Groq HTTP ${res.status} — check GROQ_API_KEY (calls fall back to Ollama)` }
-    } catch (e: any) {
-      return { ok: false, message: `Cannot reach Groq: ${e.message} (calls fall back to Ollama)` }
-    }
-  }
+export async function checkLLMHealth(): Promise<{ ok: boolean; message: string }> {
+  if (!GROQ_API_KEY) return { ok: false, message: "GROQ_API_KEY is not set" }
   try {
-    const res = await fetch(`${OLLAMA_URL}/api/tags`, { signal: AbortSignal.timeout(3000) })
-    if (!res.ok) return { ok: false, message: `Ollama not responding: HTTP ${res.status}` }
-    const data = await res.json()
-    const hasModel = data?.models?.some((m: any) => m.name === MODEL || m.name === `${MODEL}:latest`)
-    if (!hasModel) return { ok: false, message: `Model ${MODEL} not found. Run: ollama pull ${MODEL}` }
-    return { ok: true, message: `Ollama ready with ${MODEL}` }
+    const res = await fetch(`${GROQ_URL}/models/${GROQ_MODEL}`, {
+      headers: { Authorization: `Bearer ${GROQ_API_KEY}` },
+      signal: AbortSignal.timeout(5000),
+    })
+    if (res.ok) return { ok: true, message: `Groq ready with ${GROQ_MODEL}` }
+    return { ok: false, message: `Groq HTTP ${res.status} — check GROQ_API_KEY` }
   } catch (e: any) {
-    return { ok: false, message: `Cannot reach Ollama at ${OLLAMA_URL}. Error: ${e.message}` }
+    return { ok: false, message: `Cannot reach Groq: ${e.message}` }
   }
 }

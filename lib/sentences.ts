@@ -1,6 +1,6 @@
 // Incremental sentence splitting for the streaming voice pipeline.
 //
-// As Ollama streams tokens, we cut the text at sentence boundaries and hand
+// As the LLM streams tokens, we cut the text at sentence boundaries and hand
 // each finished sentence to TTS immediately — the caller hears sentence 1
 // while sentence 2 is still being generated. The rules are deliberately
 // conservative: a wrong split mid-number ("9.5 lakhs") sounds far worse than

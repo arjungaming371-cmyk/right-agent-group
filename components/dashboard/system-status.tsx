@@ -20,18 +20,18 @@ export default function SystemStatus() {
         const voiceRes = await fetch("/api/system/status")
         const whatsappRes = await fetch("/api/whatsapp/status")
 
-        const voiceData = await voiceRes.json().catch(() => ({ status: "degraded" }))
-        const whatsappData = await whatsappRes.json().catch(() => ({ status: "error" }))
+        const voiceData = await voiceRes.json().catch(() => null)
+        const whatsappData = await whatsappRes.json().catch(() => null)
 
         setStatus({
           voiceBot: {
-            status: voiceData.status || "operational",
+            status: voiceData?.llm?.running ? "operational" : "down",
             lastCheck: new Date().toISOString(),
-            activeCalls: voiceData.activeCalls || 0,
+            activeCalls: voiceData?.activeCalls || 0,
           },
           whatsapp: {
-            status: whatsappData.status || "connected",
-            unread: whatsappData.unread || 0,
+            status: whatsappData?.ready ? "connected" : "disconnected",
+            unread: whatsappData?.unread || 0,
           },
         })
       } catch (e) {

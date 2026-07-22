@@ -26,7 +26,7 @@
 // Never throws; always degrades to "" (no KB context injected).
 
 import { query } from "./db"
-import { rewriteKnowledgeQuery, canAffordExtraCompletion } from "./ollama"
+import { rewriteKnowledgeQuery, canAffordExtraCompletion } from "./llm"
 
 const MAX_SNIPPET = 800 // must fit the longest KB entry whole — clipping mid-entry (e.g. a rate table) makes the model invent the cut-off facts
 const MAX_RESULTS = 3
@@ -88,7 +88,7 @@ export async function searchKnowledgeBase(userQuery: string): Promise<string> {
     }
 
     // First pass was empty or weak — one bounded reformulation hop, but only
-    // where it's actually cheap (Groq/GPU). On CPU-only Ollama this would
+    // where it is cheap on Groq. On a slow local model this would
     // compete with the SAME slot the live call's main reply needs next —
     // not worth the lag risk for an FAQ lookup.
     if (!canAffordExtraCompletion()) return ""

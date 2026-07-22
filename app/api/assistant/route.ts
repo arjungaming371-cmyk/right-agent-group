@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
-import { chatWithSystemPromptStream } from "@/lib/ollama"
+import { chatWithSystemPromptStream } from "@/lib/llm"
 import { getSessionFromRequest } from "@/lib/auth"
 
 export const dynamic = "force-dynamic"

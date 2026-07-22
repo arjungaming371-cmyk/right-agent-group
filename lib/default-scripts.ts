@@ -1,5 +1,5 @@
 // Priya's default call scripts — the single source of truth.
-// Used as the AI fallback (lib/ollama.ts) AND as the seed / "Reset to
+// Used as the AI fallback (lib/llm.ts) AND as the seed / "Reset to
 // Default" content for the dashboard script editor (app/api/script).
 // Edit here once; both consumers pick it up.
 //

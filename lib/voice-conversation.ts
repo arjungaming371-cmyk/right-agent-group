@@ -1,12 +1,13 @@
 import { randomUUID } from "crypto"
 import { db, query } from "./db"
-import { chatWithOllama, chatWithOllamaStream, extractLeadInfo, mightBeComplete, type Language } from "./ollama"
+import { chatWithLLM, chatWithLLMStream, extractLeadInfo, mightBeComplete, type Language } from "./llm"
 import { splitSentences } from "./sentences"
 import { sendApplicationLink } from "./whatsapp"
 import { buildLeadBrief } from "./lead-brain"
 import { searchKnowledgeBase } from "./knowledge-base"
 import { detectFrustration, flagFrustratedCall } from "./frustration"
 import { createNotification } from "./notifications"
+import { maybeProposeLoanEdit } from "./loan-edit-requests"
 
 // Permission-based opener — respect keeps people on the line.
 // Neutral/informational by design: this is an intake call, not a sales
@@ -184,11 +185,14 @@ async function buildTurnInstructions(
 ): Promise<string> {
   // LEAD BRAIN: brief Priya with the full cross-channel picture — known
   // facts, rolling relationship summary, recent interactions, sentiment
-  // warnings — only on the first couple of turns, since after that it's
-  // already in the conversation history and re-injecting would just waste
-  // tokens. One cheap query (lib/lead-brain.ts), no live Ollama analysis.
+  // warnings — every turn. Raw history alone isn't reliable enough at
+  // tracking "already answered" facts (observed live: the model re-asked
+  // for info the customer had already given), so the brief's explicit
+  // "don't re-ask known facts" instruction needs to stay in context for the
+  // whole call, not just the open. One cheap query (lib/lead-brain.ts), no
+  // live LLM analysis.
   let merged = instructions || ""
-  if (leadId && history.length <= 2) {
+  if (leadId) {
     const brief = await buildLeadBrief(leadId)
     merged = [merged, brief].filter(Boolean).join("\n\n")
   }
@@ -219,7 +223,7 @@ async function buildTurnInstructions(
  * lead, creates the one-time form link, sends/logs the WhatsApp message.
  *
  * SPEED FIX: a lead can only be complete once a WhatsApp number exists in
- * the transcript. Skip the second (expensive) Ollama extraction call until a
+ * the transcript. Skip the second (expensive) LLM extraction call until a
  * phone-number-like string actually appears — most turns stay at ONE model
  * call. The caller-phone header both grounds the extractor for "same number"
  * answers AND lets mightBeComplete() pass without spoken digits.
@@ -326,14 +330,15 @@ export async function handleTurn(opts: {
 
   let reply = ""
   try {
-    reply = (await chatWithOllama(messages, language, mergedInstructions || undefined)).trim()
+    reply = (await chatWithLLM(messages, language, mergedInstructions || undefined)).trim()
     if (!reply) reply = GREETINGS[language]
   } catch (e) {
-    console.error("Ollama error:", e)
+    console.error("LLM error:", e)
     reply = RETRY_MSG[language]
   }
 
   updateTranscriptAsync(callSid, speech, reply)
+  maybeProposeLoanEdit(leadId, "priya_voice", speech)
 
   const completed = await completeLeadIfReady({ leadId, callSid, callerPhone, messages, reply })
   if (completed) return { text: CLOSING[language], hangup: true }
@@ -384,7 +389,7 @@ export async function handleTurnStream(
   let pending = ""
   try {
     reply = (
-      await chatWithOllamaStream(messages, language, mergedInstructions || undefined, (delta) => {
+      await chatWithLLMStream(messages, language, mergedInstructions || undefined, (delta) => {
         pending += delta
         const { complete, rest } = splitSentences(pending)
         for (const s of complete) onSentence(s)
@@ -398,7 +403,7 @@ export async function handleTurnStream(
       onSentence(reply)
     }
   } catch (e) {
-    console.error("Ollama error:", e)
+    console.error("LLM error:", e)
     const msg = RETRY_MSG[language]
     updateTranscriptAsync(callSid, speech, msg)
     onSentence(msg)
@@ -406,6 +411,7 @@ export async function handleTurnStream(
   }
 
   updateTranscriptAsync(callSid, speech, reply)
+  maybeProposeLoanEdit(leadId, "priya_voice", speech)
 
   const completed = await completeLeadIfReady({ leadId, callSid, callerPhone, messages, reply })
   if (completed) {

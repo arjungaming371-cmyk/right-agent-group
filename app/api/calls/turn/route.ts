@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db, query } from "@/lib/db"
 import { startCall, handleTurn, handleTurnStream } from "@/lib/voice-conversation"
-import { detectLanguage, type Language } from "@/lib/ollama"
+import { detectLanguage, type Language } from "@/lib/llm"
 
 export const dynamic = "force-dynamic"
 

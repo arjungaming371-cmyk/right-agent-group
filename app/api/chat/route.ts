@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { chatWithOllama, type Language } from "@/lib/ollama"
+import { chatWithLLM, type Language } from "@/lib/llm"
 
 export const dynamic = "force-dynamic"
 
@@ -10,7 +10,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ reply: "Please send a valid message." }, { status: 400 })
     }
     const messages = [...(Array.isArray(history) ? history.slice(-10) : []), { role: "user", content: message }]
-    const reply = await chatWithOllama(messages, (language as Language) || "english")
+    const reply = await chatWithLLM(messages, (language as Language) || "english")
     return NextResponse.json({ reply })
   } catch (e: any) {
     console.error("chat error:", e.message)

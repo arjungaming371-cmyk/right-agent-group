@@ -1,6 +1,6 @@
 "use client"
 import { useEffect, useState } from "react"
-import { Users, Target, IndianRupee, BadgeCheck, Phone, MessageCircle, RotateCcw, Plus, Search, Link2, Check, Download, Brain } from "lucide-react"
+import { Users, Target, IndianRupee, BadgeCheck, Phone, MessageCircle, RotateCcw, Plus, Search, Link2, Check, Download, Brain, Pin } from "lucide-react"
 import { formatCurrency, timeAgo } from "@/lib/utils"
 import { useToast } from "../ui/toast"
 import { Skeleton } from "../ui/skeleton"
@@ -14,6 +14,7 @@ type Lead = {
   call_count: number; created_at: string; updated_at: string; score: number
   form_token: string | null; form_used_at: string | null; form_sent_at: string | null
   form_completed: boolean
+  pinned?: boolean; pinned_at?: string | null
 }
 
 // Shows exactly what the WhatsApp form link is doing for this lead:
@@ -117,6 +118,27 @@ export default function LeadsView({ role, initialSearch }: { role: "admin" | "ag
     const res = await fetch(`/api/leads?${params.toString()}`)
     if (res.ok) setLeads(await res.json())
     setLoading(false)
+  }
+
+  async function togglePin(lead: Lead) {
+    const nextPinned = !lead.pinned
+    // Optimistic — re-sort locally so pinning feels instant instead of
+    // waiting for the next full reload.
+    setLeads(prev => {
+      const updated = prev.map(l => l.id === lead.id ? { ...l, pinned: nextPinned, pinned_at: nextPinned ? new Date().toISOString() : null } : l)
+      return [...updated].sort((a, b) => {
+        if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1
+        if (a.pinned && b.pinned) return (b.pinned_at || "").localeCompare(a.pinned_at || "")
+        return 0 // leave everything else in the order the server gave us
+      })
+    })
+    try {
+      const res = await fetch(`/api/leads/${lead.id}/pin`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pinned: nextPinned }) })
+      if (!res.ok) throw new Error()
+    } catch {
+      toast.error("Couldn't update pin — refreshing")
+      load()
+    }
   }
 
   useEffect(() => { load() }, [search, ageFilter, amountFilter, loanTypeFilter, interestedFilter])
@@ -296,7 +318,10 @@ export default function LeadsView({ role, initialSearch }: { role: "admin" | "ag
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                       <Avatar name={lead.name} />
                       <div>
-                        <div style={{ fontWeight: 600, fontSize: 14 }}>{lead.name || "Unknown"}</div>
+                        <div style={{ fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", gap: 6 }}>
+                          {lead.pinned && <Pin size={12} strokeWidth={2.2} style={{ color: "#f7b731", fill: "#f7b731", flexShrink: 0 }} />}
+                          {lead.name || "Unknown"}
+                        </div>
                         <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{lead.phone}</div>
                       </div>
                     </div>
@@ -317,6 +342,11 @@ export default function LeadsView({ role, initialSearch }: { role: "admin" | "ag
                     <div style={{ display: "flex", gap: 6 }}>
                       {canEdit && (
                         <>
+                          <button
+                            onClick={() => togglePin(lead)}
+                            title={lead.pinned ? "Unpin" : "Pin to top"}
+                            style={{ background: lead.pinned ? "rgba(247,183,49,0.15)" : "rgba(255,255,255,0.05)", border: `1px solid ${lead.pinned ? "rgba(247,183,49,0.35)" : "var(--border)"}`, color: lead.pinned ? "#f7b731" : "var(--text-muted)", borderRadius: 9, width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                          ><Pin size={14} strokeWidth={1.9} style={lead.pinned ? { fill: "#f7b731" } : undefined} /></button>
                           <button
                             onClick={() => { setCallTarget(lead); setCallInstructions("") }}
                             disabled={!lead.phone || calling === lead.id}

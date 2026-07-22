@@ -5,7 +5,7 @@
 // pipeline ourselves:
 //
 //   caller audio → silence-based endpointing → STT (self-hosted Whisper)
-//     → Next.js /api/calls/turn (Ollama = Priya's brain, DB, WhatsApp link)
+//     → Next.js /api/calls/turn (Groq = Priya's brain, DB, WhatsApp link)
 //     → TTS (self-hosted Edge TTS, server/tts-service — free Microsoft
 //       neural voices, one per language, no GPU/API key needed)
 //     → downsample to 8kHz PCM → streamed back to the caller.
@@ -77,6 +77,7 @@ function pcmToWav(pcm) {
 // switches Priya's language from that. Forcing the current call language here
 // would transliterate English speech into Telugu script and lock the call.
 async function speechToText(pcm, language) {
+  const t0 = Date.now()
   const res = await fetch(`${STT_URL}/transcribe?language=${encodeURIComponent(language)}`, {
     method: "POST",
     headers: { "Content-Type": "audio/wav", "x-api-key": API_KEY },
@@ -84,6 +85,7 @@ async function speechToText(pcm, language) {
   })
   if (!res.ok) throw new Error(`STT service HTTP ${res.status} — is server/stt-service.py running?`)
   const data = await res.json()
+  console.log(`⏱ STT: ${Date.now() - t0}ms`)
   return (data?.text || "").trim()
 }
 
@@ -91,6 +93,7 @@ async function speechToText(pcm, language) {
 const TTS_URL = process.env.TTS_SERVICE_URL || "http://127.0.0.1:3004"
 
 async function synthesizeSpeech(text, language) {
+  const t0 = Date.now()
   const res = await fetch(`${TTS_URL}/synthesize`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
@@ -98,7 +101,9 @@ async function synthesizeSpeech(text, language) {
     signal: AbortSignal.timeout(30000),
   })
   if (!res.ok) throw new Error(`TTS service HTTP ${res.status} — is server/tts-service running?`)
-  return Buffer.from(await res.arrayBuffer())
+  const buf = Buffer.from(await res.arrayBuffer())
+  console.log(`⏱ TTS: ${Date.now() - t0}ms  ("${text.slice(0, 40)}${text.length > 40 ? "…" : ""}")`)
+  return buf
 }
 
 // Playback loudness. Edge TTS output downsampled to 8kHz lands quiet on a
@@ -305,7 +310,13 @@ class CallSession {
           console.log(`   saved ${f}`)
         } catch (e) { console.error("   dump failed:", e.message) }
       }
-      const transcript = await speechToText(pcm, "auto")
+      // Pass the call's KNOWN language instead of "auto" — Whisper's language
+      // auto-detection runs an extra pass before every transcription, and on
+      // this CPU-only setup that dwarfed the actual decode time (observed
+      // live: a 1.6s "Yes, yes." utterance took 9.5s to transcribe, almost
+      // entirely detection overhead, not the 3-4 words themselves).
+      const turnT0 = Date.now()
+      const transcript = await speechToText(pcm, this.language)
       console.log(`👂 [${this.language}] "${transcript}"`)
       if (!transcript) return
 
@@ -313,10 +324,16 @@ class CallSession {
       // go straight into the TTS/playback pipeline. The caller hears sentence
       // 1 while sentence 2 is still being generated.
       let hangup = false
+      let firstSentenceAt = null
+      const brainT0 = Date.now()
       await callTurnApiStream(
         { event: "turn", callSid: this.callSid || "unknown", speech: transcript, language: this.language },
         (ev) => {
           if (ev.type === "sentence" && ev.text) {
+            if (!firstSentenceAt) {
+              firstSentenceAt = Date.now()
+              console.log(`⏱ brain (time to first sentence): ${firstSentenceAt - brainT0}ms`)
+            }
             console.log(`🗣 ${ev.text}`)
             this.queueSentence(ev.text)
           } else if (ev.type === "done") {
@@ -325,7 +342,11 @@ class CallSession {
           }
         }
       )
+      console.log(`⏱ brain (full generation): ${Date.now() - brainT0}ms`)
       await this.drainSpeech()
+      // Total turn: from "caller stopped talking" to "all of Priya's audio
+      // has been sent back" — this is the real silence the caller sat through.
+      console.log(`⏱ TOTAL turn (silence → reply fully sent): ${Date.now() - turnT0}ms`)
       if (hangup) this.hangupAfterAudio()
     } catch (e) {
       console.error("turn error:", e.message)
@@ -403,7 +424,11 @@ class CallSession {
   // 0:00 in Voice Logs. Idempotent (flag + GREATEST() server-side), called from
   // both "stop" and the socket close handler — whichever happens first wins.
   reportEnd() {
-    if (this.endReported || !this.callSid) return
+    if (this.endReported) return
+    if (!this.callSid) {
+      console.error(`⚠ reportEnd skipped — callSid was never set, duration lost (start event may be missing/malformed)`)
+      return
+    }
     this.endReported = true
     const duration = Math.round((Date.now() - this.startedAt) / 1000)
     callTurnApi({ event: "end", callSid: this.callSid, duration }).catch((e) =>

@@ -15,7 +15,7 @@
 // All other TTS providers (IndicF5, Svara, etc.) have been removed.
 
 import { MsEdgeTTS, OUTPUT_FORMAT } from "msedge-tts"
-import type { Language } from "./ollama"
+import type { Language } from "./llm"
 
 const PROVIDER = (process.env.TTS_PROVIDER || "edge").toLowerCase()
 

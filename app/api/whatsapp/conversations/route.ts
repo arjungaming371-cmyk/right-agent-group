@@ -10,6 +10,7 @@ export async function GET() {
     const result = await query(`
       SELECT
         l.id, l.name, l.phone,
+        l.pinned, l.pinned_at,
         lm.content    AS last_message,
         lm.created_at AS last_message_time,
         lm.direction  AS last_direction,
@@ -28,7 +29,7 @@ export async function GET() {
         WHERE lead_id = l.id AND direction = 'inbound' AND status = 'received'
       ) u ON true
       WHERE l.phone IS NOT NULL AND l.phone != ''
-      ORDER BY lm.created_at DESC NULLS LAST, l.created_at DESC
+      ORDER BY l.pinned DESC, l.pinned_at DESC NULLS LAST, lm.created_at DESC NULLS LAST, l.created_at DESC
       LIMIT 100
     `)
     return NextResponse.json(result.rows)

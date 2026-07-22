@@ -1,13 +1,16 @@
 import { NextRequest, NextResponse } from "next/server"
 import crypto from "crypto"
 import pool, { query } from "@/lib/db"
-import { chatWithOllama, detectLanguage, type Language } from "@/lib/ollama"
-import { sendWhatsAppText } from "@/lib/whatsapp"
+import { chatWithLLM, detectLanguage, type Language } from "@/lib/llm"
+import { sendWhatsAppText, downloadWhatsAppMedia } from "@/lib/whatsapp"
 import { buildLeadBrief } from "@/lib/lead-brain"
 import { searchKnowledgeBase } from "@/lib/knowledge-base"
 import { detectFrustration, flagFrustratedWhatsApp } from "@/lib/frustration"
 import { createNotification } from "@/lib/notifications"
 import { refreshLeadScore } from "@/lib/scoring"
+import { maybeProposeLoanEdit } from "@/lib/loan-edit-requests"
+import { extractPdfText } from "@/lib/kb-ingest"
+import { transcribeAudio } from "@/lib/stt"
 
 export const dynamic = "force-dynamic"
 
@@ -93,17 +96,49 @@ export async function POST(req: NextRequest) {
   }
 }
 
+// PDF documents (salary slips, ID proof, bank statements) and voice notes
+// are read, not just acknowledged with a placeholder: PDFs get their text
+// extracted (reusing the same parser as knowledge-base ingestion), voice
+// notes get transcribed through the self-hosted Whisper STT service that
+// already backs live calls. Everything else (images, video, stickers,
+// location) stays a placeholder — genuinely different work (vision model)
+// not in scope here.
+async function resolveInboundText(msg: any): Promise<string> {
+  if (msg?.type === "text") return String(msg.text?.body || "").slice(0, 4000)
+  if (msg?.type === "button") return String(msg.button?.text || "").slice(0, 4000)
+
+  if (msg?.type === "document" && msg.document?.id) {
+    const filename = msg.document?.filename || "document.pdf"
+    if ((msg.document?.mime_type || "") !== "application/pdf") {
+      return `[document message: ${filename} — only PDF documents can be read]`
+    }
+    const media = await downloadWhatsAppMedia(msg.document.id)
+    if (!media) return `[document message: ${filename} — could not download]`
+    try {
+      const extracted = (await extractPdfText(media.buffer)).replace(/\s+/g, " ").trim().slice(0, 3000)
+      if (extracted) return `[Customer sent a PDF document: ${filename}]\n${extracted}`
+    } catch (e: any) {
+      console.error("WhatsApp PDF extraction error:", e.message)
+    }
+    return `[document message: ${filename} — could not read text from this PDF]`
+  }
+
+  if (msg?.type === "audio" && msg.audio?.id) {
+    const media = await downloadWhatsAppMedia(msg.audio.id)
+    if (media) {
+      const transcribed = await transcribeAudio(media.buffer)
+      if (transcribed) return transcribed
+    }
+    return `[voice message — could not transcribe]`
+  }
+
+  return `[${msg?.type || "media"} message]`
+}
+
 async function handleInbound(msg: any, profileName: string | null) {
   const from = String(msg?.from || "").replace(/\D/g, "")
   const waMessageId = msg?.id ? String(msg.id) : null
-  // Text messages carry the body; media/interactive arrive as placeholders
-  // so the operator still sees that SOMETHING came in.
-  const text =
-    msg?.type === "text"
-      ? String(msg.text?.body || "").slice(0, 4000)
-      : msg?.type === "button"
-        ? String(msg.button?.text || "").slice(0, 4000)
-        : `[${msg?.type || "media"} message]`
+  const text = await resolveInboundText(msg)
   if (!from || !text) return
 
   // ---- Dedupe: Meta retries webhooks; process each message exactly once ----
@@ -128,6 +163,17 @@ async function handleInbound(msg: any, profileName: string | null) {
     )
     if (found.rows.length > 0) {
       lead = found.rows[0]
+      // Lead may have been created from a phone call (whatsapp_number never
+      // set) — the fact that they're texting us on WhatsApp right now IS
+      // their WhatsApp number. Backfill it so the AI can see it as a known
+      // fact and never has to ask for it.
+      if (!lead.whatsapp_number) {
+        const updated = await client.query(
+          `UPDATE leads SET whatsapp_number = $1 WHERE id = $2 RETURNING *`,
+          [`+${from}`, lead.id]
+        )
+        lead = updated.rows[0]
+      }
     } else {
       isNewContact = true
       const created = await client.query(
@@ -167,7 +213,7 @@ async function handleInbound(msg: any, profileName: string | null) {
     })
   }
 
-  // Don't burn an Ollama generation on "[image message]" placeholders.
+  // Don't burn an LLM generation on "[image message]" placeholders.
   if (text.startsWith("[") && text.endsWith(" message]")) return
 
   // ---- 3. AI auto-reply (isolated — failure never loses the message) ----
@@ -207,12 +253,20 @@ async function handleInbound(msg: any, profileName: string | null) {
       "never invent, round, or adjust numbers; if a detail isn't in the context, say the loan " +
       "officer will confirm it. Reply like a professional WhatsApp chat agent: friendly and " +
       "complete answers, WhatsApp formatting allowed (single-asterisk *bold* only — never " +
-      "**double** — and bullet lists), as long as needed to answer properly."
+      "**double** — and bullet lists), as long as needed to answer properly. " +
+      "NEVER ask for their WhatsApp number — the number they are texting you from RIGHT NOW " +
+      "is their WhatsApp number, you already have it. If the base script's goal mentions " +
+      "collecting a WhatsApp number, treat that as already done on this channel — do not ask, " +
+      "do not confirm it, just skip straight to name and city if those are still missing."
 
     // LEAD BRAIN: brief the WhatsApp AI with the same cross-channel picture
     // Priya gets on calls — known facts, rolling summary, recent
-    // interactions, sentiment warnings — only on the first couple of turns.
-    if (historyRes.rows.length <= 2) {
+    // interactions, sentiment warnings — every turn. Raw history alone isn't
+    // reliable enough at tracking "already answered" facts (observed live:
+    // the model re-asked for a name/WhatsApp number the customer had already
+    // given), so the brief's explicit "don't re-ask known facts" instruction
+    // needs to stay in context for the whole conversation, not just the open.
+    {
       const brief = await buildLeadBrief(lead.id)
       if (brief) extraContext = [extraContext, brief].join("\n\n")
     }
@@ -224,7 +278,10 @@ async function handleInbound(msg: any, profileName: string | null) {
 
     // numPredict 400: text chat has no caller waiting in silence — let Priya
     // write full answers (rate tables, loan lists) instead of call-length ones.
-    aiReply = await chatWithOllama(messages, lang, extraContext, { numPredict: 400 })
+    // timeoutMs 45s: nobody is on hold for a WhatsApp reply the way they are
+    // on a live call — worth the extra wait to actually get a reply instead
+    // of the CPU-fallback model timing out on a 400-token generation.
+    aiReply = await chatWithLLM(messages, lang, extraContext, { numPredict: 400, timeoutMs: 45000 })
     // WhatsApp bold is *single*; the model still slips in markdown ** sometimes.
     if (aiReply) aiReply = aiReply.replace(/\*\*/g, "*")
 
@@ -256,4 +313,9 @@ async function handleInbound(msg: any, profileName: string | null) {
   }
 
   refreshLeadScore(lead.id).catch(() => {})
+
+  // LOAN EDIT REQUESTS: fire-and-forget, after the customer already has
+  // their reply — never adds latency, never writes to loan_applications
+  // itself, only flags a pending row for staff to approve/reject.
+  maybeProposeLoanEdit(lead.id, "priya_whatsapp", text)
 }

@@ -31,15 +31,13 @@ if ($pgService) {
     Write-Host "      WARN PostgreSQL service not found - make sure it is installed and running!" -ForegroundColor Red
 }
 
-# 1. Ollama
-Write-Host "[2/6] Starting Ollama AI..." -ForegroundColor Yellow
-try {
-    Invoke-WebRequest -Uri "http://localhost:11434/api/tags" -TimeoutSec 2 -ErrorAction Stop | Out-Null
-    Write-Host "      OK Ollama already running" -ForegroundColor Green
-} catch {
-    Start-Process "ollama" -ArgumentList "serve" -WindowStyle Hidden
-    Start-Sleep -Seconds 3
-    Write-Host "      OK Ollama started" -ForegroundColor Green
+# 1. Groq (cloud AI brain — nothing to start locally, just verify the key is set)
+Write-Host "[2/6] AI brain: Groq Cloud API..." -ForegroundColor Yellow
+$groqLine = (Get-Content "$ProjectDir\.env" -ErrorAction SilentlyContinue) | Select-String "^\s*GROQ_API_KEY=\S" | Select-Object -First 1
+if ($groqLine) {
+    Write-Host "      OK GROQ_API_KEY set (cloud brain, no local AI process needed)" -ForegroundColor Green
+} else {
+    Write-Host "      WARN GROQ_API_KEY missing in .env - AI replies WILL FAIL. Get a free key at console.groq.com" -ForegroundColor Red
 }
 
 # 2. WhatsApp: official Meta Cloud API - no local service needed anymore.
@@ -65,6 +63,12 @@ if (-not $env:STT_API_KEY) { Write-Host "      WARN WHATSAPP_SERVICE_KEY / STT_A
 $appSecretLine = $envLines | Select-String "^\s*WHATSAPP_APP_SECRET=\s*\S"
 if (-not $appSecretLine) { Write-Host "      WARN WHATSAPP_APP_SECRET missing in .env - /api/whatsapp webhook accepts UNSIGNED requests from anyone!" -ForegroundColor Red }
 
+# Logs directory — these 3 services run hidden with nowhere to see their
+# output otherwise, which made timing/duration bugs impossible to diagnose
+# after the fact. stdout+stderr both land here now.
+$logsDir = Join-Path $ProjectDir "logs"
+New-Item -ItemType Directory -Force -Path $logsDir | Out-Null
+
 # 3. Whisper STT Service (port 3003) - needed for voice calls
 Write-Host "[4/6] Starting Whisper STT..." -ForegroundColor Yellow
 $sttProcess = $null
@@ -72,7 +76,7 @@ $sttDir = Join-Path $ProjectDir "server\stt-service"
 $venvPython = Join-Path $sttDir "venv\Scripts\python.exe"
 if (Test-Path $venvPython) {
     Stop-Port 3003
-    $sttProcess = Start-Process $venvPython -ArgumentList "-m","uvicorn","app:app","--host","127.0.0.1","--port","3003" -WorkingDirectory $sttDir -WindowStyle Hidden -PassThru
+    $sttProcess = Start-Process $venvPython -ArgumentList "-m","uvicorn","app:app","--host","127.0.0.1","--port","3003" -WorkingDirectory $sttDir -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logsDir "stt.log") -RedirectStandardError (Join-Path $logsDir "stt.err.log")
     Write-Host "      OK STT starting (PID: $($sttProcess.Id)) - first run downloads the model (~3GB)" -ForegroundColor Green
 } else {
     Write-Host "      SKIP STT venv not found - voice calls will not hear the caller!" -ForegroundColor Red
@@ -86,16 +90,16 @@ $ttsDir = Join-Path $ProjectDir "server\tts-service"
 $ttsVenvPython = Join-Path $ttsDir "venv\Scripts\python.exe"
 $ttsPython = if (Test-Path $ttsVenvPython) { $ttsVenvPython } else { "python" }
 Stop-Port 3004
-$ttsProcess = Start-Process $ttsPython -ArgumentList "-m","uvicorn","app:app","--host","127.0.0.1","--port","3004" -WorkingDirectory $ttsDir -WindowStyle Hidden -PassThru
+$ttsProcess = Start-Process $ttsPython -ArgumentList "-m","uvicorn","app:app","--host","127.0.0.1","--port","3004" -WorkingDirectory $ttsDir -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logsDir "tts.log") -RedirectStandardError (Join-Path $logsDir "tts.err.log")
 Start-Sleep -Seconds 1
 Write-Host "      OK Edge TTS started (PID: $($ttsProcess.Id))" -ForegroundColor Green
 
 # 5. Voicebot Server (port 3002) - the phone call brain
 Write-Host "[6/7] Starting Voicebot..." -ForegroundColor Yellow
 Stop-Port 3002
-$vbProcess = Start-Process "node" -ArgumentList "server\voicebot-server.js" -WorkingDirectory $ProjectDir -WindowStyle Hidden -PassThru
+$vbProcess = Start-Process "node" -ArgumentList "server\voicebot-server.js" -WorkingDirectory $ProjectDir -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logsDir "voicebot.log") -RedirectStandardError (Join-Path $logsDir "voicebot.err.log")
 Start-Sleep -Seconds 1
-Write-Host "      OK Voicebot started (PID: $($vbProcess.Id))" -ForegroundColor Green
+Write-Host "      OK Voicebot started (PID: $($vbProcess.Id)) - logs: logs\voicebot.log" -ForegroundColor Green
 
 # 6. Website (port 3000)
 Write-Host "[7/7] Starting Website..." -ForegroundColor Yellow
@@ -104,25 +108,26 @@ $webProcess = Start-Process "cmd" -ArgumentList "/c npm start" -WorkingDirectory
 Start-Sleep -Seconds 5
 Write-Host "      OK Website started at http://localhost:3000" -ForegroundColor Green
 
-# 6. Cloudflare Tunnel
-# NOTE: a QUICK tunnel gets a NEW random URL every restart, which breaks
-# Google login and Exotel webhooks. For production use a NAMED tunnel with
-# a fixed domain:  cloudflared tunnel create rag && cloudflared tunnel route dns rag your-domain.com
+# 6. Public tunnel
+# No domain yet -> scripts/tunnel-autofix.ps1 uses ngrok's reserved free
+# static domain (NGROK_DOMAIN in .env), which — unlike a Cloudflare QUICK
+# tunnel — does NOT change between restarts, so it stays registered in
+# Google Console + Meta once it's set up. Swap to a NAMED Cloudflare tunnel
+# (set CF_TUNNEL_NAME) once the client hands over a real domain for the demo:
+#   cloudflared tunnel create rag && cloudflared tunnel route dns rag your-domain.com
 $cfProcess = $null
-$cfFound = Get-Command "cloudflared" -ErrorAction SilentlyContinue
-if ($cfFound) {
-    $namedTunnel = $env:CF_TUNNEL_NAME
-    if ($namedTunnel) {
+$namedTunnel = $env:CF_TUNNEL_NAME
+if ($namedTunnel) {
+    if (Get-Command "cloudflared" -ErrorAction SilentlyContinue) {
         $cfProcess = Start-Process "cloudflared" -ArgumentList "tunnel run $namedTunnel" -WindowStyle Minimized -PassThru
         Write-Host "      OK Named tunnel '$namedTunnel' started (stable URL)" -ForegroundColor Green
     } else {
-        # Quick tunnel + auto-fix: scripts/tunnel-autofix.ps1 starts the tunnel,
-        # then re-points the Meta WhatsApp webhook at whatever new URL it got —
-        # so WhatsApp auto-reply survives restarts even without a domain.
-        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ProjectDir "scripts\tunnel-autofix.ps1") -ProjectDir $ProjectDir
+        Write-Host "      SKIP cloudflared not found - run: winget install Cloudflare.cloudflared" -ForegroundColor Yellow
     }
+} elseif (Get-Command "ngrok" -ErrorAction SilentlyContinue) {
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ProjectDir "scripts\tunnel-autofix.ps1") -ProjectDir $ProjectDir
 } else {
-    Write-Host "      SKIP cloudflared not found - run: winget install Cloudflare.cloudflared" -ForegroundColor Yellow
+    Write-Host "      SKIP ngrok not found - run: winget install ngrok.ngrok (then: ngrok config add-authtoken <token>)" -ForegroundColor Yellow
 }
 
 Write-Host ""

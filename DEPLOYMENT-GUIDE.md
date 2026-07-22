@@ -51,64 +51,27 @@ Write that password down — it goes in `.env` as `PG_PASSWORD`.
 
 ---
 
-## STEP 3 — Ollama (the AI brain)
+## STEP 3 — Groq (the AI brain)
+
+Priya's brain is the **Groq Cloud API** (llama-3.3-70b, streaming, generous free tier) —
+nothing to install or run locally.
+
+1. Create a free account at **console.groq.com**
+2. Enable **Zero Data Retention** in Data Controls (recommended for customer conversations)
+3. Create an API key (`gsk_...`) and put it in `.env` as `GROQ_API_KEY`
+
+Verify from the app server:
 
 ```bash
-curl -fsSL https://ollama.com/install.sh | sh
-ollama pull llama3.1:8b
-# verify it answers:
-ollama run llama3.1:8b "say hello"    # then /bye to exit
-```
-On a GPU machine, confirm with `ollama ps` during a chat — it should say **100% GPU**.
-
-Fine for development and low call volume. Ollama serves **one conversation at a time** by
-design (`OLLAMA_MAX_CONCURRENT` in `.env`) — if you need several simultaneous live calls,
-skip to STEP 3b instead.
-
----
-
-## STEP 3b — vLLM instead of Ollama (only if you need real concurrency)
-
-Use this when you expect **multiple simultaneous live calls** (roughly 5+ at once). vLLM does
-continuous batching across in-flight requests, so one GPU serves many concurrent conversations
-far more efficiently than Ollama, which was built for single-user/dev use, not a call center.
-
-Skip this step entirely if Ollama (STEP 3) is enough for your call volume — it's the simpler
-setup and this app runs on either one without any code changes, just an `.env` switch.
-
-```bash
-# On the GPU box (needs a real NVIDIA GPU, 16GB+ VRAM for llama3.1:8b comfortably):
-pip install vllm
-
-# Launch the OpenAI-compatible server. --max-num-seqs controls how many
-# requests it'll batch together — start around 10-16 and raise it once
-# you've load-tested actual latency at that concurrency.
-python -m vllm.entrypoints.openai.api_server \
-  --model meta-llama/Meta-Llama-3.1-8B-Instruct \
-  --port 8000 \
-  --max-num-seqs 16
-
-# verify it's up:
-curl http://localhost:8000/v1/models
+curl -H "Authorization: Bearer $GROQ_API_KEY" https://api.groq.com/openai/v1/models
 ```
 
-Run it under `pm2` or `systemd` like everything else in STEP 8 — it needs to survive restarts too.
-
-In `.env` on the **app server** (not the GPU box, unless they're the same machine):
-
-```bash
-LLM_PROVIDER=vllm
-VLLM_URL=http://<gpu-box-ip>:8000
-VLLM_MODEL=meta-llama/Meta-Llama-3.1-8B-Instruct      # must match --model above exactly
-OLLAMA_MAX_CONCURRENT=10                              # raise to match real GPU throughput — start conservative, load-test, raise
-```
-
-That's the entire switch — nothing else in the app changes. Confirm it's talking to vLLM (not
-Ollama) via the dashboard's system status, or:
+Concurrency, batching, and model serving are all handled by Groq — simultaneous live calls
+need no extra setup. Confirm the app sees it via the dashboard's system status, or:
 
 ```bash
 curl -H "Cookie: rag_session=..." https://your-domain.com/api/system/status
-# {"ollama":{"running":true,"message":"vLLM ready with meta-llama/Meta-Llama-3.1-8B-Instruct"}, ...}
+# {"llm":{"running":true,"message":"Groq ready with llama-3.3-70b-versatile"}, ...}
 ```
 
 ---
@@ -166,9 +129,7 @@ PG_USER=postgres
 PG_PASSWORD=YOUR_PG_PASSWORD
 
 # --- AI ---
-OLLAMA_URL=http://localhost:11434
-OLLAMA_MODEL=llama3.1:8b
-OLLAMA_GPU=true              # set false only if no NVIDIA GPU
+GROQ_API_KEY=gsk_...         # console.groq.com — REQUIRED, Priya's brain
 
 # --- Login ---
 GOOGLE_CLIENT_ID=xxxx.apps.googleusercontent.com
@@ -326,7 +287,7 @@ curl -s https://YOUR-DOMAIN/api/test      # env + service health report
 | Symptom | Fix |
 |---|---|
 | Website down | `pm2 restart web`, check `pm2 logs web` |
-| Priya silent on calls | `pm2 logs voicebot` — usually STT or Ollama down |
-| Slow replies | `ollama ps` must say 100% GPU; check `OLLAMA_GPU=true` |
+| Priya silent on calls | `pm2 logs voicebot` — usually STT down or `GROQ_API_KEY` invalid/rate-limited |
+| Slow replies | Check Groq status at groqstatus.com; verify `GROQ_API_KEY` free-tier limits aren't exhausted |
 | WhatsApp not sending | Dashboard → WhatsApp tab shows Meta's error; check `WHATSAPP_TOKEN` validity and template approval status in WhatsApp Manager |
 | Login says "not authorized" | Add that Gmail on `/access`, or check `ADMIN_EMAIL` spelling |

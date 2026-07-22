@@ -58,6 +58,36 @@ async function graphPost(payload: Record<string, any>): Promise<{ ok: boolean; i
 }
 
 /**
+ * Downloads an inbound media attachment (document, audio, image, ...) by its
+ * WhatsApp media ID. Two-step Meta flow: resolve the media ID to a
+ * short-lived signed URL, then fetch that URL — both need the same bearer
+ * token, but the second request is to a different (CDN) host so it can't be
+ * combined into one call.
+ */
+export async function downloadWhatsAppMedia(mediaId: string): Promise<{ buffer: Buffer; mimeType: string } | null> {
+  if (!configured()) return null
+  try {
+    const metaRes = await fetch(`${GRAPH}/${mediaId}`, {
+      headers: { Authorization: `Bearer ${TOKEN}` },
+      signal: AbortSignal.timeout(10000),
+    })
+    const meta: any = await metaRes.json().catch(() => ({}))
+    if (!metaRes.ok || !meta?.url) return null
+
+    const fileRes = await fetch(meta.url, {
+      headers: { Authorization: `Bearer ${TOKEN}` },
+      signal: AbortSignal.timeout(20000),
+    })
+    if (!fileRes.ok) return null
+    const arrayBuffer = await fileRes.arrayBuffer()
+    return { buffer: Buffer.from(arrayBuffer), mimeType: meta.mime_type || fileRes.headers.get("content-type") || "" }
+  } catch (e: any) {
+    console.error("downloadWhatsAppMedia error:", e.message)
+    return null
+  }
+}
+
+/**
  * Free-form text message. Delivered only inside the 24-hour customer
  * service window (i.e. the customer messaged us first). Perfect for the
  * AI auto-reply flow — and completely FREE.

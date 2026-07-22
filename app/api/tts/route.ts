@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { textToSpeech } from "@/lib/tts"
-import type { Language } from "@/lib/ollama"
+import type { Language } from "@/lib/llm"
 
 export const dynamic = "force-dynamic"
 

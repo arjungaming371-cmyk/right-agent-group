@@ -16,7 +16,7 @@
 //   • When the lead MESSAGES on WhatsApp, the AI knows their recent calls.
 //
 // Output is a compact context string (token-budget friendly for
-// llama3.1:8b on a live call) passed as extraInstructions to Ollama.
+// llama3.1:8b on a live call) passed as extraInstructions to the LLM.
 
 import { query } from "./db"
 

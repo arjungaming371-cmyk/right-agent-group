@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
-import { db } from "@/lib/db"
-import { generateLeadSummary } from "@/lib/ollama"
+import { db, query } from "@/lib/db"
+import { generateLeadSummary } from "@/lib/llm"
 import { sendCallFollowUp, sendMissedCallFollowUp } from "@/lib/whatsapp"
 import { refreshLeadScore } from "@/lib/scoring"
 import { rateLimit, clientIp } from "@/lib/rate-limit"
@@ -39,13 +39,25 @@ export async function POST(req: NextRequest) {
     }
     const outcome = outcomeMap[callStatus] ?? callStatus
 
-    const { data: call, error: callError } = await db.from("voice_calls")
-      .update({ status: callStatus, outcome, duration, recording_url: recordingUrl ?? null })
-      .eq("twilio_call_sid", callSid)
-      .select()
-      .single()
-
-    if (callError) { console.error("update error:", callError); return new NextResponse("OK", { status: 200 }) }
+    // GREATEST: Exotel doesn't track "conversation" time inside a custom
+    // Voicebot applet, so this webhook's own duration is usually 0 — a plain
+    // overwrite here was stomping the accurate value our own voicebot
+    // already reported via /api/calls/turn (observed live: real calls with
+    // full conversations still showed 0:00 in Voice Logs).
+    let call: any
+    try {
+      const res = await query(
+        `UPDATE voice_calls
+            SET status = $2, outcome = $3, duration = GREATEST(duration, $4), recording_url = COALESCE($5, recording_url)
+          WHERE twilio_call_sid = $1
+          RETURNING *`,
+        [callSid, callStatus, outcome, duration, recordingUrl]
+      )
+      call = res.rows[0]
+    } catch (callError: any) {
+      console.error("update error:", callError.message)
+      return new NextResponse("OK", { status: 200 })
+    }
     if (!call?.lead_id) return new NextResponse("OK", { status: 200 })
 
     const transcript = Array.isArray(call.transcript) ? call.transcript

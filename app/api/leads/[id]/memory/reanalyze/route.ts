@@ -2,13 +2,13 @@ import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
 import { requireRole } from "@/lib/auth"
 import { logAudit } from "@/lib/audit"
-import { analyzeLeadTranscript } from "@/lib/ollama"
+import { analyzeLeadTranscript } from "@/lib/llm"
 import { isValidUUID, mergeFacts } from "@/lib/lead-brain"
 
 // POST — rebuilds lead_memory from the FULL cross-channel history (every
 // call transcript + every WhatsApp message), not just what's changed since
 // the last analysis. Manual dashboard action, not on any hot path, so a
-// real (awaited) Ollama call here is fine — the live call/WhatsApp path
+// real (awaited) Groq call here is fine — the live call/WhatsApp path
 // never hits this route.
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await requireRole(req, ["admin", "agent"])
@@ -53,7 +53,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   // Fresh narrative from the WHOLE history, not an incremental delta —
   // that's the point of "re-analyze". Locked facts are still respected below.
   const result = await analyzeLeadTranscript(transcriptText, "")
-  if (!result) return NextResponse.json({ error: "analysis failed — Ollama did not return valid JSON, try again" }, { status: 502 })
+  if (!result) return NextResponse.json({ error: "analysis failed — the model did not return valid JSON, try again" }, { status: 502 })
 
   const existing = memRes.rows[0] || { facts: {}, locked_facts: [], stage: "new" }
   const mergedFacts = mergeFacts(existing.facts || {}, result.new_facts, existing.locked_facts || [])

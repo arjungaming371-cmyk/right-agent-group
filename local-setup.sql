@@ -112,7 +112,7 @@ CREATE TABLE IF NOT EXISTS whatsapp_messages (
 CREATE INDEX IF NOT EXISTS idx_wa_messages_lead  ON whatsapp_messages (lead_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_wa_messages_phone ON whatsapp_messages (phone_number, created_at DESC);
 
--- AI conversations (WhatsApp chat history for Ollama context)
+-- AI conversations (WhatsApp chat history for AI context)
 CREATE TABLE IF NOT EXISTS ai_conversations (
   id         BIGSERIAL PRIMARY KEY,
   lead_id    UUID REFERENCES leads(id),
