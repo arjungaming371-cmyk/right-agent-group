@@ -22,7 +22,7 @@ function loadEnv() {
 // If you add a column to a route, add it here too.
 const REQUIRED = {
   leads: ["id","name","phone","address","whatsapp_number","email","product_interest","loan_amount","notes","form_completed","status","interested","score","language","source","call_count","last_called_at","created_at","updated_at"],
-  voice_calls: ["id","twilio_call_sid","lead_id","phone","direction","status","language","duration","outcome","sentiment","ai_summary","transcript","recording_url","followup_sent","created_at","updated_at"],
+  voice_calls: ["id","twilio_call_sid","lead_id","phone","direction","status","language","duration","outcome","sentiment","ai_summary","transcript","recording_url","followup_sent","instructions","created_at","updated_at"],
   loan_applications: ["id","lead_id","full_name","customer_name","phone","city","email","whatsapp_number","address","loan_type","loan_amount","monthly_income","employment_type","pan_number","form_data","status","submitted_at"],
   form_links: ["token","lead_id","used_at","created_at"],
   whatsapp_messages: ["id","lead_id","wa_message_id","phone_number","direction","content","status","created_at"],

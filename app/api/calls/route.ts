@@ -36,6 +36,10 @@ export async function POST(req: NextRequest) {
       status: "initiated",
       language: language ?? "telugu",
       phone,
+      // Exotel's voicebot bridge only ever knows the call SID — it can't
+      // hand back custom text per turn — so this is stored here and read
+      // back by /api/calls/turn instead of being passed through the call.
+      instructions: instructions?.trim() || null,
     })
     if (leadId) {
       await db.from("comm_logs").insert({

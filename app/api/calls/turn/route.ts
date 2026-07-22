@@ -115,7 +115,7 @@ export async function POST(req: NextRequest) {
 
       const { data: call } = await db
         .from("voice_calls")
-        .select("lead_id, language, phone")
+        .select("lead_id, language, phone, instructions")
         .eq("twilio_call_sid", callSid)
         .single()
 
@@ -134,7 +134,12 @@ export async function POST(req: NextRequest) {
         speech,
         language,
         callerPhone: call?.phone || undefined,
-        instructions: typeof body?.instructions === "string" ? body.instructions.slice(0, 1000) : undefined,
+        // The Exotel voicebot bridge never sends instructions (it only knows
+        // the call SID) — body?.instructions is really only exercised by
+        // direct API testing. The real path is the DB column set at call
+        // creation time from the dashboard's "What should Priya talk about?"
+        // field (app/api/calls POST).
+        instructions: (typeof body?.instructions === "string" ? body.instructions.slice(0, 1000) : undefined) || call?.instructions || undefined,
       }
 
       // STREAMING MODE (body.stream === true): NDJSON, one object per line.
