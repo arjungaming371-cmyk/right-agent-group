@@ -38,13 +38,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({ ok: true, status: "rejected" })
   }
 
-  // approve
-  const languages: string[] = Array.isArray(body?.languages)
-    ? body.languages.filter((l: any) => ["english", "hindi", "telugu"].includes(l))
-    : []
-  if (languages.length === 0) {
-    return NextResponse.json({ error: "pick at least one language to apply this to" }, { status: 400 })
-  }
+  // approve — ONE SCRIPT MODE: suggestions always land in the single 'base'
+  // script (per-language voice is appended in code, see lib/llm.ts).
+  const languages = ["base"]
 
   await applySuggestionToScripts(suggestion.short_guideline, languages)
   await query(

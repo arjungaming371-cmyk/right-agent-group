@@ -23,10 +23,11 @@ type Suggestion = {
 
 const RISK_COLOR: Record<string, string> = { low: "#2dd4a0", medium: "#f7b731", high: "#f87171" }
 
+// ONE SCRIPT MODE — a single base script drives every language. Priya
+// automatically replies in English, Roman-script Hinglish, or Tenglish
+// depending on what the customer speaks (language rules live in code).
 const LANG_LABELS: Record<string, { label: string; short: string; desc: string }> = {
-  english: { label: "English",  short: "EN", desc: "Used when customer speaks English" },
-  hindi:   { label: "Hinglish", short: "HG", desc: "Used when customer speaks Hindi — Priya replies in Roman-script Hinglish" },
-  telugu:  { label: "Tenglish", short: "TG", desc: "Used when customer speaks Telugu — Priya replies in Roman-script Tenglish" },
+  base: { label: "Universal Script", short: "ALL", desc: "One script for all languages — Priya auto-switches between English, Hinglish, and Tenglish" },
 }
 
 const TIPS = [
@@ -52,7 +53,7 @@ function timeAgo(dateStr: string) {
 
 export default function ScriptView() {
   const [scripts, setScripts]     = useState<Script[]>([])
-  const [selected, setSelected]   = useState<string>("english")
+  const [selected, setSelected]   = useState<string>("base")
   const [content, setContent]     = useState<string>("")
   const [original, setOriginal]   = useState<string>("")
   const [loading, setLoading]     = useState(true)
@@ -65,7 +66,6 @@ export default function ScriptView() {
   const [ptLoading, setPtLoading]     = useState(true)
   const [generating, setGenerating]   = useState(false)
   const [actingId, setActingId]       = useState<string | null>(null)
-  const [langPicks, setLangPicks]     = useState<Record<string, string[]>>({})
   const [ptMsg, setPtMsg]             = useState<{ type: "ok" | "err"; text: string } | null>(null)
 
   async function load() {
@@ -104,14 +104,6 @@ export default function ScriptView() {
 
   useEffect(() => { loadSuggestions() }, [])
 
-  function toggleLang(id: string, lang: string) {
-    setLangPicks((p) => {
-      const cur = p[id] || []
-      const next = cur.includes(lang) ? cur.filter((l) => l !== lang) : [...cur, lang]
-      return { ...p, [id]: next }
-    })
-  }
-
   async function generateNow() {
     setGenerating(true)
     setPtMsg(null)
@@ -131,14 +123,12 @@ export default function ScriptView() {
   }
 
   async function approveSuggestion(id: string) {
-    const languages = langPicks[id] || []
-    if (languages.length === 0) { setPtMsg({ type: "err", text: "Pick at least one language before adding this to the script." }); return }
     setActingId(id)
     try {
       const res = await fetch(`/api/prompt-tuner/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "approve", languages }),
+        body: JSON.stringify({ action: "approve" }),
       })
       if (res.ok) {
         setPtMsg({ type: "ok", text: "Added to the script." })
@@ -233,8 +223,8 @@ export default function ScriptView() {
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
 
       {/* Header cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
-        {["english","hindi","telugu"].map(lang => {
+      <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 16 }}>
+        {["base"].map(lang => {
           const sc = scripts.find(s => s.language === lang)
           const meta = LANG_LABELS[lang]
           return (
@@ -339,18 +329,7 @@ export default function ScriptView() {
                   <strong style={{ color: "var(--text-secondary)" }}>Why:</strong> {s.source_summary} · <span style={{ textTransform: "capitalize" }}>{s.channel}</span> · {timeAgo(s.created_at)}
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
-                  <div style={{ display: "flex", gap: 10 }}>
-                    {["english", "hindi", "telugu"].map((lang) => (
-                      <label key={lang} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, color: "var(--text-secondary)", cursor: "pointer" }}>
-                        <input
-                          type="checkbox"
-                          checked={(langPicks[s.id] || []).includes(lang)}
-                          onChange={() => toggleLang(s.id, lang)}
-                        />
-                        {LANG_LABELS[lang].label}
-                      </label>
-                    ))}
-                  </div>
+                  <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Applies to the universal script (all languages)</div>
                   <div style={{ flex: 1 }} />
                   <button
                     onClick={() => rejectSuggestion(s.id)}
@@ -385,7 +364,7 @@ export default function ScriptView() {
                 Priya's Script — {LANG_LABELS[selected]?.label}
               </div>
               <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                This is the exact instruction Priya follows on every {LANG_LABELS[selected]?.label} call
+                The exact instruction Priya follows on every call and WhatsApp chat — she auto-switches language to match the customer
               </div>
             </div>
           </div>

@@ -22,6 +22,32 @@ export function canAffordExtraCompletion(): boolean {
 // Default fallback scripts (used when DB is unavailable)
 const DEFAULT_SCRIPTS = SHARED_DEFAULT_SCRIPTS
 
+// ---- ONE SCRIPT, ALL LANGUAGES ----
+// Priya has a SINGLE editable base script (ai_scripts row language='base').
+// The per-language voice (Hinglish/Tenglish, Roman script) is appended here
+// in code — so editing the script once updates every language, and the
+// language rules can never drift out of sync the way three separate
+// scripts did. Legacy per-language rows still work as a fallback when no
+// base row exists.
+const LANGUAGE_STYLES: Record<Language, string> = {
+  english: `
+
+REPLY LANGUAGE — ENGLISH:
+- The customer speaks English. Reply in simple, natural spoken English. If they mix in Hindi or Telugu words, you may mirror them.`,
+  hindi: `
+
+REPLY LANGUAGE — HINGLISH (MOST IMPORTANT RULE):
+- The customer speaks Hindi. Reply ONLY in Hinglish: natural spoken Hindi written in English (Roman) letters, mixing everyday English words the way people actually talk. Example: "Namaste sir! Main Priya bol rahi hoon Right Agent Group, Hyderabad se. Aapka WhatsApp number mil sakta hai?"
+- NEVER write in Devanagari (Hindi) script. Only English letters, always.
+- The customer's words may appear in Hindi script from the call transcription — understand them normally, but still reply in Roman letters.`,
+  telugu: `
+
+REPLY LANGUAGE — TENGLISH (MOST IMPORTANT RULE):
+- The customer speaks Telugu. Reply ONLY in Tenglish: natural spoken Telugu written in English (Roman) letters, mixing everyday English words the way people actually talk in Hyderabad. Example: "Namaskaram sir! Nenu Priya, Right Agent Group, Hyderabad nunchi matladutunnanu. Mee WhatsApp number cheppagalara?"
+- NEVER write in Telugu script. Only English letters, always.
+- The customer's words may appear in Telugu script from the call transcription — understand them normally, but still reply in Roman letters.`,
+}
+
 // Script cache — refreshed every 5 minutes so dashboard changes take
 // effect quickly without hitting the DB on every single call turn.
 let _scriptCache: Record<string, string> = {}
@@ -35,14 +61,23 @@ async function getSystemPrompt(language: Language): Promise<string> {
   }
   try {
     const { query } = await import("./db")
+    // Single base script first; legacy per-language row as fallback.
     const result = await query(
-      `SELECT content FROM ai_scripts WHERE language = $1 LIMIT 1`,
+      `SELECT language, content FROM ai_scripts WHERE language IN ('base', $1)`,
       [language]
     )
-    if (result.rows?.[0]?.content) {
-      _scriptCache[language] = result.rows[0].content
+    const base = result.rows?.find((r: any) => r.language === "base")?.content
+    if (base) {
+      const prompt = base + LANGUAGE_STYLES[language]
+      _scriptCache[language] = prompt
       _scriptCacheTime = now
-      return result.rows[0].content
+      return prompt
+    }
+    const legacy = result.rows?.find((r: any) => r.language === language)?.content
+    if (legacy) {
+      _scriptCache[language] = legacy
+      _scriptCacheTime = now
+      return legacy
     }
   } catch {
     // DB unavailable — fall through to default

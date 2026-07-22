@@ -82,7 +82,7 @@ export async function runPromptTuner(): Promise<{ generated: number }> {
  */
 export async function applySuggestionToScripts(guideline: string, languages: string[]): Promise<void> {
   for (const lang of languages) {
-    if (!["english", "hindi", "telugu"].includes(lang)) continue
+    if (!["base", "english", "hindi", "telugu"].includes(lang)) continue
     // Upsert, not a blind UPDATE — a brand-new install may not have opened
     // the Script Manager yet (which is what normally seeds ai_scripts).
     await query(
@@ -90,7 +90,7 @@ export async function applySuggestionToScripts(guideline: string, languages: str
        VALUES ($1, $2, now(), 'prompt-tuner (approved)')
        ON CONFLICT (language) DO UPDATE
        SET content = ai_scripts.content || $3, updated_at = now(), updated_by = 'prompt-tuner (approved)'`,
-      [lang, `${(DEFAULT_SCRIPTS as any)[lang] || ""}\n- ${guideline}`, `\n- ${guideline}`]
+      [lang, `${(DEFAULT_SCRIPTS as any)[lang] || (DEFAULT_SCRIPTS as any).english || ""}\n- ${guideline}`, `\n- ${guideline}`]
     )
   }
 }

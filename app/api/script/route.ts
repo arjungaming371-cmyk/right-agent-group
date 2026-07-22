@@ -21,19 +21,20 @@ async function ensureTable() {
 
 const DEFAULTS: Record<string, string> = DEFAULT_SCRIPTS
 
+// ONE SCRIPT MODE: Priya now runs on a single 'base' script for every
+// language — the per-language voice (Hinglish/Tenglish) is appended in
+// code (lib/llm.ts LANGUAGE_STYLES). The editor edits only the base row.
 export async function GET() {
   try {
     await ensureTable()
-    // Seed defaults if table is empty
-    for (const [lang, content] of Object.entries(DEFAULTS)) {
-      await query(
-        `INSERT INTO ai_scripts (language, content) VALUES ($1, $2)
-         ON CONFLICT (language) DO NOTHING`,
-        [lang, content]
-      )
-    }
+    // Seed the base script if missing (from the English default).
+    await query(
+      `INSERT INTO ai_scripts (language, content) VALUES ('base', $1)
+       ON CONFLICT (language) DO NOTHING`,
+      [DEFAULTS.english]
+    )
     const result = await query(
-      `SELECT language, content, updated_at, updated_by FROM ai_scripts ORDER BY language`
+      `SELECT language, content, updated_at, updated_by FROM ai_scripts WHERE language = 'base'`
     )
     return NextResponse.json({ scripts: result.rows })
   } catch (e: any) {
@@ -50,7 +51,7 @@ export async function POST(req: NextRequest) {
     if (!language || !content?.trim()) {
       return NextResponse.json({ error: "language and content required" }, { status: 400 })
     }
-    if (!["english", "hindi", "telugu"].includes(language)) {
+    if (!["base", "english", "hindi", "telugu"].includes(language)) {
       return NextResponse.json({ error: "invalid language" }, { status: 400 })
     }
     if (content.length > 20000) {
@@ -75,16 +76,16 @@ export async function DELETE(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   try {
     const language = new URL(req.url).searchParams.get("language")
-    if (!language || !["english", "hindi", "telugu"].includes(language)) {
+    if (!language || !["base", "english", "hindi", "telugu"].includes(language)) {
       return NextResponse.json({ error: "invalid language" }, { status: 400 })
     }
-    // Reset to default instead of hard delete
+    // Reset to default instead of hard delete (base resets to the English default)
     await query(
       `INSERT INTO ai_scripts (language, content, updated_at, updated_by)
        VALUES ($1, $2, now(), $3)
        ON CONFLICT (language) DO UPDATE
        SET content = $2, updated_at = now(), updated_by = $3`,
-      [language, DEFAULTS[language], session.email]
+      [language, DEFAULTS[language] || DEFAULTS.english, session.email]
     )
     logAudit("Priya script reset to default", session.email, { language })
     return NextResponse.json({ ok: true, message: "Reset to default script" })
