@@ -4,6 +4,30 @@ import { BadgeCheck, Download, PenLine, Check, X, History } from "lucide-react"
 import { formatCurrency, timeAgo } from "@/lib/utils"
 import { SkeletonList } from "../ui/skeleton"
 import { useToast } from "../ui/toast"
+import { calculateEMI, totalInterest, formatINR, BEST_RATES, detectLoanType } from "@/lib/finance"
+
+// Real reducing-balance EMI math (lib/finance.ts) — never a hand-typed or
+// AI-guessed figure. Shown as an illustrative estimate at our best
+// available rate; the exact rate depends on the customer's final profile.
+function EmiEstimate({ loanAmount, loanType }: { loanAmount: number; loanType: string }) {
+  const canonical = detectLoanType(loanType) || "Home Loan"
+  const rate = BEST_RATES[canonical] || BEST_RATES["Home Loan"]
+  const tenureMonths = rate.maxTenureYears * 12
+  const emi = calculateEMI(loanAmount, rate.ratePct, tenureMonths)
+  const interest = totalInterest(loanAmount, emi, tenureMonths)
+  return (
+    <div style={{ background: "var(--bg-secondary)", borderRadius: 8, padding: 14, display: "flex", gap: 24, flexWrap: "wrap" }}>
+      <div>
+        <div style={{ fontSize: 20, fontWeight: 700, color: "#2dd4a0" }}>{formatINR(emi)}<span style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 500 }}> /month</span></div>
+        <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>at {rate.ratePct}% p.a. ({rate.lender}) over {rate.maxTenureYears} years</div>
+      </div>
+      <div>
+        <div style={{ fontSize: 13, fontWeight: 600 }}>{formatINR(interest)}</div>
+        <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>total interest over the loan</div>
+      </div>
+    </div>
+  )
+}
 
 type LoanApp = {
   id: string; customer_name: string; city: string; loan_type: string
@@ -251,6 +275,13 @@ export default function LoanAppsView({ role, initialSearch }: { role: "admin" | 
                 </div>
               ))}
             </div>
+
+            {selected.loan_amount > 0 && (
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8 }}>ESTIMATED EMI</div>
+                <EmiEstimate loanAmount={Number(selected.loan_amount)} loanType={selected.loan_type} />
+              </div>
+            )}
 
             {Object.keys(formExtras).length > 0 && (
               <div>

@@ -5,6 +5,7 @@ import { chatWithLLM, detectLanguage, type Language } from "@/lib/llm"
 import { sendWhatsAppText, downloadWhatsAppMedia } from "@/lib/whatsapp"
 import { buildLeadBrief } from "@/lib/lead-brain"
 import { searchKnowledgeBase } from "@/lib/knowledge-base"
+import { buildEmiInstruction } from "@/lib/finance"
 import { detectFrustration, flagFrustratedWhatsApp } from "@/lib/frustration"
 import { createNotification } from "@/lib/notifications"
 import { refreshLeadScore } from "@/lib/scoring"
@@ -275,6 +276,14 @@ async function handleInbound(msg: any, profileName: string | null) {
     // question can arrive at any point in the chat, not just the opener.
     const kbContext = await searchKnowledgeBase(text)
     if (kbContext) extraContext = [extraContext, kbContext].filter(Boolean).join("\n\n")
+
+    // REAL MATH: same reasoning as the voice path (lib/finance.ts) — Priya
+    // states an exact code-computed EMI instead of an LLM-guessed one.
+    const emi = buildEmiInstruction(text, {
+      loanAmount: lead.loan_amount ? Number(lead.loan_amount) : null,
+      loanType: lead.product_interest || null,
+    })
+    if (emi) extraContext = [extraContext, emi.instruction].filter(Boolean).join("\n\n")
 
     // numPredict 400: text chat has no caller waiting in silence — let Priya
     // write full answers (rate tables, loan lists) instead of call-length ones.

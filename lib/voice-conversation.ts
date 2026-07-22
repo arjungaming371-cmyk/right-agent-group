@@ -5,6 +5,7 @@ import { splitSentences } from "./sentences"
 import { sendApplicationLink } from "./whatsapp"
 import { buildLeadBrief } from "./lead-brain"
 import { searchKnowledgeBase } from "./knowledge-base"
+import { buildEmiInstruction } from "./finance"
 import { detectFrustration, flagFrustratedCall } from "./frustration"
 import { createNotification } from "./notifications"
 import { maybeProposeLoanEdit } from "./loan-edit-requests"
@@ -213,6 +214,19 @@ async function buildTurnInstructions(
   // point in the call, not just the opening. One cheap indexed query.
   const kbContext = await searchKnowledgeBase(speech)
   if (kbContext) merged = [merged, kbContext].filter(Boolean).join("\n\n")
+
+  // REAL MATH: an LLM asked "what's my EMI" will confidently invent a
+  // plausible-sounding but WRONG number. lib/finance.ts does the actual
+  // arithmetic here and hands Priya an exact figure to state — she never
+  // computes EMI/eligibility herself.
+  if (leadId) {
+    const leadRow = await db.from("leads").select("loan_amount, product_interest").eq("id", leadId).single()
+    const emi = buildEmiInstruction(speech, {
+      loanAmount: leadRow.data?.loan_amount ? Number(leadRow.data.loan_amount) : null,
+      loanType: leadRow.data?.product_interest || null,
+    })
+    if (emi) merged = [merged, emi.instruction].filter(Boolean).join("\n\n")
+  }
 
   return merged
 }
