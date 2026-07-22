@@ -308,6 +308,33 @@ export async function buildLeadBrief(leadId: string): Promise<string> {
     )
     if (res.rows.length === 0) return ""
     const row = res.rows[0]
+
+    // FALLBACK for a call cut short by an LLM rate limit: the post-call
+    // analysis needs the SAME backend that just ran out of capacity, so it
+    // can fail right when it's needed most — a lead can end up with a real
+    // conversation on file but zero structured memory from it. Rather than
+    // silently losing that context until the next lucky retry, pull the
+    // raw transcript of the most recent call that never got analyzed
+    // (no matching lead_interactions row) so the NEXT call still knows
+    // what was already discussed.
+    const unanalyzed = await query(
+      `SELECT vc.transcript FROM voice_calls vc
+       WHERE vc.lead_id = $1 AND vc.status = 'completed' AND vc.transcript IS NOT NULL
+         AND vc.created_at > now() - interval '24 hours'
+         AND NOT EXISTS (SELECT 1 FROM lead_interactions li WHERE li.ref_id = vc.id::text)
+       ORDER BY vc.created_at DESC LIMIT 1`,
+      [leadId]
+    )
+    let unanalyzedBrief = ""
+    if (unanalyzed.rows.length) {
+      try {
+        const turns = typeof unanalyzed.rows[0].transcript === "string" ? JSON.parse(unanalyzed.rows[0].transcript) : unanalyzed.rows[0].transcript
+        if (Array.isArray(turns) && turns.length) {
+          const text = turns.slice(-8).map((t: any) => `${t.role === "ai" ? "Priya" : "Customer"}: ${clip(t.text || "", 100)}`).join(" / ")
+          unanalyzedBrief = `RECENT CALL THAT GOT CUT SHORT (raw, not yet summarized — read it yourself, this is exactly what was already discussed, do not restart the conversation from scratch): ${clip(text, 600)}`
+        }
+      } catch {}
+    }
     const facts: LeadFacts = row.facts || {}
     const stage: string = row.stage || "new"
     const sentiment: string = row.sentiment || "neutral"
@@ -341,6 +368,8 @@ export async function buildLeadBrief(leadId: string): Promise<string> {
     // RELATIONSHIP SUMMARY
     if (summary.trim()) lines.push(`RELATIONSHIP SUMMARY — ${clip(summary, 400)}`)
 
+    if (unanalyzedBrief) lines.push(unanalyzedBrief)
+
     // LAST 3 INTERACTIONS
     if (interactions.length) {
       const rows = interactions.map(
@@ -359,7 +388,7 @@ export async function buildLeadBrief(leadId: string): Promise<string> {
     if (warnings.length) lines.push(`WARNINGS — ${warnings.join("; ")}`)
 
     // DO/DON'T
-    if (factLines.length || interactions.length) {
+    if (factLines.length || interactions.length || unanalyzedBrief) {
       lines.push(
         "DO/DON'T — Do NOT re-ask known facts, CONFIRM them instead. Reference past contact naturally in ONE short phrase max, never recite this brief verbatim."
       )

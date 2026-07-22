@@ -46,20 +46,37 @@ export const LOAN_TYPE_ALIASES: Record<string, string> = {
   home: "Home Loan", "home loan": "Home Loan", housing: "Home Loan",
   personal: "Personal Loan", "personal loan": "Personal Loan",
   business: "Business Loan", "business loan": "Business Loan",
+  shop: "Business Loan", kirana: "Business Loan", vyapar: "Business Loan", vyaparam: "Business Loan",
+  vyapaaram: "Business Loan", "expand my shop": "Business Loan", dukaanam: "Business Loan",
   "loan against property": "Loan Against Property", lap: "Loan Against Property",
   "four wheeler": "Four Wheeler Loan", car: "Four Wheeler Loan", "car loan": "Four Wheeler Loan",
   "two wheeler": "Two Wheeler Loan", bike: "Two Wheeler Loan",
   education: "Education Loan", "education loan": "Education Loan",
 }
 
+// Real market-starting rates (India, sourced July 2026 — see below), NOT
+// invented figures. These are STARTING/best-case rates from public sector
+// banks and top lenders, same framing the script already uses for Home
+// Loan ("starts from X%, final rate depends on profile"). Update this
+// table (not the model) whenever real rates change — the AI must never be
+// asked to remember or vary these numbers itself.
+//
+// Sources (checked July 2026):
+//  - Home Loan 7.25% SBI: existing knowledge_base rate sheet
+//  - Personal Loan 9.99% HDFC/ICICI (paisabazaar.com, bajajfinservmarkets.in)
+//  - Business Loan 9% PSB starting rate (flexiloans.com, iifl.com — PSBs "from 9%")
+//  - Loan Against Property 8.45% best-case (cleartax.in, hdbfs.com)
+//  - Four Wheeler Loan 7.30% SBI new-car (creditmantri.com, bankbazaar.com)
+//  - Two Wheeler Loan 7.60% best-case market low (bankbazaar.com two-wheeler survey)
+//  - Education Loan 7.15% SBI (policybazaar.com) / Bank of Baroda from 6.9%
 export const BEST_RATES: Record<string, { ratePct: number; maxTenureYears: number; lender: string }> = {
   "Home Loan":            { ratePct: 7.25, maxTenureYears: 30, lender: "SBI" },
-  "Personal Loan":        { ratePct: 10.5, maxTenureYears: 5,  lender: "leading NBFC partners" },
-  "Business Loan":        { ratePct: 11.0, maxTenureYears: 7,  lender: "leading NBFC partners" },
-  "Loan Against Property":{ ratePct: 9.0,  maxTenureYears: 15, lender: "leading bank partners" },
-  "Four Wheeler Loan":    { ratePct: 8.75, maxTenureYears: 7,  lender: "leading bank partners" },
-  "Two Wheeler Loan":     { ratePct: 11.5, maxTenureYears: 4,  lender: "leading NBFC partners" },
-  "Education Loan":       { ratePct: 9.5,  maxTenureYears: 15, lender: "leading bank partners" },
+  "Personal Loan":        { ratePct: 9.99, maxTenureYears: 5,  lender: "HDFC Bank / ICICI Bank" },
+  "Business Loan":        { ratePct: 9.0,  maxTenureYears: 7,  lender: "public sector bank partners" },
+  "Loan Against Property":{ ratePct: 8.45, maxTenureYears: 15, lender: "leading bank partners" },
+  "Four Wheeler Loan":    { ratePct: 7.30, maxTenureYears: 7,  lender: "SBI" },
+  "Two Wheeler Loan":     { ratePct: 7.60, maxTenureYears: 4,  lender: "leading bank partners" },
+  "Education Loan":       { ratePct: 7.15, maxTenureYears: 15, lender: "SBI" },
 }
 
 /**

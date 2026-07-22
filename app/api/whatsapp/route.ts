@@ -5,7 +5,7 @@ import { chatWithLLM, detectLanguage, type Language } from "@/lib/llm"
 import { sendWhatsAppText, downloadWhatsAppMedia } from "@/lib/whatsapp"
 import { buildLeadBrief } from "@/lib/lead-brain"
 import { searchKnowledgeBase } from "@/lib/knowledge-base"
-import { buildEmiInstruction, buildEligibilityInstruction, buildRateInstruction } from "@/lib/finance"
+import { buildEmiInstruction, buildEligibilityInstruction, buildRateInstruction, detectLoanType } from "@/lib/finance"
 import { detectFrustration, flagFrustratedWhatsApp } from "@/lib/frustration"
 import { createNotification } from "@/lib/notifications"
 import { refreshLeadScore } from "@/lib/scoring"
@@ -279,18 +279,26 @@ async function handleInbound(msg: any, profileName: string | null) {
 
     // REAL MATH: same reasoning as the voice path (lib/finance.ts) — Priya
     // states an exact code-computed EMI instead of an LLM-guessed one.
-    const rate = buildRateInstruction(text, { loanType: lead.product_interest || null })
+    // Loan type may have been mentioned earlier in the thread, not this
+    // message — scan the whole recent conversation, same as the call path.
+    const conversationSoFar = [...historyRes.rows.map((h: any) => h.content), text].join(" ")
+    const detectedType = detectLoanType(conversationSoFar) || lead.product_interest || null
+    if (detectedType && detectedType !== lead.product_interest) {
+      query(`UPDATE leads SET product_interest = $1 WHERE id = $2`, [detectedType, lead.id]).catch(() => {})
+    }
+
+    const rate = buildRateInstruction(text, { loanType: detectedType })
     if (rate) extraContext = [extraContext, rate].filter(Boolean).join("\n\n")
 
     const emi = buildEmiInstruction(text, {
       loanAmount: lead.loan_amount ? Number(lead.loan_amount) : null,
-      loanType: lead.product_interest || null,
+      loanType: detectedType,
     })
     if (emi) extraContext = [extraContext, emi.instruction].filter(Boolean).join("\n\n")
 
     const memRow = await query(`SELECT facts->>'monthly_income' AS income FROM lead_memory WHERE lead_id = $1`, [lead.id])
     const eligibility = buildEligibilityInstruction(text, {
-      loanType: lead.product_interest || null,
+      loanType: detectedType,
       monthlyIncome: memRow.rows[0]?.income ? Number(memRow.rows[0].income) : null,
     })
     if (eligibility) extraContext = [extraContext, eligibility.instruction].filter(Boolean).join("\n\n")

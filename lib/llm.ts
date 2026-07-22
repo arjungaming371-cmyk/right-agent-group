@@ -339,6 +339,20 @@ export function mightBeComplete(transcriptText: string): boolean {
 }
 
 /**
+ * True when a thrown error is Groq's 429 rate-limit response, so callers on
+ * the live-call path can react DIFFERENTLY to "we're out of tokens right
+ * now" than to any other failure — a generic retry keeps failing turn after
+ * turn (the limit doesn't clear mid-call), so the right move is to end the
+ * call gracefully and let a follow-up call continue once the window resets,
+ * rather than stringing the customer along through repeated "technical
+ * moment" replies.
+ */
+export function isRateLimitError(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : String(e)
+  return msg.includes("HTTP 429")
+}
+
+/**
  * Reads the running transcript and decides: do we have name + address +
  * WhatsApp number yet? Used by the voice handler to know when to stop the
  * conversation, save the lead, and send the WhatsApp application link.

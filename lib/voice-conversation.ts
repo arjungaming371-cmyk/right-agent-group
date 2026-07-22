@@ -1,11 +1,11 @@
 import { randomUUID } from "crypto"
 import { db, query } from "./db"
-import { chatWithLLM, chatWithLLMStream, extractLeadInfo, mightBeComplete, type Language } from "./llm"
+import { chatWithLLM, chatWithLLMStream, extractLeadInfo, mightBeComplete, isRateLimitError, type Language } from "./llm"
 import { splitSentences } from "./sentences"
 import { sendApplicationLink } from "./whatsapp"
-import { buildLeadBrief } from "./lead-brain"
+import { buildLeadBrief, runPostCallAnalysis } from "./lead-brain"
 import { searchKnowledgeBase } from "./knowledge-base"
-import { buildEmiInstruction, buildEligibilityInstruction, buildRateInstruction } from "./finance"
+import { buildEmiInstruction, buildEligibilityInstruction, buildRateInstruction, detectLoanType } from "./finance"
 import { detectFrustration, flagFrustratedCall } from "./frustration"
 import { createNotification } from "./notifications"
 import { maybeProposeLoanEdit } from "./loan-edit-requests"
@@ -13,13 +13,20 @@ import { maybeProposeLoanEdit } from "./loan-edit-requests"
 // Permission-based opener — respect keeps people on the line.
 // Neutral/informational by design: this is an intake call, not a sales
 // pitch, so it states the purpose plainly instead of leading with benefits.
+// This is the FIRST line of every outbound call — spoken before the AI
+// conversation even starts, so it must already match the script's "have a
+// real conversation first, collect details only later" flow. It used to
+// jump straight to "may I have your full name" as the opening sentence,
+// defeating the whole discovery/convince flow before it began. Now it
+// introduces Priya + the company and opens the floor, exactly like a human
+// cold-caller would — name/city/WhatsApp come later, once there's a reason to.
 export const GREETINGS: Record<Language, string> = {
   english:
-    "Hello, good morning! This is Priya calling from Right Agent Group, Hyderabad. This will take just one minute — I'm calling to note down a few details for a loan application: your name, city, and a WhatsApp number to send the application link. May I have your full name, please?",
+    "Hello, good morning! This is Priya calling from Right Agent Group, Hyderabad — we help people get loans from over 20 banks without the running around. Do you have a minute? I'd love to know if you have any loan or financial need right now.",
   hindi:
-    "Namaste, good morning! Main Priya bol rahi hoon Right Agent Group, Hyderabad se. Sirf ek minute lagega — main loan application ke liye kuch details note karne ke liye call kar rahi hoon: aapka naam, city, aur application link bhejne ke liye WhatsApp number. Aapka poora naam bata sakte hain?",
+    "Namaste, good morning! Main Priya bol rahi hoon Right Agent Group, Hyderabad se — hum log 20+ banks se loan dilwane mein madad karte hain, bina bank bank ghume. Ek minute hai aapke paas? Bataiye, aapko koi loan ya financial zaroorat hai kya abhi?",
   telugu:
-    "Namaskaram! Nenu Priya, Right Agent Group, Hyderabad nunchi matladutunnanu. Okka nimisham chalu — loan application kosam konni details note cheyadaniki call chestunnanu: mee peru, ooru, mariyu application link pampadaniki WhatsApp number. Mee full name cheppagalara?",
+    "Namaskaram! Nenu Priya, Right Agent Group, Hyderabad nunchi matladutunnanu — memu 20+ banks tho kalisi meeku easy ga loan dorikేలా help chestham, bank bank tirగakunda. Meeku konchem time undha? Ippudu meeku edaina loan lేదా financial avasaram unda ani తెలుసుకోవాలని అనుకుంటున్నా.",
 }
 
 // Inbound calls are the customer's initiative — greet like a receptionist,
@@ -34,20 +41,26 @@ export const INBOUND_GREETINGS: Record<Language, string> = {
 }
 
 const CLOSING: Record<Language, string> = {
-  english: "Thank you! I'm sending the application link to your WhatsApp right now. Our loan officer will confirm your best offer soon. Have a great day!",
-  hindi: "Dhanyavad! Main abhi aapke WhatsApp pe application link bhej rahi hoon. Hamare loan officer jald aapka best offer confirm karenge. Aapka din shubh ho!",
-  telugu: "Dhanyavadalu! Nenu ippude mee WhatsApp ki application link pampistunnanu. Maa loan officer tvaralo mee best offer confirm chestaru. Meeku manchi roju!",
+  english: "Thank you! I'm sending a simple loan application on your WhatsApp right now — just fill it in, and our loan officer will personally consult you after that. Have a great day!",
+  hindi: "Dhanyavad! Main abhi aapke WhatsApp pe ek simple loan application bhej rahi hoon — bas usko fill kar dijiyega, uske baad hamare loan officer aapse personally baat karke consult karenge. Aapka din shubh ho!",
+  telugu: "Dhanyavadalu! Nenu ippude mee WhatsApp ki oka simple loan application pampistunnanu — danini fill cheyandi chalu, aa tarvata maa loan officer mee tho personal ga matladi consult chestaru. Meeku manchi roju!",
 }
 
 // Inbound calls auto-create a lead with a placeholder like "Caller 8090"
 // before we know the real name — never greet someone by that fake name.
 const PLACEHOLDER_NAME_RE = /^(Caller \d+|Unknown|WA \d+)$/i
 
+// Same fix as GREETINGS above, for when the lead's name is already known
+// (most outbound calls — CSV uploads, manual adds, repeat callers). This
+// used to skip straight to "confirm details and get WhatsApp" as the FIRST
+// thing said — before the AI ever got to ask what they need or make a
+// case. Now it greets by name and opens the conversation like a human
+// would; discovery/convince/collect all happen through the real script.
 function personalizedGreeting(language: Language, name: string): string {
   const templates: Record<Language, string> = {
-    english: `Hello ${name}! This is Priya calling from Right Agent Group, Hyderabad. This will take just a minute — I just need to confirm a couple of details and get a WhatsApp number to send your application link.`,
-    hindi: `Namaste ${name} ji! Main Priya bol rahi hoon, Right Agent Group, Hyderabad se. Sirf ek minute lagega — mujhe bas kuch details confirm karni hain aur application link bhejne ke liye WhatsApp number chahiye.`,
-    telugu: `Namaskaram ${name} garu! Nenu Priya, Right Agent Group, Hyderabad nunchi matladutunnanu. Okka nimisham chalu — nenu konni details confirm chesi, application link pampadaniki WhatsApp number teesukovali.`,
+    english: `Hello ${name}! This is Priya calling from Right Agent Group, Hyderabad — we help people get loans from over 20 banks without the running around. Do you have a minute? I'd love to know if you have any loan need right now.`,
+    hindi: `Namaste ${name} ji! Main Priya bol rahi hoon, Right Agent Group, Hyderabad se — hum 20+ banks se loan dilwane mein madad karte hain. Ek minute hai aapke paas? Bataiye, aapko koi loan zaroorat hai kya abhi?`,
+    telugu: `Namaskaram ${name} garu! Nenu Priya, Right Agent Group, Hyderabad nunchi matladutunnanu — memu 20+ banks tho kalisi meeku easy ga loan dorikేలా help chestham. Meeku konchem time undha? Ippudu edaina loan avasaram unda ani తెలుసుకోవాలని అనుకుంటున్నా.`,
   }
   return templates[language]
 }
@@ -65,6 +78,17 @@ const RETRY_MSG: Record<Language, string> = {
   english: "Sorry, I had a small technical moment. Could you please share your name so I can send your loan application link?",
   hindi:   "Maaf kijiye, chhoti technical problem hui. Kripya apna naam batayein taaki main aapka loan application link bhej sakoon.",
   telugu:  "Sorry, chinna technical problem vachindi. Dayachesi mee peru cheppandi, mee loan application link pampistanu.",
+}
+
+// Used ONLY when the LLM backend is genuinely out of capacity (Groq 429) —
+// retrying won't help mid-call since the rate window doesn't clear in the
+// next few seconds, so stringing the customer along with repeated
+// "technical moment" replies is worse than ending politely and calling
+// back once things clear.
+const RATE_LIMIT_REPLY: Record<Language, string> = {
+  english: "Sorry sir, we're having a brief network issue on our end. I'll have someone call you back in a few minutes to continue — thank you for your patience!",
+  hindi:   "Sorry sir, hamari taraf se thodi network problem aa rahi hai. Kuch minute mein hum aapko wapas call karenge — dhanyavad!",
+  telugu:  "Sorry sir, maa vaipu nunchi konchem network problem vachindi. Konni nimishaallo maname malli call chestham — dhanyavadalu!",
 }
 
 // FIXED: only real goodbye phrases end the call.
@@ -156,24 +180,25 @@ async function getHistory(callSid: string): Promise<{ role: "user" | "model"; co
   }
 }
 
-function updateTranscriptAsync(callSid: string | null, speech: string, reply: string): void {
+// Returns the write promise so callers who need ordering guarantees (e.g.
+// triggering analysis right after) can await it; normal callers just fire
+// it and move on.
+async function updateTranscriptAsync(callSid: string | null, speech: string, reply: string): Promise<void> {
   if (!callSid) return
-  db.from("voice_calls")
-    .select("transcript")
-    .eq("twilio_call_sid", callSid)
-    .single()
-    .then(({ data: existing }: any) => {
-      let prev: any[] = []
-      if (existing?.transcript) prev = typeof existing.transcript === "string" ? JSON.parse(existing.transcript) : existing.transcript
-      return db
-        .from("voice_calls")
-        .update({
-          transcript: JSON.stringify([...prev, { role: "customer", text: speech }, { role: "ai", text: reply }]),
-          status: "in-progress",
-        })
-        .eq("twilio_call_sid", callSid)
-    })
-    .catch((e: any) => console.error("transcript update error:", e))
+  try {
+    const { data: existing } = await db.from("voice_calls").select("transcript").eq("twilio_call_sid", callSid).single()
+    let prev: any[] = []
+    if (existing?.transcript) prev = typeof existing.transcript === "string" ? JSON.parse(existing.transcript) : existing.transcript
+    await db
+      .from("voice_calls")
+      .update({
+        transcript: JSON.stringify([...prev, { role: "customer", text: speech }, { role: "ai", text: reply }]),
+        status: "in-progress",
+      })
+      .eq("twilio_call_sid", callSid)
+  } catch (e: any) {
+    console.error("transcript update error:", e)
+  }
 }
 
 /** Per-turn context assembly shared by both turn paths (blocking + streaming). */
@@ -226,17 +251,27 @@ async function buildTurnInstructions(
     ])
     const knownIncome = memoryRow.data?.facts?.monthly_income ? Number(memoryRow.data.facts.monthly_income) : null
 
-    const rate = buildRateInstruction(speech, { loanType: leadRow.data?.product_interest || null })
+    // Loan type may have been mentioned in an EARLIER turn ("I have a shop,
+    // want to expand") while the rate/EMI QUESTION comes later ("what's the
+    // interest?") — detecting only off the current utterance missed that
+    // and silently fell back to Home Loan. Scan the whole conversation.
+    const conversationSoFar = [...history.map((h) => h.content), speech].join(" ")
+    const detectedType = detectLoanType(conversationSoFar) || leadRow.data?.product_interest || null
+    if (detectedType && detectedType !== leadRow.data?.product_interest) {
+      db.from("leads").update({ product_interest: detectedType }).eq("id", leadId).catch(() => {})
+    }
+
+    const rate = buildRateInstruction(speech, { loanType: detectedType })
     if (rate) merged = [merged, rate].filter(Boolean).join("\n\n")
 
     const emi = buildEmiInstruction(speech, {
       loanAmount: leadRow.data?.loan_amount ? Number(leadRow.data.loan_amount) : null,
-      loanType: leadRow.data?.product_interest || null,
+      loanType: detectedType,
     })
     if (emi) merged = [merged, emi.instruction].filter(Boolean).join("\n\n")
 
     const eligibility = buildEligibilityInstruction(speech, {
-      loanType: leadRow.data?.product_interest || null,
+      loanType: detectedType,
       monthlyIncome: knownIncome,
     })
     if (eligibility) merged = [merged, eligibility.instruction].filter(Boolean).join("\n\n")
@@ -370,12 +405,34 @@ export async function handleTurn(opts: {
   const mergedInstructions = await buildTurnInstructions(leadId, history, instructions, speech, callerPhone)
 
   let reply = ""
+  let rateLimited = false
   try {
     reply = (await chatWithLLM(messages, language, mergedInstructions || undefined)).trim()
     if (!reply) reply = GREETINGS[language]
   } catch (e) {
     console.error("LLM error:", e)
-    reply = RETRY_MSG[language]
+    if (isRateLimitError(e)) {
+      rateLimited = true
+      reply = RATE_LIMIT_REPLY[language]
+    } else {
+      reply = RETRY_MSG[language]
+    }
+  }
+
+  if (rateLimited) {
+    // Cut the call NOW rather than let the customer sit through more dead
+    // turns — the token window won't clear in the next few seconds. AWAIT
+    // the transcript write (unlike the normal fire-and-forget path) before
+    // triggering analysis, so Lead Brain reads the complete transcript
+    // instead of racing the save — a follow-up call needs everything
+    // learned so far to continue the thread instead of starting cold.
+    await updateTranscriptAsync(callSid, speech, reply)
+    maybeProposeLoanEdit(leadId, "priya_voice", speech)
+    if (callSid) {
+      await db.from("voice_calls").update({ status: "completed" }).eq("twilio_call_sid", callSid).catch(() => {})
+      runPostCallAnalysis(callSid)
+    }
+    return { text: reply, hangup: true }
   }
 
   updateTranscriptAsync(callSid, speech, reply)
@@ -445,6 +502,16 @@ export async function handleTurnStream(
     }
   } catch (e) {
     console.error("LLM error:", e)
+    if (isRateLimitError(e)) {
+      const msg = RATE_LIMIT_REPLY[language]
+      await updateTranscriptAsync(callSid, speech, msg)
+      onSentence(msg)
+      if (callSid) {
+        await db.from("voice_calls").update({ status: "completed" }).eq("twilio_call_sid", callSid).catch(() => {})
+        runPostCallAnalysis(callSid)
+      }
+      return { hangup: true }
+    }
     const msg = RETRY_MSG[language]
     updateTranscriptAsync(callSid, speech, msg)
     onSentence(msg)
