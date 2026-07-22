@@ -238,10 +238,12 @@ export async function chatWithLLM(
   if (extraInstructions?.trim()) {
     systemPrompt += `\n\n=== READ THIS BEFORE YOUR NEXT REPLY — overrides the generic GOAL step order above ===\n${extraInstructions.trim()}\n=== If IDENTITY or KNOWN FACTS above already answers a GOAL step, that step is DONE — do not ask for it, at most confirm it in passing. ===`
   }
-  // numPredict 90: live phone replies are capped at two short sentences by the
-  // script, so ~90 tokens is generous headroom. Text channels (WhatsApp) pass
-  // a higher cap since nobody is waiting on hold there.
-  return runChat(messages, systemPrompt, { numPredict: opts?.numPredict ?? 90, timeoutMs: opts?.timeoutMs })
+  // numPredict 150: the script now answers real questions (rates, documents,
+  // objections) in 2-3 sentences instead of always deflecting, so 90 tokens
+  // was cutting her off mid-sentence. 150 covers that while still being far
+  // short of a rambling paragraph. Text channels (WhatsApp) pass a higher
+  // cap since nobody is waiting on hold there.
+  return runChat(messages, systemPrompt, { numPredict: opts?.numPredict ?? 150, timeoutMs: opts?.timeoutMs })
 }
 
 /**
@@ -268,7 +270,7 @@ export async function chatWithLLMStream(
   // cost no noticeable time on Groq.
   const recentMessages = messages.slice(-12)
   const chatMessages = toChatMessages(recentMessages, systemPrompt)
-  return runCompletionStream(chatMessages, { numPredict: 90, timeoutMs: 25000 }, onChunk)
+  return runCompletionStream(chatMessages, { numPredict: 150, timeoutMs: 25000 }, onChunk)
 }
 
 /**
