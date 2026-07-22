@@ -238,7 +238,7 @@ async function completeLeadIfReady(opts: {
   const { leadId, callSid, callerPhone, messages, reply } = opts
   const allTurns = [...messages, { role: "model" as const, content: reply }]
   const transcriptText =
-    (callerPhone ? `(The customer is calling from: ${callerPhone}. If they said WhatsApp is the same number, that is their WhatsApp number.)\n` : "") +
+    (callerPhone ? `(The customer is calling from: ${callerPhone}. Use this as their whatsapp_number ONLY if they EXPLICITLY said WhatsApp is on this same number — if they never mentioned their WhatsApp number, leave whatsapp_number null.)\n` : "") +
     allTurns.map((m) => `${m.role === "model" ? "Priya" : "Customer"}: ${m.content}`).join("\n")
 
   if (!mightBeComplete(transcriptText)) return false
