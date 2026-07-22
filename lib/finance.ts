@@ -107,6 +107,55 @@ export function detectLoanType(text: string): string | null {
 
 export type EmiAnswer = { instruction: string; principal: number; ratePct: number; tenureMonths: number; emi: number }
 
+// ---- Eligibility ("will I qualify / how much can I get") ----
+const ELIGIBILITY_QUESTION_RE = /\b(eligib|qualify|qualif|how much (loan|amount|money).*(get|qualify)|how much (can|will) i get|max(imum)? loan|entha (loan|amount) (vastundi|isthaaru|dorukutundi)|kitna loan mil|loan amount entha)\b/i
+const INCOME_CONTEXT_RE = /\b(income|salary|earn|kamai|sambalam|jeetham)\b/i
+const EXISTING_EMI_RE = /\b(existing emi|already paying|other loan|already (an )?emi|current emi)\b/i
+
+export function parseIncome(text: string): number | null {
+  if (!INCOME_CONTEXT_RE.test(text)) return null
+  return parseAmount(text)
+}
+
+export type EligibilityAnswer = { instruction: string; monthlyIncome: number; maxLoan: number; ratePct: number; tenureMonths: number }
+
+/**
+ * Same principle as buildEmiInstruction: real code computes a maximum
+ * eligible loan amount (standard 50%-of-income EMI affordability rule),
+ * the AI just states it — with the mandatory "estimate, not a guarantee"
+ * framing the script's hard rules require.
+ */
+export function buildEligibilityInstruction(
+  customerMessage: string,
+  fallback: { loanType?: string | null; monthlyIncome?: number | null }
+): EligibilityAnswer | null {
+  if (!ELIGIBILITY_QUESTION_RE.test(customerMessage)) return null
+
+  const monthlyIncome = parseIncome(customerMessage) || fallback.monthlyIncome || null
+  if (!monthlyIncome || monthlyIncome < 5000) {
+    // Not enough to compute anything real — tell the AI to ASK, not guess.
+    return {
+      instruction:
+        "ELIGIBILITY CHECK REQUESTED but their monthly income is not known yet. Your VERY NEXT reply must directly ask their approximate monthly income (e.g. \"Sure — what's your monthly income, roughly?\") BEFORE anything else. Do NOT give a loan amount range or any eligibility figure yet — you have no real number to base it on.",
+      monthlyIncome: 0, maxLoan: 0, ratePct: 0, tenureMonths: 0,
+    }
+  }
+
+  const loanType = detectLoanType(fallback.loanType || customerMessage) || "Home Loan"
+  const rateInfo = BEST_RATES[loanType] || BEST_RATES["Home Loan"]
+  const tenureMonths = rateInfo.maxTenureYears * 12
+  const existingEmiMentioned = EXISTING_EMI_RE.test(customerMessage)
+  const maxLoan = estimateMaxEligibleLoan(monthlyIncome, existingEmiMentioned ? monthlyIncome * 0.1 : 0, rateInfo.ratePct, tenureMonths)
+
+  const instruction =
+    `ELIGIBILITY ESTIMATE (real calculation, use this exact figure — do NOT invent your own): ` +
+    `Based on a monthly income of ${formatINR(monthlyIncome)}, they could be eligible for up to approximately ${formatINR(maxLoan)} ` +
+    `on a ${loanType} at ${rateInfo.ratePct}% p.a. over ${tenureMonths / 12} years (standard lenders cap the EMI at about half of monthly income). ` +
+    `Always frame this as an ESTIMATE, never a guarantee — the final eligibility depends on credit score, existing loans, and lender-specific checks.`
+
+  return { instruction, monthlyIncome, maxLoan, ratePct: rateInfo.ratePct, tenureMonths }
+}
+
 /**
  * Main entry point for the call/WhatsApp turn handlers. Give it the raw
  * customer message plus whatever the lead record already knows
@@ -116,7 +165,12 @@ export type EmiAnswer = { instruction: string; principal: number; ratePct: numbe
  * this turn.
  */
 export function buildEmiInstruction(customerMessage: string, fallback: { loanAmount?: number | null; loanType?: string | null }): EmiAnswer | null {
-  if (!EMI_QUESTION_RE.test(customerMessage) && !parseAmount(customerMessage)) return null
+  // An income/eligibility statement ("my monthly income is 80000") mentions
+  // a bare number too — that number is NOT a loan principal, so don't let
+  // it trigger an EMI calc. Only a real EMI question, or an amount clearly
+  // NOT framed as income/eligibility, counts.
+  const isIncomeOrEligibility = INCOME_CONTEXT_RE.test(customerMessage) || ELIGIBILITY_QUESTION_RE.test(customerMessage)
+  if (!EMI_QUESTION_RE.test(customerMessage) && (isIncomeOrEligibility || !parseAmount(customerMessage))) return null
 
   const loanType = detectLoanType(customerMessage) || detectLoanType(fallback.loanType || "") || "Home Loan"
   const rateInfo = BEST_RATES[loanType] || BEST_RATES["Home Loan"]

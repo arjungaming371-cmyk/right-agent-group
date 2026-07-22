@@ -5,7 +5,7 @@ import { splitSentences } from "./sentences"
 import { sendApplicationLink } from "./whatsapp"
 import { buildLeadBrief } from "./lead-brain"
 import { searchKnowledgeBase } from "./knowledge-base"
-import { buildEmiInstruction } from "./finance"
+import { buildEmiInstruction, buildEligibilityInstruction } from "./finance"
 import { detectFrustration, flagFrustratedCall } from "./frustration"
 import { createNotification } from "./notifications"
 import { maybeProposeLoanEdit } from "./loan-edit-requests"
@@ -220,12 +220,23 @@ async function buildTurnInstructions(
   // arithmetic here and hands Priya an exact figure to state — she never
   // computes EMI/eligibility herself.
   if (leadId) {
-    const leadRow = await db.from("leads").select("loan_amount, product_interest").eq("id", leadId).single()
+    const [leadRow, memoryRow] = await Promise.all([
+      db.from("leads").select("loan_amount, product_interest").eq("id", leadId).single(),
+      db.from("lead_memory").select("facts").eq("lead_id", leadId).single(),
+    ])
+    const knownIncome = memoryRow.data?.facts?.monthly_income ? Number(memoryRow.data.facts.monthly_income) : null
+
     const emi = buildEmiInstruction(speech, {
       loanAmount: leadRow.data?.loan_amount ? Number(leadRow.data.loan_amount) : null,
       loanType: leadRow.data?.product_interest || null,
     })
     if (emi) merged = [merged, emi.instruction].filter(Boolean).join("\n\n")
+
+    const eligibility = buildEligibilityInstruction(speech, {
+      loanType: leadRow.data?.product_interest || null,
+      monthlyIncome: knownIncome,
+    })
+    if (eligibility) merged = [merged, eligibility.instruction].filter(Boolean).join("\n\n")
   }
 
   return merged

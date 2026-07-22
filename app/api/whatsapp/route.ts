@@ -5,7 +5,7 @@ import { chatWithLLM, detectLanguage, type Language } from "@/lib/llm"
 import { sendWhatsAppText, downloadWhatsAppMedia } from "@/lib/whatsapp"
 import { buildLeadBrief } from "@/lib/lead-brain"
 import { searchKnowledgeBase } from "@/lib/knowledge-base"
-import { buildEmiInstruction } from "@/lib/finance"
+import { buildEmiInstruction, buildEligibilityInstruction } from "@/lib/finance"
 import { detectFrustration, flagFrustratedWhatsApp } from "@/lib/frustration"
 import { createNotification } from "@/lib/notifications"
 import { refreshLeadScore } from "@/lib/scoring"
@@ -284,6 +284,13 @@ async function handleInbound(msg: any, profileName: string | null) {
       loanType: lead.product_interest || null,
     })
     if (emi) extraContext = [extraContext, emi.instruction].filter(Boolean).join("\n\n")
+
+    const memRow = await query(`SELECT facts->>'monthly_income' AS income FROM lead_memory WHERE lead_id = $1`, [lead.id])
+    const eligibility = buildEligibilityInstruction(text, {
+      loanType: lead.product_interest || null,
+      monthlyIncome: memRow.rows[0]?.income ? Number(memRow.rows[0].income) : null,
+    })
+    if (eligibility) extraContext = [extraContext, eligibility.instruction].filter(Boolean).join("\n\n")
 
     // numPredict 400: text chat has no caller waiting in silence — let Priya
     // write full answers (rate tables, loan lists) instead of call-length ones.
