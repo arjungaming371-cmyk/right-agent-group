@@ -5,7 +5,7 @@ import { splitSentences } from "./sentences"
 import { sendApplicationLink } from "./whatsapp"
 import { buildLeadBrief } from "./lead-brain"
 import { searchKnowledgeBase } from "./knowledge-base"
-import { buildEmiInstruction, buildEligibilityInstruction } from "./finance"
+import { buildEmiInstruction, buildEligibilityInstruction, buildRateInstruction } from "./finance"
 import { detectFrustration, flagFrustratedCall } from "./frustration"
 import { createNotification } from "./notifications"
 import { maybeProposeLoanEdit } from "./loan-edit-requests"
@@ -226,6 +226,9 @@ async function buildTurnInstructions(
     ])
     const knownIncome = memoryRow.data?.facts?.monthly_income ? Number(memoryRow.data.facts.monthly_income) : null
 
+    const rate = buildRateInstruction(speech, { loanType: leadRow.data?.product_interest || null })
+    if (rate) merged = [merged, rate].filter(Boolean).join("\n\n")
+
     const emi = buildEmiInstruction(speech, {
       loanAmount: leadRow.data?.loan_amount ? Number(leadRow.data.loan_amount) : null,
       loanType: leadRow.data?.product_interest || null,
@@ -268,7 +271,20 @@ async function completeLeadIfReady(opts: {
 
   if (!mightBeComplete(transcriptText)) return false
   const extracted = await extractLeadInfo(transcriptText)
-  if (!extracted.complete || !leadId) return false
+  if (!leadId) return false
+
+  // extractLeadInfo only reads what was SPOKEN this call — a returning lead
+  // whose name/address is already on file correctly never gets re-asked (by
+  // design, see the script's memory rules), so extraction alone reports
+  // "incomplete" forever even though the lead genuinely has all three facts.
+  // Merge with what the lead record already knows before deciding.
+  const existing = await db.from("leads").select("name, address, whatsapp_number").eq("id", leadId).single()
+  const knownName = existing.data?.name && !PLACEHOLDER_NAME_RE.test(existing.data.name) ? existing.data.name : null
+  const effectiveName = extracted.name || knownName
+  const effectiveAddress = extracted.address || existing.data?.address || null
+  const effectiveWhatsapp = extracted.whatsapp_number || existing.data?.whatsapp_number || null
+
+  if (!effectiveName || !effectiveAddress || !effectiveWhatsapp) return false
 
   try {
     const updates: Record<string, any> = {

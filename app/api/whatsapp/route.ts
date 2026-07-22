@@ -5,7 +5,7 @@ import { chatWithLLM, detectLanguage, type Language } from "@/lib/llm"
 import { sendWhatsAppText, downloadWhatsAppMedia } from "@/lib/whatsapp"
 import { buildLeadBrief } from "@/lib/lead-brain"
 import { searchKnowledgeBase } from "@/lib/knowledge-base"
-import { buildEmiInstruction, buildEligibilityInstruction } from "@/lib/finance"
+import { buildEmiInstruction, buildEligibilityInstruction, buildRateInstruction } from "@/lib/finance"
 import { detectFrustration, flagFrustratedWhatsApp } from "@/lib/frustration"
 import { createNotification } from "@/lib/notifications"
 import { refreshLeadScore } from "@/lib/scoring"
@@ -279,6 +279,9 @@ async function handleInbound(msg: any, profileName: string | null) {
 
     // REAL MATH: same reasoning as the voice path (lib/finance.ts) — Priya
     // states an exact code-computed EMI instead of an LLM-guessed one.
+    const rate = buildRateInstruction(text, { loanType: lead.product_interest || null })
+    if (rate) extraContext = [extraContext, rate].filter(Boolean).join("\n\n")
+
     const emi = buildEmiInstruction(text, {
       loanAmount: lead.loan_amount ? Number(lead.loan_amount) : null,
       loanType: lead.product_interest || null,

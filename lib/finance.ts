@@ -164,6 +164,26 @@ export function buildEligibilityInstruction(
  * this number, do not calculate your own") or null if no EMI math applies
  * this turn.
  */
+// ---- Rate grounding ("what's the interest rate") ----
+// The knowledge base only has a detailed rate SHEET for Home Loan — for
+// every other product (Personal, Business, Two/Four Wheeler, Education...)
+// there is no grounded text, so the model was observed inventing a
+// different rate on different calls for the SAME loan type (18% then 13%
+// for Business Loan). BEST_RATES is the single source of truth for every
+// product; ground every rate question in it, not just EMI-shaped ones.
+const RATE_QUESTION_RE = /\b(interest|rate|% ?p\.?a\.?|percent|vaddi|entha (rate|interest|vaddi)|interest entha)\b/i
+
+export function buildRateInstruction(customerMessage: string, fallback: { loanType?: string | null }): string | null {
+  if (!RATE_QUESTION_RE.test(customerMessage)) return null
+  const loanType = detectLoanType(customerMessage) || detectLoanType(fallback.loanType || "") || "Home Loan"
+  const rateInfo = BEST_RATES[loanType] || BEST_RATES["Home Loan"]
+  return (
+    `EXACT RATE (use this precise figure every time — never invent or vary it): ` +
+    `Our ${loanType} rate starts from ${rateInfo.ratePct}% p.a. with ${rateInfo.lender}, tenure up to ${rateInfo.maxTenureYears} years. ` +
+    `State this exact rate. The final rate for THIS customer still depends on their profile — say that too, but the starting figure above is fixed and must never change between calls.`
+  )
+}
+
 export function buildEmiInstruction(customerMessage: string, fallback: { loanAmount?: number | null; loanType?: string | null }): EmiAnswer | null {
   // An income/eligibility statement ("my monthly income is 80000") mentions
   // a bare number too — that number is NOT a loan principal, so don't let
