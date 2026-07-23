@@ -51,6 +51,10 @@ _load_project_env()
 # STT_API_KEY falls back to the shared internal service key
 API_KEY = os.environ.get("STT_API_KEY") or os.environ.get("WHATSAPP_SERVICE_KEY", "")
 
+# Matches server/voicebot-server.js's SAMPLE_RATE — the voicebot bridge
+# always sends 16-bit signed LE, 8kHz, mono telephony audio.
+SAMPLE_RATE = 8000
+
 def detect_device() -> str:
     forced = os.environ.get("STT_FORCE_DEVICE", "").strip().lower()
     if forced in ("cuda", "cpu"):
@@ -98,18 +102,63 @@ async def health(request: Request):
 VAD_FILTER = os.environ.get("STT_VAD_FILTER", "0").strip().lower() in ("1", "true", "yes")
 
 
+def _pcm_to_wav(pcm: bytes) -> bytes:
+    """Wrap raw headerless 16-bit/8kHz/mono PCM in a minimal WAV container.
+
+    Passing io.BytesIO(raw_pcm) directly made faster_whisper hand the bytes
+    to PyAV for container probing — but the voicebot bridge sends RAW
+    HEADERLESS PCM (no file header for PyAV to detect), so PyAV had to GUESS
+    the format and sometimes failed outright (av.error.InvalidDataError ->
+    unhandled -> 500, observed live on a real call). Wrapping in a WAV
+    header that correctly DECLARES 8kHz/16-bit/mono fixes that crash — PyAV
+    identifies the format exactly instead of guessing, and decode_audio()'s
+    normal resample-to-16kHz path still runs correctly.
+    #
+    # This did NOT, on its own, fix the SEPARATE garbled-repetition problem
+    # (see _transcribe_sync below) — verified directly against the same
+    # real call audio that repeated "నినినినిని..." dozens of times: still
+    # garbled with a correct WAV header. That repetition is a genuine
+    # Whisper hallucination failure mode on noisy real telephone-line audio,
+    # fixed separately via the temperature retry ladder + no_repeat_ngram_size.
+    """
+    import struct
+    n_channels, sampwidth, framerate = 1, 2, SAMPLE_RATE
+    byte_rate = framerate * n_channels * sampwidth
+    block_align = n_channels * sampwidth
+    header = b"RIFF" + struct.pack("<I", 36 + len(pcm)) + b"WAVE"
+    header += b"fmt " + struct.pack("<IHHIIHH", 16, 1, n_channels, framerate, byte_rate, block_align, sampwidth * 8)
+    header += b"data" + struct.pack("<I", len(pcm))
+    return header + pcm
+
+
 def _transcribe_sync(audio: bytes, lang: str | None) -> str:
+    wav_bytes = _pcm_to_wav(audio)
+
     # faster_whisper's transcribe() is lazy — it returns a generator, and the
     # actual CPU-bound decode work happens when you iterate it. Both steps
     # must run inside the same threadpool call below, or the blocking work
     # still lands back on the event loop the moment the generator is consumed.
     segments, _info = model.transcribe(
-        io.BytesIO(audio),
+        io.BytesIO(wav_bytes),
         language=lang,
         beam_size=1,            # greedy: fastest, near-identical accuracy for short utterances
         vad_filter=VAD_FILTER,  # off by default — voicebot already endpoints; see note above
         condition_on_previous_text=False,
-        temperature=0.0,
+        # Real telephone-line audio (noise, compression) can send Whisper
+        # into a repetition loop — observed live: "నినినినిని..." repeated
+        # dozens of times, on real call audio that looked completely normal
+        # (correct format, no clipping, reasonable volume). A single fixed
+        # temperature=0.0 disables Whisper's own built-in escape hatch: it
+        # only retries at higher temperatures when a segment's compression
+        # ratio / log-prob looks like a failure, and that retry ladder only
+        # runs if temperature is a tuple. no_repeat_ngram_size is a second,
+        # direct guard against the same loop. Verified against the exact
+        # audio that repeated forever: this combination breaks the loop, in
+        # ~2s on CPU — beam_size=1 stays unchanged since it wasn't the
+        # cause and raising it only adds latency with no extra benefit here.
+        temperature=(0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
+        no_repeat_ngram_size=3,
+        compression_ratio_threshold=2.4,
     )
     return " ".join(s.text.strip() for s in segments).strip()
 
