@@ -130,5 +130,10 @@ async def transcribe(request: Request, language: str = Query("english")):
     # from even starting, since this was a synchronous call inside an async
     # handler with nothing else running the loop.
     text = await run_in_threadpool(_transcribe_sync, audio, lang)
-    print(f"[{lang or 'auto'}] {time.time() - t0:.2f}s: {text[:80]!r}")
+    # ascii-safe log: Windows consoles (cp1252) can't print Telugu/Devanagari,
+    # and a logging crash must never turn a successful transcription into a
+    # 500 — this exact bug silenced Priya on every real Telugu/Hindi call
+    # (Whisper transcribed correctly, then this print() crashed the request).
+    safe_text = text[:80].encode("ascii", "backslashreplace").decode("ascii")
+    print(f"[{lang or 'auto'}] {time.time() - t0:.2f}s: {safe_text!r}")
     return {"text": text}
