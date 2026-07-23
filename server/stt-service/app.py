@@ -131,6 +131,34 @@ def _pcm_to_wav(pcm: bytes) -> bytes:
     return header + pcm
 
 
+try:
+    from indic_transliteration import sanscript
+    from indic_transliteration.sanscript import transliterate
+    _TRANSLIT_AVAILABLE = True
+except ImportError:
+    _TRANSLIT_AVAILABLE = False
+
+# Whisper transcribes Telugu/Hindi speech into native Telugu/Devanagari
+# script — but Priya's whole script, the LLM's context, and every other
+# part of this app are written for Roman-script Tenglish/Hinglish (matches
+# how the customer actually types on WhatsApp too). Rather than trust
+# Whisper's own noisy attempt at romanizing (forcing language="en" on
+# non-English audio produces inconsistent, often wrong phonetic guesses),
+# transcribe in the REAL language for best recognition accuracy, then
+# transliterate the correct native-script output to Roman script
+# ourselves — deterministic and reliable.
+_SCRIPT_MAP = {"te": sanscript.TELUGU if _TRANSLIT_AVAILABLE else None, "hi": sanscript.DEVANAGARI if _TRANSLIT_AVAILABLE else None}
+
+
+def _to_tenglish(text: str, lang: str | None) -> str:
+    if not text or not _TRANSLIT_AVAILABLE or lang not in _SCRIPT_MAP:
+        return text
+    try:
+        return transliterate(text, _SCRIPT_MAP[lang], sanscript.ITRANS).lower()
+    except Exception:
+        return text  # transliteration failure must never lose the transcript
+
+
 def _transcribe_sync(audio: bytes, lang: str | None) -> str:
     wav_bytes = _pcm_to_wav(audio)
 
@@ -160,7 +188,8 @@ def _transcribe_sync(audio: bytes, lang: str | None) -> str:
         no_repeat_ngram_size=3,
         compression_ratio_threshold=2.4,
     )
-    return " ".join(s.text.strip() for s in segments).strip()
+    text = " ".join(s.text.strip() for s in segments).strip()
+    return _to_tenglish(text, lang)
 
 
 @app.post("/transcribe")
