@@ -1,10 +1,10 @@
 // In-app background scheduler — runs inside the Next.js server process itself
-// (via instrumentation.ts), so it works on any platform: local dev, a Linux
-// GPU box, or a Kaggle session. Previously the daily digest ONLY ran via
+// (via instrumentation.ts), so it works on any platform the app is deployed
+// to, not just Windows. Previously the daily digest ONLY ran via
 // DIGEST.ps1 -Install, which registers a Windows Task Scheduler job — that
-// silently does nothing on Linux, which is exactly where this app runs on
-// Kaggle. This does not replace DIGEST.ps1 (still fine for a Windows-only
-// deployment); it makes the automation portable everywhere else too.
+// silently does nothing on a non-Windows deployment. This does not replace
+// DIGEST.ps1 (still fine for the Windows on-premise deployment); it makes
+// the automation portable everywhere else too.
 //
 // Deliberately NOT here: outbound call campaigns. Auto-dialing real phone
 // numbers on a schedule spends real money and reaches real people without a

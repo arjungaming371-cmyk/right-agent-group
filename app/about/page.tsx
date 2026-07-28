@@ -109,7 +109,7 @@ export default function AboutPage() {
               { category: "Voice", tech: "Exotel, Whisper STT, Edge TTS" },
               { category: "Messaging", tech: "Meta WhatsApp Cloud API" },
               { category: "Auth", tech: "Google OAuth, HMAC, JWT" },
-              { category: "Deployment", tech: "Cloudflare Tunnel, Kaggle" },
+              { category: "Deployment", tech: "Dedicated on-premise server, Cloudflare Tunnel" },
             ].map((item, i) => (
               <div key={i} style={{ background: "rgba(139,124,255,0.1)", border: "1px solid rgba(139,124,255,0.3)", borderRadius: 10, padding: "16px" }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: "#a5b0ff", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>{item.category}</div>

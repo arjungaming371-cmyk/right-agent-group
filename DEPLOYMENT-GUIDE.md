@@ -302,25 +302,7 @@ curl -s https://YOUR-DOMAIN/api/test      # env + service health report
 | WhatsApp not sending | Dashboard → WhatsApp tab shows Meta's error; check `WHATSAPP_TOKEN` validity and template approval status in WhatsApp Manager |
 | Login says "not authorized" | Add that Gmail on `/access`, or check `ADMIN_EMAIL` spelling |
 
----
-
-## Appendix — Running this on an AWS GPU box for a client demo
-
-Same steps as above (Steps 1–12), just on a rented EC2 GPU instance instead of
-the client's server. Doubles as a dry run of the exact handoff process.
-
-1. **Launch instance**: EC2 → `g4dn.xlarge` (1x T4 GPU) → AMI: **Deep Learning
-   AMI (Ubuntu)** — comes with the NVIDIA driver + CUDA preinstalled, so skip
-   the `ubuntu-drivers autoinstall` sub-step in Step 1; `nvidia-smi` should
-   already work on first boot.
-2. **Region**: `ap-south-1` (Mumbai) — lowest latency to India / Exotel.
-3. **Security group**: open inbound 22 (SSH), 80, 443.
-4. **Domain**: Exotel's `wss://` URL and Google OAuth's redirect URI both
-   need a real HTTPS domain pointed at the instance — even a cheap domain
-   with an A record to the instance's public IP works. This is an account
-   prerequisite, not a code change.
-5. Run Steps 1–12 above as normal on the instance.
-6. **Cost control**: `g4dn.xlarge` on-demand is ~$0.53/hr. **Stop (not
-   terminate)** the instance between demo/test sessions — a stopped instance
-   only bills for its EBS storage (a few cents/day), so a $200 credit goes a
-   long way if you're not leaving it running 24/7.
+This guide covers a Linux/VPS deployment. For the recommended path — a
+dedicated on-premise Windows machine the customer owns outright — see the
+"Running Priya on the Client's Own Server" field guide instead, and
+`scripts\setup-machine.ps1` for the automated setup.
