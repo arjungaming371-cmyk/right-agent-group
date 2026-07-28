@@ -26,3 +26,10 @@ server/stt-service/models/
 server/stt-service/__pycache__/
 server/tts-service/venv/
 server/tts-service/__pycache__/
+
+# manual TTS/STT test output — these accumulate in the repo root every time
+# someone tests voice output by hand; never meant to be committed
+/*.mp3
+/*.wav
+/*.pcm
+debug-audio/
