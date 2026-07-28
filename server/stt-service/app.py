@@ -159,7 +159,7 @@ def _to_tenglish(text: str, lang: str | None) -> str:
         return text  # transliteration failure must never lose the transcript
 
 
-def _transcribe_sync(audio: bytes, lang: str | None) -> str:
+def _transcribe_sync(audio: bytes, lang: str | None) -> tuple[str, bool]:
     wav_bytes = _pcm_to_wav(audio)
 
     # faster_whisper's transcribe() is lazy — it returns a generator, and the
@@ -188,8 +188,29 @@ def _transcribe_sync(audio: bytes, lang: str | None) -> str:
         no_repeat_ngram_size=3,
         compression_ratio_threshold=2.4,
     )
-    text = " ".join(s.text.strip() for s in segments).strip()
-    return _to_tenglish(text, lang)
+    # Materialize once: both the joined text and the confidence stats below
+    # read from this list, and the generator can only be consumed once.
+    segments_list = list(segments)
+    text = " ".join(s.text.strip() for s in segments_list).strip()
+
+    # Confidence gate: on noisy real phone audio, Whisper doesn't always fail
+    # loudly (empty text) or obviously (repetition loop, already guarded
+    # above) — it can also just confidently GUESS plausible-sounding wrong
+    # words. That transcript then goes straight to the LLM, which replies to
+    # words the caller never said (observed live: caller said something
+    # unintelligible, Whisper produced fluent-looking garbage, Priya replied
+    # about "property issues" out of nowhere). avg_logprob and no_speech_prob
+    # are per-segment confidence signals faster_whisper already computes for
+    # free — duration-weight them across segments so one bad short segment in
+    # an otherwise-clear utterance doesn't trip the gate.
+    low_confidence = False
+    if segments_list:
+        total_dur = sum(max(s.end - s.start, 0.01) for s in segments_list)
+        avg_logprob = sum(s.avg_logprob * (s.end - s.start) for s in segments_list) / total_dur
+        no_speech_prob = sum(s.no_speech_prob * (s.end - s.start) for s in segments_list) / total_dur
+        low_confidence = avg_logprob < -1.0 or no_speech_prob > 0.6
+
+    return _to_tenglish(text, lang), low_confidence
 
 
 @app.post("/transcribe")
@@ -197,7 +218,7 @@ async def transcribe(request: Request, language: str = Query("english")):
     check_key(request)
     audio = await request.body()
     if not audio or len(audio) < 1000:
-        return {"text": ""}
+        return {"text": "", "low_confidence": False}
     if len(audio) > 10 * 1024 * 1024:
         raise HTTPException(413, "audio too large")
 
@@ -207,11 +228,12 @@ async def transcribe(request: Request, language: str = Query("english")):
     # caller's transcription blocks every other simultaneous caller's audio
     # from even starting, since this was a synchronous call inside an async
     # handler with nothing else running the loop.
-    text = await run_in_threadpool(_transcribe_sync, audio, lang)
+    text, low_confidence = await run_in_threadpool(_transcribe_sync, audio, lang)
     # ascii-safe log: Windows consoles (cp1252) can't print Telugu/Devanagari,
     # and a logging crash must never turn a successful transcription into a
     # 500 — this exact bug silenced Priya on every real Telugu/Hindi call
     # (Whisper transcribed correctly, then this print() crashed the request).
     safe_text = text[:80].encode("ascii", "backslashreplace").decode("ascii")
-    print(f"[{lang or 'auto'}] {time.time() - t0:.2f}s: {safe_text!r}")
-    return {"text": text}
+    flag = " LOW-CONFIDENCE" if low_confidence else ""
+    print(f"[{lang or 'auto'}]{flag} {time.time() - t0:.2f}s: {safe_text!r}")
+    return {"text": text, "low_confidence": low_confidence}

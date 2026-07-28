@@ -13,6 +13,7 @@
 // them but nothing here deletes or breaks them.
 
 import { db, query } from "./db"
+import pool from "./db"
 import { analyzeLeadTranscript, type LeadFacts, type LeadAnalysisResult } from "./llm"
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -90,24 +91,64 @@ async function getExistingMemory(leadId: string): Promise<ExistingMemory> {
   }
 }
 
-/** Merge one analysis result into lead_memory. Idempotent-ish upsert, safe to call repeatedly. */
+/**
+ * Merge one analysis result into lead_memory. Idempotent-ish upsert, safe to
+ * call repeatedly.
+ *
+ * Wrapped in a transaction with a per-lead advisory lock: this is a
+ * read-merge-write (read existing facts, merge new ones in, write the whole
+ * row back), so two analyses for the SAME lead landing close together
+ * (e.g. a call ending right as a WhatsApp idle-scan finishes for the same
+ * customer) could otherwise race — the second write reads stale data from
+ * before the first write lands, and silently drops whatever the first one
+ * added. pg_advisory_xact_lock works even before any lead_memory row exists
+ * for this lead, unlike `SELECT ... FOR UPDATE`, and releases automatically
+ * on commit/rollback.
+ */
 async function applyAnalysis(leadId: string, result: LeadAnalysisResult): Promise<void> {
-  const existing = await getExistingMemory(leadId)
-  const mergedFacts = mergeFacts(existing.facts, result.new_facts, existing.locked)
-  const history = [...existing.sentiment_history, { sentiment: result.sentiment, at: new Date().toISOString() }].slice(-20)
-  // Once do_not_call is set (customer said stop, or a human set it), the
-  // automated pipeline can never silently un-set it — only a manual dashboard
-  // edit can move a lead off that stage. Everything else follows the AI.
-  const nextStage = existing.stage === "do_not_call" ? "do_not_call" : result.stage_suggestion
+  const client = await pool.connect()
+  try {
+    await client.query("BEGIN")
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [leadId])
 
-  await query(
-    `INSERT INTO lead_memory (lead_id, facts, summary, sentiment, sentiment_history, stage, last_analysis_at, updated_at)
-     VALUES ($1, $2::jsonb, $3, $4, $5::jsonb, $6, now(), now())
-     ON CONFLICT (lead_id) DO UPDATE SET
-       facts = $2::jsonb, summary = $3, sentiment = $4, sentiment_history = $5::jsonb,
-       stage = $6, last_analysis_at = now(), updated_at = now()`,
-    [leadId, JSON.stringify(mergedFacts), result.updated_summary || existing.summary, result.sentiment, JSON.stringify(history), nextStage]
-  )
+    const res = await client.query(
+      `SELECT facts, locked_facts, summary, sentiment_history, stage, last_analysis_at FROM lead_memory WHERE lead_id = $1`,
+      [leadId]
+    )
+    const row = res.rows[0]
+    const existing: ExistingMemory = row
+      ? {
+          facts: row.facts || {},
+          locked: row.locked_facts || [],
+          summary: row.summary || "",
+          sentiment_history: row.sentiment_history || [],
+          stage: row.stage || "new",
+          last_analysis_at: row.last_analysis_at,
+        }
+      : { facts: {}, locked: [], summary: "", sentiment_history: [], stage: "new", last_analysis_at: null }
+
+    const mergedFacts = mergeFacts(existing.facts, result.new_facts, existing.locked)
+    const history = [...existing.sentiment_history, { sentiment: result.sentiment, at: new Date().toISOString() }].slice(-20)
+    // Once do_not_call is set (customer said stop, or a human set it), the
+    // automated pipeline can never silently un-set it — only a manual dashboard
+    // edit can move a lead off that stage. Everything else follows the AI.
+    const nextStage = existing.stage === "do_not_call" ? "do_not_call" : result.stage_suggestion
+
+    await client.query(
+      `INSERT INTO lead_memory (lead_id, facts, summary, sentiment, sentiment_history, stage, last_analysis_at, updated_at)
+       VALUES ($1, $2::jsonb, $3, $4, $5::jsonb, $6, now(), now())
+       ON CONFLICT (lead_id) DO UPDATE SET
+         facts = $2::jsonb, summary = $3, sentiment = $4, sentiment_history = $5::jsonb,
+         stage = $6, last_analysis_at = now(), updated_at = now()`,
+      [leadId, JSON.stringify(mergedFacts), result.updated_summary || existing.summary, result.sentiment, JSON.stringify(history), nextStage]
+    )
+    await client.query("COMMIT")
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {})
+    throw e
+  } finally {
+    client.release()
+  }
 }
 
 /** Insert one timeline entry. ON CONFLICT DO NOTHING — (channel, ref_id) is unique, so re-running analysis on the same source row never duplicates history. */

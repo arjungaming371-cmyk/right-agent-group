@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { apiError } from "@/lib/api-error"
 import { db } from "@/lib/db"
 import { requireRole } from "@/lib/auth"
 import { logAudit } from "@/lib/audit"
@@ -14,7 +15,7 @@ export async function GET(req: NextRequest) {
   const id = searchParams.get("id")
   if (id) {
     const { data, error } = await db.from("loan_applications").select("*").eq("id", id).single()
-    if (error) return NextResponse.json({ error: error.message }, { status: 404 })
+    if (error) return apiError(error, 404)
     return NextResponse.json(data)
   }
 
@@ -22,7 +23,7 @@ export async function GET(req: NextRequest) {
   // nonexistent column made this whole query 500 while the count query above
   // succeeded, so the sidebar badge said "1" while the list showed empty.
   const { data, error } = await db.from("loan_applications").select("*").order("submitted_at", { ascending: false })
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return apiError(error)
   return NextResponse.json(data)
 }
 
@@ -33,7 +34,7 @@ export async function POST(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const body = await req.json()
   const { data, error } = await db.from("loan_applications").insert(body).select().single()
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return apiError(error)
   logAudit("loan application created", session.email, { loanAppId: data?.id, customerName: body.customer_name })
   return NextResponse.json(data)
 }
@@ -43,7 +44,7 @@ export async function PATCH(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const { id, ...updates } = await req.json()
   const { data, error } = await db.from("loan_applications").update(updates).eq("id", id).select().single()
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return apiError(error)
   logAudit("loan application updated", session.email, { loanAppId: id, fields: Object.keys(updates) })
   return NextResponse.json(data)
 }

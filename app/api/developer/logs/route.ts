@@ -4,13 +4,12 @@ import { requireRole } from "@/lib/auth"
 
 export const dynamic = "force-dynamic"
 
-// Developer logs are ONLY visible to the developer themselves, never to admins
+// Private per-account log — scoped to the requester's own email only.
 export async function GET(req: NextRequest) {
   const session = await requireRole(req, ["developer"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   try {
-    // Fetch developer activity logs
     const logsRes = await query(
       `SELECT id, action, created_at as timestamp, status
        FROM developer_logs

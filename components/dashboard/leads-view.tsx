@@ -1,7 +1,7 @@
 "use client"
 import { useEffect, useState } from "react"
 import { Users, Target, IndianRupee, BadgeCheck, Phone, MessageCircle, RotateCcw, Plus, Search, Link2, Check, Download, Brain, Pin } from "lucide-react"
-import { formatCurrency, timeAgo } from "@/lib/utils"
+import { formatCurrency, timeAgo, formatDateTime } from "@/lib/utils"
 import { useToast } from "../ui/toast"
 import { Skeleton } from "../ui/skeleton"
 import LeadMemoryModal from "./lead-memory-modal"
@@ -86,9 +86,18 @@ export default function LeadsView({ role, initialSearch }: { role: "admin" | "ag
   const [leads, setLeads] = useState<Lead[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState(initialSearch || "")
+  const [debouncedSearch, setDebouncedSearch] = useState(initialSearch || "")
 
   // Command-palette jumps re-seed the search box.
   useEffect(() => { if (initialSearch !== undefined) setSearch(initialSearch) }, [initialSearch])
+
+  // Debounce typed search input so fast typing doesn't fire a fetch per
+  // keystroke — those out-of-order responses could otherwise clobber
+  // the list with results for an already-stale query.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 300)
+    return () => clearTimeout(t)
+  }, [search])
   const [ageFilter, setAgeFilter] = useState("all")
   const [amountFilter, setAmountFilter] = useState("all")
   const [loanTypeFilter, setLoanTypeFilter] = useState("all")
@@ -110,7 +119,7 @@ export default function LeadsView({ role, initialSearch }: { role: "admin" | "ag
   async function load(silent = false) {
     if (!silent) setLoading(true)
     const params = new URLSearchParams()
-    if (search) params.set("search", search)
+    if (debouncedSearch) params.set("search", debouncedSearch)
     if (ageFilter !== "all") params.set("age", ageFilter)
     if (amountFilter !== "all") params.set("amount", amountFilter)
     if (loanTypeFilter !== "all") params.set("loanType", loanTypeFilter)
@@ -147,7 +156,7 @@ export default function LeadsView({ role, initialSearch }: { role: "admin" | "ag
     // change from calls/WhatsApp/form submissions without any user action.
     const t = setInterval(() => load(true), 15000)
     return () => clearInterval(t)
-  }, [search, ageFilter, amountFilter, loanTypeFilter, interestedFilter])
+  }, [debouncedSearch, ageFilter, amountFilter, loanTypeFilter, interestedFilter])
 
   const totalLeads = leads.length
   const qualified = leads.filter((l) => l.status === "qualified").length
@@ -343,7 +352,10 @@ export default function LeadsView({ role, initialSearch }: { role: "admin" | "ag
                   </td>
                   <td style={{ padding: "14px 16px" }}><FormLinkCell lead={lead} /></td>
                   <td style={{ padding: "14px 16px", fontSize: 13, color: "var(--text-secondary)" }}>{lead.call_count ?? 0}</td>
-                  <td style={{ padding: "14px 16px", color: "var(--text-muted)", fontSize: 12 }}>{timeAgo(lead.updated_at || lead.created_at)}</td>
+                  <td style={{ padding: "14px 16px", color: "var(--text-muted)", fontSize: 12 }}>
+                    <div>{timeAgo(lead.updated_at || lead.created_at)}</div>
+                    <div style={{ fontSize: 10.5, marginTop: 1 }}>{formatDateTime(lead.updated_at || lead.created_at)}</div>
+                  </td>
                   <td style={{ padding: "14px 16px" }}>
                     <div style={{ display: "flex", gap: 6 }}>
                       {canEdit && (

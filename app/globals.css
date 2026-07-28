@@ -188,3 +188,37 @@
   to { transform: rotate(360deg); }
 }
 .spin { animation: spin 1s linear infinite; }
+
+/* Promo page (app/apply) — blobs, marquee, reveal-on-scroll, audio bars */
+@keyframes blobFloat1 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(40px, -30px) scale(1.08); }
+  66% { transform: translate(-30px, 20px) scale(0.95); }
+}
+@keyframes blobFloat2 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  40% { transform: translate(-50px, 30px) scale(1.1); }
+  70% { transform: translate(30px, -20px) scale(0.92); }
+}
+@keyframes marqueeScroll {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+@keyframes revealUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.reveal {
+  opacity: 0;
+}
+.reveal.in {
+  animation: revealUp 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+@keyframes audioBar {
+  0%, 100% { transform: scaleY(0.3); }
+  50% { transform: scaleY(1); }
+}
+@keyframes heroGlow {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 0.9; }
+}

@@ -6,9 +6,10 @@ import { sendApplicationLink } from "./whatsapp"
 import { buildLeadBrief, runPostCallAnalysis } from "./lead-brain"
 import { searchKnowledgeBase } from "./knowledge-base"
 import { buildEmiInstruction, buildEligibilityInstruction, buildRateInstruction, detectLoanType } from "./finance"
-import { detectFrustration, flagFrustratedCall } from "./frustration"
+import { detectFrustration, flagFrustratedCall, detectHumanRequest, flagHumanRequested } from "./frustration"
 import { createNotification } from "./notifications"
 import { maybeProposeLoanEdit } from "./loan-edit-requests"
+import { currentDateTimeInstruction } from "./compliance"
 
 // Permission-based opener — respect keeps people on the line.
 // Neutral/informational by design: this is an intake call, not a sales
@@ -27,6 +28,30 @@ export const GREETINGS: Record<Language, string> = {
     "Namaste, good morning! Main Priya bol rahi hoon Right Agent Group, Hyderabad se — hum log 20+ banks se loan dilwane mein madad karte hain, bina bank bank ghume. Ek minute hai aapke paas? Bataiye, aapko koi loan ya financial zaroorat hai kya abhi?",
   telugu:
     "Namaskaram! Nenu Priya, Right Agent Group, Hyderabad nunchi matladutunnanu — memu 20+ banks tho kalisi meeku easy ga loan dorikేలా help chestham, bank bank tirగakunda. Meeku konchem time undha? Ippudu meeku edaina loan lేదా financial avasaram unda ani తెలుసుకోవాలని అనుకుంటున్నా.",
+}
+
+// Repeat outbound calls to the same lead (call_count > 0 before this call)
+// used to replay the exact same cold-open pitch every single time —
+// "we help people get loans from 20+ banks..." on call 5 sounds exactly
+// like what it is: a script replaying, not a person who remembers them.
+// Short, warm follow-up instead — the LLM's own REAL MEMORY instructions
+// pick up the specific details once the conversation continues from here.
+export const RETURNING_GREETINGS: Record<Language, string> = {
+  english:
+    "Hello again! This is Priya from Right Agent Group, following up on your loan interest — do you have a minute?",
+  hindi:
+    "Namaste! Main Priya, Right Agent Group se, phir se call kar rahi hoon aapke loan interest ke baare mein follow-up ke liye — ek minute hai kya?",
+  telugu:
+    "Namaskaram! Nenu Priya, Right Agent Group nunchi, mee loan interest gurinchi follow-up chestunnanu — konchem time undha?",
+}
+
+function personalizedReturningGreeting(language: Language, name: string): string {
+  const templates: Record<Language, string> = {
+    english: `Hello ${name}! Priya here again from Right Agent Group. Just following up on our last conversation about your loan — do you have a moment?`,
+    hindi: `Namaste ${name} ji! Main Priya, Right Agent Group se, phir se call kar rahi hoon. Aapke loan ke baare mein follow-up karna tha — ek minute hai kya?`,
+    telugu: `Namaskaram ${name} garu! Nenu Priya, Right Agent Group nunchi malli call chestunnanu. Mee loan gurinchi follow-up cheddama anukuntunnanu — konchem time undha?`,
+  }
+  return templates[language]
 }
 
 // Inbound calls are the customer's initiative — greet like a receptionist,
@@ -105,6 +130,18 @@ const GOODBYE_RE =
 const CUSTOMER_BYE_RE =
   /\b(bye|goodbye|bye[- ]?bye)\b|రేపు మాట్లాడుదాం|సెలవు|ఉంటాను మరి|పెట్టేస్తున్నాను|फोन रखत[ाी] हूँ?|रखत[ाी] हूँ?|अलविदा|बाय/i
 
+// VOICEMAIL / ANSWERING MACHINE detection — checked ONLY on the very first
+// thing heard after an OUTBOUND greeting (history.length === 0). Deliberately
+// narrow: only phrases that are unambiguously part of a recorded voicemail
+// prompt ("leave a message", "after the beep/tone", "voicemail/mailbox").
+// Broader network phrases like "switched off" or "not reachable" are left
+// OUT on purpose — a real busy lead could plausibly say something similar
+// about themselves ("sorry, my phone was switched off"), and wrongly
+// hanging up on a live human is worse than occasionally missing a real
+// voicemail and burning one extra turn talking to a machine.
+const VOICEMAIL_RE =
+  /leave (a|your) message|after the (tone|beep)|voice ?mail|mailbox( is full)?|record your message|please try your call (again )?later|message chhod|beep ke baad|message pettandi|beep tarvata/i
+
 // Short, warm sign-off — NOT the link-sending CLOSING above, which promises a
 // WhatsApp message that may not exist yet.
 const GOODBYE_REPLY: Record<Language, string> = {
@@ -120,7 +157,18 @@ export async function startCall(
   language: Language,
   direction: "inbound" | "outbound" = "outbound"
 ): Promise<string> {
+  // Read name + call_count BEFORE bumping call_count below, so "is this a
+  // repeat call" reflects the count going INTO this call, not after it.
+  let name: string | undefined
+  let isRepeatCall = false
   if (leadId) {
+    try {
+      const res = await query(`SELECT name, call_count FROM leads WHERE id = $1`, [leadId])
+      name = res.rows[0]?.name
+      isRepeatCall = (res.rows[0]?.call_count || 0) > 0
+    } catch (e: any) {
+      console.error("greeting name lookup error:", e.message)
+    }
     query(`UPDATE leads SET call_count = call_count + 1, last_called_at = now() WHERE id = $1`, [leadId]).catch((e) =>
       console.error("call_count update error:", e)
     )
@@ -149,21 +197,15 @@ export async function startCall(
       .catch(() => {})
   }
 
-  // Known real name (not the inbound placeholder)? Greet by name instead of
-  // generically — a fast lookup, no LLM call, so call pickup stays quick.
-  if (leadId) {
-    try {
-      const res = await query(`SELECT name FROM leads WHERE id = $1`, [leadId])
-      const name = res.rows[0]?.name
-      if (name && !PLACEHOLDER_NAME_RE.test(name)) {
-        return direction === "inbound" ? personalizedInboundGreeting(language, name) : personalizedGreeting(language, name)
-      }
-    } catch (e: any) {
-      console.error("greeting name lookup error:", e.message)
-    }
-  }
+  const hasName = name && !PLACEHOLDER_NAME_RE.test(name)
 
-  return direction === "inbound" ? INBOUND_GREETINGS[language] : GREETINGS[language]
+  if (direction === "inbound") {
+    return hasName ? personalizedInboundGreeting(language, name!) : INBOUND_GREETINGS[language]
+  }
+  if (isRepeatCall) {
+    return hasName ? personalizedReturningGreeting(language, name!) : RETURNING_GREETINGS[language]
+  }
+  return hasName ? personalizedGreeting(language, name!) : GREETINGS[language]
 }
 
 async function getHistory(callSid: string): Promise<{ role: "user" | "model"; content: string }[]> {
@@ -186,16 +228,18 @@ async function getHistory(callSid: string): Promise<{ role: "user" | "model"; co
 async function updateTranscriptAsync(callSid: string | null, speech: string, reply: string): Promise<void> {
   if (!callSid) return
   try {
-    const { data: existing } = await db.from("voice_calls").select("transcript").eq("twilio_call_sid", callSid).single()
-    let prev: any[] = []
-    if (existing?.transcript) prev = typeof existing.transcript === "string" ? JSON.parse(existing.transcript) : existing.transcript
-    await db
-      .from("voice_calls")
-      .update({
-        transcript: JSON.stringify([...prev, { role: "customer", text: speech }, { role: "ai", text: reply }]),
-        status: "in-progress",
-      })
-      .eq("twilio_call_sid", callSid)
+    // Atomic DB-side append (COALESCE + ||) instead of read-modify-write in
+    // JS — most callers fire this without awaiting it, so a JS-side
+    // read-then-write let an overlapping turn's write land on stale data
+    // and silently drop earlier turns from the saved transcript.
+    const newTurns = JSON.stringify([{ role: "customer", text: speech }, { role: "ai", text: reply }])
+    await query(
+      `UPDATE voice_calls
+          SET transcript = COALESCE(transcript, '[]'::jsonb) || $2::jsonb,
+              status = 'in-progress'
+        WHERE twilio_call_sid = $1`,
+      [callSid, newTurns]
+    )
   } catch (e: any) {
     console.error("transcript update error:", e)
   }
@@ -218,10 +262,29 @@ async function buildTurnInstructions(
   // whole call, not just the open. One cheap query (lib/lead-brain.ts), no
   // live LLM analysis.
   let merged = instructions || ""
-  if (leadId) {
-    const brief = await buildLeadBrief(leadId)
-    merged = [merged, brief].filter(Boolean).join("\n\n")
-  }
+
+  // DATE/TIME AWARENESS: without this the model has no idea what the real
+  // date/time is — can't correctly say "today"/"tomorrow", the right
+  // weekday, or judge whether a promised callback slot has already passed.
+  merged = [merged, currentDateTimeInstruction()].filter(Boolean).join("\n\n")
+
+  // SPEED: brief/KB-search/finance-rows are three independent reads that
+  // used to run as three separate sequential awaits — none of them needs
+  // another's result, so that was pure added silence before the LLM call
+  // even starts. Firing them together shaves that stacked latency down to
+  // whichever one is slowest, instead of the sum of all three.
+  const [brief, kbContext, financeRows] = await Promise.all([
+    leadId ? buildLeadBrief(leadId) : Promise.resolve(""),
+    searchKnowledgeBase(speech),
+    leadId
+      ? Promise.all([
+          db.from("leads").select("loan_amount, product_interest").eq("id", leadId).single(),
+          db.from("lead_memory").select("facts").eq("lead_id", leadId).single(),
+        ])
+      : Promise.resolve(null),
+  ])
+
+  if (brief) merged = [merged, brief].filter(Boolean).join("\n\n")
 
   // GROUNDING: give Priya the real caller number every turn. Without it, a
   // customer saying "same number / this number" left the model with nothing
@@ -237,18 +300,14 @@ async function buildTurnInstructions(
   // KNOWLEDGE BASE: unlike the Lead Brain brief above, this runs on EVERY
   // turn — a question about documents/eligibility/rates can land at any
   // point in the call, not just the opening. One cheap indexed query.
-  const kbContext = await searchKnowledgeBase(speech)
   if (kbContext) merged = [merged, kbContext].filter(Boolean).join("\n\n")
 
   // REAL MATH: an LLM asked "what's my EMI" will confidently invent a
   // plausible-sounding but WRONG number. lib/finance.ts does the actual
   // arithmetic here and hands Priya an exact figure to state — she never
   // computes EMI/eligibility herself.
-  if (leadId) {
-    const [leadRow, memoryRow] = await Promise.all([
-      db.from("leads").select("loan_amount, product_interest").eq("id", leadId).single(),
-      db.from("lead_memory").select("facts").eq("lead_id", leadId).single(),
-    ])
+  if (leadId && financeRows) {
+    const [leadRow, memoryRow] = financeRows
     const knownIncome = memoryRow.data?.facts?.monthly_income ? Number(memoryRow.data.facts.monthly_income) : null
 
     // Loan type may have been mentioned in an EARLIER turn ("I have a shop,
@@ -374,6 +433,20 @@ async function completeLeadIfReady(opts: {
   return true
 }
 
+// Marks the call outcome as "voicemail" and closes it out — same bookkeeping
+// completeLeadIfReady/rate-limit paths do (status completed + post-call
+// analysis), so a voicemail hit shows up correctly in Voice Logs instead of
+// sitting at "in-progress" or "resolved".
+async function markVoicemail(callSid: string | null, speech: string): Promise<void> {
+  if (!callSid) return
+  // Awaited (unlike the normal fire-and-forget transcript path) so
+  // runPostCallAnalysis below reads the completed transcript, not a
+  // still-in-flight write.
+  await updateTranscriptAsync(callSid, speech, "(Detected voicemail/answering machine — call ended)")
+  await db.from("voice_calls").update({ outcome: "voicemail", status: "completed" }).eq("twilio_call_sid", callSid).catch(() => {})
+  runPostCallAnalysis(callSid)
+}
+
 export async function handleTurn(opts: {
   leadId: string
   callSid: string | null
@@ -381,10 +454,20 @@ export async function handleTurn(opts: {
   language: Language
   callerPhone?: string
   instructions?: string
+  direction?: "inbound" | "outbound"
 }): Promise<{ text: string; hangup: boolean }> {
-  const { leadId, callSid, speech, language, callerPhone, instructions } = opts
+  const { leadId, callSid, speech, language, callerPhone, instructions, direction } = opts
 
   const history = callSid ? await getHistory(callSid) : []
+
+  // VOICEMAIL: only ever checked on the first thing heard after our own
+  // OUTBOUND greeting (history empty) — a mid-call false match would risk
+  // cutting off a real, ongoing conversation.
+  if (history.length === 0 && direction === "outbound" && VOICEMAIL_RE.test(speech)) {
+    await markVoicemail(callSid, speech)
+    return { text: "", hangup: true }
+  }
+
   const messages = [...history, { role: "user" as const, content: speech }]
 
   // The CALLER said goodbye → say a short goodbye back and end the call.
@@ -401,13 +484,17 @@ export async function handleTurn(opts: {
   if (detectFrustration(speech, history.map((h) => ({ role: h.role === "model" ? "model" : "user", content: h.content })))) {
     flagFrustratedCall(callSid, leadId || null, speech)
   }
+  // Calm request for a human — separate from frustration (see frustration.ts).
+  if (detectHumanRequest(speech)) {
+    flagHumanRequested(callSid, leadId || null, speech)
+  }
 
   const mergedInstructions = await buildTurnInstructions(leadId, history, instructions, speech, callerPhone)
 
   let reply = ""
   let rateLimited = false
   try {
-    reply = (await chatWithLLM(messages, language, mergedInstructions || undefined)).trim()
+    reply = (await chatWithLLM(messages, language, mergedInstructions || undefined, { channel: "call" })).trim()
     if (!reply) reply = GREETINGS[language]
   } catch (e) {
     console.error("LLM error:", e)
@@ -461,12 +548,20 @@ export async function handleTurnStream(
     language: Language
     callerPhone?: string
     instructions?: string
+    direction?: "inbound" | "outbound"
   },
   onSentence: (sentence: string) => void
 ): Promise<{ hangup: boolean }> {
-  const { leadId, callSid, speech, language, callerPhone, instructions } = opts
+  const { leadId, callSid, speech, language, callerPhone, instructions, direction } = opts
 
   const history = callSid ? await getHistory(callSid) : []
+
+  // VOICEMAIL: see handleTurn's identical check for why this is restricted
+  // to the first turn of an outbound call only.
+  if (history.length === 0 && direction === "outbound" && VOICEMAIL_RE.test(speech)) {
+    await markVoicemail(callSid, speech)
+    return { hangup: true }
+  }
 
   if (history.length > 0 && CUSTOMER_BYE_RE.test(speech)) {
     const reply = GOODBYE_REPLY[language]
@@ -480,6 +575,9 @@ export async function handleTurnStream(
   if (detectFrustration(speech, history.map((h) => ({ role: h.role === "model" ? "model" : "user", content: h.content })))) {
     flagFrustratedCall(callSid, leadId || null, speech)
   }
+  if (detectHumanRequest(speech)) {
+    flagHumanRequested(callSid, leadId || null, speech)
+  }
 
   const mergedInstructions = await buildTurnInstructions(leadId, history, instructions, speech, callerPhone)
 
@@ -492,7 +590,7 @@ export async function handleTurnStream(
         const { complete, rest } = splitSentences(pending)
         for (const s of complete) onSentence(s)
         pending = rest
-      })
+      }, "call")
     ).trim()
     const tail = pending.trim()
     if (tail) onSentence(tail)

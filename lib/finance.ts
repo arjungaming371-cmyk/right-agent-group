@@ -88,6 +88,12 @@ export const BEST_RATES: Record<string, { ratePct: number; maxTenureYears: numbe
  */
 const EMI_QUESTION_RE = /\b(emi|monthly (payment|installment|kattali|kattana)|per month|nela ki|month ki)\b/i
 const LAKH_CRORE_RE = /(\d+(?:\.\d+)?)\s*(lakh|lac|l\b|crore|cr\b)/i
+// "50 thousand" / "50k" / Hinglish "hazaar"/"hazar" / Tenglish "vela" — a
+// smaller personal-loan amount phrased this way used to fail to parse at
+// all (fell through to PLAIN_AMOUNT_RE, which requires 5+ digits and
+// ignores bare "50"), silently skipping the EMI/eligibility grounding and
+// leaving the LLM to guess the math itself.
+const THOUSAND_RE = /(\d+(?:\.\d+)?)\s*(thousand|hazaar|hazar|vela|k)\b/i
 const PLAIN_AMOUNT_RE = /(?:rs\.?|₹|inr)?\s*(\d[\d,]{4,})/i
 const YEARS_RE = /(\d{1,2})\s*(year|yr|years)/i
 
@@ -99,6 +105,10 @@ export function parseAmount(text: string): number | null {
     const unit = m[2]
     if (unit.startsWith("cr")) return Math.round(n * 1e7)
     return Math.round(n * 1e5)
+  }
+  const t = lc.match(THOUSAND_RE)
+  if (t) {
+    return Math.round(parseFloat(t[1]) * 1000)
   }
   const p = text.match(PLAIN_AMOUNT_RE)
   if (p) {

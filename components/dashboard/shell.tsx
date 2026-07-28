@@ -19,11 +19,13 @@ import AnalyticsView from "./analytics-view"
 import QuickChat     from "./quick-chat"
 import NotificationBell from "./notification-bell"
 import DeveloperLogsView from "./developer-logs-view"
+import CalendarView from "./calendar-view"
+import ProfileModal from "./profile-modal"
 
-export type ViewKey = "leads" | "loans" | "voice" | "whatsapp" | "comms" | "security" | "upload" | "script" | "knowledge" | "analytics" | "dev-logs"
+export type ViewKey = "leads" | "loans" | "voice" | "whatsapp" | "comms" | "calendar" | "security" | "upload" | "script" | "knowledge" | "analytics" | "dev-logs"
 export type Role = "admin" | "agent" | "viewer" | "developer"
 
-const ROLE_LABEL: Record<Role, string> = { admin: "Administrator", agent: "Loan Officer", viewer: "Viewer", developer: "Developer" }
+const ROLE_LABEL: Record<Role, string> = { admin: "Administrator", agent: "Loan Officer", viewer: "Viewer", developer: "Administrator" }
 
 type NavItem = { key: ViewKey; label: string; icon: LucideIcon; roles: Role[] }
 type NavSection = { title: string; items: NavItem[] }
@@ -46,6 +48,10 @@ const NAV_SECTIONS: NavSection[] = [
       { key: "voice",    label: "Voice Logs",        icon: Phone,          roles: ["admin", "agent", "viewer"] },
       { key: "whatsapp", label: "WhatsApp Chat",     icon: MessageCircle,  roles: ["admin", "agent", "viewer"] },
       { key: "comms",    label: "Communication Log", icon: Activity,       roles: ["admin", "agent", "viewer"] },
+      // Calendar view intentionally not linked from the nav (hidden from the
+      // UI per request) — the feature/component/API routes stay fully
+      // intact, "calendar" just isn't in this list so nothing navigates
+      // there. See components/dashboard/calendar-view.tsx.
     ],
   },
   {
@@ -58,9 +64,9 @@ const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    title: "Developer",
+    title: "Diagnostics",
     items: [
-      { key: "dev-logs", label: "Developer Logs", icon: ScrollText,   roles: ["developer"] },
+      { key: "dev-logs", label: "Activity Logs", icon: ScrollText,   roles: ["developer"] },
     ],
   },
 ]
@@ -72,11 +78,12 @@ const VIEW_TITLES: Record<ViewKey, { title: string; sub: string }> = {
   voice:    { title: "Voice Logs",         sub: "Voice bot call activity and outcomes" },
   whatsapp: { title: "WhatsApp Chat",      sub: "Live customer conversations" },
   comms:    { title: "Communication Log",  sub: "Automated calls and WhatsApp activity" },
+  calendar: { title: "Calendar",           sub: "Upcoming calls and follow-up callbacks" },
   security: { title: "Security",           sub: "Access control and audit policy" },
   upload:   { title: "Upload & Data",      sub: "Upload contacts, scripts, and files for AI campaigns" },
   script:   { title: "Priya's Script",     sub: "View and edit what Priya says on every call" },
   knowledge:{ title: "Knowledge Base",     sub: "Facts Priya can pull into any call or chat, on any turn" },
-  "dev-logs": { title: "Developer Logs",   sub: "Your activity, login history, and system events" },
+  "dev-logs": { title: "Activity Logs",   sub: "Your activity, login history, and system events" },
 }
 
 function StatusPill({ icon: Icon, label }: { icon: LucideIcon; label: string }) {
@@ -97,6 +104,7 @@ export default function DashboardShell() {
   const [counts, setCounts] = useState({ leads: 0, loans: 0, whatsapp: 0 })
   const [userEmail, setUserEmail] = useState("")
   const [role, setRole] = useState<Role>("viewer") // safest default until the real role loads
+  const [showProfile, setShowProfile] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   // Search text seeded into a view when jumping there from the command palette.
   const [seedSearch, setSeedSearch] = useState<{ view: ViewKey; q: string } | null>(null)
@@ -131,7 +139,9 @@ export default function DashboardShell() {
       setUserEmail(d.email || "")
       if (d.role) setRole(d.role)
     }).catch(() => {})
-    const t = setInterval(loadCounts, 30000)
+    // Matches the 15s poll used by leads-view/loan-apps-view so the sidebar
+    // badges don't lag a full extra cycle behind the visible lists.
+    const t = setInterval(loadCounts, 15000)
     return () => clearInterval(t)
   }, [])
 
@@ -143,18 +153,21 @@ export default function DashboardShell() {
   const badgeFor = (key: ViewKey) =>
     key === "leads" ? counts.leads : key === "loans" ? counts.loans : key === "whatsapp" ? counts.whatsapp : 0
 
-  const visibleSections = NAV_SECTIONS.map(s => ({ ...s, items: s.items.filter(i => i.roles.includes(role)) })).filter(s => s.items.length > 0)
+  // Full-access role sees every nav item regardless of each item's own list.
+  const canSee = (itemRoles: Role[]) => itemRoles.includes(role) || role === "developer"
+
+  const visibleSections = NAV_SECTIONS.map(s => ({ ...s, items: s.items.filter(i => canSee(i.roles)) })).filter(s => s.items.length > 0)
 
   // If the current view isn't visible to this role (e.g. role loaded after
   // mount and it was "security"), fall back to something everyone can see.
   useEffect(() => {
-    const allowed = NAV_SECTIONS.some(s => s.items.some(i => i.key === view && i.roles.includes(role)))
+    const allowed = NAV_SECTIONS.some(s => s.items.some(i => i.key === view && canSee(i.roles)))
     if (!allowed) setView("leads")
   }, [role, view])
 
   const { title, sub } = VIEW_TITLES[view]
   const initials = userEmail ? userEmail.slice(0, 2).toUpperCase() : "RA"
-  const allowedViews = NAV_SECTIONS.flatMap(s => s.items.filter(i => i.roles.includes(role)).map(i => i.key))
+  const allowedViews = NAV_SECTIONS.flatMap(s => s.items.filter(i => canSee(i.roles)).map(i => i.key))
 
   function navigateFromPalette(target: ViewKey, search?: string) {
     setView(target)
@@ -285,16 +298,23 @@ export default function DashboardShell() {
 
         {/* User */}
         <div className="flex items-center gap-2.5 border-t border-[var(--border-light)] px-4 py-3">
-          <div
-            className="flex h-[30px] w-[30px] flex-shrink-0 items-center justify-center rounded-full text-[10.5px] font-bold text-white"
-            style={{ background: "var(--gradient-brand)" }}
+          <button
+            onClick={() => setShowProfile(true)}
+            aria-label="View profile"
+            title="View profile"
+            className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
           >
-            {initials}
-          </div>
-          <div className="min-w-0 flex-1 leading-tight">
-            <div className="text-[12.5px] font-semibold text-[var(--text-primary)]">{ROLE_LABEL[role]}</div>
-            <div className="truncate text-[10.5px] text-[var(--text-muted)]">{userEmail || "…"}</div>
-          </div>
+            <div
+              className="flex h-[30px] w-[30px] flex-shrink-0 items-center justify-center rounded-full text-[10.5px] font-bold text-white"
+              style={{ background: "var(--gradient-brand)" }}
+            >
+              {initials}
+            </div>
+            <div className="min-w-0 flex-1 leading-tight">
+              <div className="text-[12.5px] font-semibold text-[var(--text-primary)]">{ROLE_LABEL[role]}</div>
+              <div className="truncate text-[10.5px] text-[var(--text-muted)]">{userEmail || "…"}</div>
+            </div>
+          </button>
           <button
             onClick={logout}
             aria-label="Sign out"
@@ -350,6 +370,7 @@ export default function DashboardShell() {
           {view === "voice"    && <VoiceLogsView role={role} />}
           {view === "whatsapp" && <WhatsAppView role={role} />}
           {view === "comms"    && <CommLogView />}
+          {view === "calendar" && <CalendarView role={role} />}
           {view === "security" && role === "admin" && <SecurityView />}
           {view === "upload"   && role === "admin" && <UploadView />}
           {view === "script"   && role === "admin" && <ScriptView />}
@@ -358,6 +379,7 @@ export default function DashboardShell() {
         </main>
       </div>
       <QuickChat role={role} userEmail={userEmail} />
+      {showProfile && <ProfileModal email={userEmail} role={role} onClose={() => setShowProfile(false)} />}
       {/* Neutralizes the mobile slide-in transform at md+ so the sidebar is
           always visible on desktop regardless of mobileNavOpen state. */}
       <style>{`@media (min-width: 768px) { .mobile-nav-drawer { transform: none !important; } }`}</style>

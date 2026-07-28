@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { apiError } from "@/lib/api-error"
 import { db } from "@/lib/db"
 import { makeCall } from "@/lib/exotel"
 import { requireRole } from "@/lib/auth"
@@ -10,7 +11,7 @@ export async function GET() {
     .select("*, leads(name, phone)")
     .order("created_at", { ascending: false })
     .limit(100)
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return apiError(error)
   return NextResponse.json(data ?? [])
 }
 

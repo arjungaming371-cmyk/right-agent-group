@@ -77,6 +77,33 @@ export async function isWithinCallingWindow(at: Date = new Date()): Promise<bool
   return hour >= settings.startHour && hour < settings.endHour
 }
 
+const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+]
+
+/**
+ * A one-line "right now it is ..." instruction in IST, for injecting into
+ * the AI's context — without this the model has zero awareness of the real
+ * date/time and can't correctly say "today"/"tomorrow"/the right weekday,
+ * or judge whether a promised callback time has already passed. Same fixed
+ * UTC+5:30 offset as isWithinCallingWindow above, no DST to worry about.
+ */
+export function currentDateTimeInstruction(at: Date = new Date()): string {
+  const ist = new Date(at.getTime() + IST_OFFSET_MS)
+  const weekday = WEEKDAY_NAMES[ist.getUTCDay()]
+  const day = ist.getUTCDate()
+  const month = MONTH_NAMES[ist.getUTCMonth()]
+  const year = ist.getUTCFullYear()
+  let hour = ist.getUTCHours()
+  const minute = ist.getUTCMinutes()
+  const ampm = hour >= 12 ? "PM" : "AM"
+  hour = hour % 12 || 12
+  const minuteStr = minute.toString().padStart(2, "0")
+  return `Right now it is ${weekday}, ${day} ${month} ${year}, ${hour}:${minuteStr} ${ampm} IST.`
+}
+
 function last10(phone: string): string {
   return (phone || "").replace(/\D/g, "").slice(-10)
 }

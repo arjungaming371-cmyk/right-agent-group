@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server"
+import { apiError } from "@/lib/api-error"
 import { db, query } from "@/lib/db"
 import { sendApplicationLink } from "@/lib/whatsapp"
+import { requireRole } from "@/lib/auth"
 import { randomUUID } from "crypto"
 
 export async function POST(req: NextRequest) {
+  if (!(await requireRole(req, ["admin", "agent"]))) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+
   const { leadId, phone, loanType } = await req.json()
   if (!leadId || !phone) {
     return NextResponse.json({ error: "leadId and phone required" }, { status: 400 })
@@ -50,6 +54,6 @@ export async function POST(req: NextRequest) {
       warning: result.ok ? null : result.error,
     })
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+    return apiError(e)
   }
 }

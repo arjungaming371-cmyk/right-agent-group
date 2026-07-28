@@ -1,7 +1,7 @@
 "use client"
 import { useEffect, useRef, useState } from "react"
-import { Bot, Phone, PhoneIncoming, PhoneOutgoing, Play, RotateCcw, X } from "lucide-react"
-import { formatDuration, timeAgo } from "@/lib/utils"
+import { Bot, Pause, Phone, PhoneIncoming, PhoneOutgoing, Play, RotateCcw, X } from "lucide-react"
+import { formatDuration, timeAgo, formatDateTime } from "@/lib/utils"
 import { useToast } from "../ui/toast"
 import { SkeletonList } from "../ui/skeleton"
 
@@ -45,11 +45,80 @@ export default function VoiceLogsView({ role }: { role: "admin" | "agent" | "vie
   const [mode, setMode]               = useState<"lead" | "manual">("lead")
   const [selectedLeadId, setSelectedLeadId] = useState("")
   const [manualPhone, setManualPhone] = useState("")
-  const [language, setLanguage]       = useState("english")
+  const [language, setLanguage]       = useState("telugu")
   const [instructions, setInstructions] = useState("")
   const [calling, setCalling]         = useState(false)
 
+  // Single shared <audio> element for BOTH the row "play" buttons and the
+  // detail modal. There used to be two independent <audio> tags (one hidden
+  // for row playback, one <audio controls> in the modal) with no shared
+  // state — they could play at once, the row button never showed
+  // playing/paused, and closing the modal (X) never touched the row audio
+  // since it was a different element entirely. One element + real state
+  // fixes all of that: only one recording can ever be playing.
   const audioRef = useRef<HTMLAudioElement>(null)
+  const [playingId, setPlayingId] = useState<string | null>(null)
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [currentTime, setCurrentTime] = useState(0)
+  const [audioDuration, setAudioDuration] = useState(0)
+
+  function stopAudio() {
+    const a = audioRef.current
+    if (a) { a.pause(); a.currentTime = 0 }
+    setIsPlaying(false)
+    setPlayingId(null)
+    setCurrentTime(0)
+    setAudioDuration(0)
+  }
+
+  function seek(e: React.ChangeEvent<HTMLInputElement>) {
+    const a = audioRef.current
+    if (!a) return
+    const t = Number(e.target.value)
+    a.currentTime = t
+    setCurrentTime(t)
+  }
+
+  function fmtTime(s: number): string {
+    if (!isFinite(s) || s < 0) return "0:00"
+    const m = Math.floor(s / 60)
+    const r = Math.floor(s % 60)
+    return `${m}:${r.toString().padStart(2, "0")}`
+  }
+
+  // Assigning a new .src (or calling .load()) while a previous play()
+  // promise hasn't settled yet makes the browser reject THAT promise with
+  // AbortError ("The play() request was interrupted by a new load
+  // request.") — that's not a failure, it's exactly what's supposed to
+  // happen when the user switches recordings quickly, so it must not be
+  // surfaced as an error toast. Any other rejection (autoplay blocked,
+  // network failure, unsupported format) is a real problem and still gets
+  // reported.
+  function playSafe(a: HTMLAudioElement) {
+    a.play().catch((e: DOMException) => {
+      if (e.name === "AbortError") return
+      toast.error(`Cannot play recording: ${e.message}`)
+    })
+  }
+
+  function togglePlay(call: Call) {
+    const url = proxyRecordingUrl(call.recording_url)
+    const a = audioRef.current
+    if (!url || !a) return
+    if (playingId === call.id) {
+      // Same recording — toggle play/pause instead of restarting it.
+      if (isPlaying) a.pause()
+      else playSafe(a)
+      return
+    }
+    // Switching recordings — assigning a new src auto-stops whatever was
+    // playing before, so there is never more than one audio source active.
+    setPlayingId(call.id)
+    setCurrentTime(0)
+    setAudioDuration(0)
+    a.src = url
+    playSafe(a)
+  }
 
   async function load() {
     setLoading(true)
@@ -79,13 +148,6 @@ export default function VoiceLogsView({ role }: { role: "admin" | "agent" | "vie
     setCalling(false)
     if (res.ok) { toast.success("AI call started — Priya is dialing now"); setInstructions(""); load() }
     else toast.error(data.error || "Call failed")
-  }
-
-  function playRecording(call: Call) {
-    const url = proxyRecordingUrl(call.recording_url)
-    if (!url || !audioRef.current) return
-    audioRef.current.src = url
-    audioRef.current.play().catch(e => toast.error(`Cannot play recording: ${e.message}`))
   }
 
   const today         = new Date().toDateString()
@@ -194,7 +256,8 @@ export default function VoiceLogsView({ role }: { role: "admin" | "agent" | "vie
           const name    = call.leads?.name || call.phone || "Unknown"
           const num     = call.leads?.phone || call.phone || ""
           const time    = new Date(call.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-          const dateStr = new Date(call.created_at).toDateString() === today ? "Today" : timeAgo(call.created_at)
+          const isToday = new Date(call.created_at).toDateString() === today
+          const dateStr = isToday ? "Today" : `${timeAgo(call.created_at)} · ${formatDateTime(call.created_at).split(",")[0]}`
           const ost     = OUTCOME_STYLE[call.outcome] ?? OUTCOME_STYLE.pending
           const hasRec  = !!call.recording_url
           return (
@@ -224,10 +287,11 @@ export default function VoiceLogsView({ role }: { role: "admin" | "agent" | "vie
                 <span style={{ background: ost.bg, color: ost.color, borderRadius: 6, padding: "4px 10px", fontSize: 12, fontWeight: 600, textTransform: "capitalize" }}>
                   {call.outcome || call.status}
                 </span>
-                {/* Play button — uses proxy to avoid Twilio auth popup */}
+                {/* Play/pause button — uses proxy to avoid Twilio auth popup.
+                    Reflects real play/pause state via playingId/isPlaying. */}
                 <button
-                  onClick={e => { e.stopPropagation(); if (hasRec) playRecording(call) }}
-                  title={hasRec ? "Play recording" : "No recording available"}
+                  onClick={e => { e.stopPropagation(); if (hasRec) togglePlay(call) }}
+                  title={hasRec ? (playingId === call.id && isPlaying ? "Pause recording" : "Play recording") : "No recording available"}
                   style={{
                     background: hasRec ? "rgba(34,197,94,0.15)" : "transparent",
                     border: `1px solid ${hasRec ? "rgba(34,197,94,0.3)" : "var(--border)"}`,
@@ -236,21 +300,38 @@ export default function VoiceLogsView({ role }: { role: "admin" | "agent" | "vie
                     color: hasRec ? "#2dd4a0" : "var(--border)",
                     cursor: hasRec ? "pointer" : "not-allowed",
                   }}
-                ><Play size={13} strokeWidth={2} fill={hasRec ? "currentColor" : "none"} /></button>
+                >
+                  {playingId === call.id && isPlaying
+                    ? <Pause size={13} strokeWidth={2} fill="currentColor" />
+                    : <Play size={13} strokeWidth={2} fill={hasRec ? "currentColor" : "none"} />}
+                </button>
               </div>
             </div>
           )
         })}
       </div>
 
-      {/* Hidden audio player — plays proxied recording */}
-      <audio ref={audioRef} style={{ display: "none" }} />
+      {/* Single shared audio player — plays proxied recording for both the
+          row buttons and the modal below. Events keep isPlaying/playingId
+          truthful even when playback ends naturally or errors out, instead
+          of the UI silently drifting out of sync with what's actually
+          audible. */}
+      <audio
+        ref={audioRef}
+        style={{ display: "none" }}
+        onPlay={() => setIsPlaying(true)}
+        onPause={() => setIsPlaying(false)}
+        onEnded={() => { setIsPlaying(false); setPlayingId(null); setCurrentTime(0) }}
+        onError={() => { setIsPlaying(false); setPlayingId(null); toast.error("Cannot play recording") }}
+        onLoadedMetadata={e => setAudioDuration(e.currentTarget.duration || 0)}
+        onTimeUpdate={e => setCurrentTime(e.currentTarget.currentTime)}
+      />
 
       {/* Call detail modal */}
       {selected && (
         <div
           style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}
-          onClick={() => setSelected(null)}
+          onClick={() => { stopAudio(); setSelected(null) }}
         >
           <div
             style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, padding: 28, width: 620, maxHeight: "85vh", overflowY: "auto" }}
@@ -260,7 +341,10 @@ export default function VoiceLogsView({ role }: { role: "admin" | "agent" | "vie
               <div style={{ fontWeight: 700, fontSize: 16 }}>
                 Call Details — {selected.leads?.name || selected.phone}
               </div>
-              <button onClick={() => setSelected(null)} aria-label="Close" style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", display: "flex" }}><X size={19} strokeWidth={2} /></button>
+              {/* Closing must silence any recording still playing — this used
+                  to leave the row-button's audio running in the background
+                  since it was a completely separate <audio> element. */}
+              <button onClick={() => { stopAudio(); setSelected(null) }} aria-label="Close" style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", display: "flex" }}><X size={19} strokeWidth={2} /></button>
             </div>
 
             {/* Stats */}
@@ -277,15 +361,45 @@ export default function VoiceLogsView({ role }: { role: "admin" | "agent" | "vie
               ))}
             </div>
 
-            {/* Recording — proxied through server */}
+            {/* Recording — proxied through server. Uses the SAME shared
+                audio element/state as the row buttons (see togglePlay
+                above) so this can never play concurrently with a row
+                recording, and this button's icon always reflects whether
+                audio is actually playing. */}
             {selected.recording_url && (
               <div style={{ marginBottom: 20 }}>
                 <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8, fontWeight: 600, letterSpacing: "0.05em" }}>RECORDING</div>
-                <audio
-                  controls
-                  src={proxyRecordingUrl(selected.recording_url) || ""}
-                  style={{ width: "100%", borderRadius: 8 }}
-                />
+                <div style={{
+                  display: "flex", alignItems: "center", gap: 10, width: "100%",
+                  background: "var(--bg-secondary)", border: "1px solid var(--border)",
+                  borderRadius: 8, padding: "10px 14px", color: "var(--text-primary)",
+                }}>
+                  <button
+                    onClick={() => selected && togglePlay(selected)}
+                    style={{
+                      width: 30, height: 30, borderRadius: "50%", flexShrink: 0, padding: 0,
+                      background: "rgba(34,197,94,0.15)", border: "1px solid rgba(34,197,94,0.3)",
+                      display: "flex", alignItems: "center", justifyContent: "center", color: "#2dd4a0",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {playingId === selected.id && isPlaying
+                      ? <Pause size={13} strokeWidth={2} fill="currentColor" />
+                      : <Play size={13} strokeWidth={2} fill="currentColor" />}
+                  </button>
+                  <input
+                    type="range"
+                    min={0}
+                    max={playingId === selected.id && audioDuration ? audioDuration : selected.duration || 0}
+                    step={0.1}
+                    value={playingId === selected.id ? currentTime : 0}
+                    onChange={seek}
+                    style={{ flex: 1, accentColor: "#2dd4a0" }}
+                  />
+                  <span style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: "monospace", minWidth: 78, textAlign: "right" }}>
+                    {fmtTime(playingId === selected.id ? currentTime : 0)} / {fmtTime(playingId === selected.id && audioDuration ? audioDuration : selected.duration || 0)}
+                  </span>
+                </div>
               </div>
             )}
 

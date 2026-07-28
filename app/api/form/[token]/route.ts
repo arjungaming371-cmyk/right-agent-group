@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { apiError } from "@/lib/api-error"
 import { db, query } from "@/lib/db"
 import { rateLimit, clientIp } from "@/lib/rate-limit"
 import { sendApplicationConfirmation, isMailConfigured } from "@/lib/mail"
@@ -97,7 +98,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
     if (error) {
       // Insert failed — release the token so the customer can retry.
       await query(`UPDATE form_links SET used_at = NULL WHERE token = $1`, [token]).catch(() => {})
-      return NextResponse.json({ error: error.message }, { status: 500 })
+      return apiError(error)
     }
 
     if (link.lead_id) {
@@ -145,6 +146,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
 
     return NextResponse.json(app)
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+    return apiError(e)
   }
 }

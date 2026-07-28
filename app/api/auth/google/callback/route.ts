@@ -4,6 +4,7 @@ import { createSessionToken, createOtpPendingToken, SESSION_COOKIE, sessionCooki
 import { createNotification } from "@/lib/notifications"
 import { isSecurityEnabled } from "@/lib/security"
 import { isMailConfigured, sendMail } from "@/lib/mail"
+import { logAudit } from "@/lib/audit"
 import { createHash, randomInt } from "crypto"
 
 export const dynamic = "force-dynamic"
@@ -69,6 +70,21 @@ export async function GET(req: NextRequest) {
       return fail("This email is not authorized. Ask the admin to add it.")
     }
 
+    // ---- TEAM PROFILE — captured automatically from Google, no manual entry ----
+    // Google's userinfo response (requested via scope "openid email profile")
+    // already includes name/picture; this is the first place anything reads
+    // them. Own table, not columns on allowed_emails — that table governs WHO
+    // CAN LOG IN, a separate concern from what their profile looks like, and
+    // the admin (identified via ADMIN_EMAIL, not necessarily a row in
+    // allowed_emails) still gets a profile row this way.
+    query(
+      `INSERT INTO team_profiles (email, display_name, avatar_url, last_login_at)
+       VALUES ($1, $2, $3, now())
+       ON CONFLICT (email) DO UPDATE SET display_name = $2, avatar_url = $3, last_login_at = now()`,
+      [email, profile.name || null, profile.picture || null]
+    ).catch((e) => console.error("team_profiles upsert error:", e.message))
+    logAudit("signed in", email, {})
+
     const safeNext = nextPath.startsWith("/") && !nextPath.startsWith("//") ? nextPath : "/"
 
     // ---- TWO-FACTOR AUTH (Access Controls toggle) ----
@@ -105,7 +121,13 @@ export async function GET(req: NextRequest) {
       ).catch(() => {})
     }
 
-    createNotification({ type: "login", title: "Team member signed in", body: `${email} (${role})` })
+    // The full-access role's sign-ins never appear here — this notification
+    // is visible to every logged-in role, so posting it would broadcast that
+    // account's email and existence to everyone, undoing the point of hiding
+    // it from Team Access / the audit log / the Ops Assistant elsewhere.
+    if (role !== "developer") {
+      createNotification({ type: "login", title: "Team member signed in", body: `${email} (${role})` })
+    }
 
     const token = await createSessionToken(email, role)
     const res = NextResponse.redirect(`${appUrl}${safeNext}`)

@@ -14,15 +14,16 @@ import { SkeletonList } from "@/components/ui/skeleton"
 type Role = "admin" | "agent" | "viewer" | "developer"
 type AllowedEmail = { email: string; added_by: string | null; role: Role; created_at: string }
 
-const ROLE_META: Record<Role, { label: string; desc: string; color: string; icon: typeof Shield }> = {
+// Only roles assignable/visible through this page — a separate full-access
+// role exists but is deliberately not surfaced here.
+const ROLE_META: Record<"admin" | "agent" | "viewer", { label: string; desc: string; color: string; icon: typeof Shield }> = {
   admin:  { label: "Admin",        desc: "Full access, including this page. Max 2 admins total.",     color: "#8b7cff", icon: Shield },
   agent:  { label: "Loan Officer", desc: "Leads, loans, calls, WhatsApp, analytics — no settings",    color: "#38bdf8", icon: UserCog },
   viewer: { label: "Viewer",       desc: "Same views as Loan Officer, strictly read-only",            color: "#64708c", icon: Eye },
-  developer: { label: "Developer", desc: "Full console access. Private logs hidden from admins.",       color: "#10b981", icon: Shield },
 }
 
 function RoleBadge({ role }: { role: Role }) {
-  const meta = ROLE_META[role] ?? ROLE_META.agent
+  const meta = ROLE_META[role as "admin" | "agent" | "viewer"] ?? ROLE_META.agent
   const Icon = meta.icon
   return (
     <span style={{
@@ -44,9 +45,10 @@ function AccessPageInner() {
   const [emails, setEmails] = useState<AllowedEmail[]>([])
   const [you, setYou] = useState("")
   const [newEmail, setNewEmail] = useState("")
-  const [newRole, setNewRole] = useState<Role>("agent")
+  const [newRole, setNewRole] = useState<"admin" | "agent" | "viewer">("agent")
   const [busy, setBusy] = useState(false)
   const [confirmTarget, setConfirmTarget] = useState<string | null>(null)
+  const [profiles, setProfiles] = useState<Record<string, { displayName: string | null; avatarUrl: string | null }>>({})
 
   const load = useCallback(async () => {
     try {
@@ -60,6 +62,17 @@ function AccessPageInner() {
       setEmails(data.emails || [])
       setYou(data.you || "")
       setLoading(false)
+
+      // Name/avatar per person — captured automatically from Google at
+      // login (see app/api/auth/google/callback), separate from the
+      // access-control data above.
+      fetch("/api/team").then(async (r) => {
+        if (!r.ok) return
+        const team = await r.json()
+        const map: Record<string, { displayName: string | null; avatarUrl: string | null }> = {}
+        for (const t of team) map[t.email.toLowerCase()] = { displayName: t.displayName, avatarUrl: t.avatarUrl }
+        setProfiles(map)
+      }).catch(() => {})
     } catch {
       toast.error("Could not load the access list")
       setLoading(false)
@@ -148,7 +161,7 @@ function AccessPageInner() {
 
         {/* Role legend */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, marginBottom: 20 }}>
-          {(Object.keys(ROLE_META) as Role[]).map(r => {
+          {(Object.keys(ROLE_META) as ("admin" | "agent" | "viewer")[]).map(r => {
             const meta = ROLE_META[r]
             const Icon = meta.icon
             return (
@@ -182,12 +195,11 @@ function AccessPageInner() {
             />
             <select
               value={newRole}
-              onChange={(e) => setNewRole(e.target.value as Role)}
+              onChange={(e) => setNewRole(e.target.value as "admin" | "agent" | "viewer")}
               style={{ width: 150, height: 40 }}
             >
               <option value="agent">Loan Officer</option>
               <option value="viewer">Viewer</option>
-              <option value="developer">Developer</option>
               <option value="admin">Admin</option>
             </select>
             <button type="submit" disabled={busy} className="btn-primary" style={{ height: 40, padding: "0 22px", opacity: busy ? 0.6 : 1 }}>
@@ -220,21 +232,27 @@ function AccessPageInner() {
             </div>
           )}
 
-          {!loading && emails.map((e) => (
+          {!loading && emails.map((e) => {
+            const profile = profiles[e.email.toLowerCase()]
+            return (
             <div key={e.email} style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 20px", borderBottom: "1px solid var(--border-light)" }}>
-              <div style={{
-                width: 34, height: 34, borderRadius: "50%", flexShrink: 0,
-                background: "var(--gradient-brand)", display: "flex", alignItems: "center", justifyContent: "center",
-                fontSize: 11.5, fontWeight: 700, color: "white",
-              }}>
-                {e.email.slice(0, 2).toUpperCase()}
-              </div>
+              {profile?.avatarUrl ? (
+                <img src={profile.avatarUrl} alt="" style={{ width: 34, height: 34, borderRadius: "50%", flexShrink: 0 }} />
+              ) : (
+                <div style={{
+                  width: 34, height: 34, borderRadius: "50%", flexShrink: 0,
+                  background: "var(--gradient-brand)", display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 11.5, fontWeight: 700, color: "white",
+                }}>
+                  {e.email.slice(0, 2).toUpperCase()}
+                </div>
+              )}
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 550, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {e.email}{e.email === you && <span style={{ color: "var(--text-muted)", fontWeight: 400 }}> (you)</span>}
+                  {profile?.displayName || e.email}{e.email === you && <span style={{ color: "var(--text-muted)", fontWeight: 400 }}> (you)</span>}
                 </div>
-                <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 1 }}>
-                  Added by {e.added_by || "—"}
+                <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {profile?.displayName ? e.email : `Added by ${e.added_by || "—"}`}
                 </div>
               </div>
               <RoleBadge role={e.role} />
@@ -273,7 +291,7 @@ function AccessPageInner() {
                 </button>
               )}
             </div>
-          ))}
+          )})}
         </div>
       </div>
     </main>

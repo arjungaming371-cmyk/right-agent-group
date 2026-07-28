@@ -115,7 +115,7 @@ export async function POST(req: NextRequest) {
 
       const { data: call } = await db
         .from("voice_calls")
-        .select("lead_id, language, phone, instructions")
+        .select("lead_id, language, phone, instructions, direction")
         .eq("twilio_call_sid", callSid)
         .single()
 
@@ -134,6 +134,7 @@ export async function POST(req: NextRequest) {
         speech,
         language,
         callerPhone: call?.phone || undefined,
+        direction: call?.direction === "inbound" ? ("inbound" as const) : ("outbound" as const),
         // The Exotel voicebot bridge never sends instructions (it only knows
         // the call SID) — body?.instructions is really only exercised by
         // direct API testing. The real path is the DB column set at call

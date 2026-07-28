@@ -83,8 +83,8 @@ if (Test-Path $venvPython) {
     Write-Host "      Setup: cd server\stt-service; python -m venv venv; venv\Scripts\pip install -r requirements.txt" -ForegroundColor Yellow
 }
 
-# 4. Edge TTS Service (port 3004) - Priya's voice for phone calls
-Write-Host "[5/7] Starting Edge TTS service..." -ForegroundColor Yellow
+# 4. TTS Service (port 3004) - Priya's voice for phone calls (Edge TTS, free, no GPU needed)
+Write-Host "[5/7] Starting TTS service..." -ForegroundColor Yellow
 $ttsProcess = $null
 $ttsDir = Join-Path $ProjectDir "server\tts-service"
 $ttsVenvPython = Join-Path $ttsDir "venv\Scripts\python.exe"
@@ -92,7 +92,7 @@ $ttsPython = if (Test-Path $ttsVenvPython) { $ttsVenvPython } else { "python" }
 Stop-Port 3004
 $ttsProcess = Start-Process $ttsPython -ArgumentList "-m","uvicorn","app:app","--host","127.0.0.1","--port","3004" -WorkingDirectory $ttsDir -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logsDir "tts.log") -RedirectStandardError (Join-Path $logsDir "tts.err.log")
 Start-Sleep -Seconds 1
-Write-Host "      OK Edge TTS started (PID: $($ttsProcess.Id))" -ForegroundColor Green
+Write-Host "      OK TTS started (PID: $($ttsProcess.Id))" -ForegroundColor Green
 
 # 5. Voicebot Server (port 3002) - the phone call brain
 Write-Host "[6/7] Starting Voicebot..." -ForegroundColor Yellow

@@ -1,27 +1,8 @@
 "use client"
-import { ArrowLeft, Github, Globe, Zap, Brain, Phone, MessageCircle, Lock, Users, Check } from "lucide-react"
+import { ArrowLeft, Zap, Brain, Phone, MessageCircle, Lock, Users, Check } from "lucide-react"
 import Link from "next/link"
-import { useEffect, useState } from "react"
-
-type LiveStatus = {
-  whatsapp?: { running: boolean }
-  llm?: { running: boolean }
-  db?: { running: boolean }
-  website?: { running: boolean }
-}
 
 export default function AboutPage() {
-  const [live, setLive] = useState<LiveStatus | null>(null)
-
-  useEffect(() => {
-    fetch("/api/system/status")
-      .then((r) => r.json())
-      .then(setLive)
-      .catch(() => setLive({}))
-  }, [])
-
-  const dot = (ok: boolean | undefined, okText: string, badText: string) =>
-    live === null ? "⏳ Checking…" : ok ? `🟢 ${okText}` : `🔴 ${badText}`
   return (
     <main style={{ minHeight: "100vh", background: "linear-gradient(135deg, #0f172a 0%, #1a1f35 100%)", padding: "60px 20px" }}>
       <div style={{ maxWidth: 900, margin: "0 auto" }}>
@@ -67,8 +48,8 @@ export default function AboutPage() {
               { icon: MessageCircle, label: "WhatsApp Chat", desc: "Real-time customer messaging with auto-reply" },
               { icon: Brain, label: "Groq Cloud AI", desc: "Fast llama-3.3-70b inference for calls and chat" },
               { icon: Users, label: "Lead Management", desc: "Pipeline tracking and contact organization" },
-              { icon: Lock, label: "Enterprise Security", desc: "2FA, SSO, IP allowlist, encryption" },
-              { icon: Zap, label: "Developer Role", desc: "Full access with complete activity privacy" },
+              { icon: Lock, label: "Enterprise Security", desc: "2FA, Google OAuth, encryption" },
+              { icon: Zap, label: "Fast AI Replies", desc: "Groq cloud inference keeps replies near-instant" },
             ].map((feature, i) => {
               const Icon = feature.icon
               return (
@@ -91,26 +72,24 @@ export default function AboutPage() {
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
-                  {["Capability", "Admin", "Developer", "Agent", "Viewer"].map(h => (
+                  {["Capability", "Admin", "Agent", "Viewer"].map(h => (
                     <th key={h} style={{ padding: "16px", textAlign: "left", fontSize: 12, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {[
-                  ["Full Dashboard Access", "✓", "✓", "✓", "Limited"],
-                  ["Edit Settings", "✓", "✗", "✗", "✗"],
-                  ["Private Activity Logs", "✗", "✓", "✗", "✗"],
-                  ["Send Messages", "✓", "✓", "✓", "✗"],
-                  ["Can Be Deleted by Admin", "Limited", "✗", "✓", "✓"],
-                  ["Max Count", "2", "2", "Unlimited", "Unlimited"],
+                  ["Full Dashboard Access", "✓", "✓", "Limited"],
+                  ["Edit Settings", "✓", "✗", "✗"],
+                  ["Send Messages", "✓", "✓", "✗"],
+                  ["Can Be Deleted by Admin", "Limited", "✓", "✓"],
+                  ["Max Count", "2", "Unlimited", "Unlimited"],
                 ].map((row, i) => (
-                  <tr key={i} style={{ borderBottom: i < 5 ? "1px solid rgba(255,255,255,0.05)" : "none" }}>
+                  <tr key={i} style={{ borderBottom: i < 4 ? "1px solid rgba(255,255,255,0.05)" : "none" }}>
                     <td style={{ padding: "12px 16px", fontSize: 13, color: "#cbd5e1", fontWeight: 500 }}>{row[0]}</td>
                     <td style={{ padding: "12px 16px", fontSize: 13, color: "#10b981", fontWeight: 600 }}>{row[1]}</td>
-                    <td style={{ padding: "12px 16px", fontSize: 13, color: "#10b981", fontWeight: 600 }}>{row[2]}</td>
-                    <td style={{ padding: "12px 16px", fontSize: 13, color: "#38bdf8", fontWeight: 600 }}>{row[3]}</td>
-                    <td style={{ padding: "12px 16px", fontSize: 13, color: "#64708c" }}>{row[4]}</td>
+                    <td style={{ padding: "12px 16px", fontSize: 13, color: "#38bdf8", fontWeight: 600 }}>{row[2]}</td>
+                    <td style={{ padding: "12px 16px", fontSize: 13, color: "#64708c" }}>{row[3]}</td>
                   </tr>
                 ))}
               </tbody>
@@ -127,7 +106,7 @@ export default function AboutPage() {
               { category: "Backend", tech: "Node.js, API Routes, Express" },
               { category: "Database", tech: "PostgreSQL, Supabase, Redis" },
               { category: "AI/ML", tech: "Groq API, Whisper STT" },
-              { category: "Voice", tech: "Exotel, Edge TTS, WebRTC" },
+              { category: "Voice", tech: "Exotel, Whisper STT, Edge TTS" },
               { category: "Messaging", tech: "Meta WhatsApp Cloud API" },
               { category: "Auth", tech: "Google OAuth, HMAC, JWT" },
               { category: "Deployment", tech: "Cloudflare Tunnel, Kaggle" },
@@ -140,40 +119,15 @@ export default function AboutPage() {
           </div>
         </div>
 
-        {/* System Status */}
-        <div style={{ marginBottom: 60, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(139,124,255,0.2)", borderRadius: 16, padding: "32px" }}>
-          <h3 style={{ fontSize: 18, fontWeight: 700, color: "#f1f5f9", marginBottom: 20 }}>System Status</h3>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 16 }}>
-            {[
-              { name: "Website", status: dot(live?.website?.running ?? true, "Operational", "Down"), detail: "Next.js dashboard + API" },
-              { name: "WhatsApp", status: dot(live?.whatsapp?.running, "Connected", "Disconnected"), detail: "Meta Cloud API" },
-              { name: "AI Brain", status: dot(live?.llm?.running, "Operational", "Unreachable"), detail: "Groq Cloud API" },
-              { name: "Database", status: dot(live?.db?.running, "Connected", "Down"), detail: "PostgreSQL" },
-              { name: "Security", status: "🟢 Protected", detail: "Role-based access, encryption at rest" },
-              { name: "Authentication", status: "🟢 Active", detail: "Google OAuth configured" },
-            ].map((item, i) => (
-              <div key={i} style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <div>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: "#f1f5f9", marginBottom: 4 }}>{item.name}</div>
-                  <div style={{ fontSize: 12, color: "#94a3b8" }}>{item.detail}</div>
-                  <div style={{ fontSize: 12, color: "#10b981", fontWeight: 600, marginTop: 4 }}>{item.status}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
         {/* Security & Privacy */}
         <div style={{ marginBottom: 60 }}>
           <h3 style={{ fontSize: 18, fontWeight: 700, color: "#f1f5f9", marginBottom: 16 }}>Security & Privacy Commitments</h3>
           <div style={{ display: "grid", gap: 12 }}>
             {[
               { icon: "🔐", title: "End-to-End Encryption", desc: "All voice calls and messages encrypted in transit and at rest" },
-              { icon: "👤", title: "Developer Privacy", desc: "Developer activity logs completely hidden from admins" },
-              { icon: "🛡️", title: "Enterprise Security", desc: "2FA, SSO, IP allowlist, and role-based access control" },
+              { icon: "🛡️", title: "Enterprise Security", desc: "2FA, Google OAuth, and role-based access control" },
               { icon: "⚡", title: "Fast AI Replies", desc: "Groq cloud inference keeps call and chat replies near-instant" },
               { icon: "✓", title: "Compliance Ready", desc: "Do Not Call lists, call recording encryption, audit trails" },
-              { icon: "🔒", title: "Protected Access", desc: "Developers cannot be removed by admins; self-service only" },
             ].map((item, i) => (
               <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 12, background: "rgba(16,185,129,0.05)", border: "1px solid rgba(16,185,129,0.15)", borderRadius: 10, padding: "16px" }}>
                 <div style={{ fontSize: 20 }}>{item.icon}</div>
@@ -186,26 +140,6 @@ export default function AboutPage() {
           </div>
         </div>
 
-        {/* Version Info */}
-        <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: "20px", textAlign: "center" }}>
-          <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 8 }}>
-            <strong>Version 1.5.0</strong> — Developer Role System Release
-          </div>
-          <div style={{ fontSize: 11, color: "#64748b", marginBottom: 12 }}>
-            Released 2026-07-20 • Build: Fully Optimized • Status: Production Ready
-          </div>
-          <div style={{ fontSize: 11, color: "#64748b", display: "flex", alignItems: "center", justifyContent: "center", gap: 12 }}>
-            <a href="https://github.com/arjungaming371-cmyk/right-agent-group" style={{ color: "#8b7cff", textDecoration: "none", display: "flex", alignItems: "center", gap: 6 }}>
-              <Github size={14} />
-              GitHub Repository
-            </a>
-            <span>•</span>
-            <a href="https://rightagentgroup.in" style={{ color: "#8b7cff", textDecoration: "none", display: "flex", alignItems: "center", gap: 6 }}>
-              <Globe size={14} />
-              rightagentgroup.in
-            </a>
-          </div>
-        </div>
       </div>
 
       <style>{`

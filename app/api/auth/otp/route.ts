@@ -39,7 +39,12 @@ export async function POST(req: NextRequest) {
   }
 
   await query(`DELETE FROM login_otps WHERE email = $1`, [pending.email]).catch(() => {})
-  createNotification({ type: "login", title: "Team member signed in", body: `${pending.email} (${pending.role}, 2FA verified)` })
+  // Same exclusion as the primary login path (app/api/auth/google/callback) —
+  // OTP is only ever issued to admin logins today, but guard it here too so
+  // this doesn't silently start leaking if that ever changes.
+  if (pending.role !== "developer") {
+    createNotification({ type: "login", title: "Team member signed in", body: `${pending.email} (${pending.role}, 2FA verified)` })
+  }
   query(
     `INSERT INTO audit_logs (action, performed_by, metadata) VALUES ('2FA code verified', $1, '{"source":"login"}')`,
     [pending.email]

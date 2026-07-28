@@ -29,6 +29,11 @@ const DEFAULT_SCRIPTS = SHARED_DEFAULT_SCRIPTS
 // language rules can never drift out of sync the way three separate
 // scripts did. Legacy per-language rows still work as a fallback when no
 // base row exists.
+export type Channel = "call" | "whatsapp"
+
+// WhatsApp stays Roman-script always — it's read as text by the customer AND
+// by the human team on the dashboard, so it needs to stay something everyone
+// can read at a glance.
 const LANGUAGE_STYLES: Record<Language, string> = {
   english: `
 
@@ -48,16 +53,47 @@ REPLY LANGUAGE — TENGLISH (MOST IMPORTANT RULE):
 - The customer's words may appear in Telugu script from the call transcription — understand them normally, but still reply in Roman letters.`,
 }
 
+// Calls only: replies are spoken by TTS, never read as text, so there's no
+// readability reason to force Roman letters — and forcing Roman letters was
+// actively hurting call audio quality. The old pipeline had the LLM write
+// Roman text, then a separate service reverse-transliterated it back to
+// native Telugu/Devanagari script for the native-script TTS voices to read
+// clearly, which mangled English loanwords in the process (e.g. "loan"
+// guessed into Telugu script as "లోఅన్"). Having the LLM write native
+// script directly — the way it already knows how to spell these words
+// correctly — skips that lossy round-trip. English loanwords are kept in
+// Latin letters intentionally, matching how people actually code-mix on
+// WhatsApp/in speech, and matching the TTS service's own loanword handling
+// (server/tts-service/app.py's _LOANWORDS list).
+const CALL_LANGUAGE_STYLES: Record<Language, string> = {
+  english: LANGUAGE_STYLES.english,
+  hindi: `
+
+CRITICAL OUTPUT FORMAT RULE — HINDI:
+- The customer speaks Hindi. Your reply MUST be written in real Devanagari script (देवनागरी) — this is spoken aloud by a text-to-speech voice, not read as text, so write it the way you'd naturally spell Hindi.
+- Do NOT write in Roman/English letters for Hindi words, even though the customer's own words arrive in Roman letters from the call transcription — always convert your OWN reply to real Devanagari script regardless of what script the customer used.
+- Mix in everyday English words the way people actually talk, written in plain English letters right inside the Devanagari sentence (e.g. "loan", "WhatsApp", "sir"). Example: "नमस्ते sir! मैं प्रिया बोल रही हूं Right Agent Group, Hyderabad से। आपका WhatsApp number मिल सकता है?"`,
+  telugu: `
+
+CRITICAL OUTPUT FORMAT RULE — TELUGU:
+- The customer speaks Telugu. Your reply MUST be written in real Telugu script (తెలుగు) — this is spoken aloud by a text-to-speech voice, not read as text, so write it the way you'd naturally spell Telugu.
+- Do NOT write in Roman/English letters for Telugu words, even though the customer's own words arrive in Roman letters from the call transcription — always convert your OWN reply to real Telugu script regardless of what script the customer used.
+- Mix in everyday English words the way people actually talk in Hyderabad, written in plain English letters right inside the Telugu sentence (e.g. "loan", "WhatsApp", "sir"). Example: "నమస్కారం sir! నేను ప్రియ, Right Agent Group, Hyderabad నుండి మాట్లాడుతున్నాను. మీ WhatsApp number చెప్పగలరా?"
+- When reacting with warmth/sympathy (per the SOUND HUMAN instructions), use a genuine Telugu expression — NEVER transliterate an English filler word into Telugu script. "Arey" written as "అరేయ్" sounds like a blunt "hey you!", not sympathy, and clashes badly with calling them "sir" in the same breath. Use something like "అయ్యో sir", "ఔనండి", or "నిజమే sir" instead.`,
+}
+
 // Script cache — refreshed every 5 minutes so dashboard changes take
 // effect quickly without hitting the DB on every single call turn.
 let _scriptCache: Record<string, string> = {}
 let _scriptCacheTime = 0
 const SCRIPT_CACHE_TTL = 5 * 60 * 1000
 
-async function getSystemPrompt(language: Language): Promise<string> {
+async function getSystemPrompt(language: Language, channel: Channel = "whatsapp"): Promise<string> {
+  const styles = channel === "call" ? CALL_LANGUAGE_STYLES : LANGUAGE_STYLES
+  const cacheKey = `${channel}:${language}`
   const now = Date.now()
-  if (now - _scriptCacheTime < SCRIPT_CACHE_TTL && _scriptCache[language]) {
-    return _scriptCache[language]
+  if (now - _scriptCacheTime < SCRIPT_CACHE_TTL && _scriptCache[cacheKey]) {
+    return _scriptCache[cacheKey]
   }
   try {
     const { query } = await import("./db")
@@ -68,20 +104,23 @@ async function getSystemPrompt(language: Language): Promise<string> {
     )
     const base = result.rows?.find((r: any) => r.language === "base")?.content
     if (base) {
-      const prompt = base + LANGUAGE_STYLES[language]
-      _scriptCache[language] = prompt
+      const prompt = base + styles[language]
+      _scriptCache[cacheKey] = prompt
       _scriptCacheTime = now
       return prompt
     }
     const legacy = result.rows?.find((r: any) => r.language === language)?.content
     if (legacy) {
-      _scriptCache[language] = legacy
+      _scriptCache[cacheKey] = legacy
       _scriptCacheTime = now
       return legacy
     }
   } catch {
     // DB unavailable — fall through to default
   }
+  // Rare DB-down fallback: always Roman-script (matches default-scripts.ts),
+  // regardless of channel — not worth duplicating the native-script variant
+  // into the fallback-only file for a path this infrequent.
   return DEFAULT_SCRIPTS[language] || DEFAULT_SCRIPTS.english
 }
 
@@ -230,11 +269,11 @@ export async function chatWithLLM(
   messages: { role: "user" | "model"; content: string }[],
   language: Language = "english",
   extraInstructions?: string,
-  opts?: { numPredict?: number; timeoutMs?: number }
+  opts?: { numPredict?: number; timeoutMs?: number; channel?: Channel }
 ): Promise<string> {
   if (!messages?.length) return "Hello! How can I help you today?"
 
-  let systemPrompt = await getSystemPrompt(language)
+  let systemPrompt = await getSystemPrompt(language, opts?.channel)
   if (extraInstructions?.trim()) {
     systemPrompt += `\n\n=== READ THIS BEFORE YOUR NEXT REPLY — overrides the generic GOAL step order above ===\n${extraInstructions.trim()}\n=== If IDENTITY or KNOWN FACTS above already answers a GOAL step, that step is DONE — do not ask for it, at most confirm it in passing. ===`
   }
@@ -258,11 +297,12 @@ export async function chatWithLLMStream(
   messages: { role: "user" | "model"; content: string }[],
   language: Language = "english",
   extraInstructions: string | undefined,
-  onChunk: (delta: string) => void
+  onChunk: (delta: string) => void,
+  channel: Channel = "whatsapp"
 ): Promise<string> {
   if (!messages?.length) return "Hello! How can I help you today?"
 
-  let systemPrompt = await getSystemPrompt(language)
+  let systemPrompt = await getSystemPrompt(language, channel)
   if (extraInstructions?.trim()) {
     systemPrompt += `\n\n=== READ THIS BEFORE YOUR NEXT REPLY — overrides the generic GOAL step order above ===\n${extraInstructions.trim()}\n=== If IDENTITY or KNOWN FACTS above already answers a GOAL step, that step is DONE — do not ask for it, at most confirm it in passing. ===`
   }

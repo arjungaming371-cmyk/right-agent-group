@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { apiError } from "@/lib/api-error"
 import { query } from "@/lib/db"
 import { DEFAULT_SCRIPTS } from "@/lib/default-scripts"
 import { requireRole } from "@/lib/auth"
@@ -41,7 +42,7 @@ export async function GET() {
     )
     return NextResponse.json({ scripts: result.rows })
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+    return apiError(e)
   }
 }
 
@@ -70,7 +71,7 @@ export async function POST(req: NextRequest) {
     logAudit("Priya script edited", session.email, { language })
     return NextResponse.json({ ok: true })
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+    return apiError(e)
   }
 }
 
@@ -94,6 +95,6 @@ export async function DELETE(req: NextRequest) {
     logAudit("Priya script reset to default", session.email, { language })
     return NextResponse.json({ ok: true, message: "Reset to default script" })
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+    return apiError(e)
   }
 }

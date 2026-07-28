@@ -1,7 +1,7 @@
 "use client"
 import { useEffect, useState } from "react"
 import { X, Brain, Lock, RefreshCw, Phone, MessageCircle, StickyNote, ArrowDownLeft, ArrowUpRight } from "lucide-react"
-import { timeAgo } from "@/lib/utils"
+import { timeAgo, formatDateTime } from "@/lib/utils"
 import { useToast } from "../ui/toast"
 
 type MemoryData = {
@@ -256,7 +256,7 @@ export default function LeadMemoryModal({ leadId, canEdit, onClose }: { leadId: 
                           <span style={{ color: "var(--text-primary)" }}>{t.one_line_summary}</span>
                         </div>
                         <DirIcon size={12} style={{ color: "var(--text-muted)", marginTop: 3, flexShrink: 0 }} />
-                        <span style={{ color: "var(--text-muted)", fontSize: 11, whiteSpace: "nowrap", marginTop: 2 }}>{timeAgo(t.occurred_at)}</span>
+                        <span style={{ color: "var(--text-muted)", fontSize: 11, textAlign: "right", marginTop: 2 }}>{timeAgo(t.occurred_at)}<br />{formatDateTime(t.occurred_at)}</span>
                       </div>
                     )
                   })}

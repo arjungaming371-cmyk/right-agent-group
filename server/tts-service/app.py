@@ -1,31 +1,41 @@
-# Right Agent Group — self-hosted TTS service (Edge TTS / Microsoft neural voices).
+# Right Agent Group — self-hosted TTS service (Microsoft Edge TTS).
 #
-# Uses Microsoft Edge TTS — free, no API key, no GPU needed, runs on any CPU.
-# Voices used:
-#   Telugu (Tenglish, Roman script)  → en-IN-NeerjaNeural
-#   Hindi (Hinglish, Roman script)   → en-IN-NeerjaNeural
-#   English                          → en-IN-NeerjaNeural
-# One voice for all three: Priya now speaks Hinglish/Tenglish written in
-# English letters, which the Indian-English voice pronounces naturally —
-# and the caller hears the same consistent voice in every language.
+# Free, no GPU/API key needed. Voices:
+#   Telugu  → te-IN-ShrutiNeural (native voice)
+#   Hindi   → hi-IN-SwaraNeural  (native voice)
+#   English → en-IN-NeerjaExpressiveNeural
 #
-# Returns MP3 audio — ffmpeg in the voicebot converts to 8kHz PCM for Exotel.
+# Priya's replies for calls arrive in native Telugu/Devanagari script mixed
+# with English loanwords in Roman letters (matches real code-switched
+# speech — see lib/llm.ts's CALL_LANGUAGE_STYLES). The native-script voices
+# mispronounce embedded English words rather than switching accent cleanly
+# (confirmed by listening to real output), so English loanword runs are
+# synthesized separately with the English voice and stitched into the native
+# audio — see _segments_for_synthesis / _synthesize_edge below.
+#
+# Returns MP3 audio — ffmpeg in the voicebot auto-detects the container and
+# converts to 8kHz PCM for Exotel, so no fixed content-type assumption there.
 #
 # Setup:
-#   pip install edge-tts fastapi uvicorn
+#   pip install -r requirements.txt
 #   cd server/tts-service
 #   uvicorn app:app --host 127.0.0.1 --port 3004
 #
+# Production:  pm2 start "venv/bin/uvicorn app:app --host 127.0.0.1 --port 3004" --name tts
+#
 # Env:
-#   TTS_API_KEY   shared secret (falls back to WHATSAPP_SERVICE_KEY)
+#   TTS_API_KEY    shared secret (falls back to WHATSAPP_SERVICE_KEY)
+#   EDGE_TTS_RATE  speaking rate, e.g. "-8%" (default "+0%")
+#   EDGE_TTS_PITCH pitch shift, e.g. "+2Hz" (default "+0Hz")
 
 import asyncio
 import io
 import os
+import re
 import time
 
-import edge_tts
 from fastapi import FastAPI, HTTPException, Request
+from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response
 
 
@@ -51,12 +61,64 @@ _load_project_env()
 API_KEY = os.environ.get("TTS_API_KEY") or os.environ.get("WHATSAPP_SERVICE_KEY", "")
 
 VOICE_MAP = {
-    "telugu":  "en-IN-NeerjaNeural",
-    "hindi":   "en-IN-NeerjaNeural",
-    "english": "en-IN-NeerjaNeural",
+    "telugu":  "te-IN-ShrutiNeural",
+    "hindi":   "hi-IN-SwaraNeural",
+    "english": "en-IN-NeerjaExpressiveNeural",
 }
 
-app = FastAPI(title="RAG TTS (Edge TTS)", docs_url=None, redoc_url=None)
+# Languages whose voice speaks native script (Telugu/Devanagari) rather than
+# English — these are the ones that need English-word segments split out
+# and spoken separately (see _segments_for_synthesis below).
+_NATIVE_SCRIPT_LANGUAGES = {"telugu", "hindi"}
+
+_WORD_RE = re.compile(r"[A-Za-z]+|[^A-Za-z]+")
+# Whitespace/hyphen/apostrophe between two English words — kept attached to
+# an English segment instead of forced to the native voice, so "best
+# interest rate" or "tie-up" stay ONE synthesis call instead of three.
+_ENGLISH_CONNECTOR_RE = re.compile(r"^[\s\-']+$")
+
+
+def _segments_for_synthesis(text: str, language: str) -> list[tuple[str, str]]:
+    """Split text into (segment_text, voice) runs so English words are
+    spoken by the English voice and everything else by the native voice.
+
+    Calls send native-script text with intentional English words/loanwords
+    mixed in (see lib/llm.ts's CALL_LANGUAGE_STYLES) — any run of Latin
+    letters is therefore treated as an intentional English word, not
+    guessed at via a fixed word list. A curated list is always incomplete:
+    any word not on it got force-transliterated into a mangled phonetic
+    guess (e.g. "tie-up", "best" -> "తిए-उप్", "बेस्त्" — observed live).
+    Treating every Latin run as English, unconditionally, fixes that for
+    any word, not just ones someone remembered to list.
+
+    Adjacent runs assigned the same voice are merged so consecutive English
+    words become ONE synthesis call, not one per word — a real reply with
+    several loanwords was fragmenting into ~19 separate clips, each with
+    Edge TTS's own silence padding, making a 2-sentence reply take 36
+    seconds and sound choppy at every word boundary."""
+    native_voice = VOICE_MAP.get(language, VOICE_MAP["telugu"])
+    english_voice = VOICE_MAP["english"]
+    if language not in _NATIVE_SCRIPT_LANGUAGES:
+        return [(text, native_voice)]
+
+    parts = _WORD_RE.findall(text)
+    segments: list[tuple[str, str]] = []
+    for part in parts:
+        if part.isalpha() and part.isascii():
+            voice, content = english_voice, part
+        elif segments and segments[-1][1] == english_voice and _ENGLISH_CONNECTOR_RE.match(part):
+            segments[-1] = (segments[-1][0] + part, english_voice)
+            continue
+        else:
+            voice, content = native_voice, part
+        if segments and segments[-1][1] == voice:
+            segments[-1] = (segments[-1][0] + content, voice)
+        else:
+            segments.append((content, voice))
+    return segments
+
+
+app = FastAPI(title="RAG TTS (edge-tts)", docs_url=None, redoc_url=None)
 
 
 def check_key(request: Request) -> None:
@@ -66,14 +128,73 @@ def check_key(request: Request) -> None:
         raise HTTPException(401, "unauthorized")
 
 
-async def _synthesize(text: str, language: str) -> bytes:
-    voice = VOICE_MAP.get(language, VOICE_MAP["telugu"])
-    communicate = edge_tts.Communicate(text, voice)
+# Default rate is Edge TTS's normal reading pace. Override per-deployment
+# without a code change if needed — these voices have no expressive style
+# option (checked: only "General" content category, no "cheerful" like some
+# English voices get), so rate/pitch is the only real tuning lever available.
+EDGE_TTS_RATE = os.environ.get("EDGE_TTS_RATE", "+0%")
+EDGE_TTS_PITCH = os.environ.get("EDGE_TTS_PITCH", "+0Hz")
+
+
+async def _synthesize_one(text: str, voice: str) -> bytes:
+    import edge_tts
+    communicate = edge_tts.Communicate(text, voice, rate=EDGE_TTS_RATE, pitch=EDGE_TTS_PITCH)
     buf = io.BytesIO()
     async for chunk in communicate.stream():
         if chunk["type"] == "audio":
             buf.write(chunk["data"])
     return buf.getvalue()
+
+
+def _trim_silence(seg, silence_thresh_db: int = -40):
+    """Strip Edge TTS's own lead-in/trail-out silence from a clip. Measured
+    live: a single word like "sir" synthesized alone came back as a 1.78s
+    clip — almost entirely silence padding, not speech. Concatenating many
+    un-trimmed segments (a real reply with several loanwords produced 17
+    segments) stacked that padding into ~25+ extra seconds on top of the
+    actual speech, dragging a 2-sentence reply out to 36 seconds of audio."""
+    from pydub import silence
+    start_trim = silence.detect_leading_silence(seg, silence_threshold=silence_thresh_db)
+    end_trim = silence.detect_leading_silence(seg.reverse(), silence_threshold=silence_thresh_db)
+    return seg[start_trim: len(seg) - end_trim]
+
+
+def _stitch_clips(clips: list[bytes]) -> bytes:
+    """Decode, trim silence, and concatenate MP3 clips with a small natural
+    gap between them — exporting WAV instead of re-encoding back to MP3
+    (the voicebot's ffmpeg step auto-detects the container either way, see
+    module docstring), so re-encoding to MP3 here was pure wasted latency.
+    Runs in a threadpool (see caller) since pydub shells out to ffmpeg —
+    blocking, CPU-bound work that must not sit on the event loop."""
+    from pydub import AudioSegment
+    GAP_MS = 120  # a natural pause between language switches, not silence-padding-sized
+    trimmed = [_trim_silence(AudioSegment.from_file(io.BytesIO(clip), format="mp3")) for clip in clips]
+    combined = trimmed[0]
+    for seg in trimmed[1:]:
+        combined += AudioSegment.silent(duration=GAP_MS) + seg
+    out = io.BytesIO()
+    combined.export(out, format="wav")
+    return out.getvalue()
+
+
+async def _synthesize_edge(text: str, language: str) -> tuple[bytes, str]:
+    segments = _segments_for_synthesis(text, language)
+    # A punctuation-only segment (e.g. a lone "?" left stranded after an
+    # English-word segment split off the preceding text) has nothing for
+    # Edge TTS to speak and makes it raise NoAudioReceived — require at
+    # least one actual letter/digit, not just non-whitespace.
+    speakable = [(seg_text, voice) for seg_text, voice in segments if any(c.isalnum() for c in seg_text)]
+    # Each segment is a separate network round-trip to Edge TTS — awaiting
+    # them one at a time serialized the latency (a multi-segment reply took
+    # 47s in testing, unusable for a live call). asyncio.gather runs them
+    # concurrently and preserves input order in its results, so the clips
+    # still concatenate in the right sequence.
+    clips = list(await asyncio.gather(*(_synthesize_one(t, v) for t, v in speakable)))
+    if len(clips) <= 1:
+        return (clips[0] if clips else b""), "audio/mpeg"
+
+    combined = await run_in_threadpool(_stitch_clips, clips)
+    return combined, "audio/wav"
 
 
 @app.get("/health")
@@ -93,9 +214,10 @@ async def synthesize(request: Request):
     text = text[:800]
 
     t0 = time.time()
-    mp3 = await _synthesize(text, language)
+    audio, media_type = await _synthesize_edge(text, language)
+
     # ascii-safe log: Windows consoles (cp1252) can't print Telugu/Devanagari,
     # and a logging crash must never turn a successful synthesis into a 500.
     print(f"synth {time.time() - t0:.2f}s  {language}  {len(text)}ch: "
           + text[:60].encode("ascii", "backslashreplace").decode("ascii"))
-    return Response(content=mp3, media_type="audio/mpeg")
+    return Response(content=audio, media_type=media_type)

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { apiError } from "@/lib/api-error"
 import { isSecurityEnabled } from "@/lib/security"
 
 // Proxy Exotel recording audio through our server
@@ -48,6 +49,6 @@ export async function GET(req: NextRequest) {
       },
     })
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+    return apiError(e)
   }
 }

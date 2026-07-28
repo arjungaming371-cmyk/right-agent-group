@@ -3,6 +3,7 @@ import { useEffect, useState } from "react"
 import { ShieldCheck, AlertTriangle, RotateCcw, FileLock2, PhoneOff, Clock, X, Plus } from "lucide-react"
 import { SkeletonList } from "../ui/skeleton"
 import { useToast } from "../ui/toast"
+import { formatDateTime } from "@/lib/utils"
 
 type Setting = { key: string; enabled: boolean }
 type AuditLog = { id: string; action: string; performed_by: string; created_at: string }
@@ -139,6 +140,7 @@ export default function SecurityView() {
   }
 
   async function removeDndNumber(phone: string) {
+    if (!window.confirm(`Remove ${phone} from the Do-Not-Call suppression list? This number can be called again once removed.`)) return
     try {
       const res = await fetch(`/api/compliance/dnd?phone=${encodeURIComponent(phone)}`, { method: "DELETE" })
       if (res.ok) { toast.success("Removed from suppression list"); await loadCompliance(); await loadDndEntries() }
@@ -336,7 +338,10 @@ export default function SecurityView() {
                 <div style={{ fontSize:14,fontWeight:500 }}>{log.action}</div>
                 <div style={{ fontSize:12,color:"var(--text-muted)",marginTop:2 }}>{log.performed_by}</div>
               </div>
-              <div style={{ fontSize:12,color:"var(--text-muted)",whiteSpace:"nowrap" }}>{timeAgo(log.created_at)}</div>
+              <div style={{ fontSize:12,color:"var(--text-muted)",whiteSpace:"nowrap",textAlign:"right" }}>
+                <div>{timeAgo(log.created_at)}</div>
+                <div style={{ fontSize:10.5 }}>{formatDateTime(log.created_at)}</div>
+              </div>
             </div>
           ))}
         </div>

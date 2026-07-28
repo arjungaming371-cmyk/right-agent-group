@@ -85,10 +85,19 @@ async function getStatsSnapshot(): Promise<string> {
        LEFT JOIN leads l ON c.lead_id = l.id WHERE c.type = 'alert' ORDER BY c.created_at DESC LIMIT 5`
     ),
     query(`SELECT key, enabled FROM security_settings ORDER BY key`),
-    query(`SELECT action, performed_by, created_at FROM audit_logs ORDER BY created_at DESC LIMIT 5`),
+    // Excludes the full-access role's own actions — same privacy rule as
+    // /api/security's audit view, otherwise a staff member could just ask
+    // the assistant "what happened recently" to see what that page hides.
+    query(
+      `SELECT action, performed_by, created_at FROM audit_logs
+        WHERE lower(performed_by) NOT IN (SELECT lower(email) FROM allowed_emails WHERE role = 'developer')
+        ORDER BY created_at DESC LIMIT 5`
+    ),
     query(`SELECT COUNT(*)::int AS n FROM outbound_queue WHERE status = 'pending'`),
     query(`SELECT filename, row_count, status, created_at FROM uploaded_files ORDER BY created_at DESC LIMIT 3`),
-    query(`SELECT email, role FROM allowed_emails ORDER BY role, email`),
+    // Excludes the full-access role from the reported roster — same rule as
+    // /api/team and the Team Access page.
+    query(`SELECT email, role FROM allowed_emails WHERE role != 'developer' ORDER BY role, email`),
   ])
 
   const bestLang = langBreakdown.rows[0]

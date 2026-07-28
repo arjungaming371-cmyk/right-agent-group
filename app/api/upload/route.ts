@@ -65,7 +65,9 @@ export async function POST(req: NextRequest) {
 
         parsedContacts.push({ name, phone, language: lang, product_interest: product, leadId: lead?.id })
         created++
-      } catch {}
+      } catch (e) {
+        console.error(`Failed to process CSV row for ${phone}:`, e)
+      }
     }
 
     if (uploadRecord) {

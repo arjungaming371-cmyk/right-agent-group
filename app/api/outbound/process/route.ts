@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
             if (!leadId) {
               const { data: lead } = await db.from("leads").insert({
                 name: item.name, phone,
-                language: item.language || "english",
+                language: item.language || "telugu",
                 product_interest: item.product_interest,
                 notes: item.notes, source: "Queue", status: "new"
               }).select().single()
@@ -62,14 +62,14 @@ export async function POST(req: NextRequest) {
             return
           }
 
-          const call = await makeCall(phone, leadId || "", item.language || "english")
+          const call = await makeCall(phone, leadId || "", item.language || "telugu")
 
           await db.from("voice_calls").insert({
             lead_id: leadId,
             twilio_call_sid: call.sid,
             direction: "outbound",
             status: "initiated",
-            language: item.language || "english",
+            language: item.language || "telugu",
             phone,
           })
 

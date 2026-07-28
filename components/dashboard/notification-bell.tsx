@@ -4,7 +4,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { Bell, FileText, AlertTriangle, LogIn, MessageCircle, Check, PenLine } from "lucide-react"
-import { timeAgo } from "@/lib/utils"
+import { timeAgo, formatDateTime } from "@/lib/utils"
 import type { ViewKey } from "./shell"
 
 type Notification = {
@@ -134,7 +134,7 @@ export default function NotificationBell({ onNavigate }: { onNavigate: (view: Vi
                       {!n.read && <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#8b7cff", flexShrink: 0 }} />}
                     </span>
                     {n.body && <span style={{ display: "block", fontSize: 11.5, color: "var(--text-muted)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{n.body}</span>}
-                    <span style={{ display: "block", fontSize: 10.5, color: "var(--text-muted)", marginTop: 3 }}>{timeAgo(n.created_at)}</span>
+                    <span style={{ display: "block", fontSize: 10.5, color: "var(--text-muted)", marginTop: 3 }}>{timeAgo(n.created_at)} · {formatDateTime(n.created_at)}</span>
                   </span>
                 </button>
               )

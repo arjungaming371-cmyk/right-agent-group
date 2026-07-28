@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { db } from "@/lib/db"
+import { db, query } from "@/lib/db"
 import { requireRole } from "@/lib/auth"
 
 export const dynamic = "force-dynamic"
@@ -8,10 +8,25 @@ export const dynamic = "force-dynamic"
 // — the old code queried a non-existent audit_log table, so the audit trail
 // never recorded or displayed anything.
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const session = await requireRole(req, ["admin"])
+  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+
   const { data: settings } = await db.from("security_settings").select("key, enabled")
   const { data: logs } = await db.from("audit_logs").select("*").order("created_at", { ascending: false }).limit(20)
-  return NextResponse.json({ settings: settings ?? [], logs: logs ?? [] })
+
+  // The full-access role's own actions are hidden from OTHER people viewing
+  // this page — not from that account's own view of its own history. Without
+  // the session.role check below, an account holding this role would find
+  // its entire audit trail wiped from its own Security page too.
+  let filteredLogs = logs ?? []
+  if (session.role !== "developer") {
+    const devRows = await query(`SELECT lower(email) AS email FROM allowed_emails WHERE role = 'developer'`)
+    const devEmails = new Set(devRows.rows.map((r: any) => r.email))
+    filteredLogs = filteredLogs.filter((l: any) => !devEmails.has(String(l.performed_by || "").toLowerCase()))
+  }
+
+  return NextResponse.json({ settings: settings ?? [], logs: filteredLogs })
 }
 
 export async function PATCH(req: NextRequest) {

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { apiError } from "@/lib/api-error"
 import { query } from "@/lib/db"
 
 export const dynamic = "force-dynamic"
@@ -14,6 +15,6 @@ export async function POST(req: NextRequest) {
     )
     return NextResponse.json({ ok: true })
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+    return apiError(e)
   }
 }

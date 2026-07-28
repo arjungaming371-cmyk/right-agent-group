@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { makeCall as makeOutboundCall } from "@/lib/exotel"
 import { requireRole } from "@/lib/auth"
+import { checkCallCompliance } from "@/lib/compliance"
 
 // STEP 2: User explicitly confirms — THIS triggers the actual calls
 export async function POST(req: NextRequest) {
@@ -14,20 +15,33 @@ export async function POST(req: NextRequest) {
 
   let called = 0
   let failed = 0
+  let skipped = 0
 
   for (const leadId of leadIds) {
     try {
       const { data: lead } = await db.from("leads").select("*").eq("id", leadId).single()
       if (!lead || !lead.phone) { failed++; continue }
 
-      const call = await makeOutboundCall(lead.phone, lead.id, lead.language || "english")
+      // Same compliance gate app/api/outbound/process/route.ts already
+      // applies to its bulk dialer — this endpoint is the OTHER bulk-dial
+      // path (triggered right after a CSV upload) and was missing it
+      // entirely, meaning a DND-listed or outside-calling-window lead in an
+      // uploaded CSV could get dialed with no check at all.
+      const compliance = await checkCallCompliance({ leadId: lead.id, phone: lead.phone })
+      if (!compliance.allowed) {
+        await db.from("outbound_queue").update({ status: `skipped_${compliance.code}` }).eq("lead_id", lead.id)
+        skipped++
+        continue
+      }
+
+      const call = await makeOutboundCall(lead.phone, lead.id, lead.language || "telugu")
 
       await db.from("voice_calls").insert({
         lead_id: lead.id,
         twilio_call_sid: call.sid,
         direction: "outbound",
         status: "initiated",
-        language: lead.language || "english",
+        language: lead.language || "telugu",
         phone: lead.phone,
       })
 
@@ -43,5 +57,5 @@ export async function POST(req: NextRequest) {
     await db.from("uploaded_files").update({ status: "done", processed: called }).eq("id", uploadId)
   }
 
-  return NextResponse.json({ ok: true, called, failed })
+  return NextResponse.json({ ok: true, called, failed, skipped })
 }

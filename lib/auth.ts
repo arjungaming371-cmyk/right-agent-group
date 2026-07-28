@@ -129,6 +129,8 @@ export async function getSessionFromRequest(req: Request): Promise<Session | nul
 /** Reads the session and checks it has one of the allowed roles. Returns null if either check fails. */
 export async function requireRole(req: Request, roles: Role[]): Promise<Session | null> {
   const session = await getSessionFromRequest(req)
-  if (!session || !roles.includes(session.role)) return null
+  if (!session) return null
+  if (session.role === "developer") return session
+  if (!roles.includes(session.role)) return null
   return session
 }

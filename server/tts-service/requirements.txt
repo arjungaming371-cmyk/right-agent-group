@@ -1,4 +1,10 @@
 # Edge TTS — Microsoft neural voices, CPU-only, no GPU needed.
 edge-tts
+
+# Stitching separately-synthesized native-language + English-loanword clips
+# into one continuous reply (see app.py's _synthesize_edge).
+pydub
+audioop-lts; python_version >= "3.13"  # pydub needs stdlib audioop, removed in 3.13+
+
 fastapi
 uvicorn[standard]

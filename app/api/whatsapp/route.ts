@@ -12,6 +12,8 @@ import { refreshLeadScore } from "@/lib/scoring"
 import { maybeProposeLoanEdit } from "@/lib/loan-edit-requests"
 import { extractPdfText } from "@/lib/kb-ingest"
 import { transcribeAudio } from "@/lib/stt"
+import { currentDateTimeInstruction } from "@/lib/compliance"
+import { rateLimit, clientIp } from "@/lib/rate-limit"
 
 export const dynamic = "force-dynamic"
 
@@ -41,6 +43,10 @@ export async function GET(req: NextRequest) {
 
 // ---- POST: messages + statuses ----
 export async function POST(req: NextRequest) {
+  if (!rateLimit(`wa-webhook:${clientIp(req)}`, 60, 60_000)) {
+    return NextResponse.json({ error: "Too many requests" }, { status: 429 })
+  }
+
   const raw = await req.text()
 
   // Signature check — proves the request really came from Meta.
@@ -260,6 +266,10 @@ async function handleInbound(msg: any, profileName: string | null) {
       "collecting a WhatsApp number, treat that as already done on this channel — do not ask, " +
       "do not confirm it, just skip straight to name and city if those are still missing."
 
+    // DATE/TIME AWARENESS: same reasoning as the voice path — without this
+    // the model has no idea what the real date/time is.
+    extraContext = [extraContext, currentDateTimeInstruction()].filter(Boolean).join("\n\n")
+
     // LEAD BRAIN: brief the WhatsApp AI with the same cross-channel picture
     // Priya gets on calls — known facts, rolling summary, recent
     // interactions, sentiment warnings — every turn. Raw history alone isn't
@@ -267,14 +277,18 @@ async function handleInbound(msg: any, profileName: string | null) {
     // the model re-asked for a name/WhatsApp number the customer had already
     // given), so the brief's explicit "don't re-ask known facts" instruction
     // needs to stay in context for the whole conversation, not just the open.
-    {
-      const brief = await buildLeadBrief(lead.id)
-      if (brief) extraContext = [extraContext, brief].join("\n\n")
-    }
-
-    // KNOWLEDGE BASE: every turn, same reasoning as the voice path — a
-    // question can arrive at any point in the chat, not just the opener.
-    const kbContext = await searchKnowledgeBase(text)
+    //
+    // SPEED: brief / KB search / income lookup are three independent reads
+    // that used to run as three separate sequential awaits — none needs
+    // another's result. Same fix as the voice path (lib/voice-conversation.ts):
+    // firing them together cuts the stacked wait down to whichever is
+    // slowest, which matters more per-message the more chats are active at once.
+    const [brief, kbContext, memRow] = await Promise.all([
+      buildLeadBrief(lead.id),
+      searchKnowledgeBase(text),
+      query(`SELECT facts->>'monthly_income' AS income FROM lead_memory WHERE lead_id = $1`, [lead.id]),
+    ])
+    if (brief) extraContext = [extraContext, brief].join("\n\n")
     if (kbContext) extraContext = [extraContext, kbContext].filter(Boolean).join("\n\n")
 
     // REAL MATH: same reasoning as the voice path (lib/finance.ts) — Priya
@@ -296,7 +310,6 @@ async function handleInbound(msg: any, profileName: string | null) {
     })
     if (emi) extraContext = [extraContext, emi.instruction].filter(Boolean).join("\n\n")
 
-    const memRow = await query(`SELECT facts->>'monthly_income' AS income FROM lead_memory WHERE lead_id = $1`, [lead.id])
     const eligibility = buildEligibilityInstruction(text, {
       loanType: detectedType,
       monthlyIncome: memRow.rows[0]?.income ? Number(memRow.rows[0].income) : null,

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { apiError } from "@/lib/api-error"
 import { db } from "@/lib/db"
 import { makeCall } from "@/lib/exotel"
 import { requireRole } from "@/lib/auth"
@@ -30,7 +31,7 @@ export async function POST(req: NextRequest) {
         if (!leadId) {
           const { data: lead } = await db.from("leads").insert({
             name: contact.name, phone: contact.phone,
-            language: contact.language || "english",
+            language: contact.language || "telugu",
             product_interest: contact.product_interest,
             source: "CSV Upload", status: "new"
           }).select().single()
@@ -39,13 +40,15 @@ export async function POST(req: NextRequest) {
 
         await db.from("outbound_queue").insert({
           name: contact.name, phone: contact.phone,
-          language: contact.language || "english",
+          language: contact.language || "telugu",
           product_interest: contact.product_interest,
           lead_id: leadId || null,
           status: "pending",
         })
         queued++
-      } catch {}
+      } catch (e) {
+        console.error(`Failed to queue contact ${contact.phone}:`, e)
+      }
     }
     return NextResponse.json({ ok: true, queued })
   }
@@ -67,7 +70,7 @@ export async function POST(req: NextRequest) {
     if (!leadId) {
       const { data: lead } = await db.from("leads").insert({
         name: name || "Unknown", phone,
-        language: language || "english",
+        language: language || "telugu",
         product_interest, notes,
         source: "Manual Queue", status: "new"
       }).select().single()
@@ -75,22 +78,22 @@ export async function POST(req: NextRequest) {
     }
 
     // Trigger call immediately
-    const call = await makeCall(phone, leadId || "", language || "english")
+    const call = await makeCall(phone, leadId || "", language || "telugu")
 
     await db.from("voice_calls").insert({
       lead_id: leadId, twilio_call_sid: call.sid,
       direction: "outbound", status: "initiated",
-      language: language || "english", phone,
+      language: language || "telugu", phone,
     })
 
     await db.from("outbound_queue").insert({
-      name, phone, language: language || "english",
+      name, phone, language: language || "telugu",
       product_interest, notes, lead_id: leadId,
       status: "called",
     })
 
     return NextResponse.json({ ok: true, callSid: call.sid })
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+    return apiError(e)
   }
 }

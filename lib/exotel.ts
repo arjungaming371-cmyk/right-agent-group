@@ -39,7 +39,7 @@ export type CallResult = { sid: string; status: string }
  * voice_calls table, and the voicebot server resolves the context by CallSid
  * via /api/calls/turn. That keeps the Exotel side dead simple.
  */
-export async function makeExotelCall(to: string, _leadId: string, _language: string = "english", _instructions?: string): Promise<CallResult> {
+export async function makeExotelCall(to: string, _leadId: string, _language: string = "telugu", _instructions?: string): Promise<CallResult> {
   if (!EXOTEL_SID || !EXOTEL_API_KEY || !EXOTEL_API_TOKEN) throw new Error("Exotel credentials not configured")
   if (!EXOTEL_FLOW_APP_ID) throw new Error("EXOTEL_FLOW_APP_ID not set — create the Voicebot flow in Exotel App Bazaar first")
 
@@ -78,7 +78,7 @@ export async function makeExotelCall(to: string, _leadId: string, _language: str
 }
 
 /** Kept for API compatibility with the outbound routes. */
-export async function makeCall(to: string, leadId: string, language: string = "english", instructions?: string): Promise<CallResult> {
+export async function makeCall(to: string, leadId: string, language: string = "telugu", instructions?: string): Promise<CallResult> {
   return makeExotelCall(to, leadId, language, instructions)
 }
 

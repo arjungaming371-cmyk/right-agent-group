@@ -33,3 +33,12 @@ export function timeAgo(dateStr: string): string {
   if (days < 30) return `${days}d ago`
   return new Date(dateStr).toLocaleDateString("en-IN", { day: "numeric", month: "short" })
 }
+
+/** The actual date/time to show alongside timeAgo()'s relative label, e.g. "25 Jul, 3:45 PM". */
+export function formatDateTime(dateStr: string): string {
+  if (!dateStr) return "—"
+  const d = new Date(dateStr)
+  const datePart = d.toLocaleDateString("en-IN", { day: "numeric", month: "short" })
+  const timePart = d.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true })
+  return `${datePart}, ${timePart}`
+}

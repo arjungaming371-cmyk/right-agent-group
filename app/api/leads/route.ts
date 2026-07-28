@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { apiError } from "@/lib/api-error"
 import { db, query } from "@/lib/db"
 import { requireRole } from "@/lib/auth"
 import { logAudit } from "@/lib/audit"
@@ -80,7 +81,7 @@ export async function GET(req: NextRequest) {
     )
     return NextResponse.json(res.rows)
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+    return apiError(e)
   }
 }
 
@@ -100,17 +101,17 @@ export async function POST(req: NextRequest) {
     if (existing.rows.length > 0) {
       const id = existing.rows[0].id
       const { data, error } = await db.from("leads").update({ ...body, updated_at: new Date().toISOString() }).eq("id", id).select().single()
-      if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+      if (error) return apiError(error)
       logAudit("lead updated (via dedupe)", session.email, { leadId: id, phone: body.phone })
       return NextResponse.json(data)
     }
 
     const { data, error } = await db.from("leads").insert(body).select().single()
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    if (error) return apiError(error)
     logAudit("lead created", session.email, { leadId: data?.id, name: body.name, phone: body.phone })
     return NextResponse.json(data)
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+    return apiError(e)
   }
 }
 
@@ -119,7 +120,7 @@ export async function PATCH(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const { id, ...updates } = await req.json()
   const { data, error } = await db.from("leads").update({ ...updates, updated_at: new Date().toISOString() }).eq("id", id).select().single()
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return apiError(error)
   logAudit("lead updated", session.email, { leadId: id, fields: Object.keys(updates) })
   return NextResponse.json(data)
 }
@@ -131,7 +132,7 @@ export async function DELETE(req: NextRequest) {
   const id = searchParams.get("id")
   if (!id) return NextResponse.json({ error: "id required" }, { status: 400 })
   const { error } = await db.from("leads").delete().eq("id", id)
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return apiError(error)
   logAudit("lead deleted", session.email, { leadId: id })
   return NextResponse.json({ ok: true })
 }

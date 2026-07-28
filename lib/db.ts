@@ -7,7 +7,11 @@ const pool = new Pool({
   database: process.env.PG_DATABASE || "right_agent_group",
   user: process.env.PG_USER || "postgres",
   password: process.env.PG_PASSWORD || "",
-  max: 10,
+  // Raised from 10 — each WhatsApp/call turn fires 3-5 queries, so with
+  // several conversations active at once the old limit queued requests
+  // behind each other. Postgres here allows 100 connections total and only
+  // ~10 are ever in use at a time, so this has real headroom.
+  max: 25,
   idleTimeoutMillis: 30000,
 })
 

@@ -1,7 +1,7 @@
 "use client"
 import { useEffect, useState } from "react"
 import { BadgeCheck, Download, PenLine, Check, X, History } from "lucide-react"
-import { formatCurrency, timeAgo } from "@/lib/utils"
+import { formatCurrency, timeAgo, formatDateTime } from "@/lib/utils"
 import { SkeletonList } from "../ui/skeleton"
 import { useToast } from "../ui/toast"
 import { calculateEMI, totalInterest, formatINR, BEST_RATES, detectLoanType } from "@/lib/finance"
@@ -171,7 +171,7 @@ export default function LoanAppsView({ role, initialSearch }: { role: "admin" | 
                 </div>
                 {e.reason && <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 3, fontStyle: "italic" }}>"{e.reason}"</div>}
                 <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3 }}>
-                  Flagged by Priya on {e.proposed_by === "priya_voice" ? "a call" : "WhatsApp"} · {timeAgo(e.created_at)}
+                  Flagged by Priya on {e.proposed_by === "priya_voice" ? "a call" : "WhatsApp"} · {timeAgo(e.created_at)} · {formatDateTime(e.created_at)}
                 </div>
               </div>
               <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
@@ -219,7 +219,7 @@ export default function LoanAppsView({ role, initialSearch }: { role: "admin" | 
                 <Avatar name={app.customer_name} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 600, fontSize: 13 }}>{app.customer_name}</div>
-                  <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>{app.loan_type} · {timeAgo(app.submitted_at || app.created_at)}</div>
+                  <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={`${app.loan_type} · ${timeAgo(app.submitted_at || app.created_at)} · ${formatDateTime(app.submitted_at || app.created_at)}`}>{app.loan_type} · {timeAgo(app.submitted_at || app.created_at)} · {formatDateTime(app.submitted_at || app.created_at)}</div>
                 </div>
                 {app.status === "qualified" && <BadgeCheck size={15} strokeWidth={2} style={{ color: "#2dd4a0", flexShrink: 0 }} />}
               </div>
@@ -239,7 +239,7 @@ export default function LoanAppsView({ role, initialSearch }: { role: "admin" | 
                 <Avatar name={selected.customer_name} />
                 <div>
                   <div style={{ fontWeight: 700, fontSize: 18 }}>{selected.customer_name}</div>
-                  <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Applied {timeAgo(selected.submitted_at || selected.created_at)}</div>
+                  <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Applied {timeAgo(selected.submitted_at || selected.created_at)} · {formatDateTime(selected.submitted_at || selected.created_at)}</div>
                 </div>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -324,8 +324,8 @@ export default function LoanAppsView({ role, initialSearch }: { role: "admin" | 
                   </div>
                   {h.reason && <div style={{ color: "var(--text-muted)", fontStyle: "italic", marginBottom: 4 }}>"{h.reason}"</div>}
                   <div style={{ color: "var(--text-muted)", fontSize: 11 }}>
-                    Proposed {timeAgo(h.created_at)} by Priya ({h.proposed_by === "priya_voice" ? "call" : "WhatsApp"})
-                    {h.reviewed_by && <> · reviewed by {h.reviewed_by} {timeAgo(h.reviewed_at!)}</>}
+                    Proposed {timeAgo(h.created_at)} ({formatDateTime(h.created_at)}) by Priya ({h.proposed_by === "priya_voice" ? "call" : "WhatsApp"})
+                    {h.reviewed_by && <> · reviewed by {h.reviewed_by} {timeAgo(h.reviewed_at!)} ({formatDateTime(h.reviewed_at!)})</>}
                   </div>
                 </div>
               ))}

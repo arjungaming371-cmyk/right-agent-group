@@ -1,6 +1,7 @@
 "use client"
 import { useEffect, useState } from "react"
 import { Lightbulb, Save, RotateCcw, CalendarClock, Timer, RefreshCw, Languages, Sparkles, Check, X } from "lucide-react"
+import { formatDateTime } from "@/lib/utils"
 
 type Script = {
   language: string
@@ -252,7 +253,7 @@ export default function ScriptView() {
                 </div>
               </div>
               <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                Last updated: {sc ? timeAgo(sc.updated_at) : "—"}
+                Last updated: {sc ? `${timeAgo(sc.updated_at)} (${formatDateTime(sc.updated_at)})` : "—"}
               </div>
               <div style={{ marginTop: 6, fontSize: 11, color: "var(--text-muted)" }}>
                 {sc ? `${sc.content.length.toLocaleString()} characters` : "—"}
@@ -326,7 +327,7 @@ export default function ScriptView() {
                   <strong style={{ color: "var(--text-secondary)" }}>When:</strong> {s.situation}
                 </div>
                 <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginBottom: 12 }}>
-                  <strong style={{ color: "var(--text-secondary)" }}>Why:</strong> {s.source_summary} · <span style={{ textTransform: "capitalize" }}>{s.channel}</span> · {timeAgo(s.created_at)}
+                  <strong style={{ color: "var(--text-secondary)" }}>Why:</strong> {s.source_summary} · <span style={{ textTransform: "capitalize" }}>{s.channel}</span> · {timeAgo(s.created_at)} · {formatDateTime(s.created_at)}
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
                   <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Applies to the universal script (all languages)</div>
@@ -430,7 +431,7 @@ export default function ScriptView() {
 
         {/* Footer info */}
         <div style={{ padding: "12px 20px", borderTop: "1px solid var(--border)", display: "flex", gap: 24, fontSize: 12, color: "var(--text-muted)" }}>
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><CalendarClock size={12.5} strokeWidth={1.8} /> Last saved: {currentScript ? timeAgo(currentScript.updated_at) : "never"}</span>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><CalendarClock size={12.5} strokeWidth={1.8} /> Last saved: {currentScript ? `${timeAgo(currentScript.updated_at)} (${formatDateTime(currentScript.updated_at)})` : "never"}</span>
           <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><Timer size={12.5} strokeWidth={1.8} /> Changes take effect within 5 minutes</span>
           <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><RefreshCw size={12.5} strokeWidth={1.8} /> Priya checks for updates automatically</span>
         </div>

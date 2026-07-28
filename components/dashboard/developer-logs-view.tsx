@@ -1,6 +1,7 @@
 "use client"
 import { useEffect, useState } from "react"
 import { Lock, Clock, Terminal, CheckCircle2 } from "lucide-react"
+import { formatDateTime } from "@/lib/utils"
 
 type LogEntry = { id: string; action: string; timestamp: string; status: "success" | "error" | "info" }
 
@@ -67,14 +68,14 @@ export default function DeveloperLogsView({ userEmail }: { userEmail: string }) 
         <Lock size={24} style={{ color: "#10b981" }} strokeWidth={2} />
         <div>
           <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>
-            Your Developer Session
+            Your Session
           </div>
           <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>
             This information is private and visible only to you. Admins cannot see your activity or login details.
           </div>
           {lastLogin && (
             <div style={{ fontSize: 11, color: "#10b981", marginTop: 6, fontWeight: 500 }}>
-              Last login: {timeAgo(lastLogin)}
+              Last login: {timeAgo(lastLogin)} ({formatDateTime(lastLogin)})
             </div>
           )}
         </div>
@@ -149,7 +150,7 @@ export default function DeveloperLogsView({ userEmail }: { userEmail: string }) 
                 {log.action}
               </div>
               <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}>
-                <Clock size={11} /> {timeAgo(log.timestamp)}
+                <Clock size={11} /> {timeAgo(log.timestamp)} · {formatDateTime(log.timestamp)}
               </div>
             </div>
             <span style={{
@@ -180,7 +181,7 @@ export default function DeveloperLogsView({ userEmail }: { userEmail: string }) 
       }}>
         <Lock size={16} style={{ color: "#3b82f6", marginTop: 2, flexShrink: 0 }} strokeWidth={2} />
         <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6 }}>
-          <strong>Your privacy is protected.</strong> Admins cannot view your login history, activity logs, or any actions you perform. Your developer data is encrypted and remains private.
+          <strong>Your privacy is protected.</strong> Admins cannot view your login history, activity logs, or any actions you perform. Your data is encrypted and remains private.
         </div>
       </div>
     </div>

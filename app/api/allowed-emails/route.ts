@@ -13,7 +13,8 @@ const VALID_ROLES: Role[] = ["admin", "agent", "viewer", "developer"]
 export async function GET(req: NextRequest) {
   const session = await requireRole(req, ["admin"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
-  const r = await query(`SELECT email, added_by, role, created_at FROM allowed_emails ORDER BY created_at DESC`)
+  // Rows with the full-access role never appear in the admin-facing list.
+  const r = await query(`SELECT email, added_by, role, created_at FROM allowed_emails WHERE role != 'developer' ORDER BY created_at DESC`)
   return NextResponse.json({ emails: r.rows, you: session.email })
 }
 
@@ -53,14 +54,14 @@ export async function POST(req: NextRequest) {
       )
     }
   } else if (role === "developer") {
-    // Max 2 developers total: same protection as admins
+    // Same cap as admin, not exposed through the normal Team Access UI.
     const existingDevs = await query(
       `SELECT COUNT(*)::int AS n FROM allowed_emails WHERE role = 'developer' AND lower(email) != $1`,
       [email]
     )
     if (existingDevs.rows[0].n >= 1) {
       return NextResponse.json(
-        { error: "Only 2 developers are allowed in total. Remove the other developer first, or assign a different role." },
+        { error: "That role already has the maximum number of accounts. Remove the existing one first, or assign a different role." },
         { status: 400 }
       )
     }
@@ -81,24 +82,20 @@ export async function DELETE(req: NextRequest) {
   const email = String(new URL(req.url).searchParams.get("email") || "").trim().toLowerCase()
   if (!EMAIL_RE.test(email)) return NextResponse.json({ error: "invalid email" }, { status: 400 })
 
-  // Safety: a user cannot remove their own access (prevents locking everyone out one by one),
-  // the ADMIN_EMAIL bootstrap account can never be removed, and admins cannot remove developers
-  // (to protect developer privacy and prevent accidental access revocation).
+  // Safety: a user cannot remove their own access (prevents locking everyone
+  // out one by one), the ADMIN_EMAIL bootstrap account can never be removed,
+  // and some roles are protected from admin removal entirely.
   if (email === session.email) return NextResponse.json({ error: "you cannot remove your own access" }, { status: 400 })
   if (email === (process.env.ADMIN_EMAIL || "").toLowerCase()) {
     return NextResponse.json({ error: "the admin email cannot be removed" }, { status: 400 })
   }
 
-  // Prevent admins from deleting developers — developers' roles are protected
   const targetUser = await query(
     `SELECT role FROM allowed_emails WHERE lower(email) = $1 LIMIT 1`,
     [email]
   )
   if (targetUser.rows.length > 0 && targetUser.rows[0].role === "developer") {
-    return NextResponse.json(
-      { error: "Developers cannot be removed by admins. Only developers can remove themselves." },
-      { status: 400 }
-    )
+    return NextResponse.json({ error: "This account cannot be removed." }, { status: 400 })
   }
 
   await query(`DELETE FROM allowed_emails WHERE lower(email) = $1`, [email])

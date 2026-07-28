@@ -5,7 +5,9 @@ import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth"
 // - /login + /api/auth/*          → the login flow itself
 // - /api/calls/turn               → voicebot bridge (x-api-key protected inside)
 // - /api/calls/status             → Exotel status webhook
+// - /api/calls/passthru           → Exotel Passthru applet webhook (delivers RecordingUrl)
 // - /form/*, /api/form/*          → the customer-facing loan form
+// - /apply, /api/apply            → the public promo/marketing site + its application form
 // - /api/whatsapp (POST inbound)  → Meta webhook (HMAC-verified)
 // - /api/warmup                   → cron warmup
 // - /api/digest                   → scheduled digest email (x-api-key protected inside, see DIGEST.ps1)
@@ -14,9 +16,12 @@ import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth"
 const PUBLIC_PREFIXES = [
   "/login",
   "/about",
+  "/apply",
+  "/promo/",
   "/api/auth/",
   "/form/",
   "/api/form/",
+  "/api/apply",
   "/api/warmup",
 ]
 
@@ -26,7 +31,7 @@ const PUBLIC_PREFIXES = [
 // MUST require a login session. Only the two telephony webhooks below and
 // the Meta webhook are public.
 const PUBLIC_EXACT = [
-  "/api/whatsapp", "/api/calls/turn", "/api/calls/status", "/api/digest",
+  "/api/whatsapp", "/api/calls/turn", "/api/calls/status", "/api/calls/passthru", "/api/digest",
   "/api/system/status", // coarse booleans only — no error details (see route)
   "/api/security/flags", // one boolean, read back by this middleware itself
   "/api/lead-brain/scan-idle", "/api/prompt-tuner/scan",

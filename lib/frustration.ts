@@ -40,6 +40,34 @@ export function detectFrustration(speech: string, history: { role: string; conte
   return hardNos.length >= 3
 }
 
+// A CALM request for a human — "can I talk to a person instead" — is not
+// frustration and shouldn't be lumped into FRUSTRATION_RE (that regex feeds
+// flagFrustratedCall, which marks sentiment "Frustrated"; mislabeling a
+// polite request as an angry customer would mislead whoever checks the
+// dashboard). RBI's Fair Practices Code expects a way for the customer to
+// reach a human — this call has no live transfer capability, so the
+// script's job is to acknowledge it and promise a real callback (see
+// lib/default-scripts.ts's "SPEAK TO A HUMAN" rule), and this flag is what
+// makes that callback actually happen.
+const HUMAN_REQUEST_RE = new RegExp(
+  [
+    // English
+    "speak to a human", "talk to a human", "talk to a person", "speak to a person",
+    "real person", "human agent", "speak to someone", "talk to someone",
+    "connect me to", "transfer me", "speak to (your |the |a )?manager", "talk to (your |the |a )?manager",
+    "speak to (your |the |an )?officer", "talk to (your |the |an )?officer",
+    // Hindi
+    "इंसान से बात", "किसी आदमी से", "मैनेजर से बात", "असली आदमी", "ऑफिसर से बात",
+    // Telugu
+    "మనిషితో మాట్లాడ", "నిజమైన వ్యక్తి", "మేనేజర్ తో మాట్లాడ", "ఆఫీసర్ తో మాట్లాడ",
+  ].join("|"),
+  "i"
+)
+
+export function detectHumanRequest(speech: string): boolean {
+  return HUMAN_REQUEST_RE.test(speech)
+}
+
 /** Emails ADMIN_EMAIL the moment a caller/chatter is flagged. No-op if SMTP isn't configured. */
 async function sendEscalationEmail(channel: "Phone call" | "WhatsApp", leadId: string | null, snippet: string): Promise<void> {
   const to = process.env.ADMIN_EMAIL || ""
@@ -96,6 +124,33 @@ export function flagFrustratedCall(callSid: string | null, leadId: string | null
       })
     } catch (e: any) {
       console.error("flagFrustratedCall error:", e.message)
+    }
+  })()
+}
+
+/** Fire-and-forget: same alert channel as flagFrustratedCall, but for a calm
+ * request to speak with a human — distinct sentiment/summary so the
+ * dashboard doesn't conflate "asked for a human" with "angry customer". */
+export function flagHumanRequested(callSid: string | null, leadId: string | null, speech: string): void {
+  ;(async () => {
+    try {
+      if (callSid) {
+        await db.from("voice_calls").update({ sentiment: "Requested Human", outcome: "needs_human" }).eq("twilio_call_sid", callSid)
+      }
+      await query(
+        `INSERT INTO comm_logs (lead_id, type, summary, outcome)
+         VALUES ($1, 'alert', $2, 'needs_human')`,
+        [leadId, `📞 ASKED FOR A HUMAN — said: "${speech.slice(0, 120)}" — call them back directly`]
+      )
+      await sendEscalationEmail("Phone call", leadId, speech)
+      createNotification({
+        type: "escalation",
+        title: `${await leadDisplayName(leadId)} asked to speak with a human`,
+        body: `Phone call — "${speech.slice(0, 120)}"`,
+        linkView: "voice",
+      })
+    } catch (e: any) {
+      console.error("flagHumanRequested error:", e.message)
     }
   })()
 }

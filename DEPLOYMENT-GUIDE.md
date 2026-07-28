@@ -2,7 +2,7 @@
 ### From a blank server to a live AI calling system, step by step
 
 **What you need before starting:**
-- A server (client's own machine or VPS) with Ubuntu 22.04 / 24.04, minimum 16GB RAM, an NVIDIA GPU (recommended) or strong CPU, and 40GB free disk
+- A server (client's own machine or VPS) with Ubuntu 22.04 / 24.04, minimum 16GB RAM, an NVIDIA GPU (**recommended** — speech recognition (Whisper) is much faster with one; Priya's voice (Edge TTS) doesn't need a GPU at all), and 40GB free disk
 - A domain name pointed at the server's IP (e.g. `console.rightgroupeagent.com` → A record)
 - An Exotel account with an ExoPhone number and API access
 - A Google account (for creating the login credentials)
@@ -150,6 +150,7 @@ WHATSAPP_SERVICE_URL=http://127.0.0.1:3001
 WHATSAPP_SERVICE_PORT=3001
 WHATSAPP_SERVICE_KEY=RUN_openssl_rand_-hex_32
 STT_SERVICE_URL=http://127.0.0.1:3003
+TTS_SERVICE_URL=http://127.0.0.1:3004
 VOICEBOT_PORT=3002
 ```
 
@@ -189,6 +190,14 @@ python3 -m venv venv
 STT_API_KEY=PASTE_YOUR_WHATSAPP_SERVICE_KEY pm2 start "./venv/bin/uvicorn app:app --host 127.0.0.1 --port 3003" --name stt
 ```
 (If the GPU isn't picked up: `./venv/bin/pip install nvidia-cublas-cu12 nvidia-cudnn-cu12` and `pm2 restart stt`.)
+
+**TTS service** (Priya's voice — Edge TTS, free, no GPU needed):
+```bash
+cd ~/right-agent-group/server/tts-service
+python3 -m venv venv
+./venv/bin/pip install -r requirements.txt
+TTS_API_KEY=PASTE_YOUR_WHATSAPP_SERVICE_KEY pm2 start "./venv/bin/uvicorn app:app --host 127.0.0.1 --port 3004" --name tts
+```
 
 Make everything survive reboots:
 ```bash
@@ -279,7 +288,7 @@ From the dashboard, trigger an outbound call to your own mobile (or just call th
 ## Daily health check (30 seconds)
 
 ```bash
-pm2 list                                  # all 4 green: web, whatsapp, voicebot, stt
+pm2 list                                  # all 5 green: web, whatsapp, voicebot, stt, tts
 curl -s https://YOUR-DOMAIN/api/test      # env + service health report
 ```
 
@@ -287,7 +296,31 @@ curl -s https://YOUR-DOMAIN/api/test      # env + service health report
 | Symptom | Fix |
 |---|---|
 | Website down | `pm2 restart web`, check `pm2 logs web` |
-| Priya silent on calls | `pm2 logs voicebot` — usually STT down or `GROQ_API_KEY` invalid/rate-limited |
+| Priya silent on calls | `pm2 logs voicebot` — usually STT/TTS down or `GROQ_API_KEY` invalid/rate-limited |
+| Priya mispronounces English words mid-sentence | `pm2 logs tts` — check the word is in `_LOANWORDS` in `server/tts-service/app.py`; add it and restart `tts` if not |
 | Slow replies | Check Groq status at groqstatus.com; verify `GROQ_API_KEY` free-tier limits aren't exhausted |
 | WhatsApp not sending | Dashboard → WhatsApp tab shows Meta's error; check `WHATSAPP_TOKEN` validity and template approval status in WhatsApp Manager |
 | Login says "not authorized" | Add that Gmail on `/access`, or check `ADMIN_EMAIL` spelling |
+
+---
+
+## Appendix — Running this on an AWS GPU box for a client demo
+
+Same steps as above (Steps 1–12), just on a rented EC2 GPU instance instead of
+the client's server. Doubles as a dry run of the exact handoff process.
+
+1. **Launch instance**: EC2 → `g4dn.xlarge` (1x T4 GPU) → AMI: **Deep Learning
+   AMI (Ubuntu)** — comes with the NVIDIA driver + CUDA preinstalled, so skip
+   the `ubuntu-drivers autoinstall` sub-step in Step 1; `nvidia-smi` should
+   already work on first boot.
+2. **Region**: `ap-south-1` (Mumbai) — lowest latency to India / Exotel.
+3. **Security group**: open inbound 22 (SSH), 80, 443.
+4. **Domain**: Exotel's `wss://` URL and Google OAuth's redirect URI both
+   need a real HTTPS domain pointed at the instance — even a cheap domain
+   with an A record to the instance's public IP works. This is an account
+   prerequisite, not a code change.
+5. Run Steps 1–12 above as normal on the instance.
+6. **Cost control**: `g4dn.xlarge` on-demand is ~$0.53/hr. **Stop (not
+   terminate)** the instance between demo/test sessions — a stopped instance
+   only bills for its EBS storage (a few cents/day), so a $200 credit goes a
+   long way if you're not leaving it running 24/7.
