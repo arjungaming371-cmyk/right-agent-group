@@ -18,6 +18,7 @@ import KnowledgeBaseView from "./knowledge-base-view"
 import AnalyticsView from "./analytics-view"
 import QuickChat     from "./quick-chat"
 import NotificationBell from "./notification-bell"
+import ThemeSwitcher from "./theme-switcher"
 import DeveloperLogsView from "./developer-logs-view"
 import CalendarView from "./calendar-view"
 import ProfileModal from "./profile-modal"
@@ -359,6 +360,7 @@ export default function DashboardShell() {
             <span className="kbd">Ctrl K</span>
           </button>
 
+          <ThemeSwitcher />
           <NotificationBell onNavigate={(view) => setView(view)} />
         </header>
 

@@ -27,6 +27,75 @@
   --radius-sm: 7px;
 }
 
+/* ---------- Themes ----------
+   "Dark" above is the default (:root, no attribute). Every other theme is
+   selected by [data-theme="..."] on <html> (see lib/theme.ts) and only ever
+   needs to override the variables that actually change — components read
+   these variables, never a theme name, so nothing outside this file and
+   lib/theme.ts needs to know a given theme exists. */
+
+/* Midnight — OLED-friendly near-black, same accents as Dark */
+:root[data-theme="midnight"] {
+  --bg-primary: #000000;
+  --bg-secondary: #050505;
+  --bg-card: #0a0a0a;
+  --bg-card-hover: #121212;
+  --bg-sidebar: #000000;
+  --border: #1f1f1f;
+  --border-light: #161616;
+  --text-primary: #ffffff;
+  --text-secondary: #a3a3a3;
+  --text-muted: #6b6b6b;
+  --shadow-soft: 0 1px 2px rgba(0,0,0,0.7), 0 10px 32px -12px rgba(0,0,0,0.8);
+}
+
+/* Dark Emerald — same dark base as Dark, teal/green accent instead of violet/blue */
+:root[data-theme="emerald"] {
+  --accent-blue: #14b8a6;
+  --accent-blue-dim: #0d9488;
+  --accent-violet: #10b981;
+  --accent-green: #34d399;
+  --accent-cyan: #22d3ee;
+  --gradient-brand: linear-gradient(135deg, #10b981 0%, #14b8a6 45%, #38bdf8 100%);
+  --shadow-glow: 0 8px 32px -8px rgba(16,185,129,0.4);
+}
+
+/* Light — a genuine light mode, not a lightened dark theme */
+:root[data-theme="light"] {
+  --bg-primary: #f5f6fa;
+  --bg-secondary: #ffffff;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f1f3f9;
+  --bg-sidebar: #ffffff;
+  --border: #e3e6ee;
+  --border-light: #edf0f6;
+  --text-primary: #1a1f2e;
+  --text-secondary: #565f78;
+  --text-muted: #8992a8;
+  --accent-blue: #4a6cf0;
+  --accent-blue-dim: #3654d6;
+  --accent-violet: #7c6ae8;
+  --accent-green: #16a97e;
+  --accent-red: #d43a58;
+  --accent-yellow: #c98a12;
+  --accent-purple: #8865d9;
+  --accent-cyan: #1791c4;
+  --gradient-brand: linear-gradient(135deg, #7c6ae8 0%, #4a6cf0 45%, #1791c4 100%);
+  --shadow-soft: 0 1px 2px rgba(20,25,45,0.06), 0 10px 28px -14px rgba(20,25,45,0.14);
+  --shadow-glow: 0 8px 28px -10px rgba(74,108,240,0.25);
+}
+:root[data-theme="light"] body {
+  background: radial-gradient(1100px 550px at 12% -8%, rgba(124,106,232,0.05), transparent 60%),
+              radial-gradient(900px 480px at 105% -5%, rgba(23,145,196,0.04), transparent 55%),
+              var(--bg-primary);
+}
+:root[data-theme="light"] .glass {
+  background: rgba(255,255,255,0.85);
+  border: 1px solid rgba(20,25,45,0.06);
+}
+:root[data-theme="light"] ::-webkit-scrollbar-thumb { background: #d5d9e4; }
+:root[data-theme="light"] ::-webkit-scrollbar-thumb:hover { background: #c2c7d6; }
+
 /* Base resets & element defaults — layered so Tailwind utilities always win */
 @layer base {
   * { box-sizing: border-box; margin: 0; padding: 0; }
