@@ -48,7 +48,7 @@ function AccessPageInner() {
   const [newRole, setNewRole] = useState<"admin" | "agent" | "viewer">("agent")
   const [busy, setBusy] = useState(false)
   const [confirmTarget, setConfirmTarget] = useState<string | null>(null)
-  const [profiles, setProfiles] = useState<Record<string, { displayName: string | null; avatarUrl: string | null }>>({})
+  const [profiles, setProfiles] = useState<Record<string, { displayName: string | null; avatarUrl: string | null; phone?: string | null; address?: string | null; age?: number | null }>>({})
 
   const load = useCallback(async () => {
     try {
@@ -69,8 +69,8 @@ function AccessPageInner() {
       fetch("/api/team").then(async (r) => {
         if (!r.ok) return
         const team = await r.json()
-        const map: Record<string, { displayName: string | null; avatarUrl: string | null }> = {}
-        for (const t of team) map[t.email.toLowerCase()] = { displayName: t.displayName, avatarUrl: t.avatarUrl }
+        const map: Record<string, { displayName: string | null; avatarUrl: string | null; phone?: string | null; address?: string | null; age?: number | null }> = {}
+        for (const t of team) map[t.email.toLowerCase()] = { displayName: t.displayName, avatarUrl: t.avatarUrl, phone: t.phone, address: t.address, age: t.age }
         setProfiles(map)
       }).catch(() => {})
     } catch {
@@ -254,6 +254,11 @@ function AccessPageInner() {
                 <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                   {profile?.displayName ? e.email : `Added by ${e.added_by || "—"}`}
                 </div>
+                {(profile?.phone || profile?.address || profile?.age != null) && (
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {[profile?.phone, profile?.address, profile?.age != null ? `${profile.age} yrs` : null].filter(Boolean).join(" · ")}
+                  </div>
+                )}
               </div>
               <RoleBadge role={e.role} />
               {confirmTarget === e.email ? (

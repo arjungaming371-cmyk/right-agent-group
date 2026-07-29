@@ -15,42 +15,58 @@ export async function GET(req: NextRequest) {
   const adminEmail = (process.env.ADMIN_EMAIL || "").toLowerCase()
 
   const result = await query(
-    `SELECT ae.email, ae.role, tp.display_name, tp.avatar_url, tp.last_login_at, tp.created_at
+    `SELECT ae.email, ae.role, tp.display_name, tp.avatar_url, tp.last_login_at, tp.created_at,
+            tp.phone, tp.address, tp.age
      FROM allowed_emails ae
      LEFT JOIN team_profiles tp ON lower(tp.email) = lower(ae.email)
      ORDER BY ae.created_at ASC`
   )
+
+  // Phone/address/age are only handed back to admins (viewing the team) or
+  // the person themselves (viewing/editing their own profile) — every other
+  // role only gets name + avatar, which is all the rest of the dashboard
+  // (lead/call attribution, etc.) actually needs.
+  const canSeeDetails = session.role === "admin" || session.role === "developer"
+  const withDetails = (r: any, base: any) =>
+    canSeeDetails || r.email.toLowerCase() === session.email.toLowerCase()
+      ? { ...base, phone: r.phone, address: r.address, age: r.age }
+      : base
 
   // The full-access role never appears in this roster for anyone but
   // themselves — this powers name/avatar lookups across the dashboard
   // (profile modal, Team Access page) and none of those need to see it.
   const rows = result.rows
     .filter((r: any) => r.role !== "developer" || r.email.toLowerCase() === session.email.toLowerCase())
-    .map((r: any) => ({
-      email: r.email,
-      role: r.role,
-      displayName: r.display_name,
-      avatarUrl: r.avatar_url,
-      lastLoginAt: r.last_login_at,
-      memberSince: r.created_at,
-    }))
+    .map((r: any) =>
+      withDetails(r, {
+        email: r.email,
+        role: r.role,
+        displayName: r.display_name,
+        avatarUrl: r.avatar_url,
+        lastLoginAt: r.last_login_at,
+        memberSince: r.created_at,
+      })
+    )
 
   // Admin may not have an allowed_emails row — surface them separately if
   // they're not already present (e.g. via their own team_profiles row).
   if (adminEmail && !rows.some((r) => r.email.toLowerCase() === adminEmail)) {
     const adminProfile = await query(
-      `SELECT display_name, avatar_url, last_login_at, created_at FROM team_profiles WHERE lower(email) = $1`,
+      `SELECT display_name, avatar_url, last_login_at, created_at, phone, address, age
+       FROM team_profiles WHERE lower(email) = $1`,
       [adminEmail]
     )
-    const p = adminProfile.rows[0]
-    rows.unshift({
-      email: adminEmail,
-      role: "admin",
-      displayName: p?.display_name || null,
-      avatarUrl: p?.avatar_url || null,
-      lastLoginAt: p?.last_login_at || null,
-      memberSince: p?.created_at || null,
-    })
+    const p = { ...(adminProfile.rows[0] || {}), email: adminEmail }
+    rows.unshift(
+      withDetails(p, {
+        email: adminEmail,
+        role: "admin",
+        displayName: p?.display_name || null,
+        avatarUrl: p?.avatar_url || null,
+        lastLoginAt: p?.last_login_at || null,
+        memberSince: p?.created_at || null,
+      })
+    )
   }
 
   return NextResponse.json(rows)

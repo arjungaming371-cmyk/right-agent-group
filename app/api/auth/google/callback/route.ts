@@ -77,10 +77,17 @@ export async function GET(req: NextRequest) {
     // CAN LOG IN, a separate concern from what their profile looks like, and
     // the admin (identified via ADMIN_EMAIL, not necessarily a row in
     // allowed_emails) still gets a profile row this way.
+    //
+    // profile_customized guards name/avatar once someone edits them by hand
+    // (see /api/team/profile) — without it, this upsert would silently wipe
+    // a manual edit back to Google's values on the very next login.
     query(
       `INSERT INTO team_profiles (email, display_name, avatar_url, last_login_at)
        VALUES ($1, $2, $3, now())
-       ON CONFLICT (email) DO UPDATE SET display_name = $2, avatar_url = $3, last_login_at = now()`,
+       ON CONFLICT (email) DO UPDATE SET
+         display_name = CASE WHEN team_profiles.profile_customized THEN team_profiles.display_name ELSE $2 END,
+         avatar_url = CASE WHEN team_profiles.profile_customized THEN team_profiles.avatar_url ELSE $3 END,
+         last_login_at = now()`,
       [email, profile.name || null, profile.picture || null]
     ).catch((e) => console.error("team_profiles upsert error:", e.message))
     logAudit("signed in", email, {})
