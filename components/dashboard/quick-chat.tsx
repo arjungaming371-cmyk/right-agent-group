@@ -30,9 +30,65 @@ function timeAgoShort(dateStr: string) {
   return `${Math.floor(hrs / 24)}d`
 }
 
+const POS_KEY = "opsAssistantFabPos"
+const FAB_SIZE = 56
+const EDGE_MARGIN = 24
+const DRAG_THRESHOLD = 6 // px of movement before a press counts as a drag, not a click
+
 export default function QuickChat({ role = "agent", userEmail = "" }: { role?: UserRole; userEmail?: string }) {
   const [open, setOpen] = useState(false)
   const [view, setView] = useState<"chat" | "history">("chat")
+  // Button position — null means "not placed yet, use the default corner".
+  // Persisted so it stays wherever you last dragged it, across reloads.
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null)
+  const dragRef = useRef<{ startX: number; startY: number; origX: number; origY: number; moved: boolean } | null>(null)
+  const [dragging, setDragging] = useState(false)
+
+  function clamp(x: number, y: number) {
+    const maxX = window.innerWidth - FAB_SIZE - 8
+    const maxY = window.innerHeight - FAB_SIZE - 8
+    return { x: Math.min(Math.max(8, x), Math.max(8, maxX)), y: Math.min(Math.max(8, y), Math.max(8, maxY)) }
+  }
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(POS_KEY)
+      if (saved) {
+        const p = JSON.parse(saved)
+        if (typeof p?.x === "number" && typeof p?.y === "number") setPos(clamp(p.x, p.y))
+      }
+    } catch {}
+    // Keep the button on-screen if the window is resized/rotated after being dragged.
+    function onResize() {
+      setPos(prev => (prev ? clamp(prev.x, prev.y) : prev))
+    }
+    window.addEventListener("resize", onResize)
+    return () => window.removeEventListener("resize", onResize)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function startDrag(clientX: number, clientY: number) {
+    const rect = { x: pos?.x ?? window.innerWidth - FAB_SIZE - EDGE_MARGIN, y: pos?.y ?? window.innerHeight - FAB_SIZE - EDGE_MARGIN }
+    dragRef.current = { startX: clientX, startY: clientY, origX: rect.x, origY: rect.y, moved: false }
+    setDragging(true)
+  }
+
+  function onPointerMove(e: React.PointerEvent) {
+    if (!dragRef.current) return
+    const dx = e.clientX - dragRef.current.startX
+    const dy = e.clientY - dragRef.current.startY
+    if (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD) dragRef.current.moved = true
+    setPos(clamp(dragRef.current.origX + dx, dragRef.current.origY + dy))
+  }
+
+  function onPointerUp(e: React.PointerEvent) {
+    const wasDrag = dragRef.current?.moved
+    setDragging(false)
+    if (wasDrag && pos) {
+      try { localStorage.setItem(POS_KEY, JSON.stringify(pos)) } catch {}
+    }
+    dragRef.current = null
+    if (!wasDrag) setOpen(true) // a real click (no meaningful movement) opens the assistant
+  }
   const greeting: Message = { role: "assistant", content: GREETINGS[role] || GREETINGS.agent }
   const [messages, setMessages] = useState<Message[]>([greeting])
   const [chatId, setChatId] = useState<string | null>(null)
@@ -152,17 +208,28 @@ export default function QuickChat({ role = "agent", userEmail = "" }: { role?: U
   }
 
   if (!open) {
+    // Undragged default: bottom-right corner, same as before. Once pos is
+    // set (from a drag, or restored from localStorage), it overrides top/left
+    // and drops the bottom/right anchors entirely.
+    const posStyle = pos
+      ? { top: pos.y, left: pos.x }
+      : { bottom: EDGE_MARGIN, right: EDGE_MARGIN }
     return (
       <button
-        onClick={() => setOpen(true)}
+        onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); startDrag(e.clientX, e.clientY) }}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
         style={{
-          position: "fixed", bottom: 24, right: 24, width: 56, height: 56, borderRadius: "50%",
+          position: "fixed", ...posStyle, width: FAB_SIZE, height: FAB_SIZE, borderRadius: "50%",
           background: "var(--gradient-brand)", border: "none", color: "white",
           fontSize: 22, display: "flex", alignItems: "center", justifyContent: "center",
-          boxShadow: "0 8px 28px -6px rgba(79,124,255,0.55), 0 0 0 1px rgba(255,255,255,0.08)",
-          cursor: "pointer", zIndex: 999, animation: "fadeInUp 0.3s ease",
+          boxShadow: dragging ? "0 12px 36px -6px rgba(79,124,255,0.7), 0 0 0 1px rgba(255,255,255,0.12)" : "0 8px 28px -6px rgba(79,124,255,0.55), 0 0 0 1px rgba(255,255,255,0.08)",
+          cursor: dragging ? "grabbing" : "grab", zIndex: 999,
+          animation: pos ? "none" : "fadeInUp 0.3s ease",
+          touchAction: "none", userSelect: "none",
+          transform: dragging ? "scale(1.06)" : "scale(1)", transition: dragging ? "none" : "transform 0.15s ease",
         }}
-        title="Quick AI Assistant"
+        title="Quick AI Assistant — drag to move"
       >
         <MessageSquareText size={22} strokeWidth={2} />
       </button>
