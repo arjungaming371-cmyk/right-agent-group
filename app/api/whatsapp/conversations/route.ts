@@ -12,10 +12,16 @@ export async function GET() {
       SELECT
         l.id, l.name, l.phone,
         l.pinned, l.pinned_at,
+        -- Everything the lead has actually told us / that Priya has
+        -- gathered — shown in the chat's contact-info panel so an agent
+        -- never has to switch tabs to see who they're talking to.
+        l.address, l.email, l.whatsapp_number, l.product_interest,
+        l.loan_amount, l.notes, l.status, l.interested, l.language, l.source,
         lm.content    AS last_message,
         lm.created_at AS last_message_time,
         lm.direction  AS last_direction,
-        COALESCE(u.unread, 0) AS unread
+        COALESCE(u.unread, 0) AS unread,
+        mem.summary AS ai_summary, mem.sentiment, mem.stage, mem.facts
       FROM leads l
       LEFT JOIN LATERAL (
         SELECT content, created_at, direction
@@ -29,6 +35,7 @@ export async function GET() {
         FROM whatsapp_messages
         WHERE lead_id = l.id AND direction = 'inbound' AND status = 'received'
       ) u ON true
+      LEFT JOIN lead_memory mem ON mem.lead_id = l.id
       WHERE l.phone IS NOT NULL AND l.phone != ''
       ORDER BY l.pinned DESC, l.pinned_at DESC NULLS LAST, lm.created_at DESC NULLS LAST, l.created_at DESC
       LIMIT 100
