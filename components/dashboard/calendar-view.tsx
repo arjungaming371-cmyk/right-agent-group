@@ -163,7 +163,7 @@ export default function CalendarView({ role }: { role: "admin" | "agent" | "view
                 >
                   <div style={{
                     fontSize: 12, fontWeight: isToday ? 700 : 500,
-                    color: isToday ? "#a5b0ff" : "var(--text-secondary)",
+                    color: isToday ? "var(--accent-violet)" : "var(--text-secondary)",
                     marginBottom: 6,
                     display: "inline-flex", alignItems: "center", justifyContent: "center",
                     width: isToday ? 22 : "auto", height: isToday ? 22 : "auto",
@@ -178,7 +178,7 @@ export default function CalendarView({ role }: { role: "admin" | "agent" | "view
                         key={cb.id}
                         onClick={() => setSelected(cb)}
                         style={{
-                          textAlign: "left", background: "rgba(139,124,255,0.15)", color: "#a5b0ff",
+                          textAlign: "left", background: "rgba(139,124,255,0.15)", color: "var(--accent-violet)",
                           border: "1px solid rgba(139,124,255,0.3)", borderRadius: 6,
                           padding: "3px 6px", fontSize: 11, cursor: "pointer",
                           overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
@@ -292,7 +292,7 @@ export default function CalendarView({ role }: { role: "admin" | "agent" | "view
               onChange={(e) => setScheduleNote(e.target.value)}
               placeholder="e.g. Wants to confirm EMI before deciding"
               rows={2}
-              style={{ width: "100%", background: "#0d1422", border: "1px solid var(--border)", color: "var(--text-primary)", borderRadius: 8, padding: 10, fontSize: 13, resize: "vertical", marginBottom: 16 }}
+              style={{ width: "100%", background: "var(--bg-card)", border: "1px solid var(--border)", color: "var(--text-primary)", borderRadius: 8, padding: 10, fontSize: 13, resize: "vertical", marginBottom: 16 }}
             />
 
             <button

@@ -17,9 +17,9 @@ type AllowedEmail = { email: string; added_by: string | null; role: Role; create
 // Only roles assignable/visible through this page — a separate full-access
 // role exists but is deliberately not surfaced here.
 const ROLE_META: Record<"admin" | "agent" | "viewer", { label: string; desc: string; color: string; icon: typeof Shield }> = {
-  admin:  { label: "Admin",        desc: "Full access, including this page. Max 2 admins total.",     color: "#8b7cff", icon: Shield },
-  agent:  { label: "Loan Officer", desc: "Leads, loans, calls, WhatsApp, analytics — no settings",    color: "#38bdf8", icon: UserCog },
-  viewer: { label: "Viewer",       desc: "Same views as Loan Officer, strictly read-only",            color: "#64708c", icon: Eye },
+  admin:  { label: "Admin",        desc: "Full access, including this page. Max 2 admins total.",     color: "var(--accent-violet)", icon: Shield },
+  agent:  { label: "Loan Officer", desc: "Leads, loans, calls, WhatsApp, analytics — no settings",    color: "var(--accent-cyan)", icon: UserCog },
+  viewer: { label: "Viewer",       desc: "Same views as Loan Officer, strictly read-only",            color: "var(--text-muted)", icon: Eye },
 }
 
 function RoleBadge({ role }: { role: Role }) {
@@ -266,7 +266,7 @@ function AccessPageInner() {
                   <button
                     onClick={() => removeEmail(e.email)}
                     disabled={busy}
-                    style={{ background: "rgba(251,86,112,0.14)", border: "1px solid rgba(251,86,112,0.4)", color: "#fb5670", borderRadius: 8, padding: "6px 12px", fontSize: 12, fontWeight: 600 }}
+                    style={{ background: "rgba(251,86,112,0.14)", border: "1px solid rgba(251,86,112,0.4)", color: "var(--accent-red)", borderRadius: 8, padding: "6px 12px", fontSize: 12, fontWeight: 600 }}
                   >
                     Confirm remove
                   </button>
@@ -289,7 +289,7 @@ function AccessPageInner() {
                     color: e.email === you ? "var(--border)" : "var(--text-muted)",
                     cursor: e.email === you ? "not-allowed" : "pointer", flexShrink: 0,
                   }}
-                  onMouseEnter={ev => { if (e.email !== you) { ev.currentTarget.style.color = "#fb5670"; ev.currentTarget.style.borderColor = "rgba(251,86,112,0.4)" } }}
+                  onMouseEnter={ev => { if (e.email !== you) { ev.currentTarget.style.color = "var(--accent-red)"; ev.currentTarget.style.borderColor = "rgba(251,86,112,0.4)" } }}
                   onMouseLeave={ev => { ev.currentTarget.style.color = e.email === you ? "var(--border)" : "var(--text-muted)"; ev.currentTarget.style.borderColor = "var(--border)" }}
                 >
                   <Trash2 size={14} strokeWidth={1.9} />

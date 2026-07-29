@@ -14,15 +14,15 @@ type Call = {
 type Lead = { id: string; name: string; phone: string }
 
 const OUTCOME_STYLE: Record<string, { bg: string; color: string }> = {
-  resolved:    { bg: "rgba(34,197,94,0.15)",  color: "#4ade80" },
-  missed:      { bg: "rgba(239,68,68,0.15)",  color: "#f87171" },
-  voicemail:   { bg: "rgba(245,158,11,0.15)", color: "#fbbf24" },
-  transferred: { bg: "rgba(59,130,246,0.15)", color: "#60a5fa" },
-  pending:     { bg: "rgba(100,116,139,0.15)",color: "#94a3b8" },
-  failed:      { bg: "rgba(239,68,68,0.15)",  color: "#f87171" },
+  resolved:    { bg: "rgba(34,197,94,0.15)",  color: "var(--accent-green)" },
+  missed:      { bg: "rgba(239,68,68,0.15)",  color: "var(--accent-red)" },
+  voicemail:   { bg: "rgba(245,158,11,0.15)", color: "var(--accent-yellow)" },
+  transferred: { bg: "rgba(59,130,246,0.15)", color: "var(--accent-blue)" },
+  pending:     { bg: "rgba(100,116,139,0.15)",color: "var(--text-secondary)" },
+  failed:      { bg: "rgba(239,68,68,0.15)",  color: "var(--accent-red)" },
 }
 const SENTIMENT_COLOR: Record<string, string> = {
-  Positive: "#4ade80", Neutral: "#94a3b8", Negative: "#f87171"
+  Positive: "var(--accent-green)", Neutral: "var(--text-secondary)", Negative: "var(--accent-red)"
 }
 
 // Proxy Exotel recordings through our server to avoid browser auth popup
@@ -180,7 +180,7 @@ export default function VoiceLogsView({ role }: { role: "admin" | "agent" | "vie
         <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: 20 }}>
           <div style={{ fontWeight: 600, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ width: 26, height: 26, borderRadius: 8, background: "rgba(139,124,255,0.15)", border: "1px solid rgba(139,124,255,0.3)", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-              <Bot size={14} style={{ color: "#a5b0ff" }} />
+              <Bot size={14} style={{ color: "var(--accent-violet)" }} />
             </span>
             Trigger AI Outbound Call
           </div>
@@ -191,7 +191,7 @@ export default function VoiceLogsView({ role }: { role: "admin" | "agent" | "vie
                 padding: "6px 14px", borderRadius: 8, fontSize: 13,
                 border: "1px solid var(--border)",
                 background: mode === m ? "rgba(59,130,246,0.15)" : "transparent",
-                color: mode === m ? "#60a5fa" : "var(--text-secondary)"
+                color: mode === m ? "var(--accent-blue)" : "var(--text-secondary)"
               }}>{m === "lead" ? "Select Lead" : "Manual Number"}</button>
             ))}
           </div>
@@ -220,7 +220,7 @@ export default function VoiceLogsView({ role }: { role: "admin" | "agent" | "vie
             onChange={e => setInstructions(e.target.value)}
             placeholder="e.g. Follow up on home loan enquiry, mention 8.4% rate offer"
             rows={2}
-            style={{ width: "100%", background: "#0d1422", border: "1px solid var(--border)", color: "var(--text-primary)", borderRadius: 8, padding: 10, fontSize: 13, resize: "vertical", marginBottom: 12 }}
+            style={{ width: "100%", background: "var(--bg-card)", border: "1px solid var(--border)", color: "var(--text-primary)", borderRadius: 8, padding: 10, fontSize: 13, resize: "vertical", marginBottom: 12 }}
           />
 
           <button
@@ -271,7 +271,7 @@ export default function VoiceLogsView({ role }: { role: "admin" | "agent" | "vie
                 background: call.direction === "inbound" ? "rgba(56,189,248,0.12)" : "rgba(139,124,255,0.12)",
                 border: `1px solid ${call.direction === "inbound" ? "rgba(56,189,248,0.28)" : "rgba(139,124,255,0.28)"}`,
                 display: "flex", alignItems: "center", justifyContent: "center",
-                color: call.direction === "inbound" ? "#38bdf8" : "#a5b0ff",
+                color: call.direction === "inbound" ? "var(--accent-cyan)" : "var(--accent-violet)",
               }}>
                 {call.direction === "inbound" ? <PhoneIncoming size={16} strokeWidth={1.9} /> : <PhoneOutgoing size={16} strokeWidth={1.9} />}
               </div>
@@ -281,7 +281,7 @@ export default function VoiceLogsView({ role }: { role: "admin" | "agent" | "vie
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <span style={{ fontSize: 13, color: "var(--text-secondary)", fontFamily: "monospace" }}>{formatDuration(call.duration || 0)}</span>
-                <span style={{ color: SENTIMENT_COLOR[call.sentiment] ?? SENTIMENT_COLOR.Neutral, fontSize: 12, padding: "3px 10px", background: "rgba(255,255,255,0.05)", borderRadius: 6 }}>
+                <span style={{ color: SENTIMENT_COLOR[call.sentiment] ?? SENTIMENT_COLOR.Neutral, fontSize: 12, padding: "3px 10px", background: "var(--overlay-hover)", borderRadius: 6 }}>
                   {call.sentiment || "Neutral"}
                 </span>
                 <span style={{ background: ost.bg, color: ost.color, borderRadius: 6, padding: "4px 10px", fontSize: 12, fontWeight: 600, textTransform: "capitalize" }}>
@@ -297,7 +297,7 @@ export default function VoiceLogsView({ role }: { role: "admin" | "agent" | "vie
                     border: `1px solid ${hasRec ? "rgba(34,197,94,0.3)" : "var(--border)"}`,
                     borderRadius: "50%", width: 32, height: 32,
                     display: "flex", alignItems: "center", justifyContent: "center",
-                    color: hasRec ? "#2dd4a0" : "var(--border)",
+                    color: hasRec ? "var(--accent-green)" : "var(--border)",
                     cursor: hasRec ? "pointer" : "not-allowed",
                   }}
                 >
@@ -379,7 +379,7 @@ export default function VoiceLogsView({ role }: { role: "admin" | "agent" | "vie
                     style={{
                       width: 30, height: 30, borderRadius: "50%", flexShrink: 0, padding: 0,
                       background: "rgba(34,197,94,0.15)", border: "1px solid rgba(34,197,94,0.3)",
-                      display: "flex", alignItems: "center", justifyContent: "center", color: "#2dd4a0",
+                      display: "flex", alignItems: "center", justifyContent: "center", color: "var(--accent-green)",
                       cursor: "pointer",
                     }}
                   >
@@ -394,7 +394,7 @@ export default function VoiceLogsView({ role }: { role: "admin" | "agent" | "vie
                     step={0.1}
                     value={playingId === selected.id ? currentTime : 0}
                     onChange={seek}
-                    style={{ flex: 1, accentColor: "#2dd4a0" }}
+                    style={{ flex: 1, accentColor: "var(--accent-green)" }}
                   />
                   <span style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: "monospace", minWidth: 78, textAlign: "right" }}>
                     {fmtTime(playingId === selected.id ? currentTime : 0)} / {fmtTime(playingId === selected.id && audioDuration ? audioDuration : selected.duration || 0)}
@@ -409,8 +409,8 @@ export default function VoiceLogsView({ role }: { role: "admin" | "agent" | "vie
                 <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 12, fontWeight: 600, letterSpacing: "0.05em" }}>TRANSCRIPT</div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {selected.transcript.map((t: any, i: number) => (
-                    <div key={i} style={{ display: "flex", gap: 12, padding: "8px 12px", borderRadius: 8, background: t.role === "ai" ? "rgba(59,130,246,0.08)" : "rgba(255,255,255,0.03)" }}>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: t.role === "ai" ? "#60a5fa" : "var(--text-muted)", minWidth: 80, flexShrink: 0, textTransform: "uppercase" }}>
+                    <div key={i} style={{ display: "flex", gap: 12, padding: "8px 12px", borderRadius: 8, background: t.role === "ai" ? "rgba(59,130,246,0.08)" : "var(--overlay-soft)" }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: t.role === "ai" ? "var(--accent-blue)" : "var(--text-muted)", minWidth: 80, flexShrink: 0, textTransform: "uppercase" }}>
                         {t.role === "ai" ? "Priya" : "Customer"}
                       </span>
                       <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>{t.text}</span>

@@ -100,14 +100,14 @@ export default function UploadView() {
   }
 
   const STATUS_STYLE: Record<string, { color: string }> = {
-    done: { color: "#4ade80" }, processing: { color: "#fbbf24" }, pending: { color: "#60a5fa" }, failed: { color: "#f87171" },
+    done: { color: "var(--accent-green)" }, processing: { color: "var(--accent-yellow)" }, pending: { color: "var(--accent-blue)" }, failed: { color: "var(--accent-red)" },
   }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
         <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: 24 }}>
-          <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}><ClipboardList size={16} strokeWidth={1.9} style={{ color: "#a5b0ff" }} /> Upload Contacts (CSV / Google Sheet)</div>
+          <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}><ClipboardList size={16} strokeWidth={1.9} style={{ color: "var(--accent-violet)" }} /> Upload Contacts (CSV / Google Sheet)</div>
           <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16 }}>Upload a CSV with columns: name, phone, language, product_interest, notes</div>
           <div style={{ border: "2px dashed var(--border)", borderRadius: 10, padding: 28, textAlign: "center", cursor: "pointer", marginBottom: 12 }} onClick={() => csvRef.current?.click()}>
             <FolderUp size={30} strokeWidth={1.4} style={{ marginBottom: 8, color: "var(--text-muted)" }} />
@@ -118,7 +118,7 @@ export default function UploadView() {
         </div>
 
         <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: 24 }}>
-          <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}><FileText size={16} strokeWidth={1.9} style={{ color: "#38bdf8" }} /> Upload AI Script / Document</div>
+          <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}><FileText size={16} strokeWidth={1.9} style={{ color: "var(--accent-cyan)" }} /> Upload AI Script / Document</div>
           <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16 }}>Upload what AI should reference during calls — .txt, .pdf, .docx</div>
           <div style={{ border: "2px dashed var(--border)", borderRadius: 10, padding: 28, textAlign: "center", cursor: "pointer", marginBottom: 12 }} onClick={() => docRef.current?.click()}>
             <FileUp size={30} strokeWidth={1.4} style={{ marginBottom: 8, color: "var(--text-muted)" }} />
@@ -130,14 +130,14 @@ export default function UploadView() {
 
       {/* Batch calling controls */}
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: 24 }}>
-        <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}><Phone size={16} strokeWidth={1.9} style={{ color: "#2dd4a0" }} /> Batch Calling</div>
+        <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}><Phone size={16} strokeWidth={1.9} style={{ color: "var(--accent-green)" }} /> Batch Calling</div>
         <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16 }}>
           {queueCount !== null ? `${queueCount} contacts pending in the queue` : "Loading queue…"}
         </div>
 
         <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-          <button onClick={() => setBatchMode("sequential")} style={{ padding: "6px 14px", borderRadius: 8, fontSize: 13, border: "1px solid var(--border)", background: batchMode === "sequential" ? "rgba(59,130,246,0.15)" : "transparent", color: batchMode === "sequential" ? "#60a5fa" : "var(--text-secondary)" }}>Call One By One</button>
-          <button onClick={() => setBatchMode("parallel")} style={{ padding: "6px 14px", borderRadius: 8, fontSize: 13, border: "1px solid var(--border)", background: batchMode === "parallel" ? "rgba(59,130,246,0.15)" : "transparent", color: batchMode === "parallel" ? "#60a5fa" : "var(--text-secondary)" }}>Call Multiple At A Time</button>
+          <button onClick={() => setBatchMode("sequential")} style={{ padding: "6px 14px", borderRadius: 8, fontSize: 13, border: "1px solid var(--border)", background: batchMode === "sequential" ? "rgba(59,130,246,0.15)" : "transparent", color: batchMode === "sequential" ? "var(--accent-blue)" : "var(--text-secondary)" }}>Call One By One</button>
+          <button onClick={() => setBatchMode("parallel")} style={{ padding: "6px 14px", borderRadius: 8, fontSize: 13, border: "1px solid var(--border)", background: batchMode === "parallel" ? "rgba(59,130,246,0.15)" : "transparent", color: batchMode === "parallel" ? "var(--accent-blue)" : "var(--text-secondary)" }}>Call Multiple At A Time</button>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: batchMode === "parallel" ? "1fr 1fr" : "1fr", gap: 12, marginBottom: 16 }}>
@@ -160,7 +160,7 @@ export default function UploadView() {
 
       {/* Manual single entry */}
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: 24 }}>
-        <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}><Plus size={16} strokeWidth={2.1} style={{ color: "#f7b731" }} /> Add Single Number to Queue</div>
+        <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}><Plus size={16} strokeWidth={2.1} style={{ color: "var(--accent-yellow)" }} /> Add Single Number to Queue</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 12 }}>
           {[["name", "Full Name *"], ["phone", "Phone Number *"]].map(([k, l]) => (
             <div key={k}>
@@ -212,7 +212,7 @@ export default function UploadView() {
 
       {uploading && (
         <div style={{ position: "fixed", bottom: 24, right: 24, background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 10, padding: "14px 20px", fontSize: 14, display: "flex", alignItems: "center", gap: 10, zIndex: 100 }}>
-          <div style={{ width: 16, height: 16, border: "2px solid #3b82f6", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+          <div style={{ width: 16, height: 16, border: "2px solid var(--accent-blue)", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
           Uploading file…
         </div>
       )}

@@ -18,11 +18,11 @@ type Notification = {
 }
 
 const TYPE_META: Record<Notification["type"], { icon: typeof Bell; color: string }> = {
-  loan_application: { icon: FileText, color: "#38bdf8" },
-  escalation: { icon: AlertTriangle, color: "#fb5670" },
-  login: { icon: LogIn, color: "#a5b0ff" },
-  whatsapp_message: { icon: MessageCircle, color: "#2dd4a0" },
-  loan_edit_request: { icon: PenLine, color: "#f7b731" },
+  loan_application: { icon: FileText, color: "var(--accent-cyan)" },
+  escalation: { icon: AlertTriangle, color: "var(--accent-red)" },
+  login: { icon: LogIn, color: "var(--accent-violet)" },
+  whatsapp_message: { icon: MessageCircle, color: "var(--accent-green)" },
+  loan_edit_request: { icon: PenLine, color: "var(--accent-yellow)" },
 }
 
 export default function NotificationBell({ onNavigate }: { onNavigate: (view: ViewKey) => void }) {
@@ -76,7 +76,7 @@ export default function NotificationBell({ onNavigate }: { onNavigate: (view: Vi
       <button
         onClick={() => setOpen(o => !o)}
         aria-label="Notifications"
-        className="relative flex h-9 w-9 items-center justify-center rounded-[10px] border border-transparent text-[var(--text-secondary)] hover:border-[var(--border)] hover:bg-white/[0.04] hover:text-[var(--text-primary)]"
+        className="relative flex h-9 w-9 items-center justify-center rounded-[10px] border border-transparent text-[var(--text-secondary)] hover:border-[var(--border)] hover:bg-[var(--overlay-hover)] hover:text-[var(--text-primary)]"
       >
         <Bell size={16} strokeWidth={1.9} />
         {unread > 0 && (
@@ -93,7 +93,7 @@ export default function NotificationBell({ onNavigate }: { onNavigate: (view: Vi
         <div
           style={{
             position: "absolute", right: 0, top: 44, width: 360, maxHeight: 440,
-            background: "rgba(12,17,29,0.98)", border: "1px solid #232c45", borderRadius: 14,
+            background: "rgba(12,17,29,0.98)", border: "1px solid var(--border)", borderRadius: 14,
             boxShadow: "0 20px 60px -12px rgba(0,0,0,0.7)", zIndex: 200, overflow: "hidden",
             display: "flex", flexDirection: "column", animation: "paletteIn 0.14s ease",
           }}
@@ -131,7 +131,7 @@ export default function NotificationBell({ onNavigate }: { onNavigate: (view: Vi
                   <span style={{ flex: 1, minWidth: 0 }}>
                     <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
                       <span style={{ fontSize: 13, fontWeight: n.read ? 500 : 650, color: "var(--text-primary)" }}>{n.title}</span>
-                      {!n.read && <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#8b7cff", flexShrink: 0 }} />}
+                      {!n.read && <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--accent-violet)", flexShrink: 0 }} />}
                     </span>
                     {n.body && <span style={{ display: "block", fontSize: 11.5, color: "var(--text-muted)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{n.body}</span>}
                     <span style={{ display: "block", fontSize: 10.5, color: "var(--text-muted)", marginTop: 3 }}>{timeAgo(n.created_at)} · {formatDateTime(n.created_at)}</span>

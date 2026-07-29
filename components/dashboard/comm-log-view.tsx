@@ -27,12 +27,12 @@ export default function CommLogView() {
   useEffect(() => { load(); const t=setInterval(load,15000); return ()=>clearInterval(t) }, [])
 
   const STATUS_STYLE: Record<string,{bg:string;color:string}> = {
-    completed: {bg:"rgba(45,212,160,0.13)",  color:"#2dd4a0"},
-    failed:    {bg:"rgba(251,86,112,0.13)",  color:"#fb7185"},
-    initiated: {bg:"rgba(91,124,250,0.13)",  color:"#8ba3ff"},
-    "in-progress":{bg:"rgba(247,183,49,0.13)",color:"#f7b731"},
-    sent:      {bg:"rgba(45,212,160,0.13)",  color:"#2dd4a0"},
-    replied:   {bg:"rgba(91,124,250,0.13)",  color:"#8ba3ff"},
+    completed: {bg:"rgba(45,212,160,0.13)",  color:"var(--accent-green)"},
+    failed:    {bg:"rgba(251,86,112,0.13)",  color:"var(--accent-red)"},
+    initiated: {bg:"rgba(91,124,250,0.13)",  color:"var(--accent-blue)"},
+    "in-progress":{bg:"rgba(247,183,49,0.13)",color:"var(--accent-yellow)"},
+    sent:      {bg:"rgba(45,212,160,0.13)",  color:"var(--accent-green)"},
+    replied:   {bg:"rgba(91,124,250,0.13)",  color:"var(--accent-blue)"},
   }
 
   return (
@@ -41,7 +41,7 @@ export default function CommLogView() {
       <div className="max-h-[400px] md:max-h-none" style={{ background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:12,display:"flex",flexDirection:"column",overflow:"hidden" }}>
         <div style={{ padding:"18px 20px",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center" }}>
           <div style={{ display:"flex",alignItems:"center",gap:10 }}>
-            <span style={{ width:28,height:28,borderRadius:8,background:"rgba(139,124,255,0.13)",border:"1px solid rgba(139,124,255,0.28)",display:"inline-flex",alignItems:"center",justifyContent:"center",color:"#a5b0ff" }}>
+            <span style={{ width:28,height:28,borderRadius:8,background:"rgba(139,124,255,0.13)",border:"1px solid rgba(139,124,255,0.28)",display:"inline-flex",alignItems:"center",justifyContent:"center",color:"var(--accent-violet)" }}>
               <Phone size={14} strokeWidth={1.9} />
             </span>
             <div style={{ fontWeight:600,fontSize:15 }}>Recent Auto-Calls</div>
@@ -74,11 +74,11 @@ export default function CommLogView() {
                   <div style={{ background:"var(--bg-secondary)",borderRadius:8,padding:14,marginTop:8 }}>
                     {transcript.map((t:any,i:number)=>(
                       <div key={i} style={{ display:"flex",gap:8,marginBottom:8 }}>
-                        <span style={{ flexShrink:0,width:22,height:22,borderRadius:6,display:"inline-flex",alignItems:"center",justifyContent:"center",background:t.role==="ai"?"rgba(139,124,255,0.13)":"rgba(255,255,255,0.05)",color:t.role==="ai"?"#a5b0ff":"var(--text-muted)" }}>
+                        <span style={{ flexShrink:0,width:22,height:22,borderRadius:6,display:"inline-flex",alignItems:"center",justifyContent:"center",background:t.role==="ai"?"rgba(139,124,255,0.13)":"var(--overlay-hover)",color:t.role==="ai"?"var(--accent-violet)":"var(--text-muted)" }}>
                           {t.role==="ai"?<Bot size={12} strokeWidth={1.9}/>:<User size={12} strokeWidth={1.9}/>}
                         </span>
                         <div>
-                          <span style={{ fontSize:11,fontWeight:700,color:t.role==="ai"?"#60a5fa":"var(--text-muted)",marginRight:6,textTransform:"uppercase" }}>{t.role==="ai"?"AI":"CUSTOMER"}</span>
+                          <span style={{ fontSize:11,fontWeight:700,color:t.role==="ai"?"var(--accent-blue)":"var(--text-muted)",marginRight:6,textTransform:"uppercase" }}>{t.role==="ai"?"AI":"CUSTOMER"}</span>
                           <span style={{ fontSize:13,color:"var(--text-secondary)" }}>{t.text}</span>
                         </div>
                       </div>
@@ -95,7 +95,7 @@ export default function CommLogView() {
       <div className="max-h-[400px] md:max-h-none" style={{ background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:12,display:"flex",flexDirection:"column",overflow:"hidden" }}>
         <div style={{ padding:"18px 20px",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center" }}>
           <div style={{ display:"flex",alignItems:"center",gap:10 }}>
-            <span style={{ width:28,height:28,borderRadius:8,background:"rgba(45,212,160,0.11)",border:"1px solid rgba(45,212,160,0.28)",display:"inline-flex",alignItems:"center",justifyContent:"center",color:"#2dd4a0" }}>
+            <span style={{ width:28,height:28,borderRadius:8,background:"rgba(45,212,160,0.11)",border:"1px solid rgba(45,212,160,0.28)",display:"inline-flex",alignItems:"center",justifyContent:"center",color:"var(--accent-green)" }}>
               <MessageCircle size={14} strokeWidth={1.9} />
             </span>
             <div style={{ fontWeight:600,fontSize:15 }}>WhatsApp Automation</div>
@@ -109,7 +109,7 @@ export default function CommLogView() {
             const st = STATUS_STYLE[log.outcome]??STATUS_STYLE.sent
             return (
               <div key={log.id} style={{ padding:"16px 20px",borderBottom:"1px solid var(--border-light)" }}>
-                {log.type && <div style={{ fontSize:11,color:"var(--text-muted)",marginBottom:6,display:"flex",alignItems:"center",gap:5,textTransform:"capitalize" }}><Zap size={11} style={{ color:"#f7b731" }} /> {log.type}</div>}
+                {log.type && <div style={{ fontSize:11,color:"var(--text-muted)",marginBottom:6,display:"flex",alignItems:"center",gap:5,textTransform:"capitalize" }}><Zap size={11} style={{ color:"var(--accent-yellow)" }} /> {log.type}</div>}
                 <div style={{ background:"var(--gradient-brand)",borderRadius:12,borderBottomLeftRadius:4,padding:"10px 14px",marginBottom:8,display:"inline-block",maxWidth:"85%" }}>
                   <div style={{ fontSize:13,color:"white" }}>{log.summary}</div>
                 </div>

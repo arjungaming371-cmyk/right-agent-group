@@ -53,15 +53,15 @@ export default function SystemStatus() {
     switch (s) {
       case "operational":
       case "connected":
-        return "#10b981"
+        return "var(--accent-green)"
       case "degraded":
       case "error":
-        return "#f59e0b"
+        return "var(--accent-yellow)"
       case "down":
       case "disconnected":
-        return "#ef4444"
+        return "var(--accent-red)"
       default:
-        return "#64748b"
+        return "var(--text-muted)"
     }
   }
 

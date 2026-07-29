@@ -187,7 +187,7 @@ export default function SecurityView() {
         <div style={{ background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:12 }}>
           <div style={{ padding:"18px 24px",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center" }}>
             <div style={{ fontWeight:600,fontSize:15 }}>Access Controls</div>
-            <span style={{ background:"rgba(45,212,160,0.11)",color:"#2dd4a0",border:"1px solid rgba(45,212,160,0.3)",borderRadius:6,padding:"4px 12px",fontSize:12,fontWeight:600,display:"inline-flex",alignItems:"center",gap:5 }}><ShieldCheck size={13} strokeWidth={2} /> {activeCount}/{total} active</span>
+            <span style={{ background:"rgba(45,212,160,0.11)",color:"var(--accent-green)",border:"1px solid rgba(45,212,160,0.3)",borderRadius:6,padding:"4px 12px",fontSize:12,fontWeight:600,display:"inline-flex",alignItems:"center",gap:5 }}><ShieldCheck size={13} strokeWidth={2} /> {activeCount}/{total} active</span>
           </div>
           {loading && <SkeletonList rows={4} />}
           {!loading && orderedSettings.map(item => {
@@ -214,7 +214,7 @@ export default function SecurityView() {
           <div style={{ padding:"18px 24px",borderBottom:"1px solid var(--border)" }}>
             <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
               <div style={{ fontWeight:600,fontSize:15,display:"flex",alignItems:"center",gap:8 }}><Clock size={15} strokeWidth={2} style={{ color:"var(--text-muted)" }} /> Regulatory Compliance</div>
-              <span style={{ background:"rgba(139,124,255,0.11)",color:"#a5b0ff",border:"1px solid rgba(139,124,255,0.3)",borderRadius:6,padding:"4px 12px",fontSize:12,fontWeight:600,display:"inline-flex",alignItems:"center",gap:5 }}><PhoneOff size={12} strokeWidth={2} /> {dndCount} suppressed</span>
+              <span style={{ background:"rgba(139,124,255,0.11)",color:"var(--accent-violet)",border:"1px solid rgba(139,124,255,0.3)",borderRadius:6,padding:"4px 12px",fontSize:12,fontWeight:600,display:"inline-flex",alignItems:"center",gap:5 }}><PhoneOff size={12} strokeWidth={2} /> {dndCount} suppressed</span>
             </div>
             <div style={{ fontSize:12,color:"var(--text-muted)",marginTop:6,lineHeight:1.5 }}>
               Blocks outbound calls outside the configured hours (TRAI/RBI) and against the suppression list below. This is not a live sync with TRAI's National Customer Preference Register — that requires Registered Telemarketer (RTM) registration. Verify these defaults with your compliance advisor.
@@ -267,7 +267,7 @@ export default function SecurityView() {
                             fontSize:11, padding:"5px 9px", borderRadius:6, cursor: compliance.enabled ? "pointer" : "default",
                             border: `1px solid ${compliance.days.includes(d.code) ? "rgba(139,124,255,0.5)" : "var(--border)"}`,
                             background: compliance.days.includes(d.code) ? "rgba(139,124,255,0.15)" : "transparent",
-                            color: compliance.days.includes(d.code) ? "#a5b0ff" : "var(--text-muted)",
+                            color: compliance.days.includes(d.code) ? "var(--accent-violet)" : "var(--text-muted)",
                           }}
                         >{d.label}</button>
                       ))}
@@ -292,7 +292,7 @@ export default function SecurityView() {
                     onChange={(e) => setDndPaste(e.target.value)}
                     placeholder="Paste phone numbers to suppress, one per line (or an NCPR extract if you're a Registered Telemarketer)…"
                     rows={2}
-                    style={{ flex:1, background:"#0d1422", border:"1px solid var(--border)", color:"var(--text-primary)", borderRadius:8, padding:8, fontSize:12.5, resize:"vertical" }}
+                    style={{ flex:1, background:"var(--bg-card)", border:"1px solid var(--border)", color:"var(--text-primary)", borderRadius:8, padding:8, fontSize:12.5, resize:"vertical" }}
                   />
                   <button
                     onClick={addDndNumbers}
@@ -333,7 +333,7 @@ export default function SecurityView() {
           )}
           {logs.map((log) => (
             <div key={log.id} style={{ padding:"14px 24px",borderBottom:"1px solid var(--border-light)",display:"flex",alignItems:"center",gap:14 }}>
-              <span style={{ width:30,height:30,borderRadius:8,background:"rgba(255,255,255,0.04)",display:"inline-flex",alignItems:"center",justifyContent:"center",color:"var(--text-muted)",flexShrink:0 }}><FileLock2 size={14} strokeWidth={1.8} /></span>
+              <span style={{ width:30,height:30,borderRadius:8,background:"var(--overlay-hover)",display:"inline-flex",alignItems:"center",justifyContent:"center",color:"var(--text-muted)",flexShrink:0 }}><FileLock2 size={14} strokeWidth={1.8} /></span>
               <div style={{ flex:1 }}>
                 <div style={{ fontSize:14,fontWeight:500 }}>{log.action}</div>
                 <div style={{ fontSize:12,color:"var(--text-muted)",marginTop:2 }}>{log.performed_by}</div>
@@ -352,14 +352,14 @@ export default function SecurityView() {
         <div style={{ background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:12,padding:24 }}>
           <div style={{ fontWeight:600,fontSize:15,marginBottom:20 }}>Security Posture</div>
           <div style={{ display:"flex",alignItems:"center",gap:16,marginBottom:16 }}>
-            <div style={{ width:52,height:52,borderRadius:"50%",background: score >= 75 ? "rgba(45,212,160,0.12)" : "rgba(247,183,49,0.12)",border: `2px solid ${score >= 75 ? "#2dd4a0" : "#f7b731"}`,display:"flex",alignItems:"center",justifyContent:"center",color: score >= 75 ? "#2dd4a0" : "#f7b731" }}>{score >= 75 ? <ShieldCheck size={22} strokeWidth={2} /> : <AlertTriangle size={20} strokeWidth={2} />}</div>
+            <div style={{ width:52,height:52,borderRadius:"50%",background: score >= 75 ? "rgba(45,212,160,0.12)" : "rgba(247,183,49,0.12)",border: `2px solid ${score >= 75 ? "var(--accent-green)" : "var(--accent-yellow)"}`,display:"flex",alignItems:"center",justifyContent:"center",color: score >= 75 ? "var(--accent-green)" : "var(--accent-yellow)" }}>{score >= 75 ? <ShieldCheck size={22} strokeWidth={2} /> : <AlertTriangle size={20} strokeWidth={2} />}</div>
             <div>
               <div style={{ fontSize:28,fontWeight:700 }}>{grade}</div>
               <div style={{ fontSize:12,color:"var(--text-muted)" }}>{score >= 75 ? "All critical controls enforced" : "Some controls disabled"}</div>
             </div>
           </div>
           <div style={{ background:"var(--bg-secondary)",borderRadius:4,height:8,marginBottom:8 }}>
-            <div style={{ width:`${score}%`,height:"100%",background: score >= 75 ? "#22c55e" : "#f59e0b",borderRadius:4,transition:"width 0.5s" }} />
+            <div style={{ width:`${score}%`,height:"100%",background: score >= 75 ? "var(--accent-green)" : "var(--accent-yellow)",borderRadius:4,transition:"width 0.5s" }} />
           </div>
           <div style={{ fontSize:12,color:"var(--text-muted)" }}>{score}% compliance score</div>
         </div>

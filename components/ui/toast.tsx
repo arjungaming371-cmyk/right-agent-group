@@ -24,9 +24,9 @@ export function useToast(): ToastApi {
 }
 
 const KIND_STYLE: Record<Kind, { color: string; bg: string; Icon: typeof CheckCircle2 }> = {
-  success: { color: "#2dd4a0", bg: "rgba(45,212,160,0.12)", Icon: CheckCircle2 },
-  error:   { color: "#fb5670", bg: "rgba(251,86,112,0.12)", Icon: XCircle },
-  info:    { color: "#38bdf8", bg: "rgba(56,189,248,0.12)", Icon: Info },
+  success: { color: "var(--accent-green)", bg: "rgba(45,212,160,0.12)", Icon: CheckCircle2 },
+  error:   { color: "var(--accent-red)", bg: "rgba(251,86,112,0.12)", Icon: XCircle },
+  info:    { color: "var(--accent-cyan)", bg: "rgba(56,189,248,0.12)", Icon: Info },
 }
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {

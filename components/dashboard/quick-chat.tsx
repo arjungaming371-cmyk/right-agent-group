@@ -223,7 +223,7 @@ export default function QuickChat({ role = "agent", userEmail = "" }: { role?: U
           position: "fixed", ...posStyle, width: FAB_SIZE, height: FAB_SIZE, borderRadius: "50%",
           background: "var(--gradient-brand)", border: "none", color: "white",
           fontSize: 22, display: "flex", alignItems: "center", justifyContent: "center",
-          boxShadow: dragging ? "0 12px 36px -6px rgba(79,124,255,0.7), 0 0 0 1px rgba(255,255,255,0.12)" : "0 8px 28px -6px rgba(79,124,255,0.55), 0 0 0 1px rgba(255,255,255,0.08)",
+          boxShadow: dragging ? "0 12px 36px -6px rgba(79,124,255,0.7), 0 0 0 1px var(--overlay-line)" : "0 8px 28px -6px rgba(79,124,255,0.55), 0 0 0 1px var(--overlay-chip)",
           cursor: dragging ? "grabbing" : "grab", zIndex: 999,
           animation: pos ? "none" : "fadeInUp 0.3s ease",
           touchAction: "none", userSelect: "none",
@@ -241,7 +241,7 @@ export default function QuickChat({ role = "agent", userEmail = "" }: { role?: U
       position: "fixed", bottom: 12, right: 12, left: 12, top: 12,
       width: "auto", height: "auto", maxWidth: 400, maxHeight: 560,
       marginLeft: "auto", marginTop: "auto",
-      borderRadius: 18, boxShadow: "0 20px 60px -12px rgba(0,0,0,0.65), 0 0 0 1px rgba(255,255,255,0.05)",
+      borderRadius: 18, boxShadow: "0 20px 60px -12px rgba(0,0,0,0.65), 0 0 0 1px var(--overlay-hover)",
       display: "flex", flexDirection: "column", zIndex: 999, overflow: "hidden",
       animation: "fadeInUp 0.2s ease",
     }}>
@@ -260,7 +260,7 @@ export default function QuickChat({ role = "agent", userEmail = "" }: { role?: U
           )}
           <div style={{ minWidth: 0 }}>
             <div style={{ fontWeight: 600, fontSize: 13, display: "flex", alignItems: "center", gap: 5 }}>
-              {view === "history" ? "Chat History" : "Ops Assistant"} {view === "chat" && <Sparkles size={11} style={{ color: "#8b7cff" }} />}
+              {view === "history" ? "Chat History" : "Ops Assistant"} {view === "chat" && <Sparkles size={11} style={{ color: "var(--accent-violet)" }} />}
             </div>
             <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{view === "history" ? `${chats.length} conversation${chats.length === 1 ? "" : "s"}` : "Internal only · Full data access"}</div>
           </div>
@@ -300,7 +300,7 @@ export default function QuickChat({ role = "agent", userEmail = "" }: { role?: U
               </button>
               {confirmDelete === c.id ? (
                 <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-                  <button onClick={() => deleteChat(c.id)} style={{ fontSize: 10.5, fontWeight: 600, color: "#fb5670", background: "rgba(251,86,112,0.12)", border: "1px solid rgba(251,86,112,0.35)", borderRadius: 6, padding: "4px 7px" }}>Delete</button>
+                  <button onClick={() => deleteChat(c.id)} style={{ fontSize: 10.5, fontWeight: 600, color: "var(--accent-red)", background: "rgba(251,86,112,0.12)", border: "1px solid rgba(251,86,112,0.35)", borderRadius: 6, padding: "4px 7px" }}>Delete</button>
                   <button onClick={() => setConfirmDelete(null)} style={{ fontSize: 10.5, color: "var(--text-muted)", background: "transparent", border: "1px solid var(--border)", borderRadius: 6, padding: "4px 7px" }}>Cancel</button>
                 </div>
               ) : (

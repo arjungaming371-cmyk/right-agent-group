@@ -18,7 +18,7 @@ function EmiEstimate({ loanAmount, loanType }: { loanAmount: number; loanType: s
   return (
     <div style={{ background: "var(--bg-secondary)", borderRadius: 8, padding: 14, display: "flex", gap: 24, flexWrap: "wrap" }}>
       <div>
-        <div style={{ fontSize: 20, fontWeight: 700, color: "#2dd4a0" }}>{formatINR(emi)}<span style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 500 }}> /month</span></div>
+        <div style={{ fontSize: 20, fontWeight: 700, color: "var(--accent-green)" }}>{formatINR(emi)}<span style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 500 }}> /month</span></div>
         <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>at {rate.ratePct}% p.a. ({rate.lender}) over {rate.maxTenureYears} years</div>
       </div>
       <div>
@@ -48,11 +48,14 @@ function fieldLabel(field: string): string {
   return field.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase())
 }
 
+// Tinted fill + accent-coloured initials — see the note on the matching
+// Avatar in leads-view.tsx.
 function Avatar({ name }: { name: string }) {
   const initials = (name || "?").split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()
-  const colors = ["#1d4ed8", "#7c3aed", "#0891b2", "#047857", "#b45309"]
+  const colors = ["var(--accent-blue)", "var(--accent-violet)", "var(--accent-cyan)", "var(--accent-green)", "var(--accent-yellow)"]
+  const color = colors[(name || "?").charCodeAt(0) % colors.length]
   return (
-    <div style={{ width: 36, height: 36, borderRadius: "50%", background: colors[(name || "?").charCodeAt(0) % colors.length], display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color: "white", flexShrink: 0 }}>
+    <div style={{ width: 36, height: 36, borderRadius: "50%", background: `color-mix(in oklab, ${color} 18%, transparent)`, border: `1px solid color-mix(in oklab, ${color} 32%, transparent)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color, flexShrink: 0 }}>
       {initials}
     </div>
   )
@@ -155,7 +158,7 @@ export default function LoanAppsView({ role, initialSearch }: { role: "admin" | 
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
     {canEdit && pendingEdits.length > 0 && (
       <div style={{ background: "rgba(247,183,49,0.06)", border: "1px solid rgba(247,183,49,0.25)", borderRadius: 12, padding: 16 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, fontWeight: 700, fontSize: 14, color: "#f7b731" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, fontWeight: 700, fontSize: 14, color: "var(--accent-yellow)" }}>
           <PenLine size={16} strokeWidth={2.2} /> Priya flagged {pendingEdits.length} application correction{pendingEdits.length > 1 ? "s" : ""} — needs your review
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -165,9 +168,9 @@ export default function LoanAppsView({ role, initialSearch }: { role: "admin" | 
                 <div style={{ fontSize: 13, fontWeight: 600 }}>{e.customer_name || e.lead_name || "Unknown"}</div>
                 <div style={{ fontSize: 12.5, color: "var(--text-secondary)", marginTop: 3, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                   {fieldLabel(e.previous_values.field)}:
-                  <span style={{ color: "#f87171", textDecoration: "line-through" }}>{String(e.previous_values.value ?? "—")}</span>
+                  <span style={{ color: "var(--accent-red)", textDecoration: "line-through" }}>{String(e.previous_values.value ?? "—")}</span>
                   →
-                  <span style={{ color: "#2dd4a0", fontWeight: 600 }}>{String(e.proposed_values.value)}</span>
+                  <span style={{ color: "var(--accent-green)", fontWeight: 600 }}>{String(e.proposed_values.value)}</span>
                 </div>
                 {e.reason && <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 3, fontStyle: "italic" }}>"{e.reason}"</div>}
                 <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3 }}>
@@ -178,12 +181,12 @@ export default function LoanAppsView({ role, initialSearch }: { role: "admin" | 
                 <button
                   onClick={() => reviewEditRequest(e.id, "approve")}
                   disabled={reviewing === e.id}
-                  style={{ background: "rgba(45,212,160,0.12)", border: "1px solid rgba(45,212,160,0.3)", color: "#2dd4a0", borderRadius: 8, padding: "7px 14px", fontSize: 12.5, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 5, opacity: reviewing === e.id ? 0.5 : 1 }}
+                  style={{ background: "rgba(45,212,160,0.12)", border: "1px solid rgba(45,212,160,0.3)", color: "var(--accent-green)", borderRadius: 8, padding: "7px 14px", fontSize: 12.5, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 5, opacity: reviewing === e.id ? 0.5 : 1 }}
                 ><Check size={13} strokeWidth={2.2} /> Approve</button>
                 <button
                   onClick={() => reviewEditRequest(e.id, "reject")}
                   disabled={reviewing === e.id}
-                  style={{ background: "rgba(248,113,113,0.1)", border: "1px solid rgba(248,113,113,0.28)", color: "#f87171", borderRadius: 8, padding: "7px 14px", fontSize: 12.5, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 5, opacity: reviewing === e.id ? 0.5 : 1 }}
+                  style={{ background: "rgba(248,113,113,0.1)", border: "1px solid rgba(248,113,113,0.28)", color: "var(--accent-red)", borderRadius: 8, padding: "7px 14px", fontSize: 12.5, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 5, opacity: reviewing === e.id ? 0.5 : 1 }}
                 ><X size={13} strokeWidth={2.2} /> Reject</button>
               </div>
             </div>
@@ -207,7 +210,7 @@ export default function LoanAppsView({ role, initialSearch }: { role: "admin" | 
         </div>
         <div style={{ flex: 1, overflowY: "auto" }}>
           {loading && <SkeletonList rows={4} />}
-          {!loading && loadError && <div style={{ padding: 30, textAlign: "center", color: "#f87171", fontSize: 13 }}>{loadError}</div>}
+          {!loading && loadError && <div style={{ padding: 30, textAlign: "center", color: "var(--accent-red)", fontSize: 13 }}>{loadError}</div>}
           {!loading && !loadError && filtered.length === 0 && <div style={{ padding: 30, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>No applications submitted yet.</div>}
           {filtered.map((app) => (
             <div
@@ -221,7 +224,7 @@ export default function LoanAppsView({ role, initialSearch }: { role: "admin" | 
                   <div style={{ fontWeight: 600, fontSize: 13 }}>{app.customer_name}</div>
                   <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={`${app.loan_type} · ${timeAgo(app.submitted_at || app.created_at)} · ${formatDateTime(app.submitted_at || app.created_at)}`}>{app.loan_type} · {timeAgo(app.submitted_at || app.created_at)} · {formatDateTime(app.submitted_at || app.created_at)}</div>
                 </div>
-                {app.status === "qualified" && <BadgeCheck size={15} strokeWidth={2} style={{ color: "#2dd4a0", flexShrink: 0 }} />}
+                {app.status === "qualified" && <BadgeCheck size={15} strokeWidth={2} style={{ color: "var(--accent-green)", flexShrink: 0 }} />}
               </div>
             </div>
           ))}
@@ -247,11 +250,11 @@ export default function LoanAppsView({ role, initialSearch }: { role: "admin" | 
                   <button
                     onClick={() => openHistory(selected.id)}
                     title={`Edited ${timeAgo(selected.last_edited_at)}`}
-                    style={{ background: "rgba(247,183,49,0.1)", border: "1px solid rgba(247,183,49,0.28)", color: "#f7b731", borderRadius: 8, padding: "6px 12px", fontSize: 12, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 5 }}
+                    style={{ background: "rgba(247,183,49,0.1)", border: "1px solid rgba(247,183,49,0.28)", color: "var(--accent-yellow)", borderRadius: 8, padding: "6px 12px", fontSize: 12, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 5 }}
                   ><History size={13} strokeWidth={2.2} /> Edited</button>
                 )}
                 {selected.status === "qualified" ? (
-                  <span style={{ color: "#2dd4a0", fontSize: 13, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 5, background: "rgba(45,212,160,0.1)", border: "1px solid rgba(45,212,160,0.3)", borderRadius: 8, padding: "6px 14px" }}><BadgeCheck size={14} strokeWidth={2} /> Qualified</span>
+                  <span style={{ color: "var(--accent-green)", fontSize: 13, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 5, background: "rgba(45,212,160,0.1)", border: "1px solid rgba(45,212,160,0.3)", borderRadius: 8, padding: "6px 14px" }}><BadgeCheck size={14} strokeWidth={2} /> Qualified</span>
                 ) : canEdit ? (
                   <button onClick={() => markStatus(selected.id, "qualified")} style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", color: "var(--text-secondary)", borderRadius: 8, padding: "8px 18px", fontSize: 13, fontWeight: 600 }}>Mark Qualified</button>
                 ) : null}
@@ -314,12 +317,12 @@ export default function LoanAppsView({ role, initialSearch }: { role: "admin" | 
                 <div key={h.id} style={{ background: "var(--bg-secondary)", borderRadius: 8, padding: 12, fontSize: 12.5 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 4 }}>
                     <span style={{ fontWeight: 600 }}>{fieldLabel(h.previous_values.field)}:</span>
-                    <span style={{ color: "#f87171", textDecoration: "line-through" }}>{String(h.previous_values.value ?? "—")}</span>
+                    <span style={{ color: "var(--accent-red)", textDecoration: "line-through" }}>{String(h.previous_values.value ?? "—")}</span>
                     →
-                    <span style={{ color: h.status === "approved" ? "#2dd4a0" : "var(--text-muted)", fontWeight: 600 }}>{String(h.proposed_values.value)}</span>
+                    <span style={{ color: h.status === "approved" ? "var(--accent-green)" : "var(--text-muted)", fontWeight: 600 }}>{String(h.proposed_values.value)}</span>
                     <span style={{
                       marginLeft: "auto", fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em",
-                      color: h.status === "approved" ? "#2dd4a0" : h.status === "rejected" ? "#f87171" : "#f7b731",
+                      color: h.status === "approved" ? "var(--accent-green)" : h.status === "rejected" ? "var(--accent-red)" : "var(--accent-yellow)",
                     }}>{h.status}</span>
                   </div>
                   {h.reason && <div style={{ color: "var(--text-muted)", fontStyle: "italic", marginBottom: 4 }}>"{h.reason}"</div>}

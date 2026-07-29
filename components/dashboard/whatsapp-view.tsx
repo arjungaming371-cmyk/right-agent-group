@@ -22,7 +22,11 @@ const WA = {
   panelBg: "#111b21",
   headerBg: "#202c33",
   chatBg: "#0b141a",
-  hairline: "rgba(255,255,255,0.06)",
+  // Every surface in this palette is a fixed WhatsApp colour that does NOT
+  // follow the console theme, so the text/line colours on top of it must be
+  // fixed too — a theme variable here lands on a background it was never
+  // measured against (Midnight's muted grey drops to 2.7:1 on panelBg).
+  hairline: "rgba(255,255,255,0.07)",
   bubbleIn: "#202c33",
   bubbleOut: "#005c4b",
   teal: "#00a884",
@@ -31,13 +35,17 @@ const WA = {
   tickRead: "#53bdeb",
   textPrimary: "#e9edef",
   textSecondary: "#8696a0",
+  // The timestamp/tick row sits INSIDE the bubble, so on an outgoing
+  // (green) bubble it needs its own colour — textSecondary is tuned for
+  // panelBg and only reaches ~2.6:1 against bubbleOut.
+  metaOut: "rgba(233,237,239,0.75)",
   selected: "#2a3942",
   pinnedTint: "rgba(244,180,0,0.08)",
   pinnedBorder: "rgba(244,180,0,0.25)",
 }
 
 const SENTIMENT_COLOR: Record<string, string> = {
-  positive: "#25d366", neutral: "#8696a0", frustrated: "#f0b429", hostile: "#f15c6d",
+  positive: "#25d366", neutral: "#8696a0", frustrated: "var(--accent-yellow)", hostile: "var(--accent-red)",
 }
 const STAGE_LABEL: Record<string, string> = {
   new: "New", contacted: "Contacted", interested: "Interested", docs_pending: "Docs pending",
@@ -64,12 +72,16 @@ const CHAT_WALLPAPER =
 
 const EMOJI = ["😀", "😂", "🙂", "😍", "👍", "🙏", "🎉", "❤️", "😢", "😮", "🤔", "👌", "🔥", "✅", "📞", "🏠"]
 
+// Tinted fill + coloured initials — see the note on the matching Avatar in
+// leads-view.tsx. These sit on the WhatsApp panel, whose background is a
+// fixed dark colour, so the palette is fixed too: theme accents would go
+// dark-on-dark here the moment someone picks the Light theme.
 function Avatar({ name, size = 40 }: { name: string; size?: number }) {
   const initials = (name || "?").split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase()
-  const colors = ["#00a884", "#06b6d4", "#8b5cf6", "#f0b429", "#f15c6d", "#ec4899"]
-  const bg = colors[(name || "?").charCodeAt(0) % colors.length]
+  const colors = ["#00d09c", "#38bdf8", "#8b7cff", "#f7b731", "#fb5670", "#a78bfa"]
+  const color = colors[(name || "?").charCodeAt(0) % colors.length]
   return (
-    <div style={{ width: size, height: size, borderRadius: "50%", background: bg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: size * 0.32, fontWeight: 700, color: "white", flexShrink: 0 }}>
+    <div style={{ width: size, height: size, borderRadius: "50%", background: `color-mix(in oklab, ${color} 18%, transparent)`, border: `1px solid color-mix(in oklab, ${color} 32%, transparent)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: size * 0.32, fontWeight: 700, color, flexShrink: 0 }}>
       {initials}
     </div>
   )
@@ -77,8 +89,8 @@ function Avatar({ name, size = 40 }: { name: string; size?: number }) {
 
 function Tick({ status }: { status?: string }) {
   if (status === "read") return <span style={{ color: WA.tickRead }}>✓✓</span>
-  if (status === "delivered") return <span style={{ color: WA.tick }}>✓✓</span>
-  return <span style={{ color: WA.tick }}>✓</span>
+  if (status === "delivered") return <span style={{ color: WA.metaOut }}>✓✓</span>
+  return <span style={{ color: WA.metaOut }}>✓</span>
 }
 
 function fmtMoney(n: any): string {
@@ -298,8 +310,8 @@ export default function WhatsAppView({ role }: { role: "admin" | "agent" | "view
           <div style={{ padding: "16px 16px", background: WA.headerBg, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <div style={{ fontWeight: 600, fontSize: 19, color: WA.textPrimary }}>Chats</div>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <div style={{ width: 8, height: 8, borderRadius: "50%", background: ready ? WA.tealBright : "#f15c6d" }} title={ready ? "Connected" : "Disconnected"} />
-              <span style={{ fontSize: 11, fontWeight: 500, color: ready ? WA.tealBright : "#f15c6d" }}>{ready ? "Live" : "Offline"}</span>
+              <div style={{ width: 8, height: 8, borderRadius: "50%", background: ready ? WA.tealBright : "var(--accent-red)" }} title={ready ? "Connected" : "Disconnected"} />
+              <span style={{ fontSize: 11, fontWeight: 500, color: ready ? WA.tealBright : "var(--accent-red)" }}>{ready ? "Live" : "Offline"}</span>
             </div>
           </div>
 
@@ -361,7 +373,7 @@ export default function WhatsAppView({ role }: { role: "admin" | "agent" | "view
                 <div style={{ flex: 1, minWidth: 0, borderBottom: `1px solid ${WA.hairline}`, paddingBottom: 10, marginBottom: -10 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
                     <div style={{ fontWeight: 500, fontSize: 14.5, color: WA.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 5 }}>
-                      {lead.pinned && <Pin size={11} strokeWidth={2.2} style={{ color: "#f4b400", fill: "#f4b400", flexShrink: 0 }} />}
+                      {lead.pinned && <Pin size={11} strokeWidth={2.2} style={{ color: "var(--accent-yellow)", fill: "var(--accent-yellow)", flexShrink: 0 }} />}
                       {lead.name}
                     </div>
                     <div style={{ fontSize: 11, color: (lead.unread ?? 0) > 0 ? WA.tealBright : WA.textSecondary, flexShrink: 0 }}>{lead.last_message_time ? formatTime(lead.last_message_time) : ""}</div>
@@ -382,7 +394,7 @@ export default function WhatsAppView({ role }: { role: "admin" | "agent" | "view
                           title={lead.pinned ? "Unpin" : "Pin to top"}
                           style={{ background: "transparent", border: "none", cursor: "pointer", padding: 2, display: "flex", alignItems: "center", opacity: lead.pinned ? 1 : 0.35 }}
                         >
-                          <Pin size={13} strokeWidth={2} style={{ color: lead.pinned ? "#f4b400" : WA.textSecondary, fill: lead.pinned ? "#f4b400" : "none" }} />
+                          <Pin size={13} strokeWidth={2} style={{ color: lead.pinned ? "var(--accent-yellow)" : WA.textSecondary, fill: lead.pinned ? "var(--accent-yellow)" : "none" }} />
                         </button>
                       )}
                     </div>
@@ -470,7 +482,7 @@ export default function WhatsAppView({ role }: { role: "admin" | "agent" | "view
                         }}>
                           <div style={{ fontSize: 14.5, color: WA.textPrimary, lineHeight: 1.4 }}>{msg.content}</div>
                           <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6, marginTop: 4 }}>
-                            <span style={{ fontSize: 11, color: WA.textSecondary }}>{formatMsgTime(msg.created_at)}</span>
+                            <span style={{ fontSize: 11, color: isOut ? WA.metaOut : WA.textSecondary }}>{formatMsgTime(msg.created_at)}</span>
                             {isOut && <Tick status={msg.status} />}
                           </div>
                         </div>

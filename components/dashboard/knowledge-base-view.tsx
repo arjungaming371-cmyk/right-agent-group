@@ -21,10 +21,10 @@ type Entry = {
 const EMPTY_FORM = { title: "", content: "", category: "" }
 
 const SOURCE_BADGE: Record<Entry["source_type"], { label: string; color: string }> = {
-  manual: { label: "Manual", color: "#94a3b8" },
-  csv: { label: "CSV", color: "#38bdf8" },
-  pdf: { label: "PDF", color: "#f87171" },
-  url: { label: "URL", color: "#2dd4a0" },
+  manual: { label: "Manual", color: "var(--text-secondary)" },
+  csv: { label: "CSV", color: "var(--accent-cyan)" },
+  pdf: { label: "PDF", color: "var(--accent-red)" },
+  url: { label: "URL", color: "var(--accent-green)" },
 }
 
 export default function KnowledgeBaseView({ role }: { role: "admin" | "agent" | "viewer" | "developer" }) {
@@ -187,7 +187,7 @@ export default function KnowledgeBaseView({ role }: { role: "admin" | "agent" | 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <div style={{ background: "rgba(59,130,246,0.06)", border: "1px solid rgba(59,130,246,0.2)", borderRadius: 12, padding: "14px 20px" }}>
-        <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4, color: "#8ba3ff", display: "flex", alignItems: "center", gap: 6 }}>
+        <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4, color: "var(--accent-blue)", display: "flex", alignItems: "center", gap: 6 }}>
           <BookOpen size={14} strokeWidth={2} /> How this works
         </div>
         <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6 }}>
@@ -257,11 +257,11 @@ export default function KnowledgeBaseView({ role }: { role: "admin" | "agent" | 
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                   <div style={{ fontWeight: 600, fontSize: 14 }}>{entry.title}</div>
                   {entry.category && (
-                    <span style={{ fontSize: 10.5, background: "rgba(139,124,255,0.12)", color: "#a5b0ff", borderRadius: 6, padding: "2px 8px" }}>{entry.category}</span>
+                    <span style={{ fontSize: 10.5, background: "rgba(139,124,255,0.12)", color: "var(--accent-violet)", borderRadius: 6, padding: "2px 8px" }}>{entry.category}</span>
                   )}
                   <span style={{ fontSize: 10.5, background: `${badge.color}1f`, color: badge.color, borderRadius: 6, padding: "2px 8px" }}>{badge.label}</span>
                   {!entry.is_active && (
-                    <span style={{ fontSize: 10.5, background: "rgba(148,163,184,0.15)", color: "#94a3b8", borderRadius: 6, padding: "2px 8px" }}>Inactive</span>
+                    <span style={{ fontSize: 10.5, background: "rgba(148,163,184,0.15)", color: "var(--text-secondary)", borderRadius: 6, padding: "2px 8px" }}>Inactive</span>
                   )}
                 </div>
                 {canEdit && (
@@ -284,7 +284,7 @@ export default function KnowledgeBaseView({ role }: { role: "admin" | "agent" | 
                       <Pencil size={13} strokeWidth={2} />
                     </button>
                     {confirmDelete === entry.id ? (
-                      <button onClick={() => remove(entry.id)} style={{ fontSize: 11, background: "rgba(239,68,68,0.15)", color: "#f87171", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 8, padding: "0 10px" }}>
+                      <button onClick={() => remove(entry.id)} style={{ fontSize: 11, background: "rgba(239,68,68,0.15)", color: "var(--accent-red)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 8, padding: "0 10px" }}>
                         Confirm?
                       </button>
                     ) : (
@@ -325,7 +325,7 @@ export default function KnowledgeBaseView({ role }: { role: "admin" | "agent" | 
                 onChange={(e) => setForm({ ...form, content: e.target.value })}
                 placeholder="e.g. The minimum home loan amount is ₹5,00,000 and maximum is ₹75,00,000, subject to eligibility."
                 rows={5}
-                style={{ width: "100%", background: "#0d1422", border: "1px solid var(--border)", color: "var(--text-primary)", borderRadius: 8, padding: 10, fontSize: 13, resize: "vertical" }}
+                style={{ width: "100%", background: "var(--bg-card)", border: "1px solid var(--border)", color: "var(--text-primary)", borderRadius: 8, padding: 10, fontSize: 13, resize: "vertical" }}
               />
             </div>
             <div style={{ marginBottom: 12 }}>

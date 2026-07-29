@@ -10,7 +10,10 @@
   --border-light: #161d2e;
   --text-primary: #eef1f7;
   --text-secondary: #9aa5bd;
-  --text-muted: #64708c;
+  /* Lifted from #64708c: that only reached ~3.7:1 on a card and dipped
+     under 3:1 on hover-tinted rows, and this variable carries a lot of
+     small secondary text. */
+  --text-muted: #727e9c;
   --accent-blue: #5b7cfa;
   --accent-blue-dim: #3d5af1;
   --accent-violet: #8b7cff;
@@ -20,6 +23,13 @@
   --accent-purple: #a78bfa;
   --accent-cyan: #38bdf8;
   --gradient-brand: linear-gradient(135deg, #8b7cff 0%, #5b7cfa 45%, #38bdf8 100%);
+  /* Subtle surface tints. On a dark base these are white at low alpha; a
+     light theme has to invert them or they vanish into the background,
+     which is why they are variables and not literal rgba(255,255,255,...). */
+  --overlay-soft: rgba(255,255,255,0.025);
+  --overlay-hover: rgba(255,255,255,0.045);
+  --overlay-chip: rgba(255,255,255,0.07);
+  --overlay-line: rgba(255,255,255,0.07);
   --shadow-soft: 0 1px 2px rgba(0,0,0,0.5), 0 10px 32px -12px rgba(0,0,0,0.6);
   --shadow-glow: 0 8px 32px -8px rgba(91,124,250,0.45);
   --radius-lg: 14px;
@@ -71,15 +81,27 @@
   --border-light: #edf0f6;
   --text-primary: #1a1f2e;
   --text-secondary: #565f78;
-  --text-muted: #8992a8;
+  /* Darker than the dark theme's muted equivalent looks — on a white card
+     #8992a8 only reaches ~2.9:1, well under the 4.5:1 needed for the small
+     text this variable is mostly used for. */
+  --text-muted: #6a7288;
   --accent-blue: #4a6cf0;
   --accent-blue-dim: #3654d6;
   --accent-violet: #7c6ae8;
-  --accent-green: #16a97e;
+  /* Green and yellow are darker here than a straight "light equivalent" of
+     the dark accents — those land near 3:1 on a white card, and both are
+     used for small text (lead scores, status chips), not just fills. */
+  --accent-green: #0f8a68;
   --accent-red: #d43a58;
-  --accent-yellow: #c98a12;
+  --accent-yellow: #a66d05;
   --accent-purple: #8865d9;
   --accent-cyan: #1791c4;
+  /* Inverted: dark ink at low alpha, so the same tints read as gentle grey
+     on white instead of disappearing. */
+  --overlay-soft: rgba(20,25,45,0.025);
+  --overlay-hover: rgba(20,25,45,0.05);
+  --overlay-chip: rgba(20,25,45,0.06);
+  --overlay-line: rgba(20,25,45,0.09);
   --gradient-brand: linear-gradient(135deg, #7c6ae8 0%, #4a6cf0 45%, #1791c4 100%);
   --shadow-soft: 0 1px 2px rgba(20,25,45,0.06), 0 10px 28px -14px rgba(20,25,45,0.14);
   --shadow-glow: 0 8px 28px -10px rgba(74,108,240,0.25);

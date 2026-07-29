@@ -39,9 +39,9 @@ export default function DeveloperLogsView({ userEmail }: { userEmail: string }) 
 
   const statusColor = (status: string) => {
     switch (status) {
-      case "success": return "#10b981"
-      case "error": return "#ef4444"
-      default: return "#64748b"
+      case "success": return "var(--accent-green)"
+      case "error": return "var(--accent-red)"
+      default: return "var(--text-muted)"
     }
   }
 
@@ -65,7 +65,7 @@ export default function DeveloperLogsView({ userEmail }: { userEmail: string }) 
         alignItems: "center",
         gap: 16,
       }}>
-        <Lock size={24} style={{ color: "#10b981" }} strokeWidth={2} />
+        <Lock size={24} style={{ color: "var(--accent-green)" }} strokeWidth={2} />
         <div>
           <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>
             Your Session
@@ -74,7 +74,7 @@ export default function DeveloperLogsView({ userEmail }: { userEmail: string }) 
             This information is private and visible only to you. Admins cannot see your activity or login details.
           </div>
           {lastLogin && (
-            <div style={{ fontSize: 11, color: "#10b981", marginTop: 6, fontWeight: 500 }}>
+            <div style={{ fontSize: 11, color: "var(--accent-green)", marginTop: 6, fontWeight: 500 }}>
               Last login: {timeAgo(lastLogin)} ({formatDateTime(lastLogin)})
             </div>
           )}
@@ -179,7 +179,7 @@ export default function DeveloperLogsView({ userEmail }: { userEmail: string }) 
         gap: 12,
         alignItems: "flex-start",
       }}>
-        <Lock size={16} style={{ color: "#3b82f6", marginTop: 2, flexShrink: 0 }} strokeWidth={2} />
+        <Lock size={16} style={{ color: "var(--accent-blue)", marginTop: 2, flexShrink: 0 }} strokeWidth={2} />
         <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6 }}>
           <strong>Your privacy is protected.</strong> Admins cannot view your login history, activity logs, or any actions you perform. Your data is encrypted and remains private.
         </div>

@@ -38,15 +38,15 @@ const FACT_FIELDS: { key: string; label: string; type: "text" | "number" | "arra
 const STAGES = ["new", "contacted", "interested", "docs_pending", "negotiating", "converted", "lost", "do_not_call"]
 
 const SENTIMENT_COLOR: Record<string, string> = {
-  positive: "#2dd4a0",
-  neutral: "#64708c",
-  frustrated: "#f7b731",
-  hostile: "#f87171",
+  positive: "var(--accent-green)",
+  neutral: "var(--text-muted)",
+  frustrated: "var(--accent-yellow)",
+  hostile: "var(--accent-red)",
 }
 
 const STAGE_COLOR: Record<string, string> = {
-  new: "#64708c", contacted: "#38bdf8", interested: "#8b7cff", docs_pending: "#f7b731",
-  negotiating: "#f7b731", converted: "#2dd4a0", lost: "#94a3b8", do_not_call: "#f87171",
+  new: "var(--text-muted)", contacted: "var(--accent-cyan)", interested: "var(--accent-violet)", docs_pending: "var(--accent-yellow)",
+  negotiating: "var(--accent-yellow)", converted: "var(--accent-green)", lost: "var(--text-secondary)", do_not_call: "var(--accent-red)",
 }
 
 function fieldToString(v: any, type: "text" | "number" | "array"): string {
@@ -146,14 +146,14 @@ export default function LeadMemoryModal({ leadId, canEdit, onClose }: { leadId: 
         {/* Header */}
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "18px 22px", borderBottom: "1px solid var(--border)" }}>
           <div style={{ width: 34, height: 34, borderRadius: 9, background: "rgba(139,124,255,0.15)", border: "1px solid rgba(139,124,255,0.3)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <Brain size={17} strokeWidth={1.9} style={{ color: "#a5b0ff" }} />
+            <Brain size={17} strokeWidth={1.9} style={{ color: "var(--accent-violet)" }} />
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontWeight: 700, fontSize: 15 }}>{data?.lead?.name || "Lead Memory"}</div>
             <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{data?.lead?.phone}</div>
           </div>
           {data && (
-            <span style={{ background: `${STAGE_COLOR[stageDraft] || "#64708c"}1f`, color: STAGE_COLOR[stageDraft] || "#64708c", border: `1px solid ${STAGE_COLOR[stageDraft] || "#64708c"}44`, borderRadius: 7, padding: "4px 10px", fontSize: 11.5, fontWeight: 600, textTransform: "capitalize" }}>
+            <span style={{ background: `${STAGE_COLOR[stageDraft] || "var(--text-muted)"}1f`, color: STAGE_COLOR[stageDraft] || "var(--text-muted)", border: `1px solid ${STAGE_COLOR[stageDraft] || "var(--text-muted)"}44`, borderRadius: 7, padding: "4px 10px", fontSize: 11.5, fontWeight: 600, textTransform: "capitalize" }}>
               {stageDraft.replace(/_/g, " ")}
             </span>
           )}
@@ -186,7 +186,7 @@ export default function LeadMemoryModal({ leadId, canEdit, onClose }: { leadId: 
                       <div
                         key={i}
                         title={`${s.sentiment} — ${new Date(s.at).toLocaleString()}`}
-                        style={{ width: 10, height: 10, borderRadius: "50%", background: SENTIMENT_COLOR[s.sentiment] || "#64708c", flexShrink: 0 }}
+                        style={{ width: 10, height: 10, borderRadius: "50%", background: SENTIMENT_COLOR[s.sentiment] || "var(--text-muted)", flexShrink: 0 }}
                       />
                     ))}
                   </div>
@@ -202,7 +202,7 @@ export default function LeadMemoryModal({ leadId, canEdit, onClose }: { leadId: 
                   onChange={(e) => setSummaryDraft(e.target.value)}
                   rows={4}
                   placeholder="No summary yet — Priya builds this automatically after calls and WhatsApp chats."
-                  style={{ width: "100%", background: "#0d1422", border: "1px solid var(--border)", color: "var(--text-primary)", borderRadius: 8, padding: 10, fontSize: 13, resize: "vertical" }}
+                  style={{ width: "100%", background: "var(--bg-card)", border: "1px solid var(--border)", color: "var(--text-primary)", borderRadius: 8, padding: 10, fontSize: 13, resize: "vertical" }}
                 />
               </div>
 
@@ -222,7 +222,7 @@ export default function LeadMemoryModal({ leadId, canEdit, onClose }: { leadId: 
                               title="Locked by a manual edit — AI will not overwrite this. Click to unlock."
                               style={{ background: "none", border: "none", padding: 0, display: "flex", cursor: canEdit ? "pointer" : "default" }}
                             >
-                              <Lock size={11} style={{ color: "#f7b731" }} />
+                              <Lock size={11} style={{ color: "var(--accent-yellow)" }} />
                             </button>
                           )}
                         </div>
@@ -250,7 +250,7 @@ export default function LeadMemoryModal({ leadId, canEdit, onClose }: { leadId: 
                     return (
                       <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 9, fontSize: 12.5 }}>
                         <div style={{ width: 24, height: 24, borderRadius: 7, background: "rgba(139,124,255,0.1)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 1 }}>
-                          <Icon size={12} style={{ color: "#a5b0ff" }} />
+                          <Icon size={12} style={{ color: "var(--accent-violet)" }} />
                         </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <span style={{ color: "var(--text-primary)" }}>{t.one_line_summary}</span>

@@ -15,7 +15,7 @@ type TeamMember = {
 type ActivityLog = { id: string; action: string; created_at: string }
 
 const ROLE_LABEL: Record<Role, string> = { admin: "Administrator", agent: "Loan Officer", viewer: "Viewer", developer: "Administrator" }
-const ROLE_COLOR: Record<Role, string> = { admin: "#8b7cff", agent: "#38bdf8", viewer: "#64708c", developer: "#8b7cff" }
+const ROLE_COLOR: Record<Role, string> = { admin: "var(--accent-violet)", agent: "var(--accent-cyan)", viewer: "var(--text-muted)", developer: "var(--accent-violet)" }
 
 // Keeps an uploaded photo small — a profile picture doesn't need to be
 // bigger than this to look good in a 64px circle, and it keeps every
@@ -279,7 +279,7 @@ export default function ProfileModal({ email, role, onClose }: { email: string; 
           {!loading && activity.length === 0 && <div style={{ fontSize: 13, color: "var(--text-muted)" }}>No recent activity.</div>}
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {activity.map((a) => (
-              <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 8, background: "rgba(255,255,255,0.03)" }}>
+              <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 8, background: "var(--overlay-soft)" }}>
                 <Clock size={12} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
                 <div style={{ flex: 1, fontSize: 13 }}>{a.action}</div>
                 <div style={{ fontSize: 11, color: "var(--text-muted)", flexShrink: 0 }}>{timeAgo(a.created_at)}</div>

@@ -7,8 +7,8 @@ import {
 import { Users, Phone, BadgeCheck, Timer, Mail, CheckCircle2 } from "lucide-react"
 
 // Validated (scripts/validate_palette.js, dark surface) — fixed order, never cycled.
-const CAT = { blue: "#3987e5", aqua: "#199e70", violet: "#9085e9" }
-const STATUS = { good: "#0ca30c", neutral: "#64708c", serious: "#ec835a", critical: "#d03b3b" }
+const CAT = { blue: "var(--accent-blue)", aqua: "var(--accent-green)", violet: "var(--accent-violet)" }
+const STATUS = { good: "var(--accent-green)", neutral: "var(--text-muted)", serious: "var(--accent-yellow)", critical: "var(--accent-red)" }
 
 type Analytics = {
   callsByDay: { day: string; count: number }[]
@@ -147,7 +147,7 @@ export default function AnalyticsView() {
                   <span style={{ color: "var(--text-secondary)" }}>{s.label}</span>
                   <span style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{s.value}</span>
                 </div>
-                <div style={{ height: 7, borderRadius: 4, background: "rgba(255,255,255,0.06)", overflow: "hidden" }}>
+                <div style={{ height: 7, borderRadius: 4, background: "var(--overlay-chip)", overflow: "hidden" }}>
                   <div style={{ width: `${(s.value / funnelMax) * 100}%`, height: "100%", background: s.tone, borderRadius: 4, transition: "width 0.4s" }} />
                 </div>
               </div>

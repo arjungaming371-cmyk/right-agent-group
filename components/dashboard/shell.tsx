@@ -89,11 +89,11 @@ const VIEW_TITLES: Record<ViewKey, { title: string; sub: string }> = {
 
 function StatusPill({ icon: Icon, label }: { icon: LucideIcon; label: string }) {
   return (
-    <div className="hidden lg:flex items-center gap-2 rounded-full border border-white/[0.07] bg-white/[0.03] px-3.5 py-[7px]">
+    <div className="hidden lg:flex items-center gap-2 rounded-full border border-[var(--overlay-line)] bg-[var(--overlay-soft)] px-3.5 py-[7px]">
       <Icon size={13} strokeWidth={2} className="text-[var(--text-secondary)]" />
       <span className="text-[12.5px] font-medium text-[var(--text-secondary)]">{label}</span>
       <span
-        className="ml-0.5 h-[6px] w-[6px] rounded-full bg-[#2dd4a0]"
+        className="ml-0.5 h-[6px] w-[6px] rounded-full bg-[var(--accent-green)]"
         style={{ animation: "pulse-dot 2.2s infinite" }}
       />
     </div>
@@ -218,7 +218,7 @@ export default function DashboardShell() {
           <button
             onClick={() => setMobileNavOpen(false)}
             aria-label="Close menu"
-            className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-white/[0.05] md:hidden"
+            className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[var(--overlay-hover)] md:hidden"
           >
             <X size={16} strokeWidth={2} />
           </button>
@@ -242,8 +242,8 @@ export default function DashboardShell() {
                       aria-current={active ? "page" : undefined}
                       className={`group flex h-9 w-full items-center gap-3 rounded-[10px] px-3 text-left text-[13px] transition-colors ${
                         active
-                          ? "text-white"
-                          : "text-[var(--text-secondary)] hover:bg-white/[0.04] hover:text-[var(--text-primary)]"
+                          ? "text-[var(--text-primary)]"
+                          : "text-[var(--text-secondary)] hover:bg-[var(--overlay-hover)] hover:text-[var(--text-primary)]"
                       }`}
                       style={active ? {
                         background: "linear-gradient(90deg, rgba(139,124,255,0.17), rgba(56,189,248,0.06))",
@@ -254,7 +254,7 @@ export default function DashboardShell() {
                       <Icon
                         size={16}
                         strokeWidth={active ? 2.2 : 1.8}
-                        className={active ? "text-[#a5b0ff]" : "text-[var(--text-muted)] group-hover:text-[var(--text-secondary)]"}
+                        className={active ? "text-[var(--accent-violet)]" : "text-[var(--text-muted)] group-hover:text-[var(--text-secondary)]"}
                       />
                       <span className="flex-1 truncate">{label}</span>
                       {badge > 0 && (
@@ -262,7 +262,7 @@ export default function DashboardShell() {
                           className="min-w-[20px] rounded-md px-1.5 py-px text-center text-[10.5px] font-bold"
                           style={active
                             ? { background: "var(--gradient-brand)", color: "#fff" }
-                            : { background: "rgba(255,255,255,0.07)", color: "var(--text-secondary)" }}
+                            : { background: "var(--overlay-chip)", color: "var(--text-secondary)" }}
                         >
                           {badge}
                         </span>
@@ -278,7 +278,7 @@ export default function DashboardShell() {
               <div className="mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">Team</div>
               <a
                 href="/access"
-                className="group flex h-9 w-full items-center gap-3 rounded-[10px] px-3 text-left text-[13px] text-[var(--text-secondary)] transition-colors hover:bg-white/[0.04] hover:text-[var(--text-primary)]"
+                className="group flex h-9 w-full items-center gap-3 rounded-[10px] px-3 text-left text-[13px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--overlay-hover)] hover:text-[var(--text-primary)]"
                 style={{ border: "1px solid transparent", fontWeight: 480 }}
               >
                 <UserCog size={16} strokeWidth={1.8} className="text-[var(--text-muted)] group-hover:text-[var(--text-secondary)]" />
@@ -289,9 +289,9 @@ export default function DashboardShell() {
         </nav>
 
         {/* System status */}
-        <div className="mx-3 mb-3 rounded-xl border border-[var(--border-light)] bg-white/[0.02] px-3.5 py-3">
+        <div className="mx-3 mb-3 rounded-xl border border-[var(--border-light)] bg-[var(--overlay-soft)] px-3.5 py-3">
           <div className="flex items-center gap-2">
-            <span className="h-[7px] w-[7px] rounded-full bg-[#2dd4a0]" style={{ animation: "pulse-dot 2.2s infinite" }} />
+            <span className="h-[7px] w-[7px] rounded-full bg-[var(--accent-green)]" style={{ animation: "pulse-dot 2.2s infinite" }} />
             <span className="text-[12px] font-semibold text-[var(--text-primary)]">All systems operational</span>
           </div>
           <div className="mt-0.5 pl-[15px] text-[10.5px] text-[var(--text-muted)]">Voice · WhatsApp · AI Engine</div>
@@ -320,7 +320,7 @@ export default function DashboardShell() {
             onClick={logout}
             aria-label="Sign out"
             title="Sign out"
-            className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-white/[0.05] hover:text-[var(--accent-red)]"
+            className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[var(--overlay-hover)] hover:text-[var(--accent-red)]"
           >
             <LogOut size={15} strokeWidth={1.9} />
           </button>
@@ -334,7 +334,7 @@ export default function DashboardShell() {
           <button
             onClick={() => setMobileNavOpen(true)}
             aria-label="Open menu"
-            className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[10px] text-[var(--text-secondary)] hover:bg-white/[0.04] md:hidden"
+            className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[10px] text-[var(--text-secondary)] hover:bg-[var(--overlay-hover)] md:hidden"
           >
             <Menu size={19} strokeWidth={2} />
           </button>
@@ -352,7 +352,7 @@ export default function DashboardShell() {
           <button
             onClick={() => setPaletteOpen(true)}
             aria-label="Search everything"
-            className="hidden h-9 items-center gap-2.5 rounded-[10px] border border-[var(--border)] bg-[var(--bg-secondary)] px-3 text-[13px] text-[var(--text-muted)] transition-colors hover:border-[#2b3550] hover:text-[var(--text-secondary)] md:flex"
+            className="hidden h-9 items-center gap-2.5 rounded-[10px] border border-[var(--border)] bg-[var(--bg-secondary)] px-3 text-[13px] text-[var(--text-muted)] transition-colors hover:border-[var(--border)] hover:text-[var(--text-secondary)] md:flex"
             style={{ width: 210 }}
           >
             <Search size={14} strokeWidth={2} />

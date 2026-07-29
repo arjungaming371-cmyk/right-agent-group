@@ -22,7 +22,7 @@ type Suggestion = {
   created_at: string
 }
 
-const RISK_COLOR: Record<string, string> = { low: "#2dd4a0", medium: "#f7b731", high: "#f87171" }
+const RISK_COLOR: Record<string, string> = { low: "var(--accent-green)", medium: "var(--accent-yellow)", high: "var(--accent-red)" }
 
 // ONE SCRIPT MODE — a single base script drives every language. Priya
 // automatically replies in English, Roman-script Hinglish, or Tenglish
@@ -243,12 +243,12 @@ export default function ScriptView() {
                   width: 38, height: 38, borderRadius: 10, flexShrink: 0,
                   display: "inline-flex", alignItems: "center", justifyContent: "center",
                   fontSize: 14, fontWeight: 700,
-                  background: selected === lang ? "var(--gradient-brand)" : "rgba(255,255,255,0.05)",
+                  background: selected === lang ? "var(--gradient-brand)" : "var(--overlay-hover)",
                   color: selected === lang ? "#fff" : "var(--text-secondary)",
                   border: selected === lang ? "none" : "1px solid var(--border)",
                 }}>{meta.short}</span>
                 <div>
-                  <div style={{ fontWeight: 700, fontSize: 15, color: selected === lang ? "#a5b0ff" : "var(--text-primary)" }}>{meta.label}</div>
+                  <div style={{ fontWeight: 700, fontSize: 15, color: selected === lang ? "var(--accent-violet)" : "var(--text-primary)" }}>{meta.label}</div>
                   <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{meta.desc}</div>
                 </div>
               </div>
@@ -265,11 +265,11 @@ export default function ScriptView() {
 
       {/* Tips box */}
       <div style={{ background: "rgba(59,130,246,0.06)", border: "1px solid rgba(59,130,246,0.2)", borderRadius: 12, padding: "14px 20px" }}>
-        <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: "#8ba3ff", display: "flex", alignItems: "center", gap: 6 }}><Lightbulb size={14} strokeWidth={2} /> How to write a good script</div>
+        <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: "var(--accent-blue)", display: "flex", alignItems: "center", gap: 6 }}><Lightbulb size={14} strokeWidth={2} /> How to write a good script</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 24px" }}>
           {TIPS.map((t, i) => (
             <div key={i} style={{ fontSize: 12, color: "var(--text-secondary)", padding: "2px 0", display: "flex", gap: 7, alignItems: "baseline" }}>
-              <span style={{ color: i < 5 ? "#2dd4a0" : "#f7b731", flexShrink: 0 }}>•</span>{t}
+              <span style={{ color: i < 5 ? "var(--accent-green)" : "var(--accent-yellow)", flexShrink: 0 }}>•</span>{t}
             </div>
           ))}
         </div>
@@ -279,7 +279,7 @@ export default function ScriptView() {
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
         <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ width: 32, height: 32, borderRadius: 9, background: "rgba(139,124,255,0.13)", border: "1px solid rgba(139,124,255,0.3)", display: "inline-flex", alignItems: "center", justifyContent: "center", color: "#a5b0ff" }}>
+            <span style={{ width: 32, height: 32, borderRadius: 9, background: "rgba(139,124,255,0.13)", border: "1px solid rgba(139,124,255,0.3)", display: "inline-flex", alignItems: "center", justifyContent: "center", color: "var(--accent-violet)" }}>
               <Sparkles size={15} strokeWidth={1.9} />
             </span>
             <div>
@@ -299,7 +299,7 @@ export default function ScriptView() {
             margin: "12px 20px 0", padding: "10px 16px", borderRadius: 8,
             background: ptMsg.type === "ok" ? "rgba(34,197,94,0.1)" : "rgba(239,68,68,0.1)",
             border: `1px solid ${ptMsg.type === "ok" ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)"}`,
-            color: ptMsg.type === "ok" ? "#4ade80" : "#f87171", fontSize: 13, fontWeight: 500,
+            color: ptMsg.type === "ok" ? "var(--accent-green)" : "var(--accent-red)", fontSize: 13, fontWeight: 500,
           }}>
             {ptMsg.text}
           </div>
@@ -319,8 +319,8 @@ export default function ScriptView() {
                   <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-primary)", flex: 1 }}>{s.short_guideline}</div>
                   <span style={{
                     fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em",
-                    color: RISK_COLOR[s.risk] || "#94a3b8", background: `${RISK_COLOR[s.risk] || "#94a3b8"}1f`,
-                    border: `1px solid ${RISK_COLOR[s.risk] || "#94a3b8"}44`, borderRadius: 6, padding: "2px 8px", flexShrink: 0,
+                    color: RISK_COLOR[s.risk] || "var(--text-secondary)", background: `${RISK_COLOR[s.risk] || "var(--text-secondary)"}1f`,
+                    border: `1px solid ${RISK_COLOR[s.risk] || "var(--text-secondary)"}44`, borderRadius: 6, padding: "2px 8px", flexShrink: 0,
                   }}>{s.risk} risk</span>
                 </div>
                 <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>
@@ -357,7 +357,7 @@ export default function ScriptView() {
         {/* Editor topbar */}
         <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", background: "var(--bg-secondary)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ width: 32, height: 32, borderRadius: 9, background: "rgba(139,124,255,0.13)", border: "1px solid rgba(139,124,255,0.3)", display: "inline-flex", alignItems: "center", justifyContent: "center", color: "#a5b0ff" }}>
+            <span style={{ width: 32, height: 32, borderRadius: 9, background: "rgba(139,124,255,0.13)", border: "1px solid rgba(139,124,255,0.3)", display: "inline-flex", alignItems: "center", justifyContent: "center", color: "var(--accent-violet)" }}>
               <Languages size={15} strokeWidth={1.9} />
             </span>
             <div>
@@ -371,7 +371,7 @@ export default function ScriptView() {
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             {isDirty && (
-              <span style={{ fontSize: 12, color: "#f59e0b", fontWeight: 600 }}>● Unsaved changes</span>
+              <span style={{ fontSize: 12, color: "var(--accent-yellow)", fontWeight: 600 }}>● Unsaved changes</span>
             )}
             <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{charCount.toLocaleString()} chars</span>
             <button onClick={resetToDefault} disabled={resetting} className="btn-ghost" style={{ height: 34 }}>
@@ -396,7 +396,7 @@ export default function ScriptView() {
             borderRadius: 8,
             background: msg.type === "ok" ? "rgba(34,197,94,0.1)" : "rgba(239,68,68,0.1)",
             border: `1px solid ${msg.type === "ok" ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)"}`,
-            color: msg.type === "ok" ? "#4ade80" : "#f87171",
+            color: msg.type === "ok" ? "var(--accent-green)" : "var(--accent-red)",
             fontSize: 13, fontWeight: 500,
           }}>
             {msg.text}
@@ -415,10 +415,10 @@ export default function ScriptView() {
               style={{
                 width: "100%",
                 height: 480,
-                background: "#0d1117",
+                background: "var(--bg-card)",
                 border: "1px solid var(--border)",
                 borderRadius: 10,
-                color: "#e2e8f0",
+                color: "var(--text-primary)",
                 padding: 16,
                 fontSize: 13,
                 fontFamily: "monospace",

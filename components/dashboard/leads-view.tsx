@@ -24,7 +24,7 @@ function FormLinkCell({ lead }: { lead: Lead }) {
   if (!lead.form_token) return <span style={{ color: "var(--text-muted)", fontSize: 12 }}>—</span>
 
   const submitted = lead.form_completed || !!lead.form_used_at
-  const tone = submitted ? "#2dd4a0" : "#f7b731"
+  const tone = submitted ? "var(--accent-green)" : "var(--accent-yellow)"
   const label = submitted ? "Submitted" : "Sent"
 
   async function copy() {
@@ -52,10 +52,10 @@ function FormLinkCell({ lead }: { lead: Lead }) {
 }
 
 function ScoreBadge({ score }: { score: number }) {
-  const tone = score >= 70 ? "#2dd4a0" : score >= 40 ? "#f7b731" : "#64708c"
+  const tone = score >= 70 ? "var(--accent-green)" : score >= 40 ? "var(--accent-yellow)" : "var(--text-muted)"
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-      <div style={{ width: 36, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
+      <div style={{ width: 36, height: 4, borderRadius: 2, background: "var(--overlay-chip)", overflow: "hidden" }}>
         <div style={{ width: `${score}%`, height: "100%", background: tone, borderRadius: 2 }} />
       </div>
       <span style={{ fontSize: 12.5, fontWeight: 700, color: tone, fontVariantNumeric: "tabular-nums" }}>{score}</span>
@@ -64,17 +64,22 @@ function ScoreBadge({ score }: { score: number }) {
 }
 
 const INTERESTED_STYLES: Record<string, { bg: string; color: string; label: string }> = {
-  interested:     { bg: "rgba(34,197,94,0.15)",  color: "#4ade80", label: "Interested" },
-  not_interested: { bg: "rgba(239,68,68,0.15)",  color: "#f87171", label: "Not Interested" },
-  unknown:        { bg: "rgba(100,116,139,0.15)",color: "#94a3b8", label: "Unknown" },
+  interested:     { bg: "rgba(34,197,94,0.15)",  color: "var(--accent-green)", label: "Interested" },
+  not_interested: { bg: "rgba(239,68,68,0.15)",  color: "var(--accent-red)", label: "Not Interested" },
+  unknown:        { bg: "rgba(100,116,139,0.15)",color: "var(--text-secondary)", label: "Unknown" },
 }
 
+// Tinted fill + accent-coloured initials rather than white-on-solid-accent:
+// the bright accents (cyan, green, yellow) only reach ~2:1 against white
+// text, and any accent dark enough to fix that in one theme breaks another.
+// A tint of the accent keeps the per-lead colour coding and stays legible
+// in all four themes.
 function Avatar({ name }: { name: string }) {
   const initials = (name || "?").split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()
-  const colors = ["#1d4ed8", "#7c3aed", "#0891b2", "#047857", "#b45309"]
+  const colors = ["var(--accent-blue)", "var(--accent-violet)", "var(--accent-cyan)", "var(--accent-green)", "var(--accent-yellow)"]
   const color = colors[(name || "?").charCodeAt(0) % colors.length]
   return (
-    <div style={{ width: 36, height: 36, borderRadius: "50%", background: color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color: "white", flexShrink: 0 }}>
+    <div style={{ width: 36, height: 36, borderRadius: "50%", background: `color-mix(in oklab, ${color} 18%, transparent)`, border: `1px solid color-mix(in oklab, ${color} 32%, transparent)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color, flexShrink: 0 }}>
       {initials}
     </div>
   )
@@ -228,10 +233,10 @@ export default function LeadsView({ role, initialSearch }: { role: "admin" | "ag
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-4">
-        <Card label="Total Leads" value={totalLeads.toLocaleString()} icon={Users} tone="#8b7cff" />
-        <Card label="Interested" value={interestedCount.toLocaleString()} icon={Target} tone="#38bdf8" />
-        <Card label="Pipeline Value" value={formatCurrency(pipelineValue)} icon={IndianRupee} tone="#f7b731" />
-        <Card label="Qualified" value={qualified.toLocaleString()} icon={BadgeCheck} tone="#2dd4a0" />
+        <Card label="Total Leads" value={totalLeads.toLocaleString()} icon={Users} tone="var(--accent-violet)" />
+        <Card label="Interested" value={interestedCount.toLocaleString()} icon={Target} tone="var(--accent-cyan)" />
+        <Card label="Pipeline Value" value={formatCurrency(pipelineValue)} icon={IndianRupee} tone="var(--accent-yellow)" />
+        <Card label="Qualified" value={qualified.toLocaleString()} icon={BadgeCheck} tone="var(--accent-green)" />
       </div>
 
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12 }}>
@@ -334,7 +339,7 @@ export default function LeadsView({ role, initialSearch }: { role: "admin" | "ag
                       <Avatar name={lead.name} />
                       <div>
                         <div style={{ fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", gap: 6 }}>
-                          {lead.pinned && <Pin size={12} strokeWidth={2.2} style={{ color: "#f7b731", fill: "#f7b731", flexShrink: 0 }} />}
+                          {lead.pinned && <Pin size={12} strokeWidth={2.2} style={{ color: "var(--accent-yellow)", fill: "var(--accent-yellow)", flexShrink: 0 }} />}
                           {lead.name || "Unknown"}
                         </div>
                         <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{lead.phone}</div>
@@ -363,26 +368,26 @@ export default function LeadsView({ role, initialSearch }: { role: "admin" | "ag
                           <button
                             onClick={() => togglePin(lead)}
                             title={lead.pinned ? "Unpin" : "Pin to top"}
-                            style={{ background: lead.pinned ? "rgba(247,183,49,0.15)" : "rgba(255,255,255,0.05)", border: `1px solid ${lead.pinned ? "rgba(247,183,49,0.35)" : "var(--border)"}`, color: lead.pinned ? "#f7b731" : "var(--text-muted)", borderRadius: 9, width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
-                          ><Pin size={14} strokeWidth={1.9} style={lead.pinned ? { fill: "#f7b731" } : undefined} /></button>
+                            style={{ background: lead.pinned ? "rgba(247,183,49,0.15)" : "var(--overlay-hover)", border: `1px solid ${lead.pinned ? "rgba(247,183,49,0.35)" : "var(--border)"}`, color: lead.pinned ? "var(--accent-yellow)" : "var(--text-muted)", borderRadius: 9, width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                          ><Pin size={14} strokeWidth={1.9} style={lead.pinned ? { fill: "var(--accent-yellow)" } : undefined} /></button>
                           <button
                             onClick={() => { setCallTarget(lead); setCallInstructions("") }}
                             disabled={!lead.phone || calling === lead.id}
                             title="Call with AI"
-                            style={{ background: "rgba(139,124,255,0.12)", border: "1px solid rgba(139,124,255,0.28)", color: "#a5b0ff", borderRadius: 9, width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center", opacity: calling === lead.id ? 0.5 : 1 }}
+                            style={{ background: "rgba(139,124,255,0.12)", border: "1px solid rgba(139,124,255,0.28)", color: "var(--accent-violet)", borderRadius: 9, width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center", opacity: calling === lead.id ? 0.5 : 1 }}
                           ><Phone size={14} strokeWidth={1.9} /></button>
                           <button
                             onClick={() => setWaTarget(lead)}
                             disabled={!lead.phone && !lead.whatsapp_number}
                             title="Send WhatsApp"
-                            style={{ background: "rgba(45,212,160,0.1)", border: "1px solid rgba(45,212,160,0.28)", color: "#2dd4a0", borderRadius: 9, width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                            style={{ background: "rgba(45,212,160,0.1)", border: "1px solid rgba(45,212,160,0.28)", color: "var(--accent-green)", borderRadius: 9, width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
                           ><MessageCircle size={14} strokeWidth={1.9} /></button>
                         </>
                       )}
                       <button
                         onClick={() => setMemoryLeadId(lead.id)}
                         title="View Lead Memory"
-                        style={{ background: "rgba(247,183,49,0.1)", border: "1px solid rgba(247,183,49,0.28)", color: "#f7b731", borderRadius: 9, width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                        style={{ background: "rgba(247,183,49,0.1)", border: "1px solid rgba(247,183,49,0.28)", color: "var(--accent-yellow)", borderRadius: 9, width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
                       ><Brain size={14} strokeWidth={1.9} /></button>
                       {!canEdit && <span style={{ fontSize: 12, color: "var(--text-muted)", alignSelf: "center" }}>View only</span>}
                     </div>
@@ -436,7 +441,7 @@ export default function LeadsView({ role, initialSearch }: { role: "admin" | "ag
               onChange={(e) => setCallInstructions(e.target.value)}
               placeholder="e.g. Follow up on his home loan enquiry, mention the 8.4% rate offer"
               rows={4}
-              style={{ width: "100%", background: "#0d1422", border: "1px solid var(--border)", color: "var(--text-primary)", borderRadius: 8, padding: 10, fontSize: 13, resize: "vertical" }}
+              style={{ width: "100%", background: "var(--bg-card)", border: "1px solid var(--border)", color: "var(--text-primary)", borderRadius: 8, padding: 10, fontSize: 13, resize: "vertical" }}
             />
             <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
               <button onClick={() => setCallTarget(null)} style={{ flex: 1, padding: 10, background: "transparent", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text-secondary)" }}>Cancel</button>
@@ -459,11 +464,11 @@ export default function LeadsView({ role, initialSearch }: { role: "admin" | "ag
               onChange={(e) => setWaText(e.target.value)}
               placeholder="Type a WhatsApp message…"
               rows={4}
-              style={{ width: "100%", background: "#0d1422", border: "1px solid var(--border)", color: "var(--text-primary)", borderRadius: 8, padding: 10, fontSize: 13, resize: "vertical" }}
+              style={{ width: "100%", background: "var(--bg-card)", border: "1px solid var(--border)", color: "var(--text-primary)", borderRadius: 8, padding: 10, fontSize: 13, resize: "vertical" }}
             />
             <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
               <button onClick={() => setWaTarget(null)} style={{ flex: 1, padding: 10, background: "transparent", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text-secondary)" }}>Cancel</button>
-              <button onClick={sendWa} disabled={waSending || !waText.trim()} style={{ flex: 1, height: 40, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7, background: "linear-gradient(135deg, #2dd4a0, #16a37b)", border: "none", borderRadius: 10, color: "white", fontWeight: 600, fontSize: 13, boxShadow: "0 4px 16px -4px rgba(45,212,160,0.45)", opacity: waSending || !waText.trim() ? 0.5 : 1 }}>
+              <button onClick={sendWa} disabled={waSending || !waText.trim()} style={{ flex: 1, height: 40, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7, background: "linear-gradient(135deg, var(--accent-green), var(--accent-green))", border: "none", borderRadius: 10, color: "white", fontWeight: 600, fontSize: 13, boxShadow: "0 4px 16px -4px rgba(45,212,160,0.45)", opacity: waSending || !waText.trim() ? 0.5 : 1 }}>
                 <MessageCircle size={14} strokeWidth={2} /> {waSending ? "Sending…" : "Send Message"}
               </button>
             </div>

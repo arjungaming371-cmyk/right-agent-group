@@ -129,7 +129,7 @@ export default function CommandPalette({ open, onClose, onNavigate, allowedViews
         onClick={e => e.stopPropagation()}
         style={{
           width: 600, maxWidth: "calc(100vw - 32px)", height: "fit-content", maxHeight: "58vh",
-          background: "rgba(12,17,29,0.98)", border: "1px solid #232c45", borderRadius: 16,
+          background: "rgba(12,17,29,0.98)", border: "1px solid var(--border)", borderRadius: 16,
           boxShadow: "0 24px 80px -16px rgba(0,0,0,0.8), 0 0 0 1px rgba(139,124,255,0.06)",
           display: "flex", flexDirection: "column", overflow: "hidden",
           animation: "paletteIn 0.16s cubic-bezier(0.21,1.02,0.73,1)",
@@ -178,7 +178,7 @@ export default function CommandPalette({ open, onClose, onNavigate, allowedViews
                     cursor: "pointer",
                   }}
                 >
-                  <span style={{ width: 30, height: 30, borderRadius: 8, background: "rgba(255,255,255,0.05)", display: "inline-flex", alignItems: "center", justifyContent: "center", color: isActive ? "#a5b0ff" : "var(--text-muted)", flexShrink: 0 }}>
+                  <span style={{ width: 30, height: 30, borderRadius: 8, background: "var(--overlay-hover)", display: "inline-flex", alignItems: "center", justifyContent: "center", color: isActive ? "var(--accent-violet)" : "var(--text-muted)", flexShrink: 0 }}>
                     <Icon size={14} strokeWidth={1.9} />
                   </span>
                   <span style={{ flex: 1, minWidth: 0 }}>
