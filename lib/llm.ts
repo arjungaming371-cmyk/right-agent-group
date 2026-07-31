@@ -9,6 +9,15 @@ import { DEFAULT_SCRIPTS as SHARED_DEFAULT_SCRIPTS } from "./default-scripts"
 const GROQ_API_KEY = process.env.GROQ_API_KEY || ""
 const GROQ_URL = (process.env.GROQ_URL || "https://api.groq.com/openai/v1").replace(/\/$/, "")
 const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile"
+// Utility model — for the calls that take English/transcript text in and
+// return JSON or a short English string, never customer-facing Hinglish,
+// Tenglish, or native-script text. gpt-oss-120b is ~4x cheaper on input
+// ($0.15 vs $0.59 per MTok), faster (500 vs 394 TPS), and is one of the few
+// Groq models with automatic prompt caching (50% off repeated prefixes, no
+// code needed). Priya's own replies deliberately stay on GROQ_MODEL: the
+// multilingual output is the one thing a model-family swap could quietly
+// wreck, and it's the part customers actually hear.
+const GROQ_UTILITY_MODEL = process.env.GROQ_UTILITY_MODEL || "openai/gpt-oss-120b"
 
 /**
  * Whether it's safe to spend one extra small completion call mid-turn
@@ -153,11 +162,13 @@ type CompletionOpts = {
   temperature?: number
   /** Ask the backend for strict JSON output (response_format json_object). */
   json?: boolean
+  /** Override the model for this call. Defaults to GROQ_MODEL (Priya's voice). */
+  model?: string
 }
 
 function groqBody(messages: ChatMessage[], opts: CompletionOpts, stream: boolean) {
   return JSON.stringify({
-    model: GROQ_MODEL,
+    model: opts.model || GROQ_MODEL,
     messages,
     stream,
     temperature: opts.temperature ?? 0.6,
@@ -414,7 +425,12 @@ export async function extractLeadInfo(transcriptText: string): Promise<Extracted
         },
         { role: "user", content: transcriptText },
       ],
-      { timeoutMs: 15000, temperature: 0.1, numPredict: 150, json: true }
+      // numPredict 400, not 150: gpt-oss is a reasoning model and spends
+      // completion tokens thinking BEFORE it writes the JSON. At 150 this
+      // measured 146/150 used — and Groq returns a hard 400, not a truncated
+      // reply, when the cap is below what the reasoning needs. The cap is a
+      // ceiling, not a spend: the model still stops as soon as it's done.
+      { timeoutMs: 15000, temperature: 0.1, numPredict: 400, json: true, model: GROQ_UTILITY_MODEL }
     )
     const parsed = JSON.parse(text || "{}")
     return {
@@ -457,6 +473,10 @@ export async function rewriteKnowledgeQuery(rawQuery: string): Promise<string | 
         },
         { role: "user", content: rawQuery.slice(0, 300) },
       ],
+      // Stays on GROQ_MODEL deliberately. This runs on the LIVE CALL path with
+      // a 4s budget, and gpt-oss burns ~115 reasoning tokens before writing
+      // ~20 tokens of JSON — that's latency a caller hears, for a task whose
+      // input is one short sentence (so the cheaper input rate saves nothing).
       { timeoutMs: 4000, temperature: 0.1, numPredict: 60, json: true }
     )
     const parsed = JSON.parse(text || "{}")
@@ -506,6 +526,9 @@ export async function detectLoanEditRequest(
         },
         { role: "user", content: customerMessage.slice(0, 500) },
       ],
+      // Stays on GROQ_MODEL for the same reason as rewriteKnowledgeQuery:
+      // one short message in, tiny JSON out, so reasoning overhead costs more
+      // than the cheaper input rate saves.
       { timeoutMs: 6000, temperature: 0.1, numPredict: 120, json: true }
     )
     const parsed = JSON.parse(text || "{}")
@@ -531,7 +554,7 @@ export async function generateLeadSummary(transcript: string): Promise<string> {
         { role: "system", content: "Return ONLY valid JSON, no other text." },
         { role: "user", content: `Summarize this call with keys: lead_name, address, whatsapp_number, next_action, sentiment.\n\n${transcript}` },
       ],
-      { timeoutMs: 20000, temperature: 0.2, numPredict: 150, json: true }
+      { timeoutMs: 20000, temperature: 0.2, numPredict: 400, json: true, model: GROQ_UTILITY_MODEL }
     )
     return text && text.trim() ? text.trim() : "{}"
   } catch (e) {
@@ -670,7 +693,7 @@ export async function analyzeLeadTranscript(transcriptText: string, existingSumm
           { role: "system", content: LEAD_ANALYSIS_PROMPT },
           { role: "user", content: userContent },
         ],
-        { timeoutMs, temperature: 0.2, numPredict: 450, json: true }
+        { timeoutMs, temperature: 0.2, numPredict: 900, json: true, model: GROQ_UTILITY_MODEL }
       )
       const parsed = JSON.parse(text || "")
       return normalizeAnalysisResult(parsed)
@@ -763,7 +786,7 @@ export async function generatePromptSuggestions(batchText: string): Promise<Prom
           { role: "system", content: PROMPT_TUNER_PROMPT },
           { role: "user", content: batchText.slice(0, 10000) },
         ],
-        { timeoutMs, temperature: 0.3, numPredict: 600, json: true }
+        { timeoutMs, temperature: 0.3, numPredict: 1200, json: true, model: GROQ_UTILITY_MODEL }
       )
       const parsed = JSON.parse(text || "")
       return normalizePromptSuggestions(parsed)
@@ -781,15 +804,31 @@ export function detectLanguage(text: string): Language {
   return "english"
 }
 
+/**
+ * Health check. Verifies BOTH models the app uses — a typo in
+ * GROQ_UTILITY_MODEL would otherwise stay invisible until a lead extraction
+ * or Lead Brain run silently started failing in the background, which is
+ * exactly the kind of breakage nobody notices for a week.
+ */
 export async function checkLLMHealth(): Promise<{ ok: boolean; message: string }> {
   if (!GROQ_API_KEY) return { ok: false, message: "GROQ_API_KEY is not set" }
+  const models = Array.from(new Set([GROQ_MODEL, GROQ_UTILITY_MODEL]))
   try {
-    const res = await fetch(`${GROQ_URL}/models/${GROQ_MODEL}`, {
-      headers: { Authorization: `Bearer ${GROQ_API_KEY}` },
-      signal: AbortSignal.timeout(5000),
-    })
-    if (res.ok) return { ok: true, message: `Groq ready with ${GROQ_MODEL}` }
-    return { ok: false, message: `Groq HTTP ${res.status} — check GROQ_API_KEY` }
+    const results = await Promise.all(
+      models.map(async (model) => {
+        const res = await fetch(`${GROQ_URL}/models/${model}`, {
+          headers: { Authorization: `Bearer ${GROQ_API_KEY}` },
+          signal: AbortSignal.timeout(5000),
+        })
+        return { model, ok: res.ok, status: res.status }
+      })
+    )
+    const failed = results.filter((r) => !r.ok)
+    if (failed.length === 0) return { ok: true, message: `Groq ready with ${models.join(" + ")}` }
+    return {
+      ok: false,
+      message: failed.map((f) => `${f.model}: HTTP ${f.status}`).join("; ") + " — check GROQ_API_KEY / model IDs",
+    }
   } catch (e: any) {
     return { ok: false, message: `Cannot reach Groq: ${e.message}` }
   }
