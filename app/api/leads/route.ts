@@ -24,12 +24,18 @@ export async function GET(req: NextRequest) {
   let i = 1
 
   if (search) {
-    // Phone/name stay ILIKE (partial-digit and partial-name matches need
-    // substring, not tokenized, matching). Full-text search additionally
+    // Phone/name/lead_code stay ILIKE (partial-digit and partial-name matches
+    // need substring, not tokenized, matching). Full-text search additionally
     // covers address, product interest, and notes — so "term insurance" or
     // a street/area name now finds leads that plain ILIKE on name/phone
     // never could.
-    where.push(`(name ILIKE $${i} OR phone ILIKE $${i} OR search_vector @@ websearch_to_tsquery('english', $${i + 1}))`)
+    //
+    // lead_code is matched as a substring so all of "RAG-0042", "0042", and
+    // "42" find the same lead — staff read these out over the phone and will
+    // not type the prefix or the zero padding.
+    where.push(
+      `(name ILIKE $${i} OR phone ILIKE $${i} OR lead_code ILIKE $${i} OR search_vector @@ websearch_to_tsquery('english', $${i + 1}))`
+    )
     params.push(`%${search}%`, search)
     i += 2
   }

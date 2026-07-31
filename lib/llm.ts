@@ -91,6 +91,74 @@ CRITICAL OUTPUT FORMAT RULE — TELUGU:
 - When reacting with warmth/sympathy (per the SOUND HUMAN instructions), use a genuine Telugu expression — NEVER transliterate an English filler word into Telugu script. "Arey" written as "అరేయ్" sounds like a blunt "hey you!", not sympathy, and clashes badly with calling them "sir" in the same breath. Use something like "అయ్యో sir", "ఔనండి", or "నిజమే sir" instead.`,
 }
 
+// Brevity rules, keyed by CHANNEL rather than language, and appended in
+// getSystemPrompt() on top of whatever the dashboard script says. Two
+// reasons it lives here in code instead of in the editable script:
+//   1. The live script is a DB row (ai_scripts 'base'). A rule written only
+//      into default-scripts.ts would never reach a real call unless someone
+//      clicked "Reset to Default".
+//   2. Short forms are only safe in TEXT. On calls Priya's words are read
+//      aloud by TTS, so "a/c", "pls", "w/", "approx" come out as mangled
+//      audio. CALL_BREVITY therefore bans exactly what WHATSAPP_BREVITY
+//      allows — which is also why this can't be folded into the language
+//      blocks: CALL_LANGUAGE_STYLES.english IS LANGUAGE_STYLES.english, so
+//      anything added there would leak into English calls.
+const WHATSAPP_BREVITY = `
+
+KEEP IT SHORT (WhatsApp):
+- 1-2 short sentences. This is a chat, not a letter — long messages get ignored.
+- Lead with the answer. No preamble ("Sure sir, let me tell you..."), no sign-off, no repeating their question back.
+- Prefer the simple everyday word over the formal one, in whatever language you are replying in.
+- Short forms are fine here because this is READ, not spoken: EMI, KYC, PAN, ID, docs, a/c, no., approx, min/max, and number shorthand like 5L or 10k.
+- One question per message, at the end. Never stack two asks.
+- Skip anything they did not ask for. If the answer is a number, send the number.
+- The REPLY LANGUAGE rule above still wins over everything here. Being brief NEVER means switching to a different language or script.`
+
+// NOTE: this block must not contain example sentences in any specific
+// language. An earlier version illustrated the number rule with English
+// phrases ("seven point two five percent") and that alone was enough to pull
+// Telugu call replies out of Telugu script into Roman — measured against the
+// live model. The REPLY LANGUAGE rule above is the only thing that decides
+// script; every rule here is written to describe form, never content.
+const CALL_BREVITY = `
+
+KEEP IT SHORT (SPOKEN CALL):
+- Maximum 2 short sentences. Every extra sentence is time the customer waits — they will talk over you.
+- Lead with the answer. No preamble, no restating their question, no summarising what you just said.
+- Simple everyday words the customer can follow first time, without thinking.
+- Everything you write here is SPOKEN ALOUD by a voice, so write only what a person would actually SAY. Never use written-only shorthand (slashes, ampersands, abbreviations like "a/c" or "approx", or number shorthand like "5L" or "10k") — write those out as full spoken words.
+- Write numbers the way a person says them out loud, in the SAME language and script as the rest of your reply — never switch language just to write a number.
+- Letter-by-letter acronyms people genuinely say aloud are fine: EMI, KYC, PAN, ID.
+- One question, then STOP and let them answer.
+- The REPLY LANGUAGE / OUTPUT FORMAT rule above still wins over everything here. Being brief NEVER means switching to a different language or script.`
+
+const CHANNEL_BREVITY: Record<Channel, string> = {
+  call: CALL_BREVITY,
+  whatsapp: WHATSAPP_BREVITY,
+}
+
+/**
+ * Output token ceiling for one customer-facing reply.
+ *
+ * Native-script text is far more token-expensive than the same sentence in
+ * Roman letters — measured against llama-3.3-70b, a 150-token cap yields
+ * ~22 Telugu words but ~110 English ones. That made every Telugu and Hindi
+ * CALL reply truncate mid-word (the TTS then speaks the fragment), because
+ * CALL_LANGUAGE_STYLES deliberately asks for real Telugu/Devanagari script.
+ *
+ * Only that combination is affected. English calls are Roman, and ALL
+ * WhatsApp replies are Roman too (LANGUAGE_STYLES forces Hinglish/Tenglish
+ * in Latin letters), so those keep the tighter cap.
+ *
+ * This is a ceiling, not a spend — with the brevity rules above the model
+ * stops well before it, and a reply that ends on its own costs the same
+ * whatever the cap was.
+ */
+function replyTokenBudget(language: Language, channel: Channel): number {
+  const nativeScriptCall = channel === "call" && language !== "english"
+  return nativeScriptCall ? 400 : 150
+}
+
 // Script cache — refreshed every 5 minutes so dashboard changes take
 // effect quickly without hitting the DB on every single call turn.
 let _scriptCache: Record<string, string> = {}
@@ -113,24 +181,28 @@ async function getSystemPrompt(language: Language, channel: Channel = "whatsapp"
     )
     const base = result.rows?.find((r: any) => r.language === "base")?.content
     if (base) {
-      const prompt = base + styles[language]
+      const prompt = base + styles[language] + CHANNEL_BREVITY[channel]
       _scriptCache[cacheKey] = prompt
       _scriptCacheTime = now
       return prompt
     }
+    // Legacy per-language rows already carry their own style block, so only
+    // the channel brevity rule gets appended here.
     const legacy = result.rows?.find((r: any) => r.language === language)?.content
     if (legacy) {
-      _scriptCache[cacheKey] = legacy
+      const prompt = legacy + CHANNEL_BREVITY[channel]
+      _scriptCache[cacheKey] = prompt
       _scriptCacheTime = now
-      return legacy
+      return prompt
     }
   } catch {
     // DB unavailable — fall through to default
   }
   // Rare DB-down fallback: always Roman-script (matches default-scripts.ts),
   // regardless of channel — not worth duplicating the native-script variant
-  // into the fallback-only file for a path this infrequent.
-  return DEFAULT_SCRIPTS[language] || DEFAULT_SCRIPTS.english
+  // into the fallback-only file for a path this infrequent. Brevity still
+  // applies: a DB outage is no reason for Priya to start giving speeches.
+  return (DEFAULT_SCRIPTS[language] || DEFAULT_SCRIPTS.english) + CHANNEL_BREVITY[channel]
 }
 
 interface ChatMessage { role: "system" | "user" | "assistant"; content: string }
@@ -288,12 +360,13 @@ export async function chatWithLLM(
   if (extraInstructions?.trim()) {
     systemPrompt += `\n\n=== READ THIS BEFORE YOUR NEXT REPLY — overrides the generic GOAL step order above ===\n${extraInstructions.trim()}\n=== If IDENTITY or KNOWN FACTS above already answers a GOAL step, that step is DONE — do not ask for it, at most confirm it in passing. ===`
   }
-  // numPredict 150: the script now answers real questions (rates, documents,
-  // objections) in 2-3 sentences instead of always deflecting, so 90 tokens
-  // was cutting her off mid-sentence. 150 covers that while still being far
-  // short of a rambling paragraph. Text channels (WhatsApp) pass a higher
-  // cap since nobody is waiting on hold there.
-  return runChat(messages, systemPrompt, { numPredict: opts?.numPredict ?? 150, timeoutMs: opts?.timeoutMs })
+  // Default cap comes from replyTokenBudget: 150 for Roman-script replies,
+  // 400 for native-script calls, where the same two sentences cost several
+  // times more tokens. An explicit opts.numPredict still wins.
+  return runChat(messages, systemPrompt, {
+    numPredict: opts?.numPredict ?? replyTokenBudget(language, opts?.channel ?? "whatsapp"),
+    timeoutMs: opts?.timeoutMs,
+  })
 }
 
 /**
@@ -321,7 +394,11 @@ export async function chatWithLLMStream(
   // cost no noticeable time on Groq.
   const recentMessages = messages.slice(-12)
   const chatMessages = toChatMessages(recentMessages, systemPrompt)
-  return runCompletionStream(chatMessages, { numPredict: 150, timeoutMs: 25000 }, onChunk)
+  return runCompletionStream(
+    chatMessages,
+    { numPredict: replyTokenBudget(language, channel), timeoutMs: 25000 },
+    onChunk
+  )
 }
 
 /**

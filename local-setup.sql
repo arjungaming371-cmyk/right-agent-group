@@ -29,6 +29,17 @@ CREATE TABLE IF NOT EXISTS leads (
 CREATE INDEX IF NOT EXISTS idx_leads_phone  ON leads (phone);
 CREATE INDEX IF NOT EXISTS idx_leads_status ON leads (status);
 
+-- Human-readable lead code (RAG-0001) for staff to read out and search by.
+-- leads.id stays the real primary key and the target of every foreign key;
+-- this is only the display handle. Sequence-backed so concurrent inserts
+-- can never collide, and codes are never reused after a delete.
+-- See migrations/2026-07-31_lead_code.sql for the same change on an
+-- existing database (this block is the fresh-install equivalent).
+CREATE SEQUENCE IF NOT EXISTS lead_code_seq START 1;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_code TEXT
+  DEFAULT 'RAG-' || LPAD(nextval('lead_code_seq')::text, 4, '0');
+CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_lead_code ON leads (lead_code);
+
 -- Full-text search (name/product/address weighted above notes) — phone search
 -- still uses ILIKE at the query layer since digits don't tokenize usefully.
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS search_vector tsvector

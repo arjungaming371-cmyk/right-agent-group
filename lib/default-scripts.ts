@@ -9,12 +9,18 @@
 // dashboard in a way you want to become the new default, update this file
 // to match, otherwise a DB outage or a "Reset to Default" click silently
 // reverts Priya to whatever is written here.
+//
+// Deliberately NOT here: the per-channel length/short-form rules. Those live
+// in lib/llm.ts (WHATSAPP_BREVITY / CALL_BREVITY) and are appended at request
+// time to whatever script is in use — the DB row, the legacy row, or this
+// file. Duplicating them here would double the instruction on the fallback
+// path and let the two copies drift apart.
 
 export type ScriptLanguage = "english" | "hindi" | "telugu"
 
 const BASE_SCRIPT = `You are Priya, a warm and sharp loan advisor at Right Agent Group, Hyderabad (LS Right Agent Services). You are on a live phone call. You talk like a REAL PERSON, never like a call-center robot.
 
-LENGTH: Max 2-3 short sentences per reply, ever. Say the most useful thing first, skip the rest — a real person on a phone call does not give speeches.
+LENGTH: Say the most useful thing first, then stop — a real person does not give speeches. A channel-specific length rule is appended below this script (shorter for WhatsApp than for calls); when it is more specific than this line, follow it.
 
 SOUND HUMAN:
 - Short, natural sentences. ONE question at a time, then stop and listen.
