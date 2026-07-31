@@ -5,6 +5,30 @@ import { requireRole } from "@/lib/auth"
 import { logAudit } from "@/lib/audit"
 import { normalizePhone, phoneLast10, PHONE_MATCH_SQL } from "@/lib/phone"
 
+// leads.lead_code only exists once migrations/2026-07-31_lead_code.sql has
+// been applied. Naming a missing column in the WHERE clause makes Postgres
+// reject the whole statement, so deploying this code before running the
+// migration would turn every lead search into a 500 — searching is the one
+// thing staff do constantly, so it has to keep working either way.
+//
+// Probe once and cache only the positive result: if the column is missing we
+// re-check on the next search, so search-by-code starts working the moment
+// the migration is applied, with no redeploy or restart.
+let _hasLeadCode = false
+async function hasLeadCodeColumn(): Promise<boolean> {
+  if (_hasLeadCode) return true
+  try {
+    const r = await query(
+      `SELECT 1 FROM information_schema.columns
+       WHERE table_name = 'leads' AND column_name = 'lead_code' LIMIT 1`
+    )
+    _hasLeadCode = r.rows.length > 0
+  } catch {
+    _hasLeadCode = false
+  }
+  return _hasLeadCode
+}
+
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
 
@@ -24,12 +48,19 @@ export async function GET(req: NextRequest) {
   let i = 1
 
   if (search) {
-    // Phone/name stay ILIKE (partial-digit and partial-name matches need
-    // substring, not tokenized, matching). Full-text search additionally
+    // Phone/name/lead_code stay ILIKE (partial-digit and partial-name matches
+    // need substring, not tokenized, matching). Full-text search additionally
     // covers address, product interest, and notes — so "term insurance" or
     // a street/area name now finds leads that plain ILIKE on name/phone
     // never could.
-    where.push(`(name ILIKE $${i} OR phone ILIKE $${i} OR search_vector @@ websearch_to_tsquery('english', $${i + 1}))`)
+    //
+    // lead_code is matched as a substring so all of "RAG-0042", "0042", and
+    // "42" find the same lead — staff read these out over the phone and will
+    // not type the prefix or the zero padding.
+    const codeClause = (await hasLeadCodeColumn()) ? ` OR lead_code ILIKE $${i}` : ""
+    where.push(
+      `(name ILIKE $${i} OR phone ILIKE $${i}${codeClause} OR search_vector @@ websearch_to_tsquery('english', $${i + 1}))`
+    )
     params.push(`%${search}%`, search)
     i += 2
   }

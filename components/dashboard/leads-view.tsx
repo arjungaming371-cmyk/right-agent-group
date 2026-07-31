@@ -15,6 +15,50 @@ type Lead = {
   form_token: string | null; form_used_at: string | null; form_sent_at: string | null
   form_completed: boolean
   pinned?: boolean; pinned_at?: string | null
+  // Short human-readable code (RAG-0001). Optional because a row fetched
+  // before the 2026-07-31_lead_code migration has run won't carry one.
+  lead_code?: string | null
+}
+
+// Short lead code (RAG-0042). Monospace so the digits line up down the
+// column and staff can scan for one, and click-to-copy because the usual
+// reason you look at it is to paste it somewhere or read it out on a call.
+function LeadCodeBadge({ code }: { code: string }) {
+  const [copied, setCopied] = useState(false)
+
+  async function copy(e: React.MouseEvent) {
+    // The row itself is clickable — copying a code should not also open the lead.
+    e.stopPropagation()
+    try {
+      await navigator.clipboard.writeText(code)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1200)
+    } catch {
+      // Clipboard blocked (insecure origin / denied permission) — the code is
+      // visible on screen either way, so there is nothing useful to surface.
+    }
+  }
+
+  return (
+    <button
+      onClick={copy}
+      title={copied ? "Copied" : `Copy ${code}`}
+      style={{
+        fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+        fontSize: 11,
+        letterSpacing: 0.3,
+        background: copied ? "rgba(34,197,94,0.15)" : "var(--overlay-hover)",
+        border: `1px solid ${copied ? "var(--accent-green)" : "var(--border)"}`,
+        color: copied ? "var(--accent-green)" : "var(--text-secondary)",
+        borderRadius: 5,
+        padding: "1px 6px",
+        cursor: "pointer",
+        flexShrink: 0,
+      }}
+    >
+      {copied ? "Copied" : code}
+    </button>
+  )
 }
 
 // Shows exactly what the WhatsApp form link is doing for this lead:
@@ -246,7 +290,7 @@ export default function LeadsView({ role, initialSearch }: { role: "admin" | "ag
             <div style={{ position: "relative", width: 200 }}>
               <Search size={13} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
               <input
-                placeholder="Search name or phone…"
+                placeholder="Search name, phone or code (RAG-0042)…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 style={{ width: "100%", height: 34, fontSize: 12.5, paddingLeft: 30 }}
@@ -342,7 +386,10 @@ export default function LeadsView({ role, initialSearch }: { role: "admin" | "ag
                           {lead.pinned && <Pin size={12} strokeWidth={2.2} style={{ color: "var(--accent-yellow)", fill: "var(--accent-yellow)", flexShrink: 0 }} />}
                           {lead.name || "Unknown"}
                         </div>
-                        <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{lead.phone}</div>
+                        <div style={{ fontSize: 12, color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 6 }}>
+                          {lead.lead_code && <LeadCodeBadge code={lead.lead_code} />}
+                          <span>{lead.phone}</span>
+                        </div>
                       </div>
                     </div>
                   </td>
