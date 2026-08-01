@@ -86,10 +86,15 @@ if (-not $url) {
 Write-Host "      OK ngrok tunnel URL: $url (stable - same every restart)" -ForegroundColor Green
 
 # --- 4. Self-check the webhook path through the tunnel (website must be up) ---
+# ngrok-skip-browser-warning is REQUIRED on the free plan: Invoke-WebRequest's
+# User-Agent contains "Mozilla", so ngrok's edge serves its HTML interstitial
+# instead of proxying, and this check reported a dead tunnel that was actually
+# fine. Meta's own webhook calls don't look like a browser, so only this
+# self-check ever tripped on it.
 $reachable = $false
 for ($i = 0; $i -lt 10; $i++) {
     try {
-        $ping = Invoke-WebRequest -UseBasicParsing -TimeoutSec 10 -Uri "$url/api/whatsapp?hub.mode=subscribe&hub.verify_token=$verify&hub.challenge=selfping"
+        $ping = Invoke-WebRequest -UseBasicParsing -TimeoutSec 10 -Headers @{ "ngrok-skip-browser-warning" = "1" } -Uri "$url/api/whatsapp?hub.mode=subscribe&hub.verify_token=$verify&hub.challenge=selfping"
         if ($ping.Content -eq "selfping") { $reachable = $true; break }
     } catch {}
     Start-Sleep -Seconds 3
