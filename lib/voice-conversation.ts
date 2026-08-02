@@ -245,13 +245,44 @@ async function updateTranscriptAsync(callSid: string | null, speech: string, rep
   }
 }
 
+/**
+ * The three per-turn reads that depend ONLY on the lead and what was just
+ * said — never on the conversation history. Split out from
+ * buildTurnInstructions so the caller can start them BEFORE awaiting the
+ * transcript read (see handleTurn/handleTurnStream): the history query and
+ * these have no dependency on each other, so running them back to back was
+ * stacking two round-trips of dead air in front of every single turn.
+ *
+ * Each read catches its own failure. Both callers kick this off before the
+ * turn is known to need it (a voicemail/goodbye turn returns early without
+ * ever awaiting the result), and a rejected promise nobody awaits is an
+ * unhandled rejection. Degrading to "no brief"/"no KB context" also beats
+ * killing a live call over one failed lookup, which is what the previous
+ * uncaught version did.
+ */
+function startTurnContext(leadId: string, speech: string) {
+  return Promise.all([
+    leadId ? buildLeadBrief(leadId).catch(() => "") : Promise.resolve(""),
+    searchKnowledgeBase(speech).catch(() => ""),
+    leadId
+      ? Promise.all([
+          db.from("leads").select("loan_amount, product_interest").eq("id", leadId).single(),
+          db.from("lead_memory").select("facts").eq("lead_id", leadId).single(),
+        ]).catch(() => null)
+      : Promise.resolve(null),
+  ])
+}
+
+type TurnContext = Awaited<ReturnType<typeof startTurnContext>>
+
 /** Per-turn context assembly shared by both turn paths (blocking + streaming). */
 async function buildTurnInstructions(
   leadId: string,
   history: { role: "user" | "model"; content: string }[],
   instructions: string | undefined,
   speech: string,
-  callerPhone: string | undefined
+  callerPhone: string | undefined,
+  contextPromise: Promise<TurnContext>
 ): Promise<string> {
   // LEAD BRAIN: brief Priya with the full cross-channel picture — known
   // facts, rolling relationship summary, recent interactions, sentiment
@@ -271,18 +302,10 @@ async function buildTurnInstructions(
   // SPEED: brief/KB-search/finance-rows are three independent reads that
   // used to run as three separate sequential awaits — none of them needs
   // another's result, so that was pure added silence before the LLM call
-  // even starts. Firing them together shaves that stacked latency down to
-  // whichever one is slowest, instead of the sum of all three.
-  const [brief, kbContext, financeRows] = await Promise.all([
-    leadId ? buildLeadBrief(leadId) : Promise.resolve(""),
-    searchKnowledgeBase(speech),
-    leadId
-      ? Promise.all([
-          db.from("leads").select("loan_amount, product_interest").eq("id", leadId).single(),
-          db.from("lead_memory").select("facts").eq("lead_id", leadId).single(),
-        ])
-      : Promise.resolve(null),
-  ])
+  // even starts. They now run together AND overlap the transcript read that
+  // used to precede them (startTurnContext, fired by the caller), so the
+  // wait here is whichever single read is slowest rather than the sum.
+  const [brief, kbContext, financeRows] = await contextPromise
 
   if (brief) merged = [merged, brief].filter(Boolean).join("\n\n")
 
@@ -458,6 +481,9 @@ export async function handleTurn(opts: {
 }): Promise<{ text: string; hangup: boolean }> {
   const { leadId, callSid, speech, language, callerPhone, instructions, direction } = opts
 
+  // Fire the history-independent reads NOW, so they overlap the transcript
+  // read instead of queueing behind it (see startTurnContext).
+  const contextPromise = startTurnContext(leadId, speech)
   const history = callSid ? await getHistory(callSid) : []
 
   // VOICEMAIL: only ever checked on the first thing heard after our own
@@ -489,7 +515,7 @@ export async function handleTurn(opts: {
     flagHumanRequested(callSid, leadId || null, speech)
   }
 
-  const mergedInstructions = await buildTurnInstructions(leadId, history, instructions, speech, callerPhone)
+  const mergedInstructions = await buildTurnInstructions(leadId, history, instructions, speech, callerPhone, contextPromise)
 
   let reply = ""
   let rateLimited = false
@@ -554,6 +580,10 @@ export async function handleTurnStream(
 ): Promise<{ hangup: boolean }> {
   const { leadId, callSid, speech, language, callerPhone, instructions, direction } = opts
 
+  // Fire the history-independent reads NOW, so they overlap the transcript
+  // read instead of queueing behind it (see startTurnContext). This is the
+  // live-call path — every millisecond here is silence on the caller's ear.
+  const contextPromise = startTurnContext(leadId, speech)
   const history = callSid ? await getHistory(callSid) : []
 
   // VOICEMAIL: see handleTurn's identical check for why this is restricted
@@ -579,7 +609,7 @@ export async function handleTurnStream(
     flagHumanRequested(callSid, leadId || null, speech)
   }
 
-  const mergedInstructions = await buildTurnInstructions(leadId, history, instructions, speech, callerPhone)
+  const mergedInstructions = await buildTurnInstructions(leadId, history, instructions, speech, callerPhone, contextPromise)
 
   let reply = ""
   let pending = ""
