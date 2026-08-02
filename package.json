@@ -10,7 +10,6 @@
     "db:check": "node scripts/smoke-test.js"
   },
   "dependencies": {
-    "@vercel/analytics": "^1.4.1",
     "cheerio": "^1.2.0",
     "clsx": "^2.1.1",
     "lucide-react": "^0.469.0",

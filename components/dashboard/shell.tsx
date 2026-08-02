@@ -1,5 +1,6 @@
 "use client"
 import { useState, useEffect } from "react"
+import dynamic from "next/dynamic"
 import {
   Users, FileText, Phone, MessageCircle, Activity, ShieldCheck, UploadCloud,
   ScrollText, LogOut, Mic, BarChart3, UserCog, Search, Menu, X, BookOpen, type LucideIcon,
@@ -15,7 +16,13 @@ import SecurityView  from "./security-view"
 import UploadView    from "./upload-view"
 import ScriptView    from "./script-view"
 import KnowledgeBaseView from "./knowledge-base-view"
-import AnalyticsView from "./analytics-view"
+// recharts is ~400kB and only the Analytics tab uses it. Statically imported
+// it landed in the dashboard bundle for every user, including the ones who
+// never open that tab — load it on demand instead.
+const AnalyticsView = dynamic(() => import("./analytics-view"), {
+  ssr: false,
+  loading: () => <div style={{ padding: 24, color: "var(--text-muted)" }}>Loading analytics…</div>,
+})
 import QuickChat     from "./quick-chat"
 import NotificationBell from "./notification-bell"
 import ThemeSwitcher from "./theme-switcher"
