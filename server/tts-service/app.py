@@ -72,6 +72,35 @@ VOICE_MAP = {
 _NATIVE_SCRIPT_LANGUAGES = {"telugu", "hindi"}
 
 _WORD_RE = re.compile(r"[A-Za-z]+|[^A-Za-z]+")
+
+# Acronyms the English voice reads as ORDINARY WORDS rather than letter by
+# letter. Measured against the same letters written as a normal word — a
+# duration difference of 0ms means the voice cannot tell them apart:
+#
+#   PAN 496ms vs "Pan" 496ms   -> "pan"   (so: "pan card")
+#   KYC 706ms vs "Kyc" 706ms   -> "kyc"
+#   ID  496ms vs "Id"  496ms   -> "id"
+#   EMI 606ms vs "Emi" 546ms   -> 60ms apart, already spelled out; left alone
+#
+# All three are said constantly on loan calls, so this is not cosmetic.
+# Hyphens rather than spaces or periods: measured 626ms for "P-A-N" against
+# 824ms for "P A N" (letter-by-letter either way, but the hyphen form is
+# brisker, closer to how an agent actually says it) and, unlike "P.A.N.", it
+# adds no sentence-final punctuation that would shift the intonation
+# mid-sentence. _ENGLISH_CONNECTOR_RE below keeps the hyphens inside one
+# English segment, so this stays a single synthesis call.
+#
+# This is a curated list, which _segments_for_synthesis deliberately avoids
+# for language detection — the difference is that this list is closed and
+# short: it is the set of acronyms lib/llm.ts explicitly tells Priya she may
+# say aloud. A word missing from it just keeps today's pronunciation.
+_SPELL_OUT = {"PAN", "KYC", "ID"}
+_ACRONYM_RE = re.compile(r"\b(" + "|".join(sorted(_SPELL_OUT)) + r")\b")
+
+
+def _spell_acronyms(text: str) -> str:
+    """Force letter-by-letter reading of acronyms the voice mistakes for words."""
+    return _ACRONYM_RE.sub(lambda m: "-".join(m.group(1)), text)
 # Whitespace/hyphen/apostrophe between two English words — kept attached to
 # an English segment instead of forced to the native voice, so "best
 # interest rate" or "tie-up" stay ONE synthesis call instead of three.
@@ -159,25 +188,50 @@ def _trim_silence(seg, silence_thresh_db: int = -40):
     return seg[start_trim: len(seg) - end_trim]
 
 
-def _stitch_clips(clips: list[bytes]) -> bytes:
-    """Decode, trim silence, and concatenate MP3 clips with a small natural
-    gap between them — exporting WAV instead of re-encoding back to MP3
-    (the voicebot's ffmpeg step auto-detects the container either way, see
-    module docstring), so re-encoding to MP3 here was pure wasted latency.
-    Runs in a threadpool (see caller) since pydub shells out to ffmpeg —
-    blocking, CPU-bound work that must not sit on the event loop."""
+# Gap inserted between two stitched clips.
+#
+# A flat 120ms everywhere was the wrong model of speech: segments split on
+# SCRIPT, not on meaning, so "mee best interest rate" becomes four clips and
+# got a pause at every single boundary — a stutter at each English word, in
+# the middle of a phrase where a real speaker doesn't pause at all.
+#
+# Where the pause belongs is where the punctuation is. So: a short gap
+# mid-phrase, just enough that adjacent words don't run together, and the
+# full pause only where the text actually ends a clause or a sentence.
+_PHRASE_GAP_MS = 40
+_CLAUSE_GAP_MS = 120
+_CLAUSE_ENDING = tuple(",;:।॥.!?…")
+
+
+def _gap_after(text: str) -> int:
+    """How long to pause after this segment, judged by how it ends."""
+    stripped = text.rstrip()
+    return _CLAUSE_GAP_MS if stripped.endswith(_CLAUSE_ENDING) else _PHRASE_GAP_MS
+
+
+def _stitch_clips(clips: list[bytes], texts: list[str]) -> bytes:
+    """Decode, trim silence, and concatenate MP3 clips, pausing between them
+    according to the punctuation at each boundary (see _gap_after) — exporting
+    WAV instead of re-encoding back to MP3 (the voicebot's ffmpeg step
+    auto-detects the container either way, see module docstring), so
+    re-encoding to MP3 here was pure wasted latency. Runs in a threadpool (see
+    caller) since pydub shells out to ffmpeg — blocking, CPU-bound work that
+    must not sit on the event loop."""
     from pydub import AudioSegment
-    GAP_MS = 120  # a natural pause between language switches, not silence-padding-sized
     trimmed = [_trim_silence(AudioSegment.from_file(io.BytesIO(clip), format="mp3")) for clip in clips]
     combined = trimmed[0]
-    for seg in trimmed[1:]:
-        combined += AudioSegment.silent(duration=GAP_MS) + seg
+    for i, seg in enumerate(trimmed[1:]):
+        combined += AudioSegment.silent(duration=_gap_after(texts[i])) + seg
     out = io.BytesIO()
     combined.export(out, format="wav")
     return out.getvalue()
 
 
 async def _synthesize_edge(text: str, language: str) -> tuple[bytes, str]:
+    # Before segmentation: the hyphens this inserts are kept inside the
+    # English segment by _ENGLISH_CONNECTOR_RE, so an acronym still costs
+    # exactly one synthesis call.
+    text = _spell_acronyms(text)
     segments = _segments_for_synthesis(text, language)
     # A punctuation-only segment (e.g. a lone "?" left stranded after an
     # English-word segment split off the preceding text) has nothing for
@@ -193,7 +247,7 @@ async def _synthesize_edge(text: str, language: str) -> tuple[bytes, str]:
     if len(clips) <= 1:
         return (clips[0] if clips else b""), "audio/mpeg"
 
-    combined = await run_in_threadpool(_stitch_clips, clips)
+    combined = await run_in_threadpool(_stitch_clips, clips, [t for t, _ in speakable])
     return combined, "audio/wav"
 
 
