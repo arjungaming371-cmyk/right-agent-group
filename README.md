@@ -3,7 +3,7 @@
 AI-powered loan lead management system. Priya (the AI) handles outbound/inbound calls in English, Hinglish, and Tenglish (Hindi/Telugu spoken naturally, written in Roman script — one consistent en-IN voice), collects lead details, and sends the application form link via the **official Meta WhatsApp Business Cloud API**.
 
 ## Quick Start
-See **DEPLOYMENT-GUIDE.md** (full deployment) and **SETUP-GUIDE-CLOUD-API.md** (WhatsApp/Meta setup).
+See **DEPLOYMENT-GUIDE.md** (full deployment), **SETUP-GUIDE-CLOUD-API.md** (WhatsApp/Meta setup), and **MIGRATION-GUIDE.md** (moving an existing install to another machine without losing data).
 
 1. Install: Node 22 LTS, PostgreSQL 17, Python 3.11, ffmpeg
 2. Get a free Groq API key at console.groq.com (this is Priya's AI brain — required)
