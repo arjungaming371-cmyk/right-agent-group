@@ -43,9 +43,9 @@ export const GREETINGS: Record<Language, string> = {
   english:
     "Hello, good morning! This is Priya calling from Right Agent Group, Hyderabad — we help people get loans from over 20 banks without the running around. Do you have a minute? I'd love to know if you have any loan or financial need right now.",
   hindi:
-    "नमस्ते, good morning! मैं प्रिया बोल रही हूं Right Agent Group, Hyderabad से — हम 20+ banks से loan दिलवाने में मदद करते हैं, बिना bank bank घूमे। एक minute है आपके पास? बताइए, आपको कोई loan या financial ज़रूरत है क्या अभी?",
+    "नमस्ते, good morning! मैं प्रिया बोल रही हूं Right Agent Group, Hyderabad से — हम बीस से ज़्यादा banks से loan दिलवाने में मदद करते हैं, बिना bank bank घूमे। एक minute है आपके पास? बताइए, आपको कोई loan या financial ज़रूरत है क्या अभी?",
   telugu:
-    "నమస్కారం! నేను ప్రియ, Right Agent Group, Hyderabad నుండి మాట్లాడుతున్నాను — మేము 20+ banks తో కలిసి మీకు easy గా loan దొరికేలా help చేస్తాము, bank bank తిరగకుండా. మీకు కొంచెం time ఉందా? ఇప్పుడు మీకు ఏదైనా loan లేదా financial అవసరం ఉందా అని తెలుసుకోవాలని అనుకుంటున్నాను.",
+    "నమస్కారం! నేను ప్రియ, Right Agent Group, Hyderabad నుండి మాట్లాడుతున్నాను — మేము ఇరవైకి పైగా banks తో కలిసి మీకు సులభంగా loan దొరికేలా help చేస్తాము, bank bank తిరగకుండా. మీకు కొంచెం సమయం ఉందా? ఇప్పుడు మీకు ఏదైనా loan లేదా financial అవసరం ఉందా అని తెలుసుకోవాలని అనుకుంటున్నాను.",
 }
 
 // Repeat outbound calls to the same lead (call_count > 0 before this call)
@@ -86,7 +86,7 @@ export const INBOUND_GREETINGS: Record<Language, string> = {
 const CLOSING: Record<Language, string> = {
   english: "Thank you! I'm sending a simple loan application on your WhatsApp right now — just fill it in, and our loan officer will personally consult you after that. Have a great day!",
   hindi: "धन्यवाद! मैं अभी आपके WhatsApp पे एक simple loan application भेज रही हूं — बस उसको fill कर दीजिएगा, उसके बाद हमारे loan officer आपसे personally बात करके consult करेंगे। आपका दिन शुभ हो!",
-  telugu: "ధన్యవాదాలు! నేను ఇప్పుడే మీ WhatsApp కి ఒక simple loan application పంపిస్తున్నాను — దాన్ని fill చేయండి చాలు, ఆ తర్వాత మా loan officer మీతో personal గా మాట్లాడి consult చేస్తారు. మీకు మంచి రోజు జరగాలి!",
+  telugu: "ధన్యవాదాలు! నేను ఇప్పుడే మీ WhatsApp కి ఒక simple loan application పంపిస్తున్నాను — దాన్ని fill చేయండి చాలు, ఆ తర్వాత మా loan officer మీతో వ్యక్తిగతంగా మాట్లాడి సలహా ఇస్తారు. మీకు మంచి రోజు జరగాలి!",
 }
 
 // Inbound calls auto-create a lead with a placeholder like "Caller 8090"
@@ -102,8 +102,8 @@ const PLACEHOLDER_NAME_RE = /^(Caller \d+|Unknown|WA \d+)$/i
 function personalizedGreeting(language: Language, name: string): string {
   const templates: Record<Language, string> = {
     english: `Hello ${name}! This is Priya calling from Right Agent Group, Hyderabad — we help people get loans from over 20 banks without the running around. Do you have a minute? I'd love to know if you have any loan need right now.`,
-    hindi: `नमस्ते ${name} जी! मैं प्रिया बोल रही हूं, Right Agent Group, Hyderabad से — हम 20+ banks से loan दिलवाने में मदद करते हैं। एक minute है आपके पास? बताइए, आपको कोई loan ज़रूरत है क्या अभी?`,
-    telugu: `నమస్కారం ${name} గారు! నేను ప్రియ, Right Agent Group, Hyderabad నుండి మాట్లాడుతున్నాను — మేము 20+ banks తో కలిసి మీకు easy గా loan దొరికేలా help చేస్తాము. మీకు కొంచెం time ఉందా? ఇప్పుడు ఏదైనా loan అవసరం ఉందా అని తెలుసుకోవాలని అనుకుంటున్నాను.`,
+    hindi: `नमस्ते ${name} जी! मैं प्रिया बोल रही हूं, Right Agent Group, Hyderabad से — हम बीस से ज़्यादा banks से loan दिलवाने में मदद करते हैं। एक minute है आपके पास? बताइए, आपको कोई loan ज़रूरत है क्या अभी?`,
+    telugu: `నమస్కారం ${name} గారు! నేను ప్రియ, Right Agent Group, Hyderabad నుండి మాట్లాడుతున్నాను — మేము ఇరవైకి పైగా banks తో కలిసి మీకు సులభంగా loan దొరికేలా help చేస్తాము. మీకు కొంచెం సమయం ఉందా? ఇప్పుడు ఏదైనా loan అవసరం ఉందా అని తెలుసుకోవాలని అనుకుంటున్నాను.`,
   }
   return templates[language]
 }
@@ -165,7 +165,7 @@ const VOICEMAIL_RE =
 const GOODBYE_REPLY: Record<Language, string> = {
   english: "Thank you for your time! Have a great day. Goodbye!",
   hindi: "आपके समय के लिए धन्यवाद! आपका दिन शुभ हो। नमस्ते!",
-  telugu: "మీ time కి ధన్యవాదాలు! మీకు మంచి రోజు జరగాలి. నమస్కారం!",
+  telugu: "మీ సమయానికి ధన్యవాదాలు! మీకు మంచి రోజు జరగాలి. నమస్కారం!",
 }
 
 /** Called on the first webhook hit of a call (before any speech). Bumps call_count once per call. */
