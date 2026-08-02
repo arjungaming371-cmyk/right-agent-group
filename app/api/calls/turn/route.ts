@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db, query } from "@/lib/db"
-import { startCall, handleTurn, handleTurnStream } from "@/lib/voice-conversation"
+import { startCall, handleTurn, handleTurnStream, correctLastSpokenReply } from "@/lib/voice-conversation"
 import { detectLanguage, type Language } from "@/lib/llm"
 import { PHONE_MATCH_SQL } from "@/lib/phone"
 
@@ -16,6 +16,11 @@ export const dynamic = "force-dynamic"
 //
 //  { event: "turn", callSid, speech }
 //     → runs one conversation turn, returns { text, hangup }.
+//
+//  { event: "spoken", callSid, text }
+//     → rewrites the LAST ai entry in the transcript to what the caller
+//       actually heard. Sent by the voicebot when a barge-in cut a reply
+//       short, so getHistory() stops feeding the model words it never spoke.
 //
 //  { event: "end", callSid, duration }
 //     → records real call duration when the WebSocket stream stops. Exotel's
@@ -186,6 +191,19 @@ export async function POST(req: NextRequest) {
         [callSid, duration]
       )
       return NextResponse.json({ ok: true })
+    }
+
+    if (event === "spoken") {
+      // Empty text is a meaningful value here (the caller cut in before Priya
+      // got a word out), so check the TYPE, not truthiness.
+      if (typeof body?.text !== "string") {
+        return NextResponse.json({ error: "text required" }, { status: 400 })
+      }
+      const corrected = await correctLastSpokenReply(callSid, body.text.slice(0, 4000))
+      // corrected:false is a normal 200, not an error — "nothing to correct"
+      // happens legitimately when the socket dropped before the app wrote the
+      // row, and the voicebot has nothing useful to do with a 4xx.
+      return NextResponse.json({ ok: true, corrected })
     }
 
     return NextResponse.json({ error: "unknown event" }, { status: 400 })

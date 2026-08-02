@@ -246,6 +246,49 @@ async function updateTranscriptAsync(callSid: string | null, speech: string, rep
 }
 
 /**
+ * Rewrite the last AI reply in a call's transcript to what the caller
+ * actually heard, after the voicebot cut it short on a barge-in.
+ *
+ * This matters because getHistory() feeds this column straight back to the
+ * model every turn — leave the full generated reply in place and Priya spends
+ * the rest of the call believing she said things the caller never heard.
+ *
+ * Every clause of the guard is load-bearing:
+ *  - '{-1,text}' addresses the LAST element's text key (jsonb paths count
+ *    negative indices from the end), so no subquery is needed.
+ *  - to_jsonb($2::text), not $2::jsonb — escapes server-side, so a reply
+ *    containing a quote can't blow up the statement.
+ *  - the trailing false is create_missing: if the element somehow has no
+ *    text key, leave it alone rather than inventing one.
+ *  - `transcript -> -1 ->> 'role' = 'ai'` is simultaneously the role check,
+ *    the non-empty check and the is-an-array check: on '[]', on a non-array,
+ *    and on SQL NULL it yields NULL, so the row simply doesn't match. Note
+ *    that jsonb_array_length() is deliberately NOT AND-ed in — SQL does not
+ *    guarantee short-circuit evaluation, so it could be evaluated against a
+ *    non-array row and raise, turning a harmless no-op into a 500.
+ *  - no status write (unlike updateTranscriptAsync): a correction must never
+ *    resurrect a call that already completed.
+ */
+export async function correctLastSpokenReply(callSid: string, spokenText: string): Promise<boolean> {
+  if (!callSid) return false
+  try {
+    const res = await query(
+      `UPDATE voice_calls
+          SET transcript = jsonb_set(transcript, '{-1,text}', to_jsonb($2::text), false),
+              updated_at = now()
+        WHERE twilio_call_sid = $1
+          AND jsonb_typeof(transcript) = 'array'
+          AND transcript -> -1 ->> 'role' = 'ai'`,
+      [callSid, spokenText]
+    )
+    return (res.rowCount || 0) > 0
+  } catch (e: any) {
+    console.error("transcript correction error:", e)
+    return false
+  }
+}
+
+/**
  * The three per-turn reads that depend ONLY on the lead and what was just
  * said — never on the conversation history. Split out from
  * buildTurnInstructions so the caller can start them BEFORE awaiting the
@@ -641,12 +684,18 @@ export async function handleTurnStream(
       return { hangup: true }
     }
     const msg = RETRY_MSG[language]
-    updateTranscriptAsync(callSid, speech, msg)
+    await updateTranscriptAsync(callSid, speech, msg)
     onSentence(msg)
     return { hangup: false }
   }
 
-  updateTranscriptAsync(callSid, speech, reply)
+  // AWAITED, not fire-and-forget: the voicebot may follow this turn with a
+  // correction (correctLastSpokenReply) when the caller barged in, and that
+  // POST must not race the append it is correcting. Costs the caller nothing —
+  // every sentence has already streamed out above, so the only thing gated is
+  // the "done" line, and the very next statement already awaits
+  // completeLeadIfReady, which can run a whole second LLM call.
+  await updateTranscriptAsync(callSid, speech, reply)
   maybeProposeLoanEdit(leadId, "priya_voice", speech)
 
   const completed = await completeLeadIfReady({ leadId, callSid, callerPhone, messages, reply })
