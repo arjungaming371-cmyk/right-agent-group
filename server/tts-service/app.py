@@ -5,13 +5,29 @@
 #   Hindi   → hi-IN-SwaraNeural  (native voice)
 #   English → en-IN-NeerjaExpressiveNeural
 #
-# Priya's replies for calls arrive in native Telugu/Devanagari script mixed
-# with English loanwords in Roman letters (matches real code-switched
-# speech — see lib/llm.ts's CALL_LANGUAGE_STYLES). The native-script voices
-# mispronounce embedded English words rather than switching accent cleanly
-# (confirmed by listening to real output), so English loanword runs are
-# synthesized separately with the English voice and stitched into the native
-# audio — see _segments_for_synthesis / _synthesize_edge below.
+# ONE VOICE PER REPLY, ONE SYNTHESIS CALL. That is the whole design, and it is
+# a deliberate reversal of what this file used to do.
+#
+# Priya's call replies arrive in native Telugu/Devanagari script with English
+# loanwords in Roman letters (see lib/llm.ts's CALL_LANGUAGE_STYLES). This
+# service used to split them on script — English runs to the English voice,
+# native runs to the native voice — and stitch the clips back together, on the
+# grounds that the native voices mispronounce embedded English words.
+#
+# They do, somewhat. But the cure was far worse. Each run was a SEPARATE Edge
+# TTS request, and Edge TTS generates every request as its own isolated
+# utterance with its own intonation contour: "Right Agent Group" ends on a
+# falling pitch, then Telugu restarts at a fresh one. Stitch a dozen of those
+# together, alternating between two literally different voices (Shruti and
+# Neerja), and the caller hears exactly what it is — a spliced recording.
+# Verdict from listening to a real 34-second sample: "like combining two or
+# three voices". A single greeting cost 16 network round-trips to produce it.
+#
+# So: the whole reply, in native script, English loanwords and all, goes to the
+# native voice in ONE request. Continuous prosody, one speaker, and the first
+# word arrives after one round-trip instead of sixteen. English words come out
+# in an Indian-language accent, which is how Telugu and Hindi speakers say
+# "loan", "bank" and "WhatsApp" anyway.
 #
 # Returns MP3 audio — ffmpeg in the voicebot auto-detects the container and
 # converts to 8kHz PCM for Exotel, so no fixed content-type assumption there.
@@ -28,14 +44,12 @@
 #   EDGE_TTS_RATE  speaking rate, e.g. "-8%" (default "+0%")
 #   EDGE_TTS_PITCH pitch shift, e.g. "+2Hz" (default "+0Hz")
 
-import asyncio
 import io
 import os
 import re
 import time
 
 from fastapi import FastAPI, HTTPException, Request
-from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response
 
 
@@ -66,85 +80,38 @@ VOICE_MAP = {
     "english": "en-IN-NeerjaExpressiveNeural",
 }
 
-# Languages whose voice speaks native script (Telugu/Devanagari) rather than
-# English — these are the ones that need English-word segments split out
-# and spoken separately (see _segments_for_synthesis below).
-_NATIVE_SCRIPT_LANGUAGES = {"telugu", "hindi"}
-
-_WORD_RE = re.compile(r"[A-Za-z]+|[^A-Za-z]+")
-
-# Acronyms the English voice reads as ORDINARY WORDS rather than letter by
-# letter. Measured against the same letters written as a normal word — a
-# duration difference of 0ms means the voice cannot tell them apart:
+# Acronyms the voices read as ORDINARY WORDS rather than letter by letter.
+# Diagnosed by synthesizing each one against the same letters written as a
+# normal word: a duration difference of ~0ms means the voice cannot tell them
+# apart, i.e. it is saying "pan", not "P A N".
 #
-#   PAN 496ms vs "Pan" 496ms   -> "pan"   (so: "pan card")
-#   KYC 706ms vs "Kyc" 706ms   -> "kyc"
-#   ID  496ms vs "Id"  496ms   -> "id"
-#   EMI 606ms vs "Emi" 546ms   -> 60ms apart, already spelled out; left alone
+#              plain   as a word   verdict
+#   PAN        344ms     344ms     reads "pan"  (so: "pan card", on every call)
+#   KYC        656ms     656ms     reads "kyc"
+#   ID         426ms     426ms     reads "id"
+#   EMI        536ms     396ms     already spelled out — left alone
 #
-# All three are said constantly on loan calls, so this is not cosmetic.
-# Hyphens rather than spaces or periods: measured 626ms for "P-A-N" against
-# 824ms for "P A N" (letter-by-letter either way, but the hyphen form is
-# brisker, closer to how an agent actually says it) and, unlike "P.A.N.", it
-# adds no sentence-final punctuation that would shift the intonation
-# mid-sentence. _ENGLISH_CONNECTOR_RE below keeps the hyphens inside one
-# English segment, so this stays a single synthesis call.
+# SPACES, not hyphens. Hyphens were chosen when these were spoken by the
+# English voice, where "P-A-N" spelled out fine. On the native voices they
+# only work for PAN — KYC and ID come back bit-for-bit identical hyphenated
+# (656ms and 446ms, i.e. unchanged). Spaces are the only separator that
+# actually forces letters out of both voices, verified on all three:
 #
-# This is a curated list, which _segments_for_synthesis deliberately avoids
-# for language detection — the difference is that this list is closed and
-# short: it is the set of acronyms lib/llm.ts explicitly tells Priya she may
-# say aloud. A word missing from it just keeps today's pronunciation.
+#              plain  hyphen  space        plain  hyphen  space
+#   te  PAN     344     576    896     hi   366     546    676
+#   te  KYC     656     656    856     hi   716     716    830
+#   te  ID      426     446    506     hi   436     396    506
+#
+# A curated list is acceptable here precisely because it is closed and short:
+# it is the set of acronyms lib/llm.ts explicitly tells Priya she may say
+# aloud. Anything missing just keeps today's pronunciation.
 _SPELL_OUT = {"PAN", "KYC", "ID"}
 _ACRONYM_RE = re.compile(r"\b(" + "|".join(sorted(_SPELL_OUT)) + r")\b")
 
 
 def _spell_acronyms(text: str) -> str:
     """Force letter-by-letter reading of acronyms the voice mistakes for words."""
-    return _ACRONYM_RE.sub(lambda m: "-".join(m.group(1)), text)
-# Whitespace/hyphen/apostrophe between two English words — kept attached to
-# an English segment instead of forced to the native voice, so "best
-# interest rate" or "tie-up" stay ONE synthesis call instead of three.
-_ENGLISH_CONNECTOR_RE = re.compile(r"^[\s\-']+$")
-
-
-def _segments_for_synthesis(text: str, language: str) -> list[tuple[str, str]]:
-    """Split text into (segment_text, voice) runs so English words are
-    spoken by the English voice and everything else by the native voice.
-
-    Calls send native-script text with intentional English words/loanwords
-    mixed in (see lib/llm.ts's CALL_LANGUAGE_STYLES) — any run of Latin
-    letters is therefore treated as an intentional English word, not
-    guessed at via a fixed word list. A curated list is always incomplete:
-    any word not on it got force-transliterated into a mangled phonetic
-    guess (e.g. "tie-up", "best" -> "తిए-उप్", "बेस्त्" — observed live).
-    Treating every Latin run as English, unconditionally, fixes that for
-    any word, not just ones someone remembered to list.
-
-    Adjacent runs assigned the same voice are merged so consecutive English
-    words become ONE synthesis call, not one per word — a real reply with
-    several loanwords was fragmenting into ~19 separate clips, each with
-    Edge TTS's own silence padding, making a 2-sentence reply take 36
-    seconds and sound choppy at every word boundary."""
-    native_voice = VOICE_MAP.get(language, VOICE_MAP["telugu"])
-    english_voice = VOICE_MAP["english"]
-    if language not in _NATIVE_SCRIPT_LANGUAGES:
-        return [(text, native_voice)]
-
-    parts = _WORD_RE.findall(text)
-    segments: list[tuple[str, str]] = []
-    for part in parts:
-        if part.isalpha() and part.isascii():
-            voice, content = english_voice, part
-        elif segments and segments[-1][1] == english_voice and _ENGLISH_CONNECTOR_RE.match(part):
-            segments[-1] = (segments[-1][0] + part, english_voice)
-            continue
-        else:
-            voice, content = native_voice, part
-        if segments and segments[-1][1] == voice:
-            segments[-1] = (segments[-1][0] + content, voice)
-        else:
-            segments.append((content, voice))
-    return segments
+    return _ACRONYM_RE.sub(lambda m: " ".join(m.group(1)), text)
 
 
 app = FastAPI(title="RAG TTS (edge-tts)", docs_url=None, redoc_url=None)
@@ -175,80 +142,47 @@ async def _synthesize_one(text: str, voice: str) -> bytes:
     return buf.getvalue()
 
 
-def _trim_silence(seg, silence_thresh_db: int = -40):
-    """Strip Edge TTS's own lead-in/trail-out silence from a clip. Measured
-    live: a single word like "sir" synthesized alone came back as a 1.78s
-    clip — almost entirely silence padding, not speech. Concatenating many
-    un-trimmed segments (a real reply with several loanwords produced 17
-    segments) stacked that padding into ~25+ extra seconds on top of the
-    actual speech, dragging a 2-sentence reply out to 36 seconds of audio."""
-    from pydub import silence
-    start_trim = silence.detect_leading_silence(seg, silence_threshold=silence_thresh_db)
-    end_trim = silence.detect_leading_silence(seg.reverse(), silence_threshold=silence_thresh_db)
-    return seg[start_trim: len(seg) - end_trim]
+_TELUGU_RE = re.compile(r"[ఀ-౿]")
+_DEVANAGARI_RE = re.compile(r"[ऀ-ॿ]")
 
 
-# Gap inserted between two stitched clips.
-#
-# A flat 120ms everywhere was the wrong model of speech: segments split on
-# SCRIPT, not on meaning, so "mee best interest rate" becomes four clips and
-# got a pause at every single boundary — a stutter at each English word, in
-# the middle of a phrase where a real speaker doesn't pause at all.
-#
-# Where the pause belongs is where the punctuation is. So: a short gap
-# mid-phrase, just enough that adjacent words don't run together, and the
-# full pause only where the text actually ends a clause or a sentence.
-_PHRASE_GAP_MS = 40
-_CLAUSE_GAP_MS = 120
-_CLAUSE_ENDING = tuple(",;:।॥.!?…")
+def _voice_for(text: str, language: str) -> str:
+    """Pick the voice, letting the TEXT overrule the declared language.
 
+    A Hindi sentence must never come out of the Telugu voice, and vice versa.
+    Trusting the `language` field alone could not guarantee that: it used to
+    fall back to the TELUGU voice for any value it did not recognise, so a
+    missing, misspelled or stale language on a Hindi call meant Devanagari
+    read aloud by a Telugu speaker.
 
-def _gap_after(text: str) -> int:
-    """How long to pause after this segment, judged by how it ends."""
-    stripped = text.rstrip()
-    return _CLAUSE_GAP_MS if stripped.endswith(_CLAUSE_ENDING) else _PHRASE_GAP_MS
-
-
-def _stitch_clips(clips: list[bytes], texts: list[str]) -> bytes:
-    """Decode, trim silence, and concatenate MP3 clips, pausing between them
-    according to the punctuation at each boundary (see _gap_after) — exporting
-    WAV instead of re-encoding back to MP3 (the voicebot's ffmpeg step
-    auto-detects the container either way, see module docstring), so
-    re-encoding to MP3 here was pure wasted latency. Runs in a threadpool (see
-    caller) since pydub shells out to ffmpeg — blocking, CPU-bound work that
-    must not sit on the event loop."""
-    from pydub import AudioSegment
-    trimmed = [_trim_silence(AudioSegment.from_file(io.BytesIO(clip), format="mp3")) for clip in clips]
-    combined = trimmed[0]
-    for i, seg in enumerate(trimmed[1:]):
-        combined += AudioSegment.silent(duration=_gap_after(texts[i])) + seg
-    out = io.BytesIO()
-    combined.export(out, format="wav")
-    return out.getvalue()
+    The script is unambiguous evidence and cannot be stale — Devanagari is
+    Hindi, Telugu script is Telugu — so it decides whenever it is present. The
+    declared language is only consulted for text with no native script at all
+    (English replies, or Roman Tenglish), and an unrecognised language then
+    lands on English rather than Telugu, since Latin text is far likelier to
+    be English than romanised Telugu.
+    """
+    telugu_chars = len(_TELUGU_RE.findall(text))
+    devanagari_chars = len(_DEVANAGARI_RE.findall(text))
+    if telugu_chars or devanagari_chars:
+        # Mixed scripts in one reply shouldn't happen, but if it does, the
+        # dominant script wins rather than whichever appeared first.
+        return VOICE_MAP["telugu"] if telugu_chars >= devanagari_chars else VOICE_MAP["hindi"]
+    return VOICE_MAP.get(language, VOICE_MAP["english"])
 
 
 async def _synthesize_edge(text: str, language: str) -> tuple[bytes, str]:
-    # Before segmentation: the hyphens this inserts are kept inside the
-    # English segment by _ENGLISH_CONNECTOR_RE, so an acronym still costs
-    # exactly one synthesis call.
-    text = _spell_acronyms(text)
-    segments = _segments_for_synthesis(text, language)
-    # A punctuation-only segment (e.g. a lone "?" left stranded after an
-    # English-word segment split off the preceding text) has nothing for
-    # Edge TTS to speak and makes it raise NoAudioReceived — require at
-    # least one actual letter/digit, not just non-whitespace.
-    speakable = [(seg_text, voice) for seg_text, voice in segments if any(c.isalnum() for c in seg_text)]
-    # Each segment is a separate network round-trip to Edge TTS — awaiting
-    # them one at a time serialized the latency (a multi-segment reply took
-    # 47s in testing, unusable for a live call). asyncio.gather runs them
-    # concurrently and preserves input order in its results, so the clips
-    # still concatenate in the right sequence.
-    clips = list(await asyncio.gather(*(_synthesize_one(t, v) for t, v in speakable)))
-    if len(clips) <= 1:
-        return (clips[0] if clips else b""), "audio/mpeg"
+    """One request, one voice, one continuous utterance.
 
-    combined = await run_in_threadpool(_stitch_clips, clips, [t for t, _ in speakable])
-    return combined, "audio/wav"
+    No splitting, no stitching, no pydub, no gap tuning — all of that is gone
+    deliberately (see the module docstring). Everything that made the output
+    sound spliced lived in the seams between clips, so the fix was to stop
+    producing seams, not to make them smaller.
+
+    A knock-on worth having: a greeting used to cost 16 network round-trips to
+    Edge TTS before the caller heard a word. It now costs one.
+    """
+    return await _synthesize_one(_spell_acronyms(text), _voice_for(text, language)), "audio/mpeg"
 
 
 @app.get("/health")
