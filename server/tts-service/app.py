@@ -91,25 +91,35 @@ VOICE_MAP = {
 #   ID         426ms     426ms     reads "id"
 #   EMI        536ms     396ms     already spelled out — left alone
 #
-# The separator is PER ACRONYM, because no single one is both effective and
-# brisk. Measured speech duration (silence trimmed) on each native voice:
+# PAN IS DELIBERATELY NOT IN THIS LIST.
+#
+# It was, briefly, and that was a mistake worth recording. Measurement showed
+# the voice reading "PAN" identically to the word "Pan" (344ms vs 344ms), and
+# that got treated as a defect. It is not: in India "PAN card" is SPOKEN as a
+# word — "paan card" — and nobody spells out P-A-N in conversation. The voice
+# was already saying it the way a Hyderabad agent says it, and spelling it out
+# made it worse, not better. lib/llm.ts groups PAN with EMI/KYC/ID as
+# "letter-by-letter acronyms", which is what misled this; it is the odd one
+# out.
+#
+# So this list is only for acronyms that really are spelled aloud, and where
+# the voice gets it wrong on its own. KYC and ID qualify: both come back
+# identical to "Kyc" and "Id", i.e. read as words.
+#
+# Separator is per acronym because no single one works for both. Measured
+# speech duration (silence trimmed) on each native voice:
 #
 #              plain  hyphen  space         plain  hyphen  space
-#   te  PAN     344     576    896      hi   366     546    676
 #   te  KYC     656     656    856      hi   716     716    830
 #   te  ID      426     446    506      hi   436     396    506
 #
-# PAN spells out with a hyphen on both voices, so it uses one: 576ms rather
-# than 896ms for the same three letters. Spacing it was correct but laboured —
-# 300ms/letter, slower than any agent says it.
+# Hyphens do nothing to either (656 -> 656, 426 -> 446, and Hindi ID actually
+# gets SHORTER). Only a space moves them, so both take one.
 #
-# KYC and ID ignore hyphens completely (656 -> 656, 426 -> 446: unchanged, and
-# hi ID actually gets SHORTER). Only a space moves them, so they take one.
-#
-# A curated list is acceptable here precisely because it is closed and short:
-# it is the set of acronyms lib/llm.ts explicitly tells Priya she may say
-# aloud. Anything missing just keeps today's pronunciation.
-_SPELL_OUT = {"PAN": "-", "KYC": " ", "ID": " "}
+# A curated list is acceptable here precisely because it is closed and short.
+# Anything missing just keeps today's pronunciation — which, as PAN shows, is
+# frequently already right.
+_SPELL_OUT = {"KYC": " ", "ID": " "}
 _ACRONYM_RE = re.compile(r"\b(" + "|".join(sorted(_SPELL_OUT)) + r")\b")
 
 
