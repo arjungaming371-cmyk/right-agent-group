@@ -146,8 +146,12 @@ async function speechToText(pcm, language) {
 // confidently replies to words the caller never said.
 const CLARIFY_PHRASE = {
   english: "Sorry, I didn't quite catch that — could you say that again?",
-  telugu: "Sorry andi, naaku sariga vinipinchaledu. Malli oka sari cheppagalara?",
-  hindi: "Sorry, mujhe thoda clear sunayi nahi diya. Kya aap dobara bol sakte hain?",
+  // Native script, like every other fixed line the caller hears: the TTS
+  // service picks the VOICE from the script, so Roman text here would be
+  // spoken by the English voice while the model's replies come out of the
+  // Telugu/Hindi one — two different women inside a single call.
+  telugu: "Sorry అండి, నాకు సరిగా వినిపించలేదు. మళ్ళీ ఒకసారి చెప్పగలరా?",
+  hindi: "Sorry, मुझे थोड़ा clear सुनाई नहीं दिया। क्या आप दोबारा बोल सकते हैं?",
 }
 
 // ---------- TTS: server/tts-service — Edge TTS, native Telugu/Hindi voices + English for loanwords ----------
