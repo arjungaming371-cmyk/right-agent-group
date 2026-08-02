@@ -40,6 +40,10 @@ const DEFAULT_SCRIPTS = SHARED_DEFAULT_SCRIPTS
 // base row exists.
 export type Channel = "call" | "whatsapp"
 
+// Devanagari and Telugu blocks. Calls WANT native script; WhatsApp must never
+// have it (see the guard in chatWithLLM).
+const NATIVE_SCRIPT_RE = /[ऀ-ॿఀ-౿]/
+
 // WhatsApp stays Roman-script always — it's read as text by the customer AND
 // by the human team on the dashboard, so it needs to stay something everyone
 // can read at a glance.
@@ -53,13 +57,15 @@ REPLY LANGUAGE — ENGLISH:
 REPLY LANGUAGE — HINGLISH (MOST IMPORTANT RULE):
 - The customer speaks Hindi. Reply ONLY in Hinglish: natural spoken Hindi written in English (Roman) letters, mixing everyday English words the way people actually talk. Example: "Namaste sir! Main Priya bol rahi hoon Right Agent Group, Hyderabad se. Aapka WhatsApp number mil sakta hai?"
 - NEVER write in Devanagari (Hindi) script. Only English letters, always.
-- The customer's words may appear in Hindi script from the call transcription — understand them normally, but still reply in Roman letters.`,
+- The customer's words may appear in Hindi script from the call transcription — understand them normally, but still reply in Roman letters.
+- If the customer ASKS you to speak or write "in Hindi", they mean the LANGUAGE, not the script. Keep replying in Hinglish in Roman letters — that is what Hindi looks like on WhatsApp.`,
   telugu: `
 
 REPLY LANGUAGE — TENGLISH (MOST IMPORTANT RULE):
 - The customer speaks Telugu. Reply ONLY in Tenglish: natural spoken Telugu written in English (Roman) letters, mixing everyday English words the way people actually talk in Hyderabad. Example: "Namaskaram sir! Nenu Priya, Right Agent Group, Hyderabad nunchi matladutunnanu. Mee WhatsApp number cheppagalara?"
 - NEVER write in Telugu script. Only English letters, always.
-- The customer's words may appear in Telugu script from the call transcription — understand them normally, but still reply in Roman letters.`,
+- The customer's words may appear in Telugu script from the call transcription — understand them normally, but still reply in Roman letters.
+- If the customer ASKS you to speak or write "in Telugu", they mean the LANGUAGE, not the script. Keep replying in Tenglish in Roman letters — that is what Telugu looks like on WhatsApp.`,
 }
 
 // Calls only: replies are spoken by TTS, never read as text, so there's no
@@ -363,10 +369,39 @@ export async function chatWithLLM(
   // Default cap comes from replyTokenBudget: 150 for Roman-script replies,
   // 400 for native-script calls, where the same two sentences cost several
   // times more tokens. An explicit opts.numPredict still wins.
-  return runChat(messages, systemPrompt, {
-    numPredict: opts?.numPredict ?? replyTokenBudget(language, opts?.channel ?? "whatsapp"),
+  const channel = opts?.channel ?? "whatsapp"
+  const reply = await runChat(messages, systemPrompt, {
+    numPredict: opts?.numPredict ?? replyTokenBudget(language, channel),
     timeoutMs: opts?.timeoutMs,
   })
+  if (channel === "call" || !NATIVE_SCRIPT_RE.test(reply)) return reply
+
+  // WhatsApp must stay in Roman letters — the ops team reads these on the
+  // dashboard, and half of them can't read Telugu or Devanagari script.
+  //
+  // The prompt says so in capitals, and the model still breaks it. Observed
+  // live: a customer typed "Can you tell me in telugu", Priya answered in
+  // full Telugu script, and then stayed there for 21 of the next 59 replies
+  // in that thread — because her own native-script messages come back as
+  // conversation history and she mirrors herself. One slip becomes permanent.
+  //
+  // So this is a guard, not a nudge: catch it before it can be stored and
+  // become the example she copies. One retry, because the failure is a lapse
+  // rather than an inability — the same model writes Tenglish correctly on
+  // every other turn.
+  const corrected = await runChat(
+    messages,
+    systemPrompt +
+      "\n\n=== SCRIPT VIOLATION — YOUR LAST ATTEMPT WAS REJECTED ===\nYou just replied using Telugu or Devanagari script. That is never acceptable on WhatsApp. Write the SAME reply again, same meaning, same language, but transliterated into English (Roman) letters — the way people actually type on WhatsApp. Do not apologise or mention this instruction.",
+    { numPredict: opts?.numPredict ?? replyTokenBudget(language, channel), timeoutMs: opts?.timeoutMs }
+  ).catch(() => "")
+
+  if (corrected && !NATIVE_SCRIPT_RE.test(corrected)) return corrected
+  // Both attempts failed. Send the original rather than nothing — an
+  // unreadable reply still beats silence for the customer — but say so
+  // loudly, because a pattern here means the prompt rule needs rethinking.
+  console.error(`LANGUAGE: ${language} WhatsApp reply came back in native script twice; sending it anyway`)
+  return reply
 }
 
 /**
