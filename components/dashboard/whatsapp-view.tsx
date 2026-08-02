@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState, useCallback } from "react"
 import { Search, Send, MessageCircle, ChevronLeft, CheckCircle2, Zap, Lock, Pin, Info, X, Phone, MapPin, Wallet, Languages, Tag, StickyNote, Smile, PhoneCall } from "lucide-react"
 import { useToast } from "../ui/toast"
+import { usePolling } from "@/lib/use-poll"
 
 type Lead = {
   id: string; name: string; phone: string
@@ -183,17 +184,22 @@ export default function WhatsAppView({ role }: { role: "admin" | "agent" | "view
   useEffect(() => {
     checkStatus()
     loadLeads()
-    const t1 = setInterval(checkStatus, 8000)
-    const t2 = setInterval(loadLeads, 4000)
-    return () => { clearInterval(t1); clearInterval(t2) }
   }, [])
+
+  // The fastest polls in the console (4s + 3s + 8s). usePolling stops all
+  // three while the tab is hidden and fires them once on return, so a chat
+  // left open in a background tab costs nothing and is still up to date the
+  // moment it's looked at again.
+  usePolling(checkStatus, 8000)
+  usePolling(loadLeads, 4000)
 
   useEffect(() => {
     if (!selected) return
     loadMessages(selected.id, true)
-    const t = setInterval(() => loadMessages(selected.id), 3000)
-    return () => clearInterval(t)
   }, [selected?.id])
+
+  // 0 = don't poll at all while no chat is open (mobile "back to list").
+  usePolling(() => { if (selected) loadMessages(selected.id) }, selected ? 3000 : 0)
 
   async function send() {
     if (!text.trim() || !selected?.phone || sending) return

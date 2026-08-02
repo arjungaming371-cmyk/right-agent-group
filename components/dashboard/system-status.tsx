@@ -1,6 +1,7 @@
 "use client"
 import { useEffect, useState } from "react"
 import { Phone, MessageCircle, AlertCircle, CheckCircle2, Clock } from "lucide-react"
+import { usePolling } from "@/lib/use-poll"
 
 type SystemStatus = {
   voiceBot: { status: "operational" | "degraded" | "down"; lastCheck: string; activeCalls?: number }
@@ -14,40 +15,39 @@ export default function SystemStatus() {
   })
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    async function checkStatus() {
-      try {
-        const voiceRes = await fetch("/api/system/status")
-        const whatsappRes = await fetch("/api/whatsapp/status")
+  async function checkStatus() {
+    try {
+      const voiceRes = await fetch("/api/system/status")
+      const whatsappRes = await fetch("/api/whatsapp/status")
 
-        const voiceData = await voiceRes.json().catch(() => null)
-        const whatsappData = await whatsappRes.json().catch(() => null)
+      const voiceData = await voiceRes.json().catch(() => null)
+      const whatsappData = await whatsappRes.json().catch(() => null)
 
-        setStatus({
-          voiceBot: {
-            status: voiceData?.llm?.running ? "operational" : "down",
-            lastCheck: new Date().toISOString(),
-            activeCalls: voiceData?.activeCalls || 0,
-          },
-          whatsapp: {
-            status: whatsappData?.ready ? "connected" : "disconnected",
-            unread: whatsappData?.unread || 0,
-          },
-        })
-      } catch (e) {
-        console.error("Status check failed:", e)
-        setStatus({
-          voiceBot: { status: "degraded", lastCheck: new Date().toISOString() },
-          whatsapp: { status: "error" },
-        })
-      }
-      setLoading(false)
+      setStatus({
+        voiceBot: {
+          status: voiceData?.llm?.running ? "operational" : "down",
+          lastCheck: new Date().toISOString(),
+          activeCalls: voiceData?.activeCalls || 0,
+        },
+        whatsapp: {
+          status: whatsappData?.ready ? "connected" : "disconnected",
+          unread: whatsappData?.unread || 0,
+        },
+      })
+    } catch (e) {
+      console.error("Status check failed:", e)
+      setStatus({
+        voiceBot: { status: "degraded", lastCheck: new Date().toISOString() },
+        whatsapp: { status: "error" },
+      })
     }
+    setLoading(false)
+  }
 
+  useEffect(() => {
     checkStatus()
-    const interval = setInterval(checkStatus, 30000) // Check every 30 seconds
-    return () => clearInterval(interval)
   }, [])
+  usePolling(checkStatus, 30000) // Check every 30 seconds while the tab is visible
 
   const getStatusColor = (s: string) => {
     switch (s) {

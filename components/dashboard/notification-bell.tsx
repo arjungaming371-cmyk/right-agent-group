@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState } from "react"
 import { Bell, FileText, AlertTriangle, LogIn, MessageCircle, Check, PenLine } from "lucide-react"
 import { timeAgo, formatDateTime } from "@/lib/utils"
+import { usePolling } from "@/lib/use-poll"
 import type { ViewKey } from "./shell"
 
 type Notification = {
@@ -43,9 +44,8 @@ export default function NotificationBell({ onNavigate }: { onNavigate: (view: Vi
 
   useEffect(() => {
     load()
-    const t = setInterval(load, 20000)
-    return () => clearInterval(t)
   }, [])
+  usePolling(load, 20000)
 
   useEffect(() => {
     function onClickOutside(e: MouseEvent) {

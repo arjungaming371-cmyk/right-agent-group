@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react"
 import { Phone, MessageCircle, Bot, User, Zap } from "lucide-react"
 import { timeAgo } from "@/lib/utils"
+import { usePolling } from "@/lib/use-poll"
 import { SkeletonList } from "../ui/skeleton"
 
 type CallLog  = { id:string; lead_name:string; phone:string; duration:string; time:string; status:string; transcript:{role:string;text:string}[] }
@@ -24,7 +25,8 @@ export default function CommLogView() {
     setLoading(false)
   }
 
-  useEffect(() => { load(); const t=setInterval(load,15000); return ()=>clearInterval(t) }, [])
+  useEffect(() => { load() }, [])
+  usePolling(load, 15000)
 
   const STATUS_STYLE: Record<string,{bg:string;color:string}> = {
     completed: {bg:"rgba(45,212,160,0.13)",  color:"var(--accent-green)"},

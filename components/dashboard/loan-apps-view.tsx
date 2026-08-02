@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react"
 import { BadgeCheck, Download, PenLine, Check, X, History } from "lucide-react"
 import { formatCurrency, timeAgo, formatDateTime } from "@/lib/utils"
+import { usePolling } from "@/lib/use-poll"
 import { SkeletonList } from "../ui/skeleton"
 import { useToast } from "../ui/toast"
 import { calculateEMI, totalInterest, formatINR, BEST_RATES, detectLoanType } from "@/lib/finance"
@@ -109,11 +110,11 @@ export default function LoanAppsView({ role, initialSearch }: { role: "admin" | 
   useEffect(() => {
     load()
     loadPendingEdits()
-    // Background refresh — new submissions and AI edit proposals arrive
-    // from customer activity without any user action.
-    const t = setInterval(() => { load(true); loadPendingEdits() }, 15000)
-    return () => clearInterval(t)
   }, [])
+
+  // Background refresh — new submissions and AI edit proposals arrive
+  // from customer activity without any user action.
+  usePolling(() => { load(true); loadPendingEdits() }, 15000)
 
   const filtered = apps.filter((a) => !search || a.customer_name?.toLowerCase().includes(search.toLowerCase()))
   const selected = apps.find((a) => a.id === selectedId) || null

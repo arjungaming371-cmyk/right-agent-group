@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react"
 import { Bot, Pause, Phone, PhoneIncoming, PhoneOutgoing, Play, RotateCcw, X } from "lucide-react"
 import { formatDuration, timeAgo, formatDateTime } from "@/lib/utils"
+import { usePolling } from "@/lib/use-poll"
 import { useToast } from "../ui/toast"
 import { SkeletonList } from "../ui/skeleton"
 
@@ -130,9 +131,8 @@ export default function VoiceLogsView({ role }: { role: "admin" | "agent" | "vie
 
   useEffect(() => {
     load()
-    const t = setInterval(load, 15000)
-    return () => clearInterval(t)
   }, [])
+  usePolling(load, 15000)
 
   async function makeCall() {
     const lead  = mode === "lead" ? leads.find((l) => l.id === selectedLeadId) : null

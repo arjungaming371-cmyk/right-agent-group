@@ -22,6 +22,7 @@ import ThemeSwitcher from "./theme-switcher"
 import DeveloperLogsView from "./developer-logs-view"
 import CalendarView from "./calendar-view"
 import ProfileModal from "./profile-modal"
+import { usePolling } from "@/lib/use-poll"
 
 export type ViewKey = "leads" | "loans" | "voice" | "whatsapp" | "comms" | "calendar" | "security" | "upload" | "script" | "knowledge" | "analytics" | "dev-logs"
 export type Role = "admin" | "agent" | "viewer" | "developer"
@@ -124,27 +125,28 @@ export default function DashboardShell() {
     return () => window.removeEventListener("keydown", onKey)
   }, [])
 
+  async function loadCounts() {
+    try {
+      const [l, lo, w] = await Promise.all([
+        fetch("/api/leads?count=1").then(r => r.json()),
+        fetch("/api/loans?count=1").then(r => r.json()),
+        fetch("/api/whatsapp/unread").then(r => r.json()),
+      ])
+      setCounts({ leads: l.count ?? 0, loans: lo.count ?? 0, whatsapp: w.count ?? 0 })
+    } catch {}
+  }
+
   useEffect(() => {
-    async function loadCounts() {
-      try {
-        const [l, lo, w] = await Promise.all([
-          fetch("/api/leads?count=1").then(r => r.json()),
-          fetch("/api/loans?count=1").then(r => r.json()),
-          fetch("/api/whatsapp/unread").then(r => r.json()),
-        ])
-        setCounts({ leads: l.count ?? 0, loans: lo.count ?? 0, whatsapp: w.count ?? 0 })
-      } catch {}
-    }
     loadCounts()
     fetch("/api/auth/me").then(r => r.json()).then(d => {
       setUserEmail(d.email || "")
       if (d.role) setRole(d.role)
     }).catch(() => {})
-    // Matches the 15s poll used by leads-view/loan-apps-view so the sidebar
-    // badges don't lag a full extra cycle behind the visible lists.
-    const t = setInterval(loadCounts, 15000)
-    return () => clearInterval(t)
   }, [])
+
+  // Matches the 15s poll used by leads-view/loan-apps-view so the sidebar
+  // badges don't lag a full extra cycle behind the visible lists.
+  usePolling(loadCounts, 15000)
 
   async function logout() {
     try { await fetch("/api/auth/logout", { method: "POST" }) } catch {}

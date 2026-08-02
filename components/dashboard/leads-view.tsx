@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react"
 import { Users, Target, IndianRupee, BadgeCheck, Phone, MessageCircle, RotateCcw, Plus, Search, Link2, Check, Download, Brain, Pin } from "lucide-react"
 import { formatCurrency, timeAgo, formatDateTime } from "@/lib/utils"
+import { usePolling } from "@/lib/use-poll"
 import { useToast } from "../ui/toast"
 import { Skeleton } from "../ui/skeleton"
 import LeadMemoryModal from "./lead-memory-modal"
@@ -201,11 +202,13 @@ export default function LeadsView({ role, initialSearch }: { role: "admin" | "ag
 
   useEffect(() => {
     load()
-    // Background refresh — scores, statuses, form badges, and call counts
-    // change from calls/WhatsApp/form submissions without any user action.
-    const t = setInterval(() => load(true), 15000)
-    return () => clearInterval(t)
   }, [debouncedSearch, ageFilter, amountFilter, loanTypeFilter, interestedFilter])
+
+  // Background refresh — scores, statuses, form badges, and call counts
+  // change from calls/WhatsApp/form submissions without any user action.
+  // Each tick re-reads the current filters (usePolling calls the latest
+  // closure), so it no longer needs its own deps list.
+  usePolling(() => load(true), 15000)
 
   const totalLeads = leads.length
   const qualified = leads.filter((l) => l.status === "qualified").length
