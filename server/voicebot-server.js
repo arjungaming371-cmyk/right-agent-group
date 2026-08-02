@@ -202,7 +202,7 @@ const ttsCache = new Map()
 
 async function textToSpeechPcm8k(text, language) {
   const cacheable = text.length <= TTS_CACHE_MAX_CHARS
-  const key = `${language} ${text}`
+  const key = `${language}\u0000${text}`
   if (cacheable) {
     const hit = ttsCache.get(key)
     if (hit) {
