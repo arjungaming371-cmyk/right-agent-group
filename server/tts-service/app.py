@@ -91,27 +91,31 @@ VOICE_MAP = {
 #   ID         426ms     426ms     reads "id"
 #   EMI        536ms     396ms     already spelled out — left alone
 #
-# SPACES, not hyphens. Hyphens were chosen when these were spoken by the
-# English voice, where "P-A-N" spelled out fine. On the native voices they
-# only work for PAN — KYC and ID come back bit-for-bit identical hyphenated
-# (656ms and 446ms, i.e. unchanged). Spaces are the only separator that
-# actually forces letters out of both voices, verified on all three:
+# The separator is PER ACRONYM, because no single one is both effective and
+# brisk. Measured speech duration (silence trimmed) on each native voice:
 #
-#              plain  hyphen  space        plain  hyphen  space
-#   te  PAN     344     576    896     hi   366     546    676
-#   te  KYC     656     656    856     hi   716     716    830
-#   te  ID      426     446    506     hi   436     396    506
+#              plain  hyphen  space         plain  hyphen  space
+#   te  PAN     344     576    896      hi   366     546    676
+#   te  KYC     656     656    856      hi   716     716    830
+#   te  ID      426     446    506      hi   436     396    506
+#
+# PAN spells out with a hyphen on both voices, so it uses one: 576ms rather
+# than 896ms for the same three letters. Spacing it was correct but laboured —
+# 300ms/letter, slower than any agent says it.
+#
+# KYC and ID ignore hyphens completely (656 -> 656, 426 -> 446: unchanged, and
+# hi ID actually gets SHORTER). Only a space moves them, so they take one.
 #
 # A curated list is acceptable here precisely because it is closed and short:
 # it is the set of acronyms lib/llm.ts explicitly tells Priya she may say
 # aloud. Anything missing just keeps today's pronunciation.
-_SPELL_OUT = {"PAN", "KYC", "ID"}
+_SPELL_OUT = {"PAN": "-", "KYC": " ", "ID": " "}
 _ACRONYM_RE = re.compile(r"\b(" + "|".join(sorted(_SPELL_OUT)) + r")\b")
 
 
 def _spell_acronyms(text: str) -> str:
     """Force letter-by-letter reading of acronyms the voice mistakes for words."""
-    return _ACRONYM_RE.sub(lambda m: " ".join(m.group(1)), text)
+    return _ACRONYM_RE.sub(lambda m: _SPELL_OUT[m.group(1)].join(m.group(1)), text)
 
 
 app = FastAPI(title="RAG TTS (edge-tts)", docs_url=None, redoc_url=None)
