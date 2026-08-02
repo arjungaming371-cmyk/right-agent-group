@@ -56,6 +56,38 @@ const ENERGY_THRESHOLD = parseInt(process.env.VOICEBOT_ENERGY_THRESHOLD || "300"
 // as a .wav so you can play it back / re-feed STT. Off by default.
 const DEBUG_DIR = process.env.VOICEBOT_DEBUG_DIR || ""
 
+// ---------- Barge-in (interrupting Priya mid-sentence) ----------
+//
+// OFF BY DEFAULT, deliberately. Whether this works at all depends on
+// something that cannot be determined from code: how much of our own
+// outbound audio Exotel echoes back into the inbound media stream on a real
+// phone line. If it echoes, Priya hears herself, decides the caller is
+// talking, and cuts herself off — every call, every sentence. That failure
+// is far worse than the half-duplex behaviour it replaces, so it does not
+// get switched on until someone has made a real call with it.
+//
+// To validate: set VOICEBOT_BARGE_IN=1, call in, and stay SILENT through a
+// full reply. If Priya interrupts herself, the line echoes — raise
+// VOICEBOT_BARGE_ENERGY until she doesn't, or leave the feature off. Then
+// call again and talk over her; she should stop within ~300ms.
+const BARGE_IN = (process.env.VOICEBOT_BARGE_IN || "0").trim() === "1"
+// Deliberately well above ENERGY_THRESHOLD: a frame only counts as the
+// caller interrupting if it is clearly louder than the level we accept as
+// speech when the line is otherwise quiet. Echo and line noise sit low.
+const BARGE_ENERGY = parseInt(process.env.VOICEBOT_BARGE_ENERGY || String(ENERGY_THRESHOLD * 2))
+// ...and it has to be SUSTAINED. A single loud frame is a cough, a door, or
+// a codec artefact. A third of a second of continuous energy is someone
+// actually talking.
+const BARGE_MIN_MS = parseInt(process.env.VOICEBOT_BARGE_MIN_MS || "300")
+// How far ahead of real time we let playback run. Audio already handed to
+// Exotel cannot be recalled, so this is the worst-case overhang the caller
+// still hears after interrupting. With barge-in off it is Infinity, which
+// reproduces the original behaviour exactly: push the whole reply into the
+// socket at once and let Exotel buffer it.
+const PLAYBACK_LEAD_MS = BARGE_IN ? parseInt(process.env.VOICEBOT_PLAYBACK_LEAD_MS || "300") : Infinity
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
 // ---------- STT: self-hosted faster-whisper (server/stt-service.py) ----------
 function pcmToWav(pcm) {
   const header = Buffer.alloc(44)
@@ -339,6 +371,14 @@ class CallSession {
     this.sendChain = Promise.resolve()
     this.sendingAudio = false  // inside playPcm — comfort silence must yield
     this.comfortTimer = null
+    // Bumped every time queued speech is abandoned (barge-in). Everything
+    // asynchronous that was started for a reply carries the epoch it began
+    // under and checks it before doing anything the caller would hear, so an
+    // interrupted turn's in-flight TTS and playback silently drop instead of
+    // playing over whatever comes next.
+    this.speechEpoch = 0
+    this.bargeMs = 0        // sustained caller energy while Priya is talking
+    this.bargeBuffer = []   // frames captured during that window
   }
 
   /**
@@ -411,8 +451,38 @@ class CallSession {
     }
   }
 
+  /**
+   * The caller started talking over Priya. Abandon everything queued for the
+   * current reply and treat the audio that triggered this as the start of
+   * their next utterance.
+   *
+   * Note what this does NOT undo: the turn API call that produced the reply
+   * has already run, so the FULL reply is in the saved transcript even
+   * though the caller only heard part of it. Priya's next turn therefore
+   * believes she said more than the caller heard. That is inherent to
+   * barge-in (the text exists before the audio does) and is the main reason
+   * to keep BARGE_MIN_MS high enough that this only fires on real speech.
+   */
+  interrupt() {
+    this.speechEpoch++
+    this.botTalking = false
+    this.processing = false
+    this.synthChain = Promise.resolve()
+    this.sendChain = Promise.resolve()
+    // Carry the frames that triggered the barge-in into the new utterance —
+    // dropping them would clip the first third of a second off whatever the
+    // caller said, which is usually the word that matters ("no", "wait").
+    this.buffer = this.bargeBuffer
+    this.speaking = true
+    this.speechMs = this.bargeMs
+    this.silenceMs = 0
+    this.bargeBuffer = []
+    this.bargeMs = 0
+    console.log(`✋ barge-in — caller cut in, dropping the rest of the reply`)
+  }
+
   onMedia(msg) {
-    if (this.botTalking || this.processing || this.closed) return // half-duplex: ignore mic while Priya talks
+    if (this.closed) return
     const payload = msg.media?.payload
     if (!payload) return
     const frame = Buffer.from(payload, "base64")
@@ -421,6 +491,26 @@ class CallSession {
     this.frameCount++
     if (energy > this.maxEnergy) this.maxEnergy = energy
     if (energy > this.callMaxEnergy) this.callMaxEnergy = energy
+
+    // Priya is speaking. Half-duplex (the default) ignores the mic entirely;
+    // with barge-in on we watch for sustained loud speech and cut her off.
+    if (this.botTalking) {
+      if (!BARGE_IN) return
+      if (energy > BARGE_ENERGY) {
+        this.bargeMs += ms
+        this.bargeBuffer.push(frame)
+        if (this.bargeMs >= BARGE_MIN_MS) this.interrupt()
+      } else {
+        // Not continuous — start over. Interrupting must take a real run of
+        // speech, not a loud frame here and there.
+        this.bargeMs = 0
+        this.bargeBuffer = []
+      }
+      return
+    }
+
+    // Mid-turn (STT/LLM running, nothing being spoken yet): still ignore.
+    if (this.processing) return
 
     if (energy > ENERGY_THRESHOLD) {
       this.speaking = true
@@ -448,6 +538,10 @@ class CallSession {
     this.maxEnergy = 0
     if (!hadRealSpeech || this.processing) return
 
+    // The epoch this turn belongs to. If the caller barges in partway
+    // through, every step below stops mattering and must not clobber the
+    // state the interrupt already handed to the newer turn.
+    const epoch = this.speechEpoch
     this.processing = true
     try {
       // Always-on diagnostics: if a call ever goes silent again, these numbers
@@ -477,7 +571,7 @@ class CallSession {
         const phrase = CLARIFY_PHRASE[this.language] || CLARIFY_PHRASE.english
         console.log(`🗣 (clarify) ${phrase}`)
         this.queueSentence(phrase)
-        await this.drainSpeech()
+        await this.drainSpeech(epoch)
         console.log(`⏱ TOTAL turn (silence → reply fully sent): ${Date.now() - turnT0}ms`)
         return
       }
@@ -505,26 +599,42 @@ class CallSession {
         }
       )
       console.log(`⏱ brain (full generation): ${Date.now() - brainT0}ms`)
-      await this.drainSpeech()
+      await this.drainSpeech(epoch)
       // Total turn: from "caller stopped talking" to "all of Priya's audio
       // has been sent back" — this is the real silence the caller sat through.
       console.log(`⏱ TOTAL turn (silence → reply fully sent): ${Date.now() - turnT0}ms`)
-      if (hangup) this.hangupAfterAudio()
+      // Never hang up on an interrupted turn: the caller is mid-sentence, and
+      // the goodbye that triggered this belongs to a reply they never heard.
+      if (hangup && epoch === this.speechEpoch) this.hangupAfterAudio()
     } catch (e) {
       console.error("turn error:", e.message)
     } finally {
-      this.processing = false
+      // Only if this turn is still the current one — after a barge-in the
+      // interrupt already reset processing for the turn that replaced it.
+      if (epoch === this.speechEpoch) this.processing = false
     }
   }
 
-  /** Sends synthesized PCM to the caller and waits out its real duration. */
-  async playPcm(pcm8k) {
+  /**
+   * Sends synthesized PCM to the caller and waits out its real duration.
+   *
+   * Paced rather than dumped: we stay at most PLAYBACK_LEAD_MS of audio
+   * ahead of real time, so an interrupt stops the reply within that window.
+   * Dumping the whole clip into the socket (what this used to do, and still
+   * does when barge-in is off, since the lead is then Infinity) means every
+   * byte is already buffered inside Exotel and nothing can call it back —
+   * barge-in would cut the text but the caller would keep hearing audio.
+   */
+  async playPcm(pcm8k, epoch) {
     // stream in 100ms chunks, padded to whole frames
     const CHUNK = FRAME_BYTES * 5
+    const bytesToMs = (n) => (n / (SAMPLE_RATE * BYTES_PER_SAMPLE)) * 1000
     this.sendingAudio = true // pause comfort silence so it can't interleave
+    const startedAt = Date.now()
+    let queuedMs = 0
     try {
       for (let off = 0; off < pcm8k.length; off += CHUNK) {
-        if (this.closed) return
+        if (this.closed || epoch !== this.speechEpoch) return
         let chunk = pcm8k.subarray(off, Math.min(off + CHUNK, pcm8k.length))
         if (chunk.length % FRAME_BYTES !== 0) {
           chunk = Buffer.concat([chunk, Buffer.alloc(FRAME_BYTES - (chunk.length % FRAME_BYTES))])
@@ -534,11 +644,18 @@ class CallSession {
           stream_sid: this.streamSid,
           media: { payload: chunk.toString("base64") },
         }))
+        queuedMs += bytesToMs(chunk.length)
+        // Hand over the next chunk only once we've drifted back inside the
+        // lead. Keeping a lead (rather than sending exactly in real time)
+        // is what stops timer jitter from starving the caller's playout.
+        const aheadMs = queuedMs - (Date.now() - startedAt)
+        if (aheadMs > PLAYBACK_LEAD_MS) await sleep(aheadMs - PLAYBACK_LEAD_MS)
       }
       // keep mic muted until playback roughly finishes on the caller's side;
       // the 200ms tail doubles as a natural inter-sentence pause.
-      const durationMs = (pcm8k.length / (SAMPLE_RATE * BYTES_PER_SAMPLE)) * 1000
-      await new Promise((r) => setTimeout(r, durationMs + 200))
+      const remainingMs = queuedMs - (Date.now() - startedAt)
+      if (remainingMs > 0) await sleep(remainingMs)
+      if (!this.closed && epoch === this.speechEpoch) await sleep(200)
     } finally {
       this.sendingAudio = false
     }
@@ -553,31 +670,44 @@ class CallSession {
   queueSentence(text) {
     const clean = (text || "").trim()
     if (!clean || this.closed) return
+    // Stamp the epoch this sentence belongs to. If the caller interrupts
+    // between now and playback, both the synthesis and the send are skipped
+    // rather than talking over the caller a second later.
+    const epoch = this.speechEpoch
     this.botTalking = true
     const synth = this.synthChain.then(() =>
-      this.closed ? null : textToSpeechPcm8k(clean, this.language).catch((e) => {
-        console.error("TTS error:", e.message)
-        return null
-      })
+      this.closed || epoch !== this.speechEpoch
+        ? null
+        : textToSpeechPcm8k(clean, this.language).catch((e) => {
+            console.error("TTS error:", e.message)
+            return null
+          })
     )
     this.synthChain = synth
     this.sendChain = this.sendChain.then(async () => {
       const pcm = await synth
-      if (pcm && pcm.length > 0 && !this.closed) await this.playPcm(pcm)
+      if (pcm && pcm.length > 0 && !this.closed && epoch === this.speechEpoch) {
+        await this.playPcm(pcm, epoch)
+      }
     })
   }
 
-  /** Wait until every queued sentence has fully played, then unmute the mic. */
-  async drainSpeech() {
+  /**
+   * Wait until every queued sentence has fully played, then unmute the mic.
+   * After a barge-in the epoch has moved on and the mic is already live —
+   * clearing botTalking here would stomp on a turn that has since started.
+   */
+  async drainSpeech(epoch) {
     await this.sendChain
-    this.botTalking = false
+    if (epoch === undefined || epoch === this.speechEpoch) this.botTalking = false
   }
 
   /** Speak a fixed text (greeting/closing): pipelined sentence-by-sentence. */
   async speak(text) {
     if (!text || this.closed) return
+    const epoch = this.speechEpoch
     for (const s of splitIntoSentences(text)) this.queueSentence(s)
-    await this.drainSpeech()
+    await this.drainSpeech(epoch)
   }
 
   hangupAfterAudio() {
@@ -606,6 +736,10 @@ class CallSession {
 }
 
 // ---------- WebSocket server ----------
+// Guarded so the module can be require()d without binding a port or firing
+// the warm-up — that is what lets the barge-in/playback logic be tested
+// against a fake socket instead of only on a live phone call.
+function startServer() {
 const wss = new WebSocketServer({ port: PORT, host: "127.0.0.1", path: "/voicebot" })
 
 wss.on("connection", (ws) => {
@@ -634,7 +768,13 @@ wss.on("connection", (ws) => {
 })
 
 console.log(`Voicebot server listening on ws://127.0.0.1:${PORT}/voicebot (put nginx wss in front) — TTS: edge-tts @ ${TTS_URL}`)
+console.log(`   barge-in: ${BARGE_IN ? `ON (energy>${BARGE_ENERGY} for ${BARGE_MIN_MS}ms, ${PLAYBACK_LEAD_MS}ms playback lead)` : "off — set VOICEBOT_BARGE_IN=1 to enable"}`)
 
 // Fire-and-forget: the socket is already accepting calls, so a slow warm-up
 // never blocks startup — it just means an early call misses the cache.
 prewarm()
+}
+
+if (require.main === module) startServer()
+
+module.exports = { CallSession, startServer, buildAudioFilter, splitIntoSentences }
