@@ -86,6 +86,21 @@ const BARGE_MIN_MS = parseInt(process.env.VOICEBOT_BARGE_MIN_MS || "300")
 // socket at once and let Exotel buffer it.
 const PLAYBACK_LEAD_MS = BARGE_IN ? parseInt(process.env.VOICEBOT_PLAYBACK_LEAD_MS || "300") : Infinity
 
+// ---------- Echo probe ----------
+//
+// Answers the question that keeps barge-in switched off: how much of Priya's
+// own audio does Exotel loop back into the inbound stream? Nothing in the code
+// can tell you — it depends on the carrier and the handset.
+//
+// This measures it from ONE ordinary call with barge-in still off, so there is
+// no risk to the call at all. Set VOICEBOT_ECHO_PROBE=1, call in, and stay
+// SILENT through a full reply. The per-call summary says whether barge-in
+// would have falsely fired, and what threshold (if any) would clear the echo.
+//
+// Independent of VOICEBOT_BARGE_IN on purpose: the numbers describe the
+// half-duplex configuration, which is the one you are deciding about.
+const ECHO_PROBE = (process.env.VOICEBOT_ECHO_PROBE || "0").trim() === "1"
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 // ---------- STT: self-hosted faster-whisper (server/stt-service.py) ----------
@@ -379,6 +394,147 @@ class CallSession {
     this.speechEpoch = 0
     this.bargeMs = 0        // sustained caller energy while Priya is talking
     this.bargeBuffer = []   // frames captured during that window
+    // ---- echo probe counters (all inert unless ECHO_PROBE) ----
+    this.echoReplyOpen = false  // a reply is currently being measured
+    this.echoReplyNo = 0
+    this.echoFrames = 0         // inbound frames seen while Priya spoke
+    this.echoMs = 0
+    this.echoAbove = 0          // ...of which, above BARGE_ENERGY
+    this.echoPeak = 0
+    this.echoRunMs = 0          // current consecutive run above the threshold
+    this.echoRunCounted = false // latch: one long run is ONE would-be fire
+    this.echoMaxRunMs = 0
+    this.echoFires = 0
+    this.echoFirstFireMs = 0
+    this.echoCallReplies = 0
+    this.echoCallFrames = 0
+    this.echoCallMs = 0
+    this.echoCallPeak = 0
+    this.echoCallMaxRunMs = 0
+    this.echoCallFires = 0
+    this.echoCallRepliesCut = 0
+    this.echoCallerPeak = 0     // loudest frame while the mic was LIVE
+    this.echoSummaryDone = false
+  }
+
+  /**
+   * One frame of echo measurement. Called for every inbound frame when the
+   * probe is on, BEFORE any of onMedia's branches, so it sees everything.
+   *
+   * Deliberately nothing but integer arithmetic on its own fields: onMedia
+   * runs straight from the raw ws "message" handler with no try/catch, so a
+   * throw here would take down every live call on the process. It reads
+   * botTalking and writes only echo* fields — it must never touch frameCount,
+   * maxEnergy, speaking, buffer, bargeMs or any other real call state.
+   */
+  probeFrame(energy, ms) {
+    if (!this.botTalking) {
+      // Mic is live: this is the CALLER. Tracked separately from the existing
+      // callMaxEnergy so the threshold advice below is derived from real
+      // caller level, never from the echo it is meant to clear.
+      if (energy > this.echoCallerPeak) this.echoCallerPeak = energy
+      return
+    }
+    this.echoFrames++
+    this.echoMs += ms
+    if (energy > this.echoPeak) this.echoPeak = energy
+    // Mirrors interrupt()'s rule exactly — same comparison, same accumulation,
+    // same threshold — so "would have fired" means precisely that.
+    if (energy > BARGE_ENERGY) {
+      this.echoAbove++
+      this.echoRunMs += ms
+      if (this.echoRunMs > this.echoMaxRunMs) this.echoMaxRunMs = this.echoRunMs
+      if (this.echoRunMs >= BARGE_MIN_MS && !this.echoRunCounted) {
+        this.echoRunCounted = true
+        this.echoFires++
+        if (!this.echoFirstFireMs) this.echoFirstFireMs = this.echoMs
+      }
+    } else {
+      this.echoRunMs = 0
+      this.echoRunCounted = false
+    }
+  }
+
+  /** Per-reply echo line. Rolls the reply's numbers into the call totals. */
+  probeReport() {
+    if (!this.echoReplyOpen) return
+    this.echoReplyOpen = false
+    this.echoReplyNo++
+    this.echoCallReplies++
+    this.echoCallFrames += this.echoFrames
+    this.echoCallMs += this.echoMs
+    this.echoCallFires += this.echoFires
+    if (this.echoPeak > this.echoCallPeak) this.echoCallPeak = this.echoPeak
+    if (this.echoMaxRunMs > this.echoCallMaxRunMs) this.echoCallMaxRunMs = this.echoMaxRunMs
+    if (this.echoFires > 0) this.echoCallRepliesCut++
+
+    const verdict = this.echoFrames === 0
+      ? "no inbound audio at all while Priya spoke"
+      : this.echoFires > 0
+        ? `WOULD HAVE CUT PRIYA OFF at ${this.echoFirstFireMs.toFixed(0)}ms`
+        : "clean"
+    console.log(
+      `🔎 echo reply #${this.echoReplyNo}: ${(this.echoMs / 1000).toFixed(1)}s spoken  ` +
+      `peak=${this.echoPeak.toFixed(0)}  above(>${BARGE_ENERGY})=${this.echoAbove}/${this.echoFrames} frames  ` +
+      `longestRun=${this.echoMaxRunMs.toFixed(0)}ms (fires at ${BARGE_MIN_MS})  fires=${this.echoFires}  → ${verdict}`
+    )
+    this.echoFrames = 0
+    this.echoMs = 0
+    this.echoAbove = 0
+    this.echoPeak = 0
+    this.echoRunMs = 0
+    this.echoRunCounted = false
+    this.echoMaxRunMs = 0
+    this.echoFires = 0
+    this.echoFirstFireMs = 0
+  }
+
+  /**
+   * End-of-call verdict. Says in words whether barge-in is safe on this line,
+   * and — the part that matters — whether raising the threshold would actually
+   * help or would just stop real callers interrupting too.
+   */
+  probeSummary() {
+    if (this.echoSummaryDone) return
+    this.echoSummaryDone = true
+    this.probeReport() // flush a reply still open when the call dropped
+
+    const suggested = Math.ceil((this.echoCallPeak * 1.5) / 50) * 50
+    const callerPeak = this.echoCallerPeak
+    let verdict
+    if (this.echoCallFrames === 0) {
+      verdict = "Exotel sent NO inbound audio while Priya was speaking. Nothing echoes —\n" +
+                "            but there is also nothing to barge in WITH. Barge-in cannot work on this line."
+    } else if (this.echoCallRepliesCut === 0) {
+      verdict = `SAFE at the current threshold (${BARGE_ENERGY}). You can set VOICEBOT_BARGE_IN=1.\n` +
+                "            Make one more call and talk over her to confirm she actually stops."
+    } else if (callerPeak === 0) {
+      // Without a caller level there is nothing to compare the echo against,
+      // and a threshold recommendation would be a guess dressed up as a number.
+      verdict = `NOT SAFE at ${BARGE_ENERGY} — ${this.echoCallRepliesCut} of ${this.echoCallReplies} replies would have been cut.\n` +
+                "            But the caller never spoke, so there is no level to compare the echo against\n" +
+                "            and no threshold can be recommended yet. Call again, stay silent through one\n" +
+                "            reply as before, then say a few words after she finishes."
+    } else if (suggested >= callerPeak * 0.6) {
+      verdict = `NOT SAFE, and raising the threshold will NOT rescue it. Echo peaked at\n` +
+                `            ${this.echoCallPeak.toFixed(0)} while the caller only reached ${callerPeak.toFixed(0)} — clearing the echo\n` +
+                `            needs ~${suggested}, too close to the caller's own level to tell them apart.\n` +
+                "            Leave VOICEBOT_BARGE_IN off on this line."
+    } else {
+      verdict = `NOT SAFE at ${BARGE_ENERGY} — ${this.echoCallRepliesCut} of ${this.echoCallReplies} replies would have been cut.\n` +
+                `            Try VOICEBOT_BARGE_ENERGY=${suggested} (the caller reached ${callerPeak.toFixed(0)}, so that leaves headroom),\n` +
+                "            re-run this probe, and confirm 'replies that would be cut' reaches 0 BEFORE enabling barge-in."
+    }
+    console.log(
+      `\n🔎 ECHO PROBE SUMMARY sid=${this.callSid}\n` +
+      `   replies measured         : ${this.echoCallReplies}\n` +
+      `   inbound while Priya spoke: ${this.echoCallFrames} frames (${(this.echoCallMs / 1000).toFixed(1)}s)\n` +
+      `   echo peak                : ${this.echoCallPeak.toFixed(0)}   (VOICEBOT_BARGE_ENERGY=${BARGE_ENERGY})\n` +
+      `   longest sustained run    : ${this.echoCallMaxRunMs.toFixed(0)}ms  (fires at ${BARGE_MIN_MS}ms)\n` +
+      `   replies that would be cut: ${this.echoCallRepliesCut} of ${this.echoCallReplies}  (${this.echoCallFires} fires total)\n` +
+      `   caller peak, mic live    : ${callerPeak.toFixed(0)}\n` +
+      `   VERDICT: ${verdict}\n`
+    )
   }
 
   /**
@@ -488,9 +644,8 @@ class CallSession {
     const frame = Buffer.from(payload, "base64")
     const energy = this.avgEnergy(frame)
     const ms = (frame.length / (SAMPLE_RATE * BYTES_PER_SAMPLE)) * 1000
-    this.frameCount++
-    if (energy > this.maxEnergy) this.maxEnergy = energy
-    if (energy > this.callMaxEnergy) this.callMaxEnergy = energy
+
+    if (ECHO_PROBE) this.probeFrame(energy, ms)
 
     // Priya is speaking. Half-duplex (the default) ignores the mic entirely;
     // with barge-in on we watch for sustained loud speech and cut her off.
@@ -511,6 +666,16 @@ class CallSession {
 
     // Mid-turn (STT/LLM running, nothing being spoken yet): still ignore.
     if (this.processing) return
+
+    // Diagnostics count ONLY frames captured while the mic is live. These
+    // numbers answer "did the caller's audio ever register as speech?" when a
+    // call goes quiet — counting frames received while Priya talks would feed
+    // them echo of her own voice and mislead exactly the debugging they exist
+    // for. (The barge-in change briefly moved these above the guards above;
+    // this is the behaviour from before that.)
+    this.frameCount++
+    if (energy > this.maxEnergy) this.maxEnergy = energy
+    if (energy > this.callMaxEnergy) this.callMaxEnergy = energy
 
     if (energy > ENERGY_THRESHOLD) {
       this.speaking = true
@@ -570,7 +735,10 @@ class CallSession {
         // conversation history where it would keep confusing later turns.
         const phrase = CLARIFY_PHRASE[this.language] || CLARIFY_PHRASE.english
         console.log(`🗣 (clarify) ${phrase}`)
-        this.queueSentence(phrase)
+        this.queueSentence(phrase, epoch)
+        // No reportSpoken here on purpose: this branch never calls the app, so
+        // there is no "ai" entry for this turn — a correction would silently
+        // overwrite the PREVIOUS turn's reply instead.
         await this.drainSpeech(epoch)
         console.log(`⏱ TOTAL turn (silence → reply fully sent): ${Date.now() - turnT0}ms`)
         return
@@ -581,8 +749,13 @@ class CallSession {
       // 1 while sentence 2 is still being generated.
       let hangup = false
       let firstSentenceAt = null
+      // Sentences whose playback actually started. Local to this turn, not a
+      // field: after an interrupt the NEXT turn can start (and be interrupted
+      // itself) while this one is still awaiting the model, and a shared
+      // field would be clobbered in that window.
+      const spoken = []
       const brainT0 = Date.now()
-      await callTurnApiStream(
+      await this.turnStream(
         { event: "turn", callSid: this.callSid || "unknown", speech: transcript, language: this.language },
         (ev) => {
           if (ev.type === "sentence" && ev.text) {
@@ -591,7 +764,7 @@ class CallSession {
               console.log(`⏱ brain (time to first sentence): ${firstSentenceAt - brainT0}ms`)
             }
             console.log(`🗣 ${ev.text}`)
-            this.queueSentence(ev.text)
+            this.queueSentence(ev.text, epoch, spoken)
           } else if (ev.type === "done") {
             if (ev.language) this.language = ev.language
             hangup = !!ev.hangup
@@ -600,6 +773,10 @@ class CallSession {
       )
       console.log(`⏱ brain (full generation): ${Date.now() - brainT0}ms`)
       await this.drainSpeech(epoch)
+      // Interrupted? Correct the transcript down to what actually played.
+      // Skipped when the socket is gone — the full text beats a correction
+      // racing post-call analysis.
+      if (epoch !== this.speechEpoch && !this.closed) await this.reportSpoken(spoken)
       // Total turn: from "caller stopped talking" to "all of Priya's audio
       // has been sent back" — this is the real silence the caller sat through.
       console.log(`⏱ TOTAL turn (silence → reply fully sent): ${Date.now() - turnT0}ms`)
@@ -667,29 +844,60 @@ class CallSession {
    * a time), playback after the previous playback. Callers await
    * drainSpeech() when they need "everything has been said".
    */
-  queueSentence(text) {
+  /**
+   * Queue one sentence for playback under the epoch of the TURN that produced
+   * it — `turnEpoch`, not whatever the epoch happens to be right now.
+   *
+   * That distinction is the whole point. Sentences arrive one at a time from
+   * the model's NDJSON stream, so a barge-in lands in the MIDDLE of a reply
+   * being queued. Reading the current epoch here would stamp every sentence
+   * that arrives after the interrupt with the NEW epoch, match, and play it —
+   * Priya talking straight over the caller, which is precisely what barge-in
+   * is supposed to stop. It would also re-set botTalking mid-utterance,
+   * re-muting the caller's mic.
+   *
+   * `spoken`, when passed, collects the sentences whose playback actually
+   * started, so the transcript can be corrected to what the caller heard.
+   */
+  queueSentence(text, turnEpoch, spoken) {
     const clean = (text || "").trim()
     if (!clean || this.closed) return
-    // Stamp the epoch this sentence belongs to. If the caller interrupts
-    // between now and playback, both the synthesis and the send are skipped
-    // rather than talking over the caller a second later.
-    const epoch = this.speechEpoch
+    // undefined => "whatever is current", so a missed call site degrades to
+    // the old behaviour rather than going silent.
+    const epoch = turnEpoch === undefined ? this.speechEpoch : turnEpoch
+    if (epoch !== this.speechEpoch) return // this turn was abandoned
+    if (ECHO_PROBE && !this.botTalking) this.echoReplyOpen = true
     this.botTalking = true
-    const synth = this.synthChain.then(() =>
-      this.closed || epoch !== this.speechEpoch
-        ? null
-        : textToSpeechPcm8k(clean, this.language).catch((e) => {
-            console.error("TTS error:", e.message)
-            return null
-          })
-    )
+    const synth = this.synth(clean, epoch)
     this.synthChain = synth
     this.sendChain = this.sendChain.then(async () => {
       const pcm = await synth
       if (pcm && pcm.length > 0 && !this.closed && epoch === this.speechEpoch) {
+        // Reaching here means the first chunk is about to hit the wire, and
+        // interrupt() runs synchronously from onMedia so it cannot interleave
+        // between this check and the push. Pushed <=> the caller heard at
+        // least the start of this sentence.
+        if (spoken) spoken.push(clean)
         await this.playPcm(pcm, epoch)
       }
     })
+  }
+
+  /** Extracted verbatim so tests can replace it without a TTS service. */
+  synth(text, epoch) {
+    return this.synthChain.then(() =>
+      this.closed || epoch !== this.speechEpoch
+        ? null
+        : textToSpeechPcm8k(text, this.language).catch((e) => {
+            console.error("TTS error:", e.message)
+            return null
+          })
+    )
+  }
+
+  /** Extracted verbatim so tests can replace it without the Next.js app. */
+  turnStream(payload, onEvent) {
+    return callTurnApiStream(payload, onEvent)
   }
 
   /**
@@ -699,15 +907,44 @@ class CallSession {
    */
   async drainSpeech(epoch) {
     await this.sendChain
-    if (epoch === undefined || epoch === this.speechEpoch) this.botTalking = false
+    if (epoch === undefined || epoch === this.speechEpoch) {
+      this.botTalking = false
+      // Every speech path — greeting, clarify phrase, streamed turn, closing —
+      // ends here, so this is the one place that closes a measured reply.
+      if (ECHO_PROBE) this.probeReport()
+    }
   }
 
   /** Speak a fixed text (greeting/closing): pipelined sentence-by-sentence. */
   async speak(text) {
     if (!text || this.closed) return
     const epoch = this.speechEpoch
-    for (const s of splitIntoSentences(text)) this.queueSentence(s)
+    for (const s of splitIntoSentences(text)) this.queueSentence(s, epoch)
     await this.drainSpeech(epoch)
+  }
+
+  /**
+   * Tell the app what the caller ACTUALLY heard, after a barge-in cut a reply
+   * short. Without this the full generated reply stays in the transcript, and
+   * getHistory feeds it back next turn — so Priya carries on believing she
+   * said things the caller never heard.
+   *
+   * Sent only after callTurnApiStream has returned, which means the app has
+   * committed its transcript append (it awaits the write before emitting
+   * "done"), so the row this corrects is guaranteed to exist.
+   */
+  async reportSpoken(spoken) {
+    if (!this.callSid) return
+    const said = spoken.join(" ").trim()
+    const text = said
+      ? `${said} …(interrupted by the customer)`
+      : "(the customer interrupted before Priya said anything)"
+    try {
+      const r = await callTurnApi({ event: "spoken", callSid: this.callSid, text })
+      console.log(`✂ transcript corrected to ${spoken.length} spoken sentence(s)${r?.corrected ? "" : " — no matching entry"}`)
+    } catch (e) {
+      console.error("spoken correction error:", e.message)
+    }
   }
 
   hangupAfterAudio() {
@@ -722,6 +959,11 @@ class CallSession {
   // 0:00 in Voice Logs. Idempotent (flag + GREATEST() server-side), called from
   // both "stop" and the socket close handler — whichever happens first wins.
   reportEnd() {
+    // First, and with its own guard: reportEnd is the one thing guaranteed to
+    // run on both the Exotel "stop" event and a raw socket close, and putting
+    // the summary ahead of the early returns means it still prints when
+    // callSid was never set.
+    if (ECHO_PROBE) this.probeSummary()
     if (this.endReported) return
     if (!this.callSid) {
       console.error(`⚠ reportEnd skipped — callSid was never set, duration lost (start event may be missing/malformed)`)

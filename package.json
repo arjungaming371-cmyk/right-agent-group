@@ -7,7 +7,10 @@
     "build": "next build",
     "start": "next start -p 3000",
     "db:setup": "node scripts/setup-db.js",
-    "db:check": "node scripts/smoke-test.js"
+    "db:check": "node scripts/smoke-test.js",
+    "test:voicebot": "node scripts/voicebot-selftest.js",
+    "test:transcript": "node scripts/transcript-correction-test.js",
+    "bench:turn": "node scripts/turn-latency-bench.js"
   },
   "dependencies": {
     "cheerio": "^1.2.0",
