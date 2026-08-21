@@ -73,11 +73,31 @@ const CHAT_WALLPAPER =
 
 const EMOJI = ["😀", "😂", "🙂", "😍", "👍", "🙏", "🎉", "❤️", "😢", "😮", "🤔", "👌", "🔥", "✅", "📞", "🏠"]
 
-// Tinted fill + coloured initials — see the note on the matching Avatar in
-// leads-view.tsx. These sit on the WhatsApp panel, whose background is a
-// fixed dark colour, so the palette is fixed too: theme accents would go
-// dark-on-dark here the moment someone picks the Light theme.
-function Avatar({ name, size = 40 }: { name: string; size?: number }) {
+// Profile avatar with image support, Dicebear WhatsApp style generation, and fallback to initials
+function Avatar({ name, size = 40, src, phone }: { name: string; size?: number; src?: string | null; phone?: string | null }) {
+  const [imgErr, setImgErr] = useState(false)
+  const seed = encodeURIComponent((name || phone || "contact").trim())
+  const avatarUrl = src || `https://api.dicebear.com/7.x/initials/svg?seed=${seed}&backgroundColor=00a884,25d366,128c7e,075e54,34b7f1&fontSize=42&fontWeight=600`
+
+  if (avatarUrl && !imgErr) {
+    return (
+      <img
+        src={avatarUrl}
+        alt={name || "Profile"}
+        onError={() => setImgErr(true)}
+        style={{
+          width: size,
+          height: size,
+          borderRadius: "50%",
+          objectFit: "cover",
+          flexShrink: 0,
+          background: WA.headerBg,
+          border: `1px solid ${WA.hairline}`,
+        }}
+      />
+    )
+  }
+
   const initials = (name || "?").split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase()
   const colors = ["#00d09c", "#38bdf8", "#8b7cff", "#f7b731", "#fb5670", "#a78bfa"]
   const color = colors[(name || "?").charCodeAt(0) % colors.length]
@@ -375,7 +395,7 @@ export default function WhatsAppView({ role }: { role: "admin" | "agent" | "view
                   display: "flex", alignItems: "center", gap: 12,
                 }}
               >
-                <Avatar name={lead.name} size={44} />
+                <Avatar name={lead.name} phone={lead.phone} size={44} />
                 <div style={{ flex: 1, minWidth: 0, borderBottom: `1px solid ${WA.hairline}`, paddingBottom: 10, marginBottom: -10 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
                     <div style={{ fontWeight: 500, fontSize: 14.5, color: WA.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 5 }}>
@@ -429,7 +449,7 @@ export default function WhatsAppView({ role }: { role: "admin" | "agent" | "view
                   >
                     <ChevronLeft size={22} strokeWidth={2} />
                   </span>
-                  <Avatar name={selected.name} size={40} />
+                  <Avatar name={selected.name} phone={selected.phone} size={40} />
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontWeight: 500, fontSize: 15.5, color: WA.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selected.name}</div>
                     <div style={{ fontSize: 12, color: WA.textSecondary, display: "flex", gap: 4, alignItems: "center", marginTop: 1 }}>
@@ -560,7 +580,7 @@ export default function WhatsAppView({ role }: { role: "admin" | "agent" | "view
 
                 <div style={{ padding: "28px 20px", textAlign: "center", borderBottom: `1px solid ${WA.hairline}` }}>
                   <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}>
-                    <Avatar name={selected.name} size={88} />
+                    <Avatar name={selected.name} phone={selected.phone} size={88} />
                   </div>
                   <div style={{ fontSize: 18, fontWeight: 600, color: WA.textPrimary }}>{selected.name}</div>
                   <div style={{ fontSize: 13, color: WA.textSecondary, marginTop: 2 }}>{selected.phone}</div>
