@@ -8,7 +8,7 @@ import { DEFAULT_SCRIPTS as SHARED_DEFAULT_SCRIPTS } from "./default-scripts"
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY || ""
 const GROQ_URL = (process.env.GROQ_URL || "https://api.groq.com/openai/v1").replace(/\/$/, "")
-const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile"
+const GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b"
 // Utility model — for the calls that take English/transcript text in and
 // return JSON or a short English string, never customer-facing Hinglish,
 // Tenglish, or native-script text. gpt-oss-120b is ~4x cheaper on input
@@ -17,7 +17,7 @@ const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile"
 // code needed). Priya's own replies deliberately stay on GROQ_MODEL: the
 // multilingual output is the one thing a model-family swap could quietly
 // wreck, and it's the part customers actually hear.
-const GROQ_UTILITY_MODEL = process.env.GROQ_UTILITY_MODEL || "openai/gpt-oss-120b"
+const GROQ_UTILITY_MODEL = process.env.GROQ_UTILITY_MODEL || "openai/gpt-oss-20b"
 
 /**
  * Whether it's safe to spend one extra small completion call mid-turn

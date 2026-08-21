@@ -54,11 +54,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
     city,
     loan_type,
     loan_amount,
+    loan_tenure,
     email,
     address,
     whatsapp_number,
     employment_type,
     monthly_income,
+    pan_number,
     ...rest
   } = body
 
@@ -83,11 +85,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
         city,
         loan_type: loan_type || "Home",
         loan_amount: loan_amount ? Number(loan_amount) : null,
+        loan_tenure: loan_tenure ? Number(loan_tenure) : null,
         email,
         address,
         whatsapp_number,
         employment_type,
         monthly_income: monthly_income ? Number(monthly_income) : null,
+        pan_number: pan_number ? String(pan_number).toUpperCase() : null,
         form_data: JSON.stringify(rest),
         submitted_at: new Date().toISOString(),
         status: "pending",
