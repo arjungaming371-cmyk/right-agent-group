@@ -1,7 +1,7 @@
 # RIGHT AGENT GROUP - ONE CLICK STARTUP (all 7 services)
 # Run: PowerShell -ExecutionPolicy Bypass -File START.ps1
 
-$ProjectDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ProjectDir = if ($PSScriptRoot) { $PSScriptRoot } elseif ($MyInvocation.MyCommand.Path) { Split-Path -Parent $MyInvocation.MyCommand.Path } else { (Get-Location).Path }
 Set-Location $ProjectDir
 
 Write-Host ""
