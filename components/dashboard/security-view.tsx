@@ -27,7 +27,7 @@ const LABELS: Record<string, { label: string; desc: string }> = {
   two_factor_auth: { label: "Two-Factor Authentication", desc: "Email a one-time code on every admin sign-in (needs SMTP_* set in .env)." },
   single_sign_on:  { label: "Single Sign-On (SSO)",        desc: "Google SSO is the only sign-in method — always enforced, allowlisted emails only." },
   ip_allowlist:    { label: "IP Allowlist",                desc: "Block console access from IPs not in the IP_ALLOWLIST list in .env." },
-  call_recording_encryption: { label: "Call Recording Encryption", desc: "Recordings stay encrypted at the provider; when on, playback is never cached to disk." },
+  call_recording_encryption: { label: "Block Recording Playback Caching", desc: "Recordings are always encrypted at rest by the telephony provider. When this is on, playback is streamed only — never cached to local disk." },
 }
 
 const ORDER = ["two_factor_auth", "single_sign_on", "ip_allowlist", "call_recording_encryption"]
@@ -192,18 +192,23 @@ export default function SecurityView() {
           {loading && <SkeletonList rows={4} />}
           {!loading && orderedSettings.map(item => {
             const meta = LABELS[item.key] ?? { label: item.key, desc: "" }
+            const isAlwaysOn = item.key === "single_sign_on"
             return (
               <div key={item.key} style={{ padding:"18px 24px",borderBottom:"1px solid var(--border-light)",display:"flex",alignItems:"center",justifyContent:"space-between" }}>
                 <div>
                   <div style={{ fontWeight:500,fontSize:14 }}>{meta.label}</div>
                   <div style={{ fontSize:12,color:"var(--text-muted)",marginTop:3 }}>{meta.desc}</div>
                 </div>
-                <button
-                  className={`toggle ${item.enabled ? "on" : ""}`}
-                  onClick={() => toggle(item.key, item.enabled)}
-                  disabled={saving === item.key}
-                  style={{ opacity: saving === item.key ? 0.5 : 1 }}
-                />
+                {isAlwaysOn ? (
+                  <span style={{ background:"rgba(45,212,160,0.11)",color:"var(--accent-green)",border:"1px solid rgba(45,212,160,0.3)",borderRadius:6,padding:"5px 12px",fontSize:11.5,fontWeight:600,whiteSpace:"nowrap" }}>Always On</span>
+                ) : (
+                  <button
+                    className={`toggle ${item.enabled ? "on" : ""}`}
+                    onClick={() => toggle(item.key, item.enabled)}
+                    disabled={saving === item.key}
+                    style={{ opacity: saving === item.key ? 0.5 : 1 }}
+                  />
+                )}
               </div>
             )
           })}

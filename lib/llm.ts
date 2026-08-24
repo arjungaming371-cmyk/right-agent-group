@@ -9,15 +9,10 @@ import { DEFAULT_SCRIPTS as SHARED_DEFAULT_SCRIPTS } from "./default-scripts"
 const GROQ_API_KEY = process.env.GROQ_API_KEY || ""
 const GROQ_URL = (process.env.GROQ_URL || "https://api.groq.com/openai/v1").replace(/\/$/, "")
 const GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b"
-// Utility model — for the calls that take English/transcript text in and
-// return JSON or a short English string, never customer-facing Hinglish,
-// Tenglish, or native-script text. gpt-oss-120b is ~4x cheaper on input
-// ($0.15 vs $0.59 per MTok), faster (500 vs 394 TPS), and is one of the few
-// Groq models with automatic prompt caching (50% off repeated prefixes, no
-// code needed). Priya's own replies deliberately stay on GROQ_MODEL: the
-// multilingual output is the one thing a model-family swap could quietly
-// wreck, and it's the part customers actually hear.
 const GROQ_UTILITY_MODEL = process.env.GROQ_UTILITY_MODEL || "openai/gpt-oss-20b"
+
+console.log("GROQ_MODEL in llm.ts resolved to:", GROQ_MODEL)
+console.log("GROQ_UTILITY_MODEL in llm.ts resolved to:", GROQ_UTILITY_MODEL)
 
 /**
  * Whether it's safe to spend one extra small completion call mid-turn
@@ -90,11 +85,23 @@ CRITICAL OUTPUT FORMAT RULE — HINDI:
 - Mix in everyday English words the way people actually talk, written in plain English letters right inside the Devanagari sentence (e.g. "loan", "WhatsApp", "sir"). Example: "नमस्ते sir! मैं प्रिया बोल रही हूं Right Agent Group, Hyderabad से। आपका WhatsApp number मिल सकता है?"`,
   telugu: `
 
-CRITICAL OUTPUT FORMAT RULE — TELUGU:
-- The customer speaks Telugu. Your reply MUST be written in real Telugu script (తెలుగు) — this is spoken aloud by a text-to-speech voice, not read as text, so write it the way you'd naturally spell Telugu.
-- Do NOT write in Roman/English letters for Telugu words, even though the customer's own words arrive in Roman letters from the call transcription — always convert your OWN reply to real Telugu script regardless of what script the customer used.
-- Mix in everyday English words the way people actually talk in Hyderabad, written in plain English letters right inside the Telugu sentence (e.g. "loan", "WhatsApp", "sir"). Example: "నమస్కారం sir! నేను ప్రియ, Right Agent Group, Hyderabad నుండి మాట్లాడుతున్నాను. మీ WhatsApp number చెప్పగలరా?"
-- When reacting with warmth/sympathy (per the SOUND HUMAN instructions), use a genuine Telugu expression — NEVER transliterate an English filler word into Telugu script. "Arey" written as "అరేయ్" sounds like a blunt "hey you!", not sympathy, and clashes badly with calling them "sir" in the same breath. Use something like "అయ్యో sir", "ఔనండి", or "నిజమే sir" instead.`,
+CRITICAL OUTPUT FORMAT RULE — TELUGU (HYDERABAD TENGLISH):
+- The customer speaks Telugu. Your reply MUST be written in natural, spoken Telugu script mixed with English words, the way people actually talk in Hyderabad.
+- DO NOT use formal or literary Telugu words. They sound highly robotic. Follow this vocabulary table:
+  * BAN: "రుణం" (runam) or "రుణాలు" (runalu) -> USE: "loan" or "loans" (in English letters: e.g. "loan", "home loan").
+  * BAN: "ధన్యవాదాలు" (dhanyavadalu) -> USE: "thank you" or "thanks" (in English letters: e.g. "thank you sir").
+  * BAN: "సమయం" (samayam) -> USE: "time" (in English letters).
+  * BAN: "శుభోదయం" (shubhodayam) -> USE: "good morning" (in English letters).
+  * BAN: "కార్యాలయం" (karyalayam) or "శాఖ" (shakha) -> USE: "office" or "branch" (in English letters).
+  * BAN: "వివరాలు" (vivaralu) -> USE: "details" (in English letters).
+  * BAN: "వెబ్‌సైట్" (website in Telugu characters) -> USE: "website" (in English letters).
+  * BAN: "లింక్" (link in Telugu characters) -> USE: "link" (in English letters).
+- Write all Telugu words in native Telugu script (తెలుగు). Write all English words in plain English/Latin letters (e.g., "loan", "WhatsApp", "sir", "office", "link", "thank you").
+- Examples of natural responses:
+  * "నమస్కారం sir! మీకు home loan కావాలా sir?"
+  * "Sure sir! నేను link మీ WhatsApp కి పంపిస్తాను, details fill చేయండి."
+  * "Okay sir, thank you so much! Have a nice day, bye!"
+  * "చిన్న technical problem వచ్చింది sir, మళ్ళీ చెప్పగలరా?"`,
 }
 
 // Brevity rules, keyed by CHANNEL rather than language, and appended in
@@ -161,8 +168,7 @@ const CHANNEL_BREVITY: Record<Channel, string> = {
  * whatever the cap was.
  */
 function replyTokenBudget(language: Language, channel: Channel): number {
-  const nativeScriptCall = channel === "call" && language !== "english"
-  return nativeScriptCall ? 400 : 150
+  return 450
 }
 
 // Script cache — refreshed every 5 minutes so dashboard changes take
@@ -245,15 +251,17 @@ type CompletionOpts = {
 }
 
 function groqBody(messages: ChatMessage[], opts: CompletionOpts, stream: boolean) {
+  const modelName = opts.model || GROQ_MODEL
+  const isReasoning = modelName.includes("gpt-oss") || modelName.includes("qwen")
   return JSON.stringify({
-    model: opts.model || GROQ_MODEL,
+    model: modelName,
     messages,
     stream,
     temperature: opts.temperature ?? 0.6,
     max_tokens: opts.numPredict ?? 300,
     // Groq's JSON mode requires the word "JSON" in a message — all our JSON
     // prompts start with "Return ONLY valid JSON", so this is safe to map.
-    ...(opts.json ? { response_format: { type: "json_object" } } : {}),
+    ...(opts.json && !isReasoning ? { response_format: { type: "json_object" } } : {}),
   })
 }
 
@@ -293,6 +301,8 @@ async function groqChatStream(
   const decoder = new TextDecoder()
   let buffer = ""
   let fullText = ""
+  let isThinking = false
+  let accumulatedThinkText = ""
   while (true) {
     const { done, value } = await reader.read()
     if (done) break
@@ -305,8 +315,31 @@ async function groqChatStream(
       try {
         const delta = JSON.parse(payload)?.choices?.[0]?.delta?.content
         if (delta) {
-          fullText += delta
-          onChunk(delta)
+          const currentText = accumulatedThinkText + delta
+          if (!isThinking && currentText.includes("<think>")) {
+            isThinking = true
+          }
+          if (isThinking) {
+            accumulatedThinkText = currentText
+            const endIdx = accumulatedThinkText.indexOf("</think>")
+            if (endIdx !== -1) {
+              isThinking = false
+              const rest = accumulatedThinkText.slice(endIdx + 8)
+              accumulatedThinkText = ""
+              if (rest) {
+                fullText += rest
+                onChunk(rest)
+              }
+            }
+          } else {
+            if (delta.includes("<think")) {
+              isThinking = true
+              accumulatedThinkText = delta
+            } else {
+              fullText += delta
+              onChunk(delta)
+            }
+          }
         }
       } catch {
         // partial/keepalive line — skip
@@ -324,7 +357,9 @@ async function runCompletion(messages: ChatMessage[], opts: CompletionOpts): Pro
   try {
     const text = await groqChatRequest(messages, opts, controller.signal)
     if (!text.trim()) throw new Error("Empty Groq response")
-    return text.trim()
+    const cleaned = text.replace(/<think>[\s\S]*?<\/think>/g, "").trim()
+    if (!cleaned) throw new Error("Empty Groq response after removing think tags")
+    return cleaned
   } catch (e: any) {
     console.error("Groq error:", e.message)
     throw e
@@ -542,7 +577,7 @@ export async function extractLeadInfo(transcriptText: string): Promise<Extracted
       // measured 146/150 used — and Groq returns a hard 400, not a truncated
       // reply, when the cap is below what the reasoning needs. The cap is a
       // ceiling, not a spend: the model still stops as soon as it's done.
-      { timeoutMs: 15000, temperature: 0.1, numPredict: 400, json: true, model: GROQ_UTILITY_MODEL }
+      { timeoutMs: 15000, temperature: 0.1, numPredict: 1024, json: true, model: GROQ_UTILITY_MODEL }
     )
     const parsed = JSON.parse(text || "{}")
     return {
@@ -589,7 +624,7 @@ export async function rewriteKnowledgeQuery(rawQuery: string): Promise<string | 
       // a 4s budget, and gpt-oss burns ~115 reasoning tokens before writing
       // ~20 tokens of JSON — that's latency a caller hears, for a task whose
       // input is one short sentence (so the cheaper input rate saves nothing).
-      { timeoutMs: 4000, temperature: 0.1, numPredict: 60, json: true }
+      { timeoutMs: 4000, temperature: 0.1, numPredict: 60, json: true, model: GROQ_UTILITY_MODEL }
     )
     const parsed = JSON.parse(text || "{}")
     if (parsed.is_question && typeof parsed.query === "string" && parsed.query.trim().length >= 3) {
@@ -641,7 +676,7 @@ export async function detectLoanEditRequest(
       // Stays on GROQ_MODEL for the same reason as rewriteKnowledgeQuery:
       // one short message in, tiny JSON out, so reasoning overhead costs more
       // than the cheaper input rate saves.
-      { timeoutMs: 6000, temperature: 0.1, numPredict: 120, json: true }
+      { timeoutMs: 6000, temperature: 0.1, numPredict: 120, json: true, model: GROQ_UTILITY_MODEL }
     )
     const parsed = JSON.parse(text || "{}")
     if (
@@ -666,7 +701,7 @@ export async function generateLeadSummary(transcript: string): Promise<string> {
         { role: "system", content: "Return ONLY valid JSON, no other text." },
         { role: "user", content: `Summarize this call with keys: lead_name, address, whatsapp_number, next_action, sentiment.\n\n${transcript}` },
       ],
-      { timeoutMs: 20000, temperature: 0.2, numPredict: 400, json: true, model: GROQ_UTILITY_MODEL }
+      { timeoutMs: 20000, temperature: 0.2, numPredict: 1024, json: true, model: GROQ_UTILITY_MODEL }
     )
     return text && text.trim() ? text.trim() : "{}"
   } catch (e) {
@@ -913,6 +948,16 @@ export async function generatePromptSuggestions(batchText: string): Promise<Prom
 export function detectLanguage(text: string): Language {
   if (/[ఀ-౿]/.test(text)) return "telugu"
   if (/[ऀ-ॿ]/.test(text)) return "hindi"
+  
+  const lower = text.toLowerCase()
+  // Telugu romanized keywords
+  const teluguKeywords = /\b(kavali|naku|gurinchi|cheppandi|chepandi|avunu|ledhu|ledu|vaddhu|vaddu|undhi|undi|istara|matladutunnanu|telugu|namaskaram|garu|kaadu|kadu|telusukovadaniki|unnaya|unda)\b/i;
+  if (teluguKeywords.test(lower)) return "telugu"
+  
+  // Hindi romanized keywords
+  const hindiKeywords = /\b(chahiye|hai|nahi|nahin|haan|boliye|baat|karna|mera|naam|kya|mujhe|apna|hoga|dijiye|hoon|hu|tum|aap)\b/i;
+  if (hindiKeywords.test(lower)) return "hindi"
+  
   return "english"
 }
 

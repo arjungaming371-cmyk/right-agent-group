@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
 import { rateLimit, clientIp } from "@/lib/rate-limit"
+import { verifyExotelWebhookKey } from "@/lib/exotel-webhook-auth"
 
 // Exotel-specific quirk: when a call flow uses a Voicebot applet (ours does —
 // that's the WebSocket bridge to server/voicebot-server.js), the recording
@@ -18,6 +19,9 @@ import { rateLimit, clientIp } from "@/lib/rate-limit"
 // Exotel's Passthru GET params (bracket-notation query keys):
 //   CallSid, Stream[Status], Stream[Duration], Stream[RecordingUrl], ...
 export async function GET(req: NextRequest) {
+  if (!verifyExotelWebhookKey(req)) {
+    return new NextResponse("OK", { status: 200 })
+  }
   if (!rateLimit(`call-passthru:${clientIp(req)}`, 60, 60000)) {
     return new NextResponse("OK", { status: 200 })
   }

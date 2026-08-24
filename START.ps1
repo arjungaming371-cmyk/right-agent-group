@@ -3,6 +3,8 @@
 
 $ProjectDir = if ($PSScriptRoot) { $PSScriptRoot } elseif ($MyInvocation.MyCommand.Path) { Split-Path -Parent $MyInvocation.MyCommand.Path } else { (Get-Location).Path }
 Set-Location $ProjectDir
+$FFmpegBin = "C:\Users\Hello\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg.Essentials_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-8.1.1-essentials_build\bin"
+$env:PATH = "$ProjectDir;$FFmpegBin;" + $env:PATH
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
@@ -48,7 +50,7 @@ $waProcess = $null
 # (The Python STT service does NOT read .env itself — it only sees the
 #  environment it inherits from this script.)
 $envLines = Get-Content "$ProjectDir\.env" -ErrorAction SilentlyContinue
-foreach ($name in @("STT_API_KEY", "STT_MODEL", "STT_FORCE_DEVICE", "WHATSAPP_SERVICE_KEY", "CF_TUNNEL_NAME")) {
+foreach ($name in @("STT_API_KEY", "STT_MODEL", "STT_FORCE_DEVICE", "WHATSAPP_SERVICE_KEY", "CF_TUNNEL_NAME", "VOICEBOT_BARGE_IN")) {
     $line = $envLines | Select-String "^\s*$name=" | Select-Object -First 1
     if ($line) {
         $val = $line.ToString().Split("=",2)[1].Split("#",2)[0].Trim()
@@ -104,7 +106,7 @@ Write-Host "      OK Voicebot started (PID: $($vbProcess.Id)) - logs: logs\voice
 # 6. Website (port 3000)
 Write-Host "[7/7] Starting Website..." -ForegroundColor Yellow
 Stop-Port 3000
-$webProcess = Start-Process "cmd" -ArgumentList "/c npm start" -WorkingDirectory $ProjectDir -WindowStyle Hidden -PassThru
+$webProcess = Start-Process "cmd" -ArgumentList "/c npm start" -WorkingDirectory $ProjectDir -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logsDir "website.log") -RedirectStandardError (Join-Path $logsDir "website.err.log")
 Start-Sleep -Seconds 5
 Write-Host "      OK Website started at http://localhost:3000" -ForegroundColor Green
 

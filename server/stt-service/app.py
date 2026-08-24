@@ -21,6 +21,20 @@
 import os
 import io
 import time
+import sys
+
+# Force add NVIDIA CUDA DLL paths on Windows to fix cublas/cudnn load errors
+if sys.platform == "win32":
+    venv_site_packages = os.path.join(os.path.dirname(__file__), "venv", "Lib", "site-packages")
+    nvidia_dirs = [
+        os.path.join(venv_site_packages, "nvidia", "cublas", "bin"),
+        os.path.join(venv_site_packages, "nvidia", "cudnn", "bin"),
+        os.path.join(venv_site_packages, "nvidia", "cuda_nvrtc", "bin"),
+    ]
+    for d in nvidia_dirs:
+        if os.path.exists(d):
+            os.add_dll_directory(d)
+            os.environ["PATH"] = d + ";" + os.environ["PATH"]
 
 from fastapi import FastAPI, Request, Query, HTTPException
 from faster_whisper import WhisperModel
@@ -154,7 +168,11 @@ def _to_tenglish(text: str, lang: str | None) -> str:
     if not text or not _TRANSLIT_AVAILABLE or lang not in _SCRIPT_MAP:
         return text
     try:
-        return transliterate(text, _SCRIPT_MAP[lang], sanscript.ITRANS).lower()
+        raw_translit = transliterate(text, _SCRIPT_MAP[lang], sanscript.ITRANS).lower()
+        import unicodedata
+        normalized = unicodedata.normalize('NFD', raw_translit)
+        clean_text = "".join(c for c in normalized if unicodedata.category(c) != 'Mn')
+        return clean_text
     except Exception:
         return text  # transliteration failure must never lose the transcript
 
@@ -188,9 +206,10 @@ def _transcribe_sync(audio: bytes, lang: str | None) -> tuple[str, bool]:
         no_repeat_ngram_size=3,
         compression_ratio_threshold=2.4,
     )
-    # Materialize once: both the joined text and the confidence stats below
-    # read from this list, and the generator can only be consumed once.
     segments_list = list(segments)
+    detected_lang = _info.language
+    if lang is None:
+        lang = detected_lang
     text = " ".join(s.text.strip() for s in segments_list).strip()
 
     # Confidence gate: on noisy real phone audio, Whisper doesn't always fail
@@ -208,7 +227,12 @@ def _transcribe_sync(audio: bytes, lang: str | None) -> tuple[str, bool]:
         total_dur = sum(max(s.end - s.start, 0.01) for s in segments_list)
         avg_logprob = sum(s.avg_logprob * (s.end - s.start) for s in segments_list) / total_dur
         no_speech_prob = sum(s.no_speech_prob * (s.end - s.start) for s in segments_list) / total_dur
-        low_confidence = avg_logprob < -1.0 or no_speech_prob > 0.6
+        safe_text = text.encode("ascii", "backslashreplace").decode("ascii")
+        print(f"STT confidence metrics: text='{safe_text}', avg_logprob={avg_logprob:.3f}, no_speech_prob={no_speech_prob:.3f}")
+        if lang in ("te", "hi"):
+            low_confidence = avg_logprob < -3.0 or no_speech_prob > 0.90
+        else:
+            low_confidence = avg_logprob < -1.6 or no_speech_prob > 0.85
 
     return _to_tenglish(text, lang), low_confidence
 

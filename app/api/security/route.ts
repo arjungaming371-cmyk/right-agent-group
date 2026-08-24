@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db, query } from "@/lib/db"
 import { requireRole } from "@/lib/auth"
+import { isMailConfigured } from "@/lib/mail"
 
 export const dynamic = "force-dynamic"
 
@@ -35,6 +36,16 @@ export async function PATCH(req: NextRequest) {
   const { key, enabled } = await req.json()
   if (typeof key !== "string" || typeof enabled !== "boolean") {
     return NextResponse.json({ error: "key (string) and enabled (boolean) required" }, { status: 400 })
+  }
+
+  // Turning 2FA on without SMTP configured would lock the admin out at their
+  // next login — the OTP email would have nowhere to send from. Block it
+  // here rather than let it fail silently at sign-in time.
+  if (key === "two_factor_auth" && enabled && !isMailConfigured()) {
+    return NextResponse.json(
+      { error: "Set SMTP_HOST / SMTP_USER / SMTP_PASS in .env before enabling Two-Factor Authentication — otherwise the login OTP email can't send." },
+      { status: 400 }
+    )
   }
   await db.from("security_settings").update({ enabled, updated_at: new Date().toISOString() }).eq("key", key)
   await db

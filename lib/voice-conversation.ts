@@ -456,7 +456,12 @@ async function completeLeadIfReady(opts: {
   // design, see the script's memory rules), so extraction alone reports
   // "incomplete" forever even though the lead genuinely has all three facts.
   // Merge with what the lead record already knows before deciding.
-  const existing = await db.from("leads").select("name, address, whatsapp_number").eq("id", leadId).single()
+  const existing = await db.from("leads").select("name, address, whatsapp_number, status").eq("id", leadId).single()
+
+  // If the lead was already completed (status is no longer 'new') before this call,
+  // do not trigger the auto-onboarding completion hangup.
+  if (existing.data?.status && existing.data?.status !== "new") return false
+
   const knownName = existing.data?.name && !PLACEHOLDER_NAME_RE.test(existing.data.name) ? existing.data.name : null
   const effectiveName = extracted.name || knownName
   const effectiveAddress = extracted.address || existing.data?.address || null

@@ -723,11 +723,8 @@ class CallSession {
           console.log(`   saved ${f}`)
         } catch (e) { console.error("   dump failed:", e.message) }
       }
-      // Pass the call's KNOWN language instead of "auto" — Whisper's language
-      // auto-detection runs an extra pass before every transcription, and on
-      // this CPU-only setup that dwarfed the actual decode time (observed
-      // live: a 1.6s "Yes, yes." utterance took 9.5s to transcribe, almost
-      // entirely detection overhead, not the 3-4 words themselves).
+      // Pass the call's KNOWN language instead of "auto" — this guides Whisper
+      // to decode in the correct script, preventing language cross-talk.
       const turnT0 = Date.now()
       const { text: transcript, lowConfidence } = await speechToText(pcm, this.language)
       console.log(`👂 [${this.language}]${lowConfidence ? " LOW-CONFIDENCE" : ""} "${transcript}"`)

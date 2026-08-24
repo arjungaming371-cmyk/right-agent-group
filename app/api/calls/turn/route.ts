@@ -40,6 +40,12 @@ function normalizeLanguage(input: any): Language {
 // short fillers like "ok", "yes" appear inside Telugu/Hindi conversations all
 // the time and must not flip the call.
 function resolveSpokenLanguage(speech: string, current: Language): Language {
+  const text = speech.toLowerCase()
+  // Explicit keyword shift requests
+  if (/\b(telugu|telgu|tenglish|telug|telegu)\b|తెలుగు/i.test(text)) return "telugu"
+  if (/\b(hindi|hinglish|hind|hnd)\b|हिंदी|हिन्दी/i.test(text)) return "hindi"
+  if (/\b(english|eng|inglish)\b/i.test(text)) return "english"
+
   const detected = detectLanguage(speech)
   if (detected === current) return current
   if (detected === "english" && speech.trim().split(/\s+/).length < 3) return current

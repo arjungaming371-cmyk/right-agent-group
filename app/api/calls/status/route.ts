@@ -5,9 +5,14 @@ import { sendCallFollowUp, sendMissedCallFollowUp } from "@/lib/whatsapp"
 import { refreshLeadScore } from "@/lib/scoring"
 import { rateLimit, clientIp } from "@/lib/rate-limit"
 import { runPostCallAnalysis } from "@/lib/lead-brain"
+import { verifyExotelWebhookKey } from "@/lib/exotel-webhook-auth"
 
 export async function POST(req: NextRequest) {
   try {
+    if (!verifyExotelWebhookKey(req)) {
+      return new NextResponse("OK", { status: 200 }) // Exotel expects 200 either way; just drop it silently.
+    }
+
     if (!rateLimit(`call-status:${clientIp(req)}`, 60, 60000)) {
       return new NextResponse("OK", { status: 200 })
     }
