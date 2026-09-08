@@ -10,6 +10,7 @@
 //   SMTP_FROM="Right Agent Group <yourbusiness@gmail.com>"
 
 import nodemailer from "nodemailer"
+import { escapeHtml } from "./utils"
 
 const HOST = process.env.SMTP_HOST || ""
 const PORT = parseInt(process.env.SMTP_PORT || "465")
@@ -58,6 +59,11 @@ export async function sendApplicationConfirmation(opts: {
 }): Promise<{ ok: boolean; error?: string }> {
   const { to, name, loanType, applicationId } = opts
   const shortId = applicationId.slice(0, 8).toUpperCase()
+  // name/loanType come from the public application form — escaped so a
+  // "name" of <a href=...> or <script> renders as text in the applicant's
+  // and admin's mail clients, never as markup (phishing vector otherwise).
+  const safeName = escapeHtml(name)
+  const safeLoanType = escapeHtml(loanType)
   return sendMail({
     to,
     subject: `Application received — Right Agent Group (Ref: ${shortId})`,
@@ -68,9 +74,9 @@ export async function sendApplicationConfirmation(opts: {
     <div style="font-size:13px;color:#dbeafe;margin-top:4px">LS Right Agent Services, Hyderabad</div>
   </div>
   <div style="border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px;padding:28px">
-    <p style="font-size:16px;margin:0 0 12px">Dear ${name},</p>
+    <p style="font-size:16px;margin:0 0 12px">Dear ${safeName},</p>
     <p style="font-size:14px;line-height:1.6;margin:0 0 16px">
-      Thank you! We have received your <strong>${loanType} loan</strong> application.
+      Thank you! We have received your <strong>${safeLoanType} loan</strong> application.
       Your reference number is:
     </p>
     <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:14px;text-align:center;font-size:20px;font-weight:700;color:#1d4ed8;letter-spacing:2px;margin:0 0 16px">

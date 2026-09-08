@@ -25,9 +25,9 @@ const REQUIRED = {
   // dashboard. It comes from migrations/2026-07-31_lead_code.sql — listing it
   // here is what makes this test fail loudly if that migration was skipped,
   // instead of the column quietly going missing at runtime.
-  leads: ["id","name","phone","address","whatsapp_number","email","product_interest","loan_amount","notes","form_completed","status","interested","score","language","source","call_count","last_called_at","created_at","updated_at","lead_code"],
+  leads: ["id","name","phone","address","whatsapp_number","email","product_interest","loan_amount","notes","form_completed","status","interested","score","language","source","call_count","last_called_at","created_at","updated_at","lead_code","pinned","pinned_at","callback_at","callback_note","loan_tenure"],
   voice_calls: ["id","twilio_call_sid","lead_id","phone","direction","status","language","duration","outcome","sentiment","ai_summary","transcript","recording_url","followup_sent","instructions","created_at","updated_at"],
-  loan_applications: ["id","lead_id","full_name","customer_name","phone","city","email","whatsapp_number","address","loan_type","loan_amount","monthly_income","employment_type","pan_number","form_data","status","submitted_at"],
+  loan_applications: ["id","lead_id","full_name","customer_name","phone","city","email","whatsapp_number","address","loan_type","loan_amount","monthly_income","employment_type","pan_number","form_data","status","submitted_at","last_edited_at","loan_tenure"],
   form_links: ["token","lead_id","used_at","created_at"],
   whatsapp_messages: ["id","lead_id","wa_message_id","phone_number","direction","content","status","created_at"],
   ai_conversations: ["id","lead_id","role","content","language","created_at"],
@@ -36,8 +36,19 @@ const REQUIRED = {
   uploaded_files: ["id","filename","file_path","type","row_count","processed","status","uploaded_by","created_at"],
   security_settings: ["key","enabled","updated_at"],
   audit_logs: ["id","action","performed_by","metadata","created_at"],
-  allowed_emails: ["email","added_by","created_at"],
+  allowed_emails: ["email","added_by","role","created_at"],
   ai_scripts: ["id","language","content","updated_at","updated_by"],
+  // Post-July-14 feature tables — a database missing these silently breaks
+  // pinning, callbacks, 2FA login, loan edit requests, team profiles and the
+  // developer role, so they are checked with the same weight as core tables.
+  login_otps: ["email","code_hash","attempts","expires_at","created_at"],
+  team_profiles: ["email","display_name","avatar_url","last_login_at","created_at","phone","address","age","profile_customized"],
+  developer_logs: ["id","email","action","status","created_at"],
+  loan_application_edit_requests: ["id","loan_application_id","lead_id","proposed_by","reason","previous_values","proposed_values","status","reviewed_by","reviewed_at","created_at"],
+  dnd_suppression: ["phone","reason","source","added_by","created_at"],
+  compliance_settings: ["key","value","updated_at"],
+  lead_memory: ["lead_id","facts","locked_facts","summary","sentiment","stage","last_analysis_at","updated_at"],
+  knowledge_base: ["id","title","content","category","is_active","created_at","updated_at","source_type"],
 }
 
 async function main() {

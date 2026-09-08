@@ -129,7 +129,10 @@ export default function CommandPalette({ open, onClose, onNavigate, allowedViews
         onClick={e => e.stopPropagation()}
         style={{
           width: 600, maxWidth: "calc(100vw - 32px)", height: "fit-content", maxHeight: "58vh",
-          background: "rgba(12,17,29,0.98)", border: "1px solid var(--border)", borderRadius: 16,
+          /* Themed surface — see the note in toast.tsx: a hardcoded dark
+             panel under themed text breaks light theme. var(--bg-card) is
+             the elevated surface token and resolves in both themes. */
+          background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16,
           boxShadow: "0 24px 80px -16px rgba(0,0,0,0.8), 0 0 0 1px rgba(139,124,255,0.06)",
           display: "flex", flexDirection: "column", overflow: "hidden",
           animation: "paletteIn 0.16s cubic-bezier(0.21,1.02,0.73,1)",

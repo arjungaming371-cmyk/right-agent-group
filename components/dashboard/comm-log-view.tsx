@@ -14,19 +14,25 @@ export default function CommLogView() {
   const [loading, setLoading] = useState(true)
   const [expanded, setExpanded] = useState<string|null>(null)
 
-  async function load() {
-    setLoading(true)
-    const [c,w] = await Promise.all([
-      fetch("/api/calls").then(r=>r.ok?r.json():[]),
-      fetch("/api/comms").then(r=>r.ok?r.json():[]),
-    ])
-    setCalls(c)
-    setWaLogs(w.filter((l:any)=>l.type==="whatsapp"))
-    setLoading(false)
+  async function load(silent = false) {
+    // Background poll ticks skip the skeleton flash once real data is on
+    // screen — without this, every 15s poll replaced the whole list with
+    // skeletons all day. First load and user-triggered refreshes still show it.
+    if (!silent || calls.length === 0) setLoading(true)
+    try {
+      const [c,w] = await Promise.all([
+        fetch("/api/calls").then(r=>r.ok?r.json():[]),
+        fetch("/api/comms").then(r=>r.ok?r.json():[]),
+      ])
+      setCalls(c)
+      setWaLogs(w.filter((l:any)=>l.type==="whatsapp"))
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => { load() }, [])
-  usePolling(load, 15000)
+  usePolling(() => load(true), 15000)
 
   const STATUS_STYLE: Record<string,{bg:string;color:string}> = {
     completed: {bg:"rgba(45,212,160,0.13)",  color:"var(--accent-green)"},

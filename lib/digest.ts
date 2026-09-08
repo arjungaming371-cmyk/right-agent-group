@@ -7,6 +7,7 @@
 import { query } from "./db"
 import { isMailConfigured, sendMail } from "./mail"
 import { chatWithSystemPrompt } from "./llm"
+import { escapeHtml } from "./utils"
 
 type DigestStats = {
   periodLabel: string
@@ -27,8 +28,12 @@ type DigestStats = {
 async function collectStats(days: number): Promise<DigestStats> {
   const periodLabel = days === 1 ? "Last 24 hours" : `Last ${days} days`
 
+  // `days` is parameterized ($1 * interval '1 day') rather than interpolated
+  // — today it is only ever the literal 1 or 7 from two routes, but one
+  // refactor away from SQLi is one too many.
   const calls = await query(
-    `SELECT outcome, sentiment, duration FROM voice_calls WHERE created_at > now() - interval '${days} days'`
+    `SELECT outcome, sentiment, duration FROM voice_calls WHERE created_at > now() - ($1 * interval '1 day')`,
+    [days]
   )
   const totalCalls = calls.rows.length
   const callsResolved = calls.rows.filter((c: any) => c.outcome === "resolved").length
@@ -46,9 +51,10 @@ async function collectStats(days: number): Promise<DigestStats> {
 
   const leadsRes = await query(
     `SELECT
-       count(*) FILTER (WHERE created_at > now() - interval '${days} days') AS new_leads,
-       count(*) FILTER (WHERE status = 'qualified' AND updated_at > now() - interval '${days} days') AS qualified
-     FROM leads`
+       count(*) FILTER (WHERE created_at > now() - ($1 * interval '1 day')) AS new_leads,
+       count(*) FILTER (WHERE status = 'qualified' AND updated_at > now() - ($1 * interval '1 day')) AS qualified
+     FROM leads`,
+    [days]
   )
   const newLeads = Number(leadsRes.rows[0]?.new_leads || 0)
   const qualifiedLeads = Number(leadsRes.rows[0]?.qualified || 0)
@@ -57,7 +63,8 @@ async function collectStats(days: number): Promise<DigestStats> {
     `SELECT
        count(*) FILTER (WHERE direction = 'inbound')  AS wa_in,
        count(*) FILTER (WHERE direction = 'outbound') AS wa_out
-     FROM whatsapp_messages WHERE created_at > now() - interval '${days} days'`
+     FROM whatsapp_messages WHERE created_at > now() - ($1 * interval '1 day')`,
+    [days]
   )
   const waInbound = Number(waRes.rows[0]?.wa_in || 0)
   const waOutbound = Number(waRes.rows[0]?.wa_out || 0)
@@ -65,8 +72,9 @@ async function collectStats(days: number): Promise<DigestStats> {
   const alertsRes = await query(
     `SELECT cl.summary, cl.created_at, l.name AS lead_name
      FROM comm_logs cl LEFT JOIN leads l ON l.id = cl.lead_id
-     WHERE cl.type = 'alert' AND cl.outcome = 'needs_human' AND cl.created_at > now() - interval '${days} days'
-     ORDER BY cl.created_at DESC LIMIT 10`
+     WHERE cl.type = 'alert' AND cl.outcome = 'needs_human' AND cl.created_at > now() - ($1 * interval '1 day')
+     ORDER BY cl.created_at DESC LIMIT 10`,
+    [days]
   )
   const needsHuman = alertsRes.rows.map((r: any) => ({
     leadName: r.lead_name || "Unknown lead",
@@ -77,8 +85,9 @@ async function collectStats(days: number): Promise<DigestStats> {
   const negRes = await query(
     `SELECT ai_summary FROM voice_calls
      WHERE sentiment IN ('Negative', 'Frustrated') AND ai_summary IS NOT NULL
-       AND created_at > now() - interval '${days} days'
-     ORDER BY created_at DESC LIMIT 8`
+       AND created_at > now() - ($1 * interval '1 day')
+     ORDER BY created_at DESC LIMIT 8`,
+    [days]
   )
   const negativeSummaries = negRes.rows.map((r: any) => r.ai_summary).filter(Boolean)
 
@@ -132,8 +141,10 @@ export async function generateAndSendDigest(days: number): Promise<{ ok: boolean
     return { ok: false, error: "SMTP or ADMIN_EMAIL not configured", stats }
   }
 
+  // leadName and summary include caller/lead-controlled text — escaped so a
+  // lead named "<a href=...>" renders as text in the admin's inbox, not markup.
   const needsHumanHtml = stats.needsHuman.length
-    ? stats.needsHuman.map((n) => `<li style="margin-bottom:6px"><strong>${n.leadName}</strong> — ${n.summary}</li>`).join("")
+    ? stats.needsHuman.map((n) => `<li style="margin-bottom:6px"><strong>${escapeHtml(n.leadName)}</strong> — ${escapeHtml(n.summary)}</li>`).join("")
     : `<li style="color:#9ca3af">None — nobody needed escalation this period.</li>`
 
   const html = `
@@ -143,7 +154,7 @@ export async function generateAndSendDigest(days: number): Promise<{ ok: boolean
     <div style="font-size:13px;color:#eef1ff;margin-top:4px">Right Agent Group · Operations Console</div>
   </div>
   <div style="border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px;padding:24px">
-    <p style="font-size:14px;line-height:1.6;margin:0 0 20px">${highlights}</p>
+    <p style="font-size:14px;line-height:1.6;margin:0 0 20px">${escapeHtml(highlights)}</p>
 
     <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
       ${statRow("Total calls", stats.totalCalls)}

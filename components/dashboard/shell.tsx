@@ -155,6 +155,27 @@ export default function DashboardShell() {
   // badges don't lag a full extra cycle behind the visible lists.
   usePolling(loadCounts, 15000)
 
+  // Live system status for the sidebar pill — replaces the old hardcoded
+  // "All systems operational" (which lied whenever a service was down).
+  // Lightweight: one public endpoint, on mount + every 60s, paused while
+  // the tab is hidden like every other poll in the console. null until the
+  // first check lands, so the pill never claims health before it knows.
+  const [systemOk, setSystemOk] = useState<boolean | null>(null)
+
+  async function loadSystemStatus() {
+    try {
+      const res = await fetch("/api/system/status")
+      if (!res.ok) { setSystemOk(false); return }
+      const d = await res.json()
+      setSystemOk(!!(d?.whatsapp?.running && d?.llm?.running && d?.db?.running && d?.website?.running))
+    } catch {
+      setSystemOk(false)
+    }
+  }
+
+  useEffect(() => { loadSystemStatus() }, [])
+  usePolling(loadSystemStatus, 60000)
+
   async function logout() {
     try { await fetch("/api/auth/logout", { method: "POST" }) } catch {}
     window.location.href = "/login"
@@ -297,11 +318,24 @@ export default function DashboardShell() {
           )}
         </nav>
 
-        {/* System status */}
+        {/* System status — live from /api/system/status, not hardcoded */}
         <div className="mx-3 mb-3 rounded-xl border border-[var(--border-light)] bg-[var(--overlay-soft)] px-3.5 py-3">
           <div className="flex items-center gap-2">
-            <span className="h-[7px] w-[7px] rounded-full bg-[var(--accent-green)]" style={{ animation: "pulse-dot 2.2s infinite" }} />
-            <span className="text-[12px] font-semibold text-[var(--text-primary)]">All systems operational</span>
+            <span
+              className="h-[7px] w-[7px] rounded-full"
+              style={{
+                background: systemOk === null ? "var(--text-muted)" : systemOk ? "var(--accent-green)" : "var(--accent-yellow)",
+                // pulse-dot's halo is hardcoded green in globals.css — only
+                // pulse while actually green, so degraded doesn't glow green.
+                animation: systemOk ? "pulse-dot 2.2s infinite" : "none",
+              }}
+            />
+            <span
+              className="text-[12px] font-semibold"
+              style={{ color: systemOk === false ? "var(--accent-yellow)" : "var(--text-primary)" }}
+            >
+              {systemOk === null ? "Checking status…" : systemOk ? "All systems operational" : "Service degraded — check System"}
+            </span>
           </div>
           <div className="mt-0.5 pl-[15px] text-[10.5px] text-[var(--text-muted)]">Voice · WhatsApp · AI Engine</div>
         </div>

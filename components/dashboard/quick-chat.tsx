@@ -98,6 +98,10 @@ export default function QuickChat({ role = "agent", userEmail = "" }: { role?: U
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
+  // Epoch guard for the streaming reader: every chat switch and every send
+  // bumps it, and stream chunks arriving for a stale epoch are dropped
+  // instead of appending into the wrong conversation.
+  const streamEpochRef = useRef(0)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -120,12 +124,19 @@ export default function QuickChat({ role = "agent", userEmail = "" }: { role?: U
   }
 
   function startNewChat() {
+    // Invalidate any in-flight stream/load from the previous conversation and
+    // clear the shared loading flag — nothing is pending in a fresh chat.
+    streamEpochRef.current += 1
+    setLoading(false)
     setChatId(null)
     setMessages([greeting])
     setView("chat")
   }
 
   async function openChat(c: ChatSummary) {
+    // Epoch guard — same pattern as send(): switching chats invalidates any
+    // in-flight stream/load from the previous conversation.
+    const epoch = ++streamEpochRef.current
     setChatId(c.id)
     setView("chat")
     setLoading(true)
@@ -133,8 +144,10 @@ export default function QuickChat({ role = "agent", userEmail = "" }: { role?: U
       const res = await fetch(`/api/assistant/chats/${c.id}`)
       const data = await res.json()
       const loaded: Message[] = (data.messages || []).map((m: any) => ({ role: m.role, content: m.content }))
+      if (epoch !== streamEpochRef.current) return
       setMessages(loaded.length ? loaded : [greeting])
     } catch {
+      if (epoch !== streamEpochRef.current) return
       setMessages([greeting])
     }
     setLoading(false)
@@ -150,6 +163,7 @@ export default function QuickChat({ role = "agent", userEmail = "" }: { role?: U
   async function send(text?: string) {
     const q = text ?? input
     if (!q.trim() || loading) return
+    const epoch = ++streamEpochRef.current
     setInput("")
     const newMessages: Message[] = [...messages, { role: "user", content: q }]
     setMessages(newMessages)
@@ -163,7 +177,7 @@ export default function QuickChat({ role = "agent", userEmail = "" }: { role?: U
       if (!activeChatId) {
         const created = await fetch("/api/assistant/chats", { method: "POST", body: JSON.stringify({ role }) }).then(r => r.json())
         activeChatId = created.chat?.id || null
-        if (activeChatId) setChatId(activeChatId)
+        if (activeChatId && epoch === streamEpochRef.current) setChatId(activeChatId)
       }
 
       const history = newMessages.slice(0, -1).map(m => ({
@@ -176,6 +190,7 @@ export default function QuickChat({ role = "agent", userEmail = "" }: { role?: U
         body: JSON.stringify({ message: q, history, chatId: activeChatId, role, userEmail }),
       })
       if (!res.body) throw new Error("no response stream")
+      if (epoch !== streamEpochRef.current) return // superseded while in flight
 
       // Streaming reply — append a growing placeholder and fill it in as
       // chunks arrive, instead of waiting 20-50s for the whole thing.
@@ -186,6 +201,12 @@ export default function QuickChat({ role = "agent", userEmail = "" }: { role?: U
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
+        if (epoch !== streamEpochRef.current) {
+          // A newer chat/send superseded this one — stop consuming so late
+          // chunks can never append into the wrong conversation.
+          reader.cancel().catch(() => {})
+          return
+        }
         acc += decoder.decode(value, { stream: true })
         const textSoFar = acc
         setMessages(prev => {
@@ -194,6 +215,7 @@ export default function QuickChat({ role = "agent", userEmail = "" }: { role?: U
           return copy
         })
       }
+      if (epoch !== streamEpochRef.current) return
       if (!acc.trim()) {
         setMessages(prev => {
           const copy = [...prev]
@@ -202,9 +224,14 @@ export default function QuickChat({ role = "agent", userEmail = "" }: { role?: U
         })
       }
     } catch {
-      setMessages([...newMessages, { role: "assistant", content: "Something went wrong. Please try again." }])
+      if (epoch === streamEpochRef.current) {
+        setMessages([...newMessages, { role: "assistant", content: "Something went wrong. Please try again." }])
+      }
+    } finally {
+      // Only the owner of the current epoch may clear the flag — a stale
+      // stream's exit must not clobber a newer conversation's loading state.
+      if (epoch === streamEpochRef.current) setLoading(false)
     }
-    setLoading(false)
   }
 
   if (!open) {
@@ -296,7 +323,7 @@ export default function QuickChat({ role = "agent", userEmail = "" }: { role?: U
             <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderTop: "1px solid var(--border-light)" }}>
               <button onClick={() => openChat(c)} style={{ flex: 1, minWidth: 0, textAlign: "left", background: c.id === chatId ? "rgba(139,124,255,0.08)" : "transparent", border: "none", borderRadius: 8, padding: "6px 8px", cursor: "pointer" }}>
                 <div style={{ fontSize: 12.5, fontWeight: 500, color: "var(--text-primary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.title}</div>
-                <div style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 1 }}>{timeAgoShort(c.updated_at)} ago</div>
+                <div style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 1 }}>{timeAgoShort(c.updated_at) === "now" ? "now" : `${timeAgoShort(c.updated_at)} ago`}</div>
               </button>
               {confirmDelete === c.id ? (
                 <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>

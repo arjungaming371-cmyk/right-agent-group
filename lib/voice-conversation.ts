@@ -212,7 +212,10 @@ export async function startCall(
         },
         { onConflict: "twilio_call_sid" }
       )
-      .catch(() => {})
+      .catch((e: any) =>
+        // A swallowed failure here used to erase the entire call's conversation
+        // record with no trace — now it is at least visible in the pm2 logs.
+        console.error("voice_calls upsert error (call row may be missing/stale):", e.message))
   }
 
   const hasName = name && !PLACEHOLDER_NAME_RE.test(name)
@@ -478,7 +481,18 @@ async function completeLeadIfReady(opts: {
     if (extracted.name) updates.name = extracted.name
     if (extracted.address) updates.address = extracted.address
     if (extracted.whatsapp_number) updates.whatsapp_number = extracted.whatsapp_number
-    await db.from("leads").update(updates).eq("id", leadId)
+    // RACE GATE (2026-09 fix): the status read above and this update are not
+    // atomic — two overlapping turns/webhooks for the same lead could both
+    // read status='new' and BOTH create a form link and message the customer.
+    // Making the completion itself conditional (…WHERE status = 'new') means
+    // exactly one writer wins: the loser's update matches 0 rows and returns
+    // without sending anything. (Postgres evaluates WHERE against the OLD row,
+    // so filtering on the same column we're setting is correct.)
+    const claim = await db.from("leads").update(updates).eq("id", leadId).eq("status", "new")
+    if (!claim.data || (Array.isArray(claim.data) && claim.data.length === 0)) {
+      console.log(`lead ${leadId} completion race lost — another turn already completed it, skipping duplicate form link/send`)
+      return false
+    }
 
     const token = randomUUID()
     await db.from("form_links").insert({ token, lead_id: leadId })
@@ -492,7 +506,8 @@ async function completeLeadIfReady(opts: {
       // Only on SUCCESS — if the link send failed, the post-call fallback
       // template is the customer's only remaining automatic touchpoint.
       if (callSid && result.ok) {
-        db.from("voice_calls").update({ followup_sent: true }).eq("twilio_call_sid", callSid).catch(() => {})
+        db.from("voice_calls").update({ followup_sent: true }).eq("twilio_call_sid", callSid).catch((e: any) =>
+          console.error("followup_sent flag error (status webhook may double-message):", e.message))
       }
       // Surface the exact link in the dashboard's Communication Log.
       const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "")
@@ -503,7 +518,7 @@ async function completeLeadIfReady(opts: {
           ? `Application form link sent on WhatsApp to ${waNumber}: ${appUrl}/form/${token}`
           : `Application form link generated but WhatsApp send FAILED (${result.error}) — share manually: ${appUrl}/form/${token}`,
         outcome: result.ok ? "sent" : "failed",
-      }).catch(() => {})
+      }).catch((e: any) => console.error("comm_log form-link entry error:", e.message))
       // Priya just told the customer "the link is on its way" — if the send
       // actually failed, ping the operator to share it manually before the
       // customer gives up waiting.
@@ -532,7 +547,8 @@ async function markVoicemail(callSid: string | null, speech: string): Promise<vo
   // runPostCallAnalysis below reads the completed transcript, not a
   // still-in-flight write.
   await updateTranscriptAsync(callSid, speech, "(Detected voicemail/answering machine — call ended)")
-  await db.from("voice_calls").update({ outcome: "voicemail", status: "completed" }).eq("twilio_call_sid", callSid).catch(() => {})
+  await db.from("voice_calls").update({ outcome: "voicemail", status: "completed" }).eq("twilio_call_sid", callSid).catch((e: any) =>
+    console.error("voicemail mark error:", e.message))
   runPostCallAnalysis(callSid)
 }
 

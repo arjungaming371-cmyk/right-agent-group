@@ -93,7 +93,9 @@ export default function NotificationBell({ onNavigate }: { onNavigate: (view: Vi
         <div
           style={{
             position: "absolute", right: 0, top: 44, width: 360, maxHeight: 440,
-            background: "rgba(12,17,29,0.98)", border: "1px solid var(--border)", borderRadius: 14,
+            /* Themed surface — see the note in ../ui/toast.tsx: a hardcoded
+               dark panel under themed text breaks light theme. */
+            background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14,
             boxShadow: "0 20px 60px -12px rgba(0,0,0,0.7)", zIndex: 200, overflow: "hidden",
             display: "flex", flexDirection: "column", animation: "paletteIn 0.14s ease",
           }}

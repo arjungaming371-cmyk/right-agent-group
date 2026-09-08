@@ -12,6 +12,7 @@ export default function ApplicationFormPage() {
 
   const [loading, setLoading] = useState(true)
   const [valid, setValid] = useState(false)
+  const [networkFailed, setNetworkFailed] = useState(false)
   const [alreadyUsed, setAlreadyUsed] = useState(false)
   const [submitted, setSubmitted] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -23,27 +24,51 @@ export default function ApplicationFormPage() {
     employment_type: "Salaried", monthly_income: "", pan_number: "",
   })
 
+  async function checkToken() {
+    setLoading(true)
+    setNetworkFailed(false)
+    try {
+      const res = await fetch(`/api/form/${token}`)
+      if (res.status === 404 || res.status === 410) {
+        // Definitive server rejection — only THIS means the link is truly
+        // invalid or expired.
+        setValid(false)
+        return
+      }
+      if (!res.ok) {
+        // 5xx / rate-limit / anything else: the server may be fine and the
+        // link perfectly valid — don't claim it is bad.
+        setNetworkFailed(true)
+        return
+      }
+      const data = await res.json()
+      if (!data.valid) {
+        setValid(false)
+        return
+      }
+      setValid(true)
+      setAlreadyUsed(!!data.used)
+      if (data.lead) {
+        setForm((f) => ({
+          ...f,
+          customer_name: data.lead.name || "",
+          address: data.lead.address || "",
+          whatsapp_number: data.lead.phone || "",
+          loan_type: data.lead.product_interest || f.loan_type,
+        }))
+      }
+    } catch {
+      // Fetch threw (offline, DNS, aborted) — a network blip must never
+      // render as "link invalid" for a valid link.
+      setNetworkFailed(true)
+    } finally {
+      setLoading(false)
+    }
+  }
+
   useEffect(() => {
     if (!token) return
-    fetch(`/api/form/${token}`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.valid) {
-          setValid(true)
-          setAlreadyUsed(!!data.used)
-          if (data.lead) {
-            setForm((f) => ({
-              ...f,
-              customer_name: data.lead.name || "",
-              address: data.lead.address || "",
-              whatsapp_number: data.lead.phone || "",
-              loan_type: data.lead.product_interest || f.loan_type,
-            }))
-          }
-        }
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false))
+    checkToken()
   }, [token])
 
   async function submit() {
@@ -66,8 +91,14 @@ export default function ApplicationFormPage() {
       setSubmitted(true)
     } catch (e: any) {
       setError(e.message)
+    } finally {
+      setSubmitting(false)
     }
-    setSubmitting(false)
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    submit()
   }
 
   const wrap: React.CSSProperties = {
@@ -85,6 +116,27 @@ export default function ApplicationFormPage() {
   }
 
   if (loading) return <div style={wrap}><div style={card}>Loading…</div></div>
+
+  // Network failure — distinct from an invalid link, with a way to retry.
+  if (networkFailed) {
+    return (
+      <div style={wrap}>
+        <div style={card}>
+          <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Connection problem</div>
+          <div style={{ fontSize: 14, color: "#94a3b8", marginBottom: 20 }}>We couldn't reach the server — please check your connection and try again.</div>
+          <button
+            onClick={checkToken}
+            style={{
+              width: "100%", padding: 12, background: "#1d4ed8", border: "none", borderRadius: 8,
+              color: "white", fontWeight: 600, fontSize: 14, cursor: "pointer",
+            }}
+          >
+            Try again
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   if (!valid) {
     return (
@@ -117,59 +169,61 @@ export default function ApplicationFormPage() {
         <div style={{ fontSize: 13, color: "#94a3b8", marginBottom: 4 }}>Right Agent Group — fill in your details below</div>
         <div style={{ fontSize: 11, color: "#64748b", marginBottom: 24 }}>Fields marked <span style={{ color: "#f87171" }}>*</span> are required</div>
 
-        <label style={label}>Full Name <span style={{ color: "#f87171" }}>*</span></label>
-        <input style={input} placeholder="Your full name" value={form.customer_name} onChange={(e) => setForm({ ...form, customer_name: e.target.value })} />
+        <form onSubmit={handleSubmit}>
+          <label htmlFor="customer_name" style={label}>Full Name <span style={{ color: "#f87171" }}>*</span></label>
+          <input id="customer_name" style={input} placeholder="Your full name" autoComplete="name" maxLength={120} value={form.customer_name} onChange={(e) => setForm({ ...form, customer_name: e.target.value })} />
 
-        <label style={label}>WhatsApp Number <span style={{ color: "#f87171" }}>*</span></label>
-        <input style={input} placeholder="e.g. 9876543210" value={form.whatsapp_number} onChange={(e) => setForm({ ...form, whatsapp_number: e.target.value })} />
+          <label htmlFor="whatsapp_number" style={label}>WhatsApp Number <span style={{ color: "#f87171" }}>*</span></label>
+          <input id="whatsapp_number" style={input} placeholder="e.g. 9876543210" autoComplete="tel" value={form.whatsapp_number} onChange={(e) => setForm({ ...form, whatsapp_number: e.target.value })} />
 
-        <label style={label}>Email</label>
-        <input style={input} type="email" placeholder="you@example.com" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+          <label htmlFor="email" style={label}>Email</label>
+          <input id="email" style={input} type="email" placeholder="you@example.com" autoComplete="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
 
-        <label style={label}>Address</label>
-        <input style={input} placeholder="Your home/office address" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
+          <label htmlFor="address" style={label}>Address</label>
+          <input id="address" style={input} placeholder="Your home/office address" autoComplete="street-address" maxLength={400} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
 
-        <label style={label}>City <span style={{ color: "#f87171" }}>*</span></label>
-        <input style={input} placeholder="e.g. Hyderabad" value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} />
+          <label htmlFor="city" style={label}>City <span style={{ color: "#f87171" }}>*</span></label>
+          <input id="city" style={input} placeholder="e.g. Hyderabad" autoComplete="address-level2" maxLength={80} value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} />
 
-        <label style={label}>Loan Type <span style={{ color: "#f87171" }}>*</span></label>
-        <select style={input} value={form.loan_type} onChange={(e) => setForm({ ...form, loan_type: e.target.value })}>
-          {PRODUCT_GROUPS.map((g) => (
-            <optgroup key={g.label} label={g.label}>
-              {g.products.map((t) => <option key={t}>{t}</option>)}
-            </optgroup>
-          ))}
-        </select>
+          <label htmlFor="loan_type" style={label}>Loan Type <span style={{ color: "#f87171" }}>*</span></label>
+          <select id="loan_type" style={input} value={form.loan_type} onChange={(e) => setForm({ ...form, loan_type: e.target.value })}>
+            {PRODUCT_GROUPS.map((g) => (
+              <optgroup key={g.label} label={g.label}>
+                {g.products.map((t) => <option key={t}>{t}</option>)}
+              </optgroup>
+            ))}
+          </select>
 
-        <label style={label}>Loan Amount (₹) <span style={{ color: "#f87171" }}>*</span></label>
-        <input style={input} type="number" placeholder="e.g. 2500000" value={form.loan_amount} onChange={(e) => setForm({ ...form, loan_amount: e.target.value })} />
+          <label htmlFor="loan_amount" style={label}>Loan Amount (₹) <span style={{ color: "#f87171" }}>*</span></label>
+          <input id="loan_amount" style={input} type="number" placeholder="e.g. 2500000" value={form.loan_amount} onChange={(e) => setForm({ ...form, loan_amount: e.target.value })} />
 
-        <label style={label}>Loan Tenure (months) <span style={{ color: "#f87171" }}>*</span></label>
-        <input style={input} type="number" placeholder="e.g. 240 (20 years)" min="1" max="360" value={form.loan_tenure} onChange={(e) => setForm({ ...form, loan_tenure: e.target.value })} />
+          <label htmlFor="loan_tenure" style={label}>Loan Tenure (months) <span style={{ color: "#f87171" }}>*</span></label>
+          <input id="loan_tenure" style={input} type="number" placeholder="e.g. 240 (20 years)" min="1" max="360" value={form.loan_tenure} onChange={(e) => setForm({ ...form, loan_tenure: e.target.value })} />
 
-        <label style={label}>Employment Type <span style={{ color: "#f87171" }}>*</span></label>
-        <select style={input} value={form.employment_type} onChange={(e) => setForm({ ...form, employment_type: e.target.value })}>
-          {EMPLOYMENT_TYPES.map((t) => <option key={t}>{t}</option>)}
-        </select>
+          <label htmlFor="employment_type" style={label}>Employment Type <span style={{ color: "#f87171" }}>*</span></label>
+          <select id="employment_type" style={input} value={form.employment_type} onChange={(e) => setForm({ ...form, employment_type: e.target.value })}>
+            {EMPLOYMENT_TYPES.map((t) => <option key={t}>{t}</option>)}
+          </select>
 
-        <label style={label}>Monthly Income (₹) <span style={{ color: "#f87171" }}>*</span></label>
-        <input style={input} type="number" placeholder="e.g. 75000" value={form.monthly_income} onChange={(e) => setForm({ ...form, monthly_income: e.target.value })} />
+          <label htmlFor="monthly_income" style={label}>Monthly Income (₹) <span style={{ color: "#f87171" }}>*</span></label>
+          <input id="monthly_income" style={input} type="number" placeholder="e.g. 75000" value={form.monthly_income} onChange={(e) => setForm({ ...form, monthly_income: e.target.value })} />
 
-        <label style={label}>PAN Number</label>
-        <input style={input} placeholder="e.g. ABCDE1234F" maxLength={10} value={form.pan_number} onChange={(e) => setForm({ ...form, pan_number: e.target.value.toUpperCase() })} />
+          <label htmlFor="pan_number" style={label}>PAN Number</label>
+          <input id="pan_number" style={input} placeholder="e.g. ABCDE1234F" autoComplete="off" maxLength={10} value={form.pan_number} onChange={(e) => setForm({ ...form, pan_number: e.target.value.toUpperCase() })} />
 
-        {error && <div style={{ color: "#f87171", fontSize: 13, marginBottom: 12 }}>{error}</div>}
+          {error && <div role="alert" style={{ color: "#f87171", fontSize: 13, marginBottom: 12 }}>{error}</div>}
 
-        <button
-          onClick={submit}
-          disabled={submitting}
-          style={{
-            width: "100%", padding: 12, background: "#1d4ed8", border: "none", borderRadius: 8,
-            color: "white", fontWeight: 600, fontSize: 14, opacity: submitting ? 0.6 : 1, marginTop: 8, cursor: "pointer",
-          }}
-        >
-          {submitting ? "Submitting…" : "Submit Application"}
-        </button>
+          <button
+            type="submit"
+            disabled={submitting}
+            style={{
+              width: "100%", padding: 12, background: "#1d4ed8", border: "none", borderRadius: 8,
+              color: "white", fontWeight: 600, fontSize: 14, opacity: submitting ? 0.6 : 1, marginTop: 8, cursor: "pointer",
+            }}
+          >
+            {submitting ? "Submitting…" : "Submit Application"}
+          </button>
+        </form>
       </div>
     </div>
   )

@@ -1,6 +1,8 @@
 /** @type {import("next").NextConfig} */
 const nextConfig = {
-  serverExternalPackages: ["twilio", "ws"],
+  // (twilio was removed here — the project migrated to the self-hosted Exotel
+  // voicebot and this package is no longer a dependency anywhere.)
+  serverExternalPackages: ["ws"],
   experimental: {
     // "*" accepted a server action request claiming to come from any
     // origin — nothing in this codebase uses "use server" today, but a

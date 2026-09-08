@@ -135,6 +135,7 @@ export default function LeadsView({ role, initialSearch }: { role: "admin" | "ag
   const toast = useToast()
   const [leads, setLeads] = useState<Lead[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [search, setSearch] = useState(initialSearch || "")
   const [debouncedSearch, setDebouncedSearch] = useState(initialSearch || "")
 
@@ -174,9 +175,21 @@ export default function LeadsView({ role, initialSearch }: { role: "admin" | "ag
     if (amountFilter !== "all") params.set("amount", amountFilter)
     if (loanTypeFilter !== "all") params.set("loanType", loanTypeFilter)
     if (interestedFilter !== "all") params.set("interested", interestedFilter)
-    const res = await fetch(`/api/leads?${params.toString()}`)
-    if (res.ok) setLeads(await res.json())
-    setLoading(false)
+    try {
+      const res = await fetch(`/api/leads?${params.toString()}`)
+      if (res.ok) {
+        setLeads(await res.json())
+        setLoadError(null)
+      } else {
+        // A failed fetch is NOT "no leads" — say so, or a server bug reads
+        // as an empty pipeline (same trap loan-apps-view documents).
+        setLoadError(`Could not load leads (HTTP ${res.status}). Check server logs.`)
+      }
+    } catch (e: any) {
+      setLoadError(e?.message || "Could not load leads")
+    } finally {
+      setLoading(false)
+    }
   }
 
   async function togglePin(lead: Lead) {
@@ -222,32 +235,44 @@ export default function LeadsView({ role, initialSearch }: { role: "admin" | "ag
   async function startCall() {
     if (!callTarget) return
     setCalling(callTarget.id)
-    const res = await fetch("/api/calls", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ leadId: callTarget.id, phone: callTarget.phone, language: callTarget.language || "telugu", instructions: callInstructions }),
-    })
-    const data = await res.json()
-    setCalling(null)
-    setCallTarget(null)
-    setCallInstructions("")
-    if (res.ok) { toast.success("AI call started — Priya is dialing now"); load() }
-    else toast.error(data.error || "Call failed")
+    try {
+      const res = await fetch("/api/calls", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ leadId: callTarget.id, phone: callTarget.phone, language: callTarget.language || "telugu", instructions: callInstructions }),
+      })
+      const data = await res.json()
+      if (res.ok) { toast.success("AI call started — Priya is dialing now"); load() }
+      else toast.error(data.error || "Call failed")
+    } catch {
+      // Network failure — surface it, the busy spinner must not just hang.
+      toast.error("Call failed — check your connection and try again")
+    } finally {
+      setCalling(null)
+      setCallTarget(null)
+      setCallInstructions("")
+    }
   }
 
   async function sendWa() {
     if (!waTarget || !waText.trim()) return
     setWaSending(true)
     const to = waTarget.whatsapp_number || waTarget.phone
-    const res = await fetch("/api/whatsapp/send", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ to, message: waText, leadId: waTarget.id }),
-    })
-    const data = await res.json()
-    setWaSending(false)
-    if (res.ok) { setWaTarget(null); setWaText(""); toast.success("WhatsApp message sent") }
-    else toast.error(data.error === "WHATSAPP_NOT_CONFIGURED" ? data.message : data.error || "Send failed")
+    try {
+      const res = await fetch("/api/whatsapp/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to, message: waText, leadId: waTarget.id }),
+      })
+      const data = await res.json()
+      if (res.ok) { setWaTarget(null); setWaText(""); toast.success("WhatsApp message sent") }
+      else toast.error(data.error === "WHATSAPP_NOT_CONFIGURED" ? data.message : data.error || "Send failed")
+    } catch {
+      // Network failure — surface it, the busy spinner must not just hang.
+      toast.error("Send failed — check your connection and try again")
+    } finally {
+      setWaSending(false)
+    }
   }
 
   async function addLead() {
@@ -374,7 +399,17 @@ export default function LeadsView({ role, initialSearch }: { role: "admin" | "ag
                 ))}
               </tr>
             ))}
-            {!loading && leads.length === 0 && (
+            {!loading && loadError && (
+              <tr>
+                <td colSpan={10} style={{ padding: 32, textAlign: "center" }}>
+                  <div style={{ color: "var(--accent-red)", fontSize: 13, fontWeight: 600, marginBottom: 12 }}>{loadError}</div>
+                  <button onClick={() => load()} className="btn-ghost" style={{ height: 32, padding: "0 14px", fontSize: 12.5 }}>
+                    <RotateCcw size={12.5} strokeWidth={1.9} /> Try again
+                  </button>
+                </td>
+              </tr>
+            )}
+            {!loading && !loadError && leads.length === 0 && (
               <tr><td colSpan={10} style={{ padding: 40, textAlign: "center", color: "var(--text-muted)" }}>No leads match these filters.</td></tr>
             )}
             {leads.map((lead) => {

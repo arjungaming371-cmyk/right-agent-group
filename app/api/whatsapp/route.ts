@@ -51,10 +51,15 @@ export async function POST(req: NextRequest) {
 
   // Signature check — proves the request really came from Meta.
   // REQUIRED in production: without WHATSAPP_APP_SECRET this public endpoint
-  // accepts forged payloads from anyone (junk leads, wasted AI, spam sends).
+  // would accept forged payloads from anyone (junk leads, wasted AI, spam sends).
+  // FAIL-CLOSED since the 2026-09 security pass: an unsigned public webhook is
+  // a worse outcome than a blocked one. For local development without Meta,
+  // set ALLOW_UNSIGNED_WEBHOOK=1 in .env to restore the old fail-open behaviour.
   const appSecret = process.env.WHATSAPP_APP_SECRET || ""
-  if (!appSecret) {
-    console.warn("⚠️ WHATSAPP_APP_SECRET not set — accepting UNSIGNED webhook request. Set it in .env before going live!")
+  if (!appSecret && process.env.ALLOW_UNSIGNED_WEBHOOK !== "1") {
+    console.error("🚫 Rejecting WhatsApp webhook: WHATSAPP_APP_SECRET is not set (fail-closed). " +
+      "Set WHATSAPP_APP_SECRET in .env, or ALLOW_UNSIGNED_WEBHOOK=1 for local dev only.")
+    return NextResponse.json({ error: "webhook not configured" }, { status: 503 })
   }
   if (appSecret) {
     const sig = req.headers.get("x-hub-signature-256") || ""

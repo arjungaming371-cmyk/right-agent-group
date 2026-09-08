@@ -1,6 +1,10 @@
 "use client"
-import { useEffect, useRef, useState } from "react"
-import { Bot, Pause, Phone, PhoneIncoming, PhoneOutgoing, Play, RotateCcw, X } from "lucide-react"
+import { useEffect, useRef, useState, useMemo } from "react"
+import {
+  Bot, Check, Copy, Download, ExternalLink, FastForward, FileAudio,
+  Pause, Phone, PhoneIncoming, PhoneOutgoing, Play, Repeat, Rewind,
+  RotateCcw, Volume1, Volume2, VolumeX, X, Radio
+} from "lucide-react"
 import { formatDuration, timeAgo, formatDateTime } from "@/lib/utils"
 import { usePolling } from "@/lib/use-poll"
 import { useToast } from "../ui/toast"
@@ -50,18 +54,17 @@ export default function VoiceLogsView({ role }: { role: "admin" | "agent" | "vie
   const [instructions, setInstructions] = useState("")
   const [calling, setCalling]         = useState(false)
 
-  // Single shared <audio> element for BOTH the row "play" buttons and the
-  // detail modal. There used to be two independent <audio> tags (one hidden
-  // for row playback, one <audio controls> in the modal) with no shared
-  // state — they could play at once, the row button never showed
-  // playing/paused, and closing the modal (X) never touched the row audio
-  // since it was a different element entirely. One element + real state
-  // fixes all of that: only one recording can ever be playing.
+  // Full-featured shared Audio Player state
   const audioRef = useRef<HTMLAudioElement>(null)
   const [playingId, setPlayingId] = useState<string | null>(null)
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [audioDuration, setAudioDuration] = useState(0)
+  const [playbackRate, setPlaybackRate] = useState(1)
+  const [volume, setVolume] = useState(1)
+  const [isMuted, setIsMuted] = useState(false)
+  const [isLooping, setIsLooping] = useState(false)
+  const [copiedLink, setCopiedLink] = useState(false)
 
   function stopAudio() {
     const a = audioRef.current
@@ -72,12 +75,108 @@ export default function VoiceLogsView({ role }: { role: "admin" | "agent" | "vie
     setAudioDuration(0)
   }
 
-  function seek(e: React.ChangeEvent<HTMLInputElement>) {
+  function seek(e: React.ChangeEvent<HTMLInputElement> | number) {
+    const a = audioRef.current
+    const t = typeof e === "number" ? e : Number(e.target.value)
+    setCurrentTime(t)
+    if (!a) return
+    if (selected && (!a.src || playingId !== selected.id)) {
+      const url = proxyRecordingUrl(selected.recording_url)
+      if (url) {
+        a.src = url
+        setPlayingId(selected.id)
+      }
+    }
+    try {
+      a.currentTime = t
+    } catch {}
+  }
+
+  function skip(seconds: number) {
+    const a = audioRef.current
+    if (!selected) return
+    if (a && (!a.src || playingId !== selected.id)) {
+      const url = proxyRecordingUrl(selected.recording_url)
+      if (url) {
+        a.src = url
+        setPlayingId(selected.id)
+      }
+    }
+    const total = audioDuration || selected.duration || 0
+    const cur = playingId === selected.id ? (a ? a.currentTime : currentTime) : currentTime
+    const target = Math.max(0, Math.min(total, cur + seconds))
+    setCurrentTime(target)
+    if (a) {
+      try {
+        a.currentTime = target
+      } catch {}
+    }
+  }
+
+  function changeSpeed(rate: number) {
+    setPlaybackRate(rate)
+    if (audioRef.current) {
+      audioRef.current.playbackRate = rate
+    }
+  }
+
+  function handleVolumeChange(v: number) {
+    setVolume(v)
+    const muted = v === 0
+    setIsMuted(muted)
+    if (audioRef.current) {
+      audioRef.current.volume = v
+      audioRef.current.muted = muted
+    }
+  }
+
+  function toggleMute() {
     const a = audioRef.current
     if (!a) return
-    const t = Number(e.target.value)
-    a.currentTime = t
-    setCurrentTime(t)
+    if (isMuted) {
+      a.muted = false
+      setIsMuted(false)
+      if (volume === 0) {
+        setVolume(1)
+        a.volume = 1
+      }
+    } else {
+      a.muted = true
+      setIsMuted(true)
+    }
+  }
+
+  function toggleLoop() {
+    const next = !isLooping
+    setIsLooping(next)
+    if (audioRef.current) {
+      audioRef.current.loop = next
+    }
+  }
+
+  function downloadRecording(call: Call) {
+    const url = proxyRecordingUrl(call.recording_url)
+    if (!url) return
+    const link = document.createElement("a")
+    link.href = url
+    link.download = `call-recording-${call.phone || "call"}-${call.id.slice(0, 8)}.wav`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    toast.success("Download started")
+  }
+
+  function copyRecordingLink(call: Call) {
+    const url = proxyRecordingUrl(call.recording_url)
+    if (!url) return
+    const fullUrl = `${window.location.origin}${url}`
+    navigator.clipboard.writeText(fullUrl).then(() => {
+      setCopiedLink(true)
+      toast.success("Recording URL copied to clipboard")
+      setTimeout(() => setCopiedLink(false), 2000)
+    }).catch(() => {
+      toast.error("Failed to copy link")
+    })
   }
 
   function fmtTime(s: number): string {
@@ -87,15 +186,10 @@ export default function VoiceLogsView({ role }: { role: "admin" | "agent" | "vie
     return `${m}:${r.toString().padStart(2, "0")}`
   }
 
-  // Assigning a new .src (or calling .load()) while a previous play()
-  // promise hasn't settled yet makes the browser reject THAT promise with
-  // AbortError ("The play() request was interrupted by a new load
-  // request.") — that's not a failure, it's exactly what's supposed to
-  // happen when the user switches recordings quickly, so it must not be
-  // surfaced as an error toast. Any other rejection (autoplay blocked,
-  // network failure, unsupported format) is a real problem and still gets
-  // reported.
   function playSafe(a: HTMLAudioElement) {
+    a.playbackRate = playbackRate
+    a.loop = isLooping
+    a.volume = isMuted ? 0 : volume
     a.play().catch((e: DOMException) => {
       if (e.name === "AbortError") return
       toast.error(`Cannot play recording: ${e.message}`)
@@ -107,13 +201,10 @@ export default function VoiceLogsView({ role }: { role: "admin" | "agent" | "vie
     const a = audioRef.current
     if (!url || !a) return
     if (playingId === call.id) {
-      // Same recording — toggle play/pause instead of restarting it.
       if (isPlaying) a.pause()
       else playSafe(a)
       return
     }
-    // Switching recordings — assigning a new src auto-stops whatever was
-    // playing before, so there is never more than one audio source active.
     setPlayingId(call.id)
     setCurrentTime(0)
     setAudioDuration(0)
@@ -121,33 +212,45 @@ export default function VoiceLogsView({ role }: { role: "admin" | "agent" | "vie
     playSafe(a)
   }
 
-  async function load() {
-    setLoading(true)
-    const [cr, lr] = await Promise.all([fetch("/api/calls"), fetch("/api/leads")])
-    if (cr.ok) setCalls(await cr.json())
-    if (lr.ok) setLeads(await lr.json())
-    setLoading(false)
+  async function load(silent = false) {
+    // Background poll ticks skip the skeleton flash once real data is on
+    // screen — without this, every 15s poll replaced the whole list with
+    // skeletons all day. First load and user-triggered refreshes still show it.
+    if (!silent || calls.length === 0) setLoading(true)
+    try {
+      const [cr, lr] = await Promise.all([fetch("/api/calls"), fetch("/api/leads")])
+      if (cr.ok) setCalls(await cr.json())
+      if (lr.ok) setLeads(await lr.json())
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => {
     load()
   }, [])
-  usePolling(load, 15000)
+  usePolling(() => load(true), 15000)
 
   async function makeCall() {
     const lead  = mode === "lead" ? leads.find((l) => l.id === selectedLeadId) : null
     const phone = mode === "lead" ? lead?.phone : manualPhone
     if (!phone) return
     setCalling(true)
-    const res = await fetch("/api/calls", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ leadId: lead?.id, phone, language, instructions }),
-    })
-    const data = await res.json()
-    setCalling(false)
-    if (res.ok) { toast.success("AI call started — Priya is dialing now"); setInstructions(""); load() }
-    else toast.error(data.error || "Call failed")
+    try {
+      const res = await fetch("/api/calls", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ leadId: lead?.id, phone, language, instructions }),
+      })
+      const data = await res.json()
+      if (res.ok) { toast.success("AI call started — Priya is dialing now"); setInstructions(""); load() }
+      else toast.error(data.error || "Call failed")
+    } catch {
+      // Network failure — surface it, the busy state must always reset.
+      toast.error("Call failed — check your connection and try again")
+    } finally {
+      setCalling(false)
+    }
   }
 
   const today         = new Date().toDateString()
@@ -156,6 +259,17 @@ export default function VoiceLogsView({ role }: { role: "admin" | "agent" | "vie
   const resolvedPct   = calls.length ? Math.round((resolved.length / calls.length) * 100) : 0
   const missed        = calls.filter(c => c.outcome === "missed").length
   const avgDur        = calls.length ? Math.round(calls.reduce((s, c) => s + (c.duration || 0), 0) / calls.length) : 0
+
+  const waveformBars = useMemo(() => {
+    if (!selected) return []
+    const seed = selected.id ? selected.id.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0) : 42
+    const bars: number[] = []
+    for (let i = 0; i < 48; i++) {
+      const pseudo = Math.abs(Math.sin((seed + i) * 0.45)) * 0.7 + Math.abs(Math.cos(i * 0.75)) * 0.3
+      bars.push(Math.max(20, Math.min(100, Math.round(pseudo * 100))))
+    }
+    return bars
+  }, [selected?.id])
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -244,7 +358,7 @@ export default function VoiceLogsView({ role }: { role: "admin" | "agent" | "vie
             <div style={{ fontWeight: 600, fontSize: 15 }}>Call History</div>
             <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>Voice Bot — recorded and transcribed</div>
           </div>
-          <button onClick={load} className="btn-ghost" style={{ height: 32, padding: "0 12px", fontSize: 12 }}>
+          <button onClick={() => load()} className="btn-ghost" style={{ height: 32, padding: "0 12px", fontSize: 12 }}>
             <RotateCcw size={12.5} strokeWidth={1.9} /> Refresh
           </button>
         </div>
@@ -366,39 +480,290 @@ export default function VoiceLogsView({ role }: { role: "admin" | "agent" | "vie
                 above) so this can never play concurrently with a row
                 recording, and this button's icon always reflects whether
                 audio is actually playing. */}
+            {/* Audio Player */}
             {selected.recording_url && (
-              <div style={{ marginBottom: 20 }}>
-                <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8, fontWeight: 600, letterSpacing: "0.05em" }}>RECORDING</div>
-                <div style={{
-                  display: "flex", alignItems: "center", gap: 10, width: "100%",
-                  background: "var(--bg-secondary)", border: "1px solid var(--border)",
-                  borderRadius: 8, padding: "10px 14px", color: "var(--text-primary)",
-                }}>
-                  <button
-                    onClick={() => selected && togglePlay(selected)}
-                    style={{
-                      width: 30, height: 30, borderRadius: "50%", flexShrink: 0, padding: 0,
-                      background: "rgba(34,197,94,0.15)", border: "1px solid rgba(34,197,94,0.3)",
-                      display: "flex", alignItems: "center", justifyContent: "center", color: "var(--accent-green)",
-                      cursor: "pointer",
+              <div style={{
+                marginBottom: 22,
+                background: "linear-gradient(180deg, var(--bg-secondary) 0%, rgba(15, 23, 42, 0.45) 100%)",
+                border: "1px solid var(--border)",
+                borderRadius: 14,
+                padding: "16px 18px",
+                display: "flex",
+                flexDirection: "column",
+                gap: 14,
+                boxShadow: "0 4px 20px rgba(0, 0, 0, 0.25)",
+              }}>
+                {/* Header: Badge + Tools (Loop, Share, Download) */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid var(--border-light)", paddingBottom: 10 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{
+                      display: "inline-flex", alignItems: "center", gap: 5,
+                      fontSize: 11, fontWeight: 700, letterSpacing: "0.06em",
+                      color: "var(--accent-green)", background: "rgba(34,197,94,0.12)",
+                      border: "1px solid rgba(34,197,94,0.25)", borderRadius: 6, padding: "3px 8px", textTransform: "uppercase"
+                    }}>
+                      <Radio size={12} strokeWidth={2.5} className={isPlaying && playingId === selected.id ? "animate-pulse" : ""} />
+                      Call Audio
+                    </span>
+                    <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                      8 kHz PCM • Telephony Audio
+                    </span>
+                  </div>
+
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <button
+                      onClick={toggleLoop}
+                      title={isLooping ? "Disable Loop" : "Enable Loop"}
+                      style={{
+                        background: isLooping ? "rgba(59,130,246,0.2)" : "transparent",
+                        border: `1px solid ${isLooping ? "rgba(59,130,246,0.4)" : "var(--border)"}`,
+                        color: isLooping ? "var(--accent-blue)" : "var(--text-muted)",
+                        borderRadius: 6, padding: "4px 8px", fontSize: 11, display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer"
+                      }}
+                    >
+                      <Repeat size={12} strokeWidth={2} />
+                      <span>Loop</span>
+                    </button>
+
+                    <button
+                      onClick={() => copyRecordingLink(selected)}
+                      title="Copy Recording URL"
+                      style={{
+                        background: "transparent", border: "1px solid var(--border)", color: "var(--text-muted)",
+                        borderRadius: 6, padding: "4px 8px", fontSize: 11, display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer"
+                      }}
+                    >
+                      {copiedLink ? <Check size={12} strokeWidth={2} color="var(--accent-green)" /> : <Copy size={12} strokeWidth={2} />}
+                      <span>{copiedLink ? "Copied" : "Share"}</span>
+                    </button>
+
+                    <button
+                      onClick={() => downloadRecording(selected)}
+                      title="Download Audio (.wav)"
+                      style={{
+                        background: "rgba(34,197,94,0.12)", border: "1px solid rgba(34,197,94,0.3)", color: "var(--accent-green)",
+                        borderRadius: 6, padding: "4px 10px", fontSize: 11, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer"
+                      }}
+                    >
+                      <Download size={12} strokeWidth={2} />
+                      <span>Download</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Waveform Visualization & Interactive Scrubber */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <div
+                    onClick={(e) => {
+                      const rect = e.currentTarget.getBoundingClientRect()
+                      const clickX = e.clientX - rect.left
+                      const totalDur = (playingId === selected.id && audioDuration) ? audioDuration : (selected.duration || 0)
+                      if (totalDur > 0) {
+                        const newTime = Math.max(0, Math.min(totalDur, (clickX / rect.width) * totalDur))
+                        seek(newTime)
+                        if (playingId !== selected.id) togglePlay(selected)
+                      }
                     }}
+                    style={{
+                      height: 46,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 2.5,
+                      padding: "4px 8px",
+                      background: "var(--overlay-soft)",
+                      borderRadius: 8,
+                      border: "1px solid var(--border-light)",
+                      cursor: "pointer",
+                      position: "relative",
+                      overflow: "hidden"
+                    }}
+                    title="Click waveform to seek anywhere"
                   >
-                    {playingId === selected.id && isPlaying
-                      ? <Pause size={13} strokeWidth={2} fill="currentColor" />
-                      : <Play size={13} strokeWidth={2} fill="currentColor" />}
-                  </button>
-                  <input
-                    type="range"
-                    min={0}
-                    max={playingId === selected.id && audioDuration ? audioDuration : selected.duration || 0}
-                    step={0.1}
-                    value={playingId === selected.id ? currentTime : 0}
-                    onChange={seek}
-                    style={{ flex: 1, accentColor: "var(--accent-green)" }}
-                  />
-                  <span style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: "monospace", minWidth: 78, textAlign: "right" }}>
-                    {fmtTime(playingId === selected.id ? currentTime : 0)} / {fmtTime(playingId === selected.id && audioDuration ? audioDuration : selected.duration || 0)}
-                  </span>
+                    {waveformBars.map((heightPercent, idx) => {
+                      const totalDur = (playingId === selected.id && audioDuration) ? audioDuration : (selected.duration || 0)
+                      const barPositionTime = (idx / waveformBars.length) * (totalDur || 1)
+                      const isPlayed = playingId === selected.id && currentTime >= barPositionTime
+
+                      return (
+                        <div
+                          key={idx}
+                          style={{
+                            flex: 1,
+                            height: `${heightPercent}%`,
+                            borderRadius: 2,
+                            background: isPlayed
+                              ? "var(--accent-green)"
+                              : "rgba(255, 255, 255, 0.16)",
+                            transition: "background 0.12s ease, height 0.2s ease",
+                          }}
+                        />
+                      )
+                    })}
+                  </div>
+
+                  {/* Scrubber Progress Slider */}
+                  <div style={{ position: "relative", width: "100%", display: "flex", alignItems: "center" }}>
+                    {(() => {
+                      const activeDur = (playingId === selected.id && audioDuration) ? audioDuration : (selected.duration || 0)
+                      const activeTime = playingId === selected.id ? currentTime : 0
+                      const progPct = activeDur > 0 ? Math.min(100, Math.max(0, (activeTime / activeDur) * 100)) : 0
+
+                      return (
+                        <input
+                          type="range"
+                          className="audio-range-slider"
+                          min={0}
+                          max={activeDur || 0.1}
+                          step={0.05}
+                          value={activeTime}
+                          onChange={seek}
+                          style={{
+                            width: "100%",
+                            background: `linear-gradient(to right, var(--accent-green) 0%, var(--accent-green) ${progPct}%, rgba(255, 255, 255, 0.14) ${progPct}%, rgba(255, 255, 255, 0.14) 100%)`,
+                          }}
+                        />
+                      )
+                    })()}
+                  </div>
+
+                  {/* Timestamps Row */}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, color: "var(--text-muted)", fontFamily: "monospace", marginTop: -2 }}>
+                    <span>{fmtTime(playingId === selected.id ? currentTime : 0)}</span>
+                    <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                      Remaining: -{fmtTime(Math.max(0, ((playingId === selected.id && audioDuration ? audioDuration : selected.duration || 0) - (playingId === selected.id ? currentTime : 0))))}
+                    </span>
+                    <span>{fmtTime(playingId === selected.id && audioDuration ? audioDuration : selected.duration || 0)}</span>
+                  </div>
+                </div>
+
+                {/* Primary Transport Controls */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 2, flexWrap: "wrap", gap: 10 }}>
+                  {/* Speed Presets */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 3, background: "var(--overlay-soft)", padding: "3px 6px", borderRadius: 8, border: "1px solid var(--border-light)" }}>
+                    <span style={{ fontSize: 11, color: "var(--text-muted)", marginRight: 2 }}>Speed:</span>
+                    {[0.75, 1.0, 1.25, 1.5, 2.0].map(rate => (
+                      <button
+                        key={rate}
+                        onClick={() => changeSpeed(rate)}
+                        style={{
+                          background: playbackRate === rate ? "var(--accent-green)" : "transparent",
+                          color: playbackRate === rate ? "#000" : "var(--text-secondary)",
+                          fontWeight: playbackRate === rate ? 700 : 500,
+                          fontSize: 11,
+                          padding: "2px 6px",
+                          borderRadius: 5,
+                          border: "none",
+                          cursor: "pointer",
+                          transition: "all 0.15s ease"
+                        }}
+                      >
+                        {rate}x
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Playback Controls (Restart, Rewind, Play/Pause, Fast Forward) */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <button
+                      onClick={() => {
+                        seek(0)
+                        if (!isPlaying) togglePlay(selected)
+                      }}
+                      title="Restart (0:00)"
+                      style={{
+                        width: 32, height: 32, borderRadius: "50%",
+                        background: "var(--overlay-soft)", border: "1px solid var(--border-light)",
+                        color: "var(--text-secondary)", display: "flex", alignItems: "center", justifyContent: "center",
+                        cursor: "pointer"
+                      }}
+                    >
+                      <RotateCcw size={14} strokeWidth={2} />
+                    </button>
+
+                    <button
+                      onClick={() => skip(-5)}
+                      title="Rewind 5 seconds"
+                      style={{
+                        width: 34, height: 34, borderRadius: "50%",
+                        background: "var(--overlay-soft)", border: "1px solid var(--border-light)",
+                        color: "var(--text-primary)", display: "flex", alignItems: "center", justifyContent: "center",
+                        cursor: "pointer"
+                      }}
+                    >
+                      <Rewind size={15} strokeWidth={2} />
+                    </button>
+
+                    <button
+                      onClick={() => selected && togglePlay(selected)}
+                      title={playingId === selected.id && isPlaying ? "Pause" : "Play"}
+                      style={{
+                        width: 44, height: 44, borderRadius: "50%",
+                        background: "var(--accent-green)",
+                        border: "none",
+                        color: "#052e16",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        cursor: "pointer",
+                        boxShadow: isPlaying && playingId === selected.id ? "0 0 16px rgba(34, 197, 94, 0.5)" : "0 2px 8px rgba(0, 0, 0, 0.3)",
+                        transition: "all 0.2s ease"
+                      }}
+                    >
+                      {playingId === selected.id && isPlaying
+                        ? <Pause size={20} strokeWidth={2.5} fill="currentColor" />
+                        : <Play size={20} strokeWidth={2.5} fill="currentColor" style={{ marginLeft: 2 }} />}
+                    </button>
+
+                    <button
+                      onClick={() => skip(5)}
+                      title="Forward 5 seconds"
+                      style={{
+                        width: 34, height: 34, borderRadius: "50%",
+                        background: "var(--overlay-soft)", border: "1px solid var(--border-light)",
+                        color: "var(--text-primary)", display: "flex", alignItems: "center", justifyContent: "center",
+                        cursor: "pointer"
+                      }}
+                    >
+                      <FastForward size={15} strokeWidth={2} />
+                    </button>
+                  </div>
+
+                  {/* Volume Control */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 120 }}>
+                    <button
+                      onClick={toggleMute}
+                      title={isMuted ? "Unmute" : "Mute"}
+                      style={{
+                        background: "none", border: "none", color: isMuted ? "var(--accent-red)" : "var(--text-muted)",
+                        cursor: "pointer", display: "flex", alignItems: "center"
+                      }}
+                    >
+                      {isMuted || volume === 0 ? <VolumeX size={16} strokeWidth={2} /> : volume < 0.5 ? <Volume1 size={16} strokeWidth={2} /> : <Volume2 size={16} strokeWidth={2} />}
+                    </button>
+                    {(() => {
+                      const vPct = Math.round((isMuted ? 0 : volume) * 100)
+                      return (
+                        <>
+                          <input
+                            type="range"
+                            className="audio-range-slider"
+                            min={0}
+                            max={1}
+                            step={0.02}
+                            value={isMuted ? 0 : volume}
+                            onChange={e => handleVolumeChange(Number(e.target.value))}
+                            style={{
+                              width: 65,
+                              background: `linear-gradient(to right, var(--accent-green) 0%, var(--accent-green) ${vPct}%, rgba(255, 255, 255, 0.14) ${vPct}%, rgba(255, 255, 255, 0.14) 100%)`,
+                            }}
+                            title={`Volume: ${vPct}%`}
+                          />
+                          <span style={{ fontSize: 11, color: "var(--text-muted)", minWidth: 32, fontFamily: "monospace", textAlign: "right" }}>
+                            {vPct}%
+                          </span>
+                        </>
+                      )
+                    })()}
+                  </div>
                 </div>
               </div>
             )}

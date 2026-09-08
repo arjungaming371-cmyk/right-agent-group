@@ -22,6 +22,8 @@ import os
 import io
 import time
 import sys
+import hmac
+import asyncio
 
 # Force add NVIDIA CUDA DLL paths on Windows to fix cublas/cudnn load errors
 if sys.platform == "win32":
@@ -96,13 +98,18 @@ app = FastAPI(title="RAG STT", docs_url=None, redoc_url=None)
 def check_key(request: Request) -> None:
     if not API_KEY:
         raise HTTPException(500, "STT_API_KEY not configured on server")
-    if request.headers.get("x-api-key") != API_KEY:
+    provided = request.headers.get("x-api-key") or ""
+    # Constant-time compare — the key is a bearer credential.
+    if not hmac.compare_digest(provided.encode("utf-8"), API_KEY.encode("utf-8")):
         raise HTTPException(401, "unauthorized")
 
 
 @app.get("/health")
-async def health(request: Request):
-    check_key(request)
+async def health():
+    # Keyless ON PURPOSE: uptime probes / START.ps1 health checks / pm2
+    # monitors must be able to distinguish "model loaded" from "auth broken"
+    # without holding the service key. The service binds 127.0.0.1 and is not
+    # proxied publicly, so this leaks nothing sensitive.
     return {"ok": True, "model": MODEL_NAME, "device": DEVICE, "compute": COMPUTE}
 
 
@@ -237,6 +244,32 @@ def _transcribe_sync(audio: bytes, lang: str | None) -> tuple[str, bool]:
     return _to_tenglish(text, lang), low_confidence
 
 
+# Warm-up inference at boot (2026-09 reliability pass): the first real
+# transcribe after every start used to pay cuDNN autotune + first-decode
+# cost — several seconds of dead air on the first call of the day. One
+# second of digital silence through the full path pays all of it now,
+# while nobody is listening. Non-fatal: a failed warm-up just means
+# call #1 is as slow as it used to be.
+# NOTE: this MUST sit below _transcribe_sync's definition — module-level
+# Python runs top-to-bottom, and an earlier placement raised NameError
+# (silently swallowed, leaving the warm-up a no-op).
+try:
+    _transcribe_sync(b"\x00" * (SAMPLE_RATE * 2), "en")
+    print("STT warm-up complete — first real utterance won't pay cold-start cost")
+except Exception as _e:
+    print(f"STT warm-up failed (non-fatal): {_e}")
+
+
+# Concurrency cap (2026-09 reliability pass): the threadpool defaults to ~40
+# threads, so two simultaneous calls used to run concurrent full Whisper
+# decodes — CPU thread thrash or GPU VRAM contention, with latency for call #2
+# unbounded (and the voicebot used to have no timeout, so a wedged call sat
+# muted forever). Now: brief 2s queue for overlapping turns, then an honest
+# 503 the voicebot can report to the caller and recover from.
+_STT_MAX_CONCURRENCY = int(os.environ.get("STT_MAX_CONCURRENCY", "2"))
+_stt_sem = asyncio.Semaphore(_STT_MAX_CONCURRENCY)
+
+
 @app.post("/transcribe")
 async def transcribe(request: Request, language: str = Query("english")):
     check_key(request)
@@ -246,13 +279,21 @@ async def transcribe(request: Request, language: str = Query("english")):
     if len(audio) > 10 * 1024 * 1024:
         raise HTTPException(413, "audio too large")
 
+    try:
+        await asyncio.wait_for(_stt_sem.acquire(), timeout=2.0)
+    except asyncio.TimeoutError:
+        raise HTTPException(503, f"STT busy — { _STT_MAX_CONCURRENCY } transcription(s) already running, try again shortly")
+
     lang = LANG_MAP.get(language.lower(), None)  # None = auto-detect
     t0 = time.time()
-    # Off the event loop and into Starlette's threadpool — without this, one
-    # caller's transcription blocks every other simultaneous caller's audio
-    # from even starting, since this was a synchronous call inside an async
-    # handler with nothing else running the loop.
-    text, low_confidence = await run_in_threadpool(_transcribe_sync, audio, lang)
+    try:
+        # Off the event loop and into Starlette's threadpool — without this, one
+        # caller's transcription blocks every other simultaneous caller's audio
+        # from even starting, since this was a synchronous call inside an async
+        # handler with nothing else running the loop.
+        text, low_confidence = await run_in_threadpool(_transcribe_sync, audio, lang)
+    finally:
+        _stt_sem.release()
     # ascii-safe log: Windows consoles (cp1252) can't print Telugu/Devanagari,
     # and a logging crash must never turn a successful transcription into a
     # 500 — this exact bug silenced Priya on every real Telugu/Hindi call

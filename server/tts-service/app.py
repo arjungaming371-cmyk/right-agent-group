@@ -48,6 +48,8 @@ import io
 import os
 import re
 import time
+import hmac
+import asyncio
 
 from fastapi import FastAPI, HTTPException, Request
 from starlette.responses import Response
@@ -134,7 +136,9 @@ app = FastAPI(title="RAG TTS (edge-tts)", docs_url=None, redoc_url=None)
 def check_key(request: Request) -> None:
     if not API_KEY:
         raise HTTPException(500, "TTS_API_KEY not configured on server")
-    if request.headers.get("x-api-key") != API_KEY:
+    provided = request.headers.get("x-api-key") or ""
+    # Constant-time compare — the key is a bearer credential.
+    if not hmac.compare_digest(provided.encode("utf-8"), API_KEY.encode("utf-8")):
         raise HTTPException(401, "unauthorized")
 
 
@@ -199,24 +203,60 @@ async def _synthesize_edge(text: str, language: str) -> tuple[bytes, str]:
     return await _synthesize_one(_spell_acronyms(text), _voice_for(text, language)), "audio/mpeg"
 
 
+# Concurrency cap (2026-09 reliability pass): parallel synthesis calls used to
+# fire unbounded edge_tts streams at Microsoft's free endpoint. When MS
+# rate-limits (403/429), some of them come back EMPTY — and an empty 200 was
+# forwarded to the voicebot, whose TTS cache then stored silence. Bounded
+# queue + one retry + hard reject of empty audio fixes all three.
+_TTS_MAX_CONCURRENCY = int(os.environ.get("TTS_MAX_CONCURRENCY", "3"))
+_tts_sem = asyncio.Semaphore(_TTS_MAX_CONCURRENCY)
+
+
 @app.get("/health")
-async def health(request: Request):
-    check_key(request)
+async def health():
+    # Keyless ON PURPOSE — see the same note in server/stt-service/app.py.
     return {"ok": True, "engine": "edge-tts", "voices": VOICE_MAP}
 
 
 @app.post("/synthesize")
 async def synthesize(request: Request):
     check_key(request)
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "invalid JSON body")
     text = str(body.get("text") or "").strip()
     language = str(body.get("language") or "telugu").strip().lower()
     if not text:
         raise HTTPException(400, "text required")
-    text = text[:800]
+    # Hard-cut at 800 chars used to split mid-word. Cut at the last word
+    # boundary instead — the node sentence-splitter makes this rare, but one
+    # run-on LLM sentence used to get audibly chopped in half.
+    if len(text) > 800:
+        cut = text.rfind(" ", 600, 800)
+        text = text[: cut if cut > 0 else 800].rstrip()
+
+    try:
+        await asyncio.wait_for(_tts_sem.acquire(), timeout=5.0)
+    except asyncio.TimeoutError:
+        raise HTTPException(503, f"TTS busy — { _TTS_MAX_CONCURRENCY } synthesis(es) already running, try again shortly")
 
     t0 = time.time()
-    audio, media_type = await _synthesize_edge(text, language)
+    try:
+        try:
+            audio, media_type = await _synthesize_edge(text, language)
+        except Exception:
+            # One retry — MS's free endpoint rate-limits intermittently, and a
+            # single clean retry recovers most of those.
+            await asyncio.sleep(0.4)
+            audio, media_type = await _synthesize_edge(text, language)
+    finally:
+        _tts_sem.release()
+
+    if not audio or len(audio) < 100:
+        # Empty/garbage audio must be a 5xx, not a 200: a 200 would let the
+        # voicebot cache silence for this phrase and play it forever after.
+        raise HTTPException(502, "TTS produced no audio (upstream rate-limited or failed)")
 
     # ascii-safe log: Windows consoles (cp1252) can't print Telugu/Devanagari,
     # and a logging crash must never turn a successful synthesis into a 500.

@@ -44,7 +44,11 @@ export default function OtpForm() {
           {error}
         </div>
       )}
+      {/* Visually-hidden label — the input was placeholder-only, which
+          screen readers announce as just "••••••". Appearance unchanged. */}
+      <label htmlFor="otp-code" className="sr-only">6-digit verification code</label>
       <input
+        id="otp-code"
         autoFocus
         inputMode="numeric"
         maxLength={6}

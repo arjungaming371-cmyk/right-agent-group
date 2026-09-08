@@ -4,7 +4,7 @@ import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from "recharts"
-import { Users, Phone, BadgeCheck, Timer, Mail, CheckCircle2 } from "lucide-react"
+import { Users, Phone, BadgeCheck, Timer, Mail, CheckCircle2, RotateCcw } from "lucide-react"
 
 // Validated (scripts/validate_palette.js, dark surface) — fixed order, never cycled.
 const CAT = { blue: "var(--accent-blue)", aqua: "var(--accent-green)", violet: "var(--accent-violet)" }
@@ -40,14 +40,25 @@ function StatTile({ icon: Icon, label, value, tone }: { icon: any; label: string
 export default function AnalyticsView() {
   const [data, setData] = useState<Analytics | null>(null)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
   const [sentMsg, setSentMsg] = useState<string | null>(null)
 
   async function load() {
     setLoading(true)
-    const res = await fetch("/api/analytics")
-    if (res.ok) setData(await res.json())
-    setLoading(false)
+    try {
+      const res = await fetch("/api/analytics")
+      if (res.ok) {
+        setData(await res.json())
+        setLoadError(null)
+      } else {
+        setLoadError(`Could not load analytics (HTTP ${res.status}).`)
+      }
+    } catch (e: any) {
+      setLoadError(e?.message || "Could not load analytics")
+    } finally {
+      setLoading(false)
+    }
   }
   useEffect(() => { load() }, [])
 
@@ -68,7 +79,24 @@ export default function AnalyticsView() {
     setSending(false)
   }
 
-  if (loading || !data) {
+  if (loading) {
+    return <div style={{ padding: 60, textAlign: "center", color: "var(--text-muted)" }}>Loading analytics…</div>
+  }
+
+  // A failed load must not render as an eternal "Loading analytics…" — say
+  // what happened and let the user retry.
+  if (loadError) {
+    return (
+      <div style={{ padding: 60, textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
+        <div style={{ color: "var(--accent-red)", fontSize: 13.5, fontWeight: 600 }}>{loadError}</div>
+        <button onClick={load} className="btn-ghost" style={{ height: 34 }}>
+          <RotateCcw size={13} strokeWidth={1.9} /> Try again
+        </button>
+      </div>
+    )
+  }
+
+  if (!data) {
     return <div style={{ padding: 60, textAlign: "center", color: "var(--text-muted)" }}>Loading analytics…</div>
   }
 

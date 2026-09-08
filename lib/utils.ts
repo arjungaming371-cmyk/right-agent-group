@@ -42,3 +42,18 @@ export function formatDateTime(dateStr: string): string {
   const timePart = d.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true })
   return `${datePart}, ${timePart}`
 }
+
+/**
+ * Escape a value interpolated into an HTML email template (2026-09 security
+ * pass). Caller speech and lead names flow into digest/escalation emails —
+ * unescaped, a caller whose name is "<a href=...>" injects markup into the
+ * admin's inbox. Use for EVERY dynamic value in outbound HTML mail.
+ */
+export function escapeHtml(value: unknown): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+}

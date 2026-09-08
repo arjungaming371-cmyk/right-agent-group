@@ -11,14 +11,16 @@
 //     → downsample to 8kHz PCM → streamed back to the caller.
 //
 // Exotel setup: Voicebot applet URL = wss://YOUR-DOMAIN/voicebot
-// (nginx proxies /voicebot → ws://127.0.0.1:3002 — see nginx snippet in
-// UPGRADE-NOTES-v13.md).
+// (nginx proxies /voicebot → ws://127.0.0.1:3002). Set VOICEBOT_WS_KEY in
+// .env and append it to the applet URL as ?key=YOUR_SECRET — see the
+// WebSocket authentication note at startServer() below.
 //
 // Run:  cd server && npm install && node voicebot-server.js
 // Prod: pm2 start voicebot-server.js --name voicebot
 
 require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") })
 
+const crypto = require("crypto")
 const { WebSocketServer } = require("ws")
 const { spawn } = require("child_process")
 
@@ -122,19 +124,31 @@ function pcmToWav(pcm) {
   return Buffer.concat([header, pcm])
 }
 
-// language="auto" → Whisper auto-detects per utterance. This is what makes
-// mid-call language switching work: the transcript comes back in the script
-// the caller actually spoke (Telugu/Devanagari/Latin), and the turn API
-// switches Priya's language from that. Forcing the current call language here
-// would transliterate English speech into Telugu script and lock the call.
+// language="auto" → Whisper auto-detects per utterance. NOTE: the per-utterance
+// call below actually passes the call's KNOWN language (see endUtterance) —
+// "auto" only happens if the caller's language line is something STT doesn't
+// map. Detection per utterance is what makes mid-call language switching work:
+// the transcript comes back in the script the caller actually spoke
+// (Telugu/Devanagari/Latin), and the turn API switches Priya's language from
+// that. Forcing the current call language here would transliterate English
+// speech into Telugu script and lock the call.
+const STT_TIMEOUT_MS = parseInt(process.env.VOICEBOT_STT_TIMEOUT_MS || "10000")
 async function speechToText(pcm, language) {
   const t0 = Date.now()
   const res = await fetch(`${STT_URL}/transcribe?language=${encodeURIComponent(language)}`, {
     method: "POST",
     headers: { "Content-Type": "audio/wav", "x-api-key": API_KEY },
     body: pcmToWav(pcm),
+    // A hung STT request used to wedge the whole call: endUtterance awaited
+    // forever with processing=true, which drops all inbound frames — the
+    // caller sat on dead air with no recovery until they hung up. 10s is well
+    // above the healthy 1-4s STT takes for a ≤15s utterance on CPU.
+    signal: AbortSignal.timeout(STT_TIMEOUT_MS),
   })
-  if (!res.ok) throw new Error(`STT service HTTP ${res.status} — is server/stt-service.py running?`)
+  if (!res.ok) {
+    const hint = res.status === 503 ? " (STT busy — another call is being transcribed)" : ""
+    throw new Error(`STT service HTTP ${res.status}${hint} — is server/stt-service running?`)
+  }
   const data = await res.json()
   console.log(`⏱ STT: ${Date.now() - t0}ms`)
   return { text: (data?.text || "").trim(), lowConfidence: !!data?.low_confidence }
@@ -152,6 +166,26 @@ const CLARIFY_PHRASE = {
   // Telugu/Hindi one — two different women inside a single call.
   telugu: "Sorry అండి, నాకు సరిగా వినిపించలేదు. మళ్ళీ ఒకసారి చెప్పగలరా?",
   hindi: "Sorry, मुझे थोड़ा clear सुनाई नहीं दिया। क्या आप दोबारा बोल सकते हैं?",
+}
+
+// Said when the PIPELINE itself fails (STT service down, turn API unreachable,
+// TTS error): the caller must never sit in unexplained silence. These are
+// prewarmed into the TTS cache at boot (see prewarm), so they still play even
+// when the TTS service went down AFTER startup — the single worst failure a
+// live call can hit is silence with no recovery.
+const FALLBACK_PHRASE = {
+  english: "Sorry, one moment please — I'm checking on something.",
+  telugu: "క్షమించండి, ఒక నిమిషం. నేను చెక్ చేస్తున్నాను.",
+  hindi: "क्षमा कीजिए, एक पल रुकिए — मैं जाँच रही हूँ।",
+}
+
+// Said when the app itself is unreachable at call START (the app's own
+// /api/calls/turn picks the proper greeting by lead language; this is only
+// the can't-reach-the-app emergency line, in the caller's likely language).
+const START_FALLBACK_PHRASE = {
+  english: "Hello! This is Priya from Right Agent Group.",
+  telugu: "నమస్కారం! నేను రైట్ ఏజెంట్ గ్రూప్ నుంచి మాట్లాడుతున్నాను.",
+  hindi: "नमस्ते! मैं राइट एजेंट ग्रुप से बोल रही हूँ।",
 }
 
 // ---------- TTS: server/tts-service — Edge TTS, native Telugu/Hindi voices + English for loanwords ----------
@@ -294,15 +328,38 @@ async function prewarm() {
     fetch(`${STT_URL}/health`, { headers: { "x-api-key": API_KEY } }).catch(() => {}),
   ]
   await Promise.allSettled(jobs)
-  console.log(`✓ pipeline pre-warmed in ${Date.now() - t0}ms (TTS cache: ${ttsCache.size})`)
+  // Prewarm every fixed caller-facing line into the TTS cache: clarify
+  // phrases, pipeline-failure fallbacks, and start fallbacks. If the TTS
+  // service dies mid-day, these STILL play from cache on the next call —
+  // the caller hears an apology instead of unexplained silence.
+  const fixedLines = [
+    ...Object.values(CLARIFY_PHRASE),
+    ...Object.values(FALLBACK_PHRASE),
+    ...Object.values(START_FALLBACK_PHRASE),
+  ]
+  await Promise.allSettled(fixedLines.map((line) =>
+    textToSpeechPcm8k(line, "telugu").catch((e) => console.error("prewarm fixed line (te):", e.message))))
+  await Promise.allSettled(fixedLines.map((line) =>
+    textToSpeechPcm8k(line, "english").catch((e) => console.error("prewarm fixed line (en):", e.message))))
+  await Promise.allSettled(fixedLines.map((line) =>
+    textToSpeechPcm8k(line, "hindi").catch((e) => console.error("prewarm fixed line (hi):", e.message))))
+  console.log(`✓ fixed-line cache ready (${ttsCache.size} phrases)`)
 }
 
 // ---------- Bridge to the Next.js app (Priya's brain) ----------
-async function callTurnApi(payload) {
+const TURN_TIMEOUT_MS = parseInt(process.env.VOICEBOT_TURN_TIMEOUT_MS || "20000")
+// Streaming turns get a much longer backstop: AbortSignal.timeout covers the
+// WHOLE response body, and a legitimate slow generation (script-violation
+// retry in the app can double latency) must not be cut off mid-reply. The
+// backstop only exists so a TOTAL hang can't wedge the call forever.
+const TURN_STREAM_TIMEOUT_MS = parseInt(process.env.VOICEBOT_TURN_STREAM_TIMEOUT_MS || "90000")
+
+async function callTurnApi(payload, signal) {
   const res = await fetch(`${APP_URL}/api/calls/turn`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
     body: JSON.stringify(payload),
+    signal: signal || AbortSignal.timeout(TURN_TIMEOUT_MS),
   })
   if (!res.ok) throw new Error(`turn API HTTP ${res.status}`)
   return res.json()
@@ -312,11 +369,12 @@ async function callTurnApi(payload) {
 // the model writes them, then {"type":"done",language,hangup}. Each sentence
 // goes to TTS the moment it arrives, so playback of sentence 1 overlaps
 // generation of sentence 2 — the caller stops waiting for the full reply.
-async function callTurnApiStream(payload, onEvent) {
+async function callTurnApiStream(payload, onEvent, signal) {
   const res = await fetch(`${APP_URL}/api/calls/turn`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
     body: JSON.stringify({ ...payload, stream: true }),
+    signal: signal || AbortSignal.timeout(TURN_STREAM_TIMEOUT_MS),
   })
   if (!res.ok) throw new Error(`turn API HTTP ${res.status}`)
   const ct = res.headers.get("content-type") || ""
@@ -398,6 +456,10 @@ class CallSession {
     this.speechEpoch = 0
     this.bargeMs = 0        // sustained caller energy while Priya is talking
     this.bargeBuffer = []   // frames captured during that window
+    // Abort controller for the in-flight turn-API stream. Aborted on barge-in
+    // and socket close so generation of a reply nobody will hear stops paying
+    // Groq tokens and reading the socket.
+    this.turnAbort = null
     // ---- echo probe counters (all inert unless ECHO_PROBE) ----
     this.echoReplyOpen = false  // a reply is currently being measured
     this.echoReplyNo = 0
@@ -607,7 +669,8 @@ class CallSession {
       console.log(`⏱ answer → greeting fully spoken: ${Date.now() - t0}ms`)
     } catch (e) {
       console.error("start error:", e.message)
-      await this.speak("Hello! This is Priya from Right Agent Group.").catch(() => {})
+      const line = START_FALLBACK_PHRASE[this.language] || START_FALLBACK_PHRASE.english
+      await this.speak(line).catch(() => {})
     }
   }
 
@@ -629,6 +692,10 @@ class CallSession {
     this.processing = false
     this.synthChain = Promise.resolve()
     this.sendChain = Promise.resolve()
+    // The turn whose reply is being abandoned is still being generated — stop
+    // paying for tokens nobody will hear (the stream reader also checks its
+    // epoch and exits early).
+    if (this.turnAbort) { try { this.turnAbort.abort() } catch {} this.turnAbort = null }
     // Carry the frames that triggered the barge-in into the new utterance —
     // dropping them would clip the first third of a second off whatever the
     // caller said, which is usually the word that matters ("no", "wait").
@@ -644,7 +711,11 @@ class CallSession {
   onMedia(msg) {
     if (this.closed) return
     const payload = msg.media?.payload
-    if (!payload) return
+    // Exotel always sends a base64 string here, but ANY other value (object,
+    // number — e.g. from a hostile client, see the WS auth note) would make
+    // Buffer.from throw synchronously inside the message handler and CRASH
+    // the whole process, dropping every concurrent call.
+    if (!payload || typeof payload !== "string") return
     const frame = Buffer.from(payload, "base64")
     const energy = this.avgEnergy(frame)
     const ms = (frame.length / (SAMPLE_RATE * BYTES_PER_SAMPLE)) * 1000
@@ -686,6 +757,11 @@ class CallSession {
       this.speechMs += ms
       this.silenceMs = 0
       this.buffer.push(frame)
+      // The cap MUST be checked in the speech branch too: a continuously
+      // loud line (TV background, echo, open-mic noise) never reaches the
+      // quiet branch below, so this used to grow the buffer unbounded
+      // (~115MB/hour at 8kHz) and STT never fired — the caller got nothing.
+      if (this.speechMs >= MAX_UTTERANCE_MS) this.endUtterance()
     } else if (this.speaking) {
       this.silenceMs += ms
       this.buffer.push(frame)
@@ -728,7 +804,16 @@ class CallSession {
       const turnT0 = Date.now()
       const { text: transcript, lowConfidence } = await speechToText(pcm, this.language)
       console.log(`👂 [${this.language}]${lowConfidence ? " LOW-CONFIDENCE" : ""} "${transcript}"`)
-      if (!transcript) return
+      if (!transcript) {
+        // Real speech (≥ MIN_SPEECH_MS above threshold) but Whisper returned
+        // nothing: silence here would leave the caller hanging after their
+        // turn. Ask for a repeat, same as the low-confidence path.
+        console.log("🎙 transcript empty after real speech — asking to repeat")
+        const phrase = CLARIFY_PHRASE[this.language] || CLARIFY_PHRASE.english
+        this.queueSentence(phrase, epoch)
+        await this.drainSpeech(epoch)
+        return
+      }
 
       if (lowConfidence) {
         // Bypass the LLM entirely — never let it reply to a transcript we
@@ -750,6 +835,10 @@ class CallSession {
       // 1 while sentence 2 is still being generated.
       let hangup = false
       let firstSentenceAt = null
+      // Abortable per turn: interrupt()/socket close abort this so the app
+      // stops generating a reply the caller will never hear.
+      const turnAbort = new AbortController()
+      this.turnAbort = turnAbort
       // Sentences whose playback actually started. Local to this turn, not a
       // field: after an interrupt the NEXT turn can start (and be interrupted
       // itself) while this one is still awaiting the model, and a shared
@@ -759,6 +848,7 @@ class CallSession {
       await this.turnStream(
         { event: "turn", callSid: this.callSid || "unknown", speech: transcript, language: this.language },
         (ev) => {
+          if (turnAbort.signal.aborted || epoch !== this.speechEpoch) return // turn abandoned — stop consuming
           if (ev.type === "sentence" && ev.text) {
             if (!firstSentenceAt) {
               firstSentenceAt = Date.now()
@@ -770,8 +860,10 @@ class CallSession {
             if (ev.language) this.language = ev.language
             hangup = !!ev.hangup
           }
-        }
+        },
+        turnAbort.signal
       )
+      if (this.turnAbort === turnAbort) this.turnAbort = null
       console.log(`⏱ brain (full generation): ${Date.now() - brainT0}ms`)
       await this.drainSpeech(epoch)
       // Interrupted? Correct the transcript down to what actually played.
@@ -786,6 +878,19 @@ class CallSession {
       if (hangup && epoch === this.speechEpoch) this.hangupAfterAudio()
     } catch (e) {
       console.error("turn error:", e.message)
+      // The caller spoke and got nothing — play the fixed fallback line
+      // (prewarmed into the TTS cache at boot, so it works even when the TTS
+      // service itself is the thing that just failed). Skipped when the turn
+      // was abandoned (barge-in) or the socket is gone.
+      if (epoch === this.speechEpoch && !this.closed) {
+        try {
+          const phrase = FALLBACK_PHRASE[this.language] || FALLBACK_PHRASE.english
+          this.queueSentence(phrase, epoch)
+          await this.drainSpeech(epoch)
+        } catch (e2) {
+          console.error("fallback utterance failed too:", e2.message)
+        }
+      }
     } finally {
       // Only if this turn is still the current one — after a barge-in the
       // interrupt already reset processing for the turn that replaced it.
@@ -880,6 +985,18 @@ class CallSession {
         // least the start of this sentence.
         if (spoken) spoken.push(clean)
         await this.playPcm(pcm, epoch)
+      } else if ((!pcm || pcm.length === 0) && !this.closed && epoch === this.speechEpoch && !spoken?.includes(clean)) {
+        // Synthesis failed (TTS service down/error) — the caller just heard
+        // the previous sentence end and now gets nothing. If the fixed
+        // fallback line was prewarmed into the TTS cache at boot, play it
+        // from cache; if even that isn't cached (TTS was down before boot),
+        // there is genuinely nothing we can say, so log and move on.
+        const fbText = FALLBACK_PHRASE[this.language] || FALLBACK_PHRASE.english
+        const fbPcm = ttsCache.get(`${this.language}\u0000${fbText}`)
+        if (fbPcm && clean !== fbText) {
+          console.log("🗣 (tts-failed fallback)")
+          await this.playPcm(fbPcm, epoch)
+        }
       }
     })
   }
@@ -897,8 +1014,8 @@ class CallSession {
   }
 
   /** Extracted verbatim so tests can replace it without the Next.js app. */
-  turnStream(payload, onEvent) {
-    return callTurnApiStream(payload, onEvent)
+  turnStream(payload, onEvent, signal) {
+    return callTurnApiStream(payload, onEvent, signal)
   }
 
   /**
@@ -985,28 +1102,70 @@ class CallSession {
 function startServer() {
 const wss = new WebSocketServer({ port: PORT, host: "127.0.0.1", path: "/voicebot" })
 
-wss.on("connection", (ws) => {
+// ---- WebSocket authentication (2026-09 security pass) ----
+// The old server accepted ANY connection to /voicebot, and trusted the
+// callSid/from the client sends — so anyone who learned the domain could
+// connect, forge a victim's callSid, inject turns into a live call's
+// transcript, and burn STT/Groq/TTS at will. With VOICEBOT_WS_KEY set,
+// Exotel's applet URL becomes wss://YOUR-DOMAIN/voicebot?key=YOUR_SECRET and
+// connections without the key are dropped at the handshake.
+// Set VOICEBOT_WS_KEY (openssl rand -hex 32) and update the Exotel applet URL
+// in the same deployment — until both are done the warning below reminds you.
+const WS_KEY = (process.env.VOICEBOT_WS_KEY || "").trim()
+function wsKeyMatches(provided) {
+  const a = Buffer.from(provided || "")
+  const b = Buffer.from(WS_KEY)
+  if (a.length !== b.length) return false
+  return crypto.timingSafeEqual(a, b)
+}
+if (!WS_KEY) {
+  console.warn("⚠ VOICEBOT_WS_KEY is NOT set — /voicebot accepts UNAUTHENTICATED WebSocket connections. " +
+    "Set VOICEBOT_WS_KEY in .env and add ?key=YOUR_SECRET to the Exotel Voicebot applet URL, then restart.")
+}
+
+wss.on("connection", (ws, req) => {
+  if (WS_KEY) {
+    let provided = ""
+    try { provided = new URL(req.url, "http://localhost").searchParams.get("key") || "" } catch {}
+    if (!wsKeyMatches(provided)) {
+      console.error(`🚫 rejected /voicebot connection — missing/invalid ?key= (from ${req.socket?.remoteAddress || "unknown"})`)
+      try { ws.close(4401, "unauthorized") } catch {}
+      return
+    }
+  }
   const session = new CallSession(ws)
   ws.on("message", (raw) => {
     let msg
     try { msg = JSON.parse(raw.toString()) } catch { return }
-    switch (msg.event) {
-      case "connected": break
-      case "start": session.onStart(msg); break
-      case "media": session.onMedia(msg); break
-      case "stop":
-        session.closed = true
-        session.stopComfortNoise()
-        // Call-wide peak energy: if this is well below ENERGY_THRESHOLD, the caller's
-        // audio never registered as speech and the threshold needs lowering. If it's
-        // high but transcripts were empty, the problem is capture/format, not volume.
-        console.log(`■ call stop sid=${session.callSid}  frames=${session.frameCount}  callMaxEnergy=${session.callMaxEnergy.toFixed(0)}  threshold=${ENERGY_THRESHOLD}`)
-        session.reportEnd()
-        try { ws.close() } catch {}
-        break
+    // One malformed frame must never take down the process — a synchronous
+    // throw in a ws message handler propagates as an uncaughtException and
+    // pm2's restart would drop every concurrent call. Log and keep the call.
+    try {
+      switch (msg.event) {
+        case "connected": break
+        case "start": session.onStart(msg); break
+        case "media": session.onMedia(msg); break
+        case "stop":
+          session.closed = true
+          session.stopComfortNoise()
+          // Call-wide peak energy: if this is well below ENERGY_THRESHOLD, the caller's
+          // audio never registered as speech and the threshold needs lowering. If it's
+          // high but transcripts were empty, the problem is capture/format, not volume.
+          console.log(`■ call stop sid=${session.callSid}  frames=${session.frameCount}  callMaxEnergy=${session.callMaxEnergy.toFixed(0)}  threshold=${ENERGY_THRESHOLD}`)
+          session.reportEnd()
+          try { ws.close() } catch {}
+          break
+      }
+    } catch (e) {
+      console.error("ws message handler error (call kept alive):", e.message)
     }
   })
-  ws.on("close", () => { session.closed = true; session.stopComfortNoise(); session.reportEnd() })
+  ws.on("close", () => {
+    session.closed = true
+    session.stopComfortNoise()
+    if (session.turnAbort) { try { session.turnAbort.abort() } catch {} }
+    session.reportEnd()
+  })
   ws.on("error", (e) => console.error("ws error:", e.message))
 })
 

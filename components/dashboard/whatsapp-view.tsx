@@ -73,34 +73,20 @@ const CHAT_WALLPAPER =
 
 const EMOJI = ["😀", "😂", "🙂", "😍", "👍", "🙏", "🎉", "❤️", "😢", "😮", "🤔", "👌", "🔥", "✅", "📞", "🏠"]
 
-// Profile avatar with image support, Dicebear WhatsApp style generation, and fallback to initials
-function Avatar({ name, size = 40, src, phone }: { name: string; size?: number; src?: string | null; phone?: string | null }) {
-  const [imgErr, setImgErr] = useState(false)
-  const seed = encodeURIComponent((name || phone || "contact").trim())
-  const avatarUrl = src || `https://api.dicebear.com/7.x/initials/svg?seed=${seed}&backgroundColor=00a884,25d366,128c7e,075e54,34b7f1&fontSize=42&fontWeight=600`
-
-  if (avatarUrl && !imgErr) {
-    return (
-      <img
-        src={avatarUrl}
-        alt={name || "Profile"}
-        onError={() => setImgErr(true)}
-        style={{
-          width: size,
-          height: size,
-          borderRadius: "50%",
-          objectFit: "cover",
-          flexShrink: 0,
-          background: WA.headerBg,
-          border: `1px solid ${WA.hairline}`,
-        }}
-      />
-    )
-  }
-
-  const initials = (name || "?").split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase()
+// Local initials avatar — the previous version generated avatars from
+// api.dicebear.com seeded with the customer's name/phone, which leaked
+// customer PII to a third party on every render. Avatars are now drawn
+// locally, same pattern as leads-view.tsx: a tinted circle with 1-2
+// initials from the name (or the last digits of the phone number when no
+// name exists) and a deterministic hue per contact string.
+function Avatar({ name, size = 40, phone }: { name: string; size?: number; phone?: string | null }) {
+  const source = (name || "").trim()
+  const fallbackDigits = (phone || "").replace(/\D/g, "")
+  const initials = source
+    ? source.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase()
+    : fallbackDigits.slice(-2) || "?"
   const colors = ["#00d09c", "#38bdf8", "#8b7cff", "#f7b731", "#fb5670", "#a78bfa"]
-  const color = colors[(name || "?").charCodeAt(0) % colors.length]
+  const color = colors[(source || fallbackDigits || "?").charCodeAt(0) % colors.length]
   return (
     <div style={{ width: size, height: size, borderRadius: "50%", background: `color-mix(in oklab, ${color} 18%, transparent)`, border: `1px solid color-mix(in oklab, ${color} 32%, transparent)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: size * 0.32, fontWeight: 700, color, flexShrink: 0 }}>
       {initials}
@@ -149,6 +135,10 @@ export default function WhatsAppView({ role }: { role: "admin" | "agent" | "view
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef  = useRef<HTMLInputElement>(null)
   const prevMsgCount = useRef(0)
+  // Epoch guard for loadMessages: every new call bumps the epoch, so a slow
+  // in-flight fetch for chat A can never render its result under chat B
+  // after a quick switch — stale responses are dropped before touching state.
+  const loadEpochRef = useRef(0)
   // Auto-select the first chat ONCE (initial load only). Without this
   // one-time flag, the 4s poll would treat "no chat selected" as always
   // meaning "nothing picked yet" and re-force the first chat — which is
@@ -188,10 +178,13 @@ export default function WhatsAppView({ role }: { role: "admin" | "agent" | "view
   }, [])
 
   const loadMessages = useCallback(async (leadId: string, scroll = false) => {
+    loadEpochRef.current += 1
+    const epoch = loadEpochRef.current
     try {
       const res = await fetch(`/api/whatsapp/messages?leadId=${leadId}`)
       if (res.ok) {
         const data = await res.json()
+        if (epoch !== loadEpochRef.current) return // a newer chat/poll superseded this one
         setMessages(data)
         if (scroll || data.length !== prevMsgCount.current) {
           prevMsgCount.current = data.length

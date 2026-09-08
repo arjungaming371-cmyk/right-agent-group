@@ -35,6 +35,10 @@ ALTER TABLE loan_applications ADD COLUMN IF NOT EXISTS last_edited_at TIMESTAMPT
 -- notifications.type has a CHECK constraint from local-setup.sql that
 -- doesn't know about this new event type — widen it or every
 -- createNotification({type: "loan_edit_request", ...}) call silently fails.
+-- Guarded so re-running this migration doesn't error on duplicate_object.
 ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_type_check;
-ALTER TABLE notifications ADD CONSTRAINT notifications_type_check
-  CHECK (type IN ('loan_application', 'escalation', 'login', 'whatsapp_message', 'loan_edit_request'));
+DO $$ BEGIN
+  ALTER TABLE notifications ADD CONSTRAINT notifications_type_check
+    CHECK (type IN ('loan_application', 'escalation', 'login', 'whatsapp_message', 'loan_edit_request'));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;

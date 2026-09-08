@@ -23,6 +23,53 @@ function configured(): boolean {
   return !!(TOKEN && PHONE_ID)
 }
 
+// ---- DND / opt-out gate (2026-09 compliance pass) ----
+// Every BUSINESS-INITIATED send (form link, call follow-up, missed-call
+// follow-up) now passes through this gate. Before this, a caller who said
+// "stop calling me" mid-call still received a WhatsApp template seconds
+// later — a TRAI-penalizable contact, not a UX bug. Inbound-conversation
+// replies (sendWhatsAppText called directly from the webhook) stay ungated:
+// the customer messaged us first, and blocking the auto-reply mid-window
+// would strand an active conversation.
+// Self-contained query (not lib/compliance.ts's isDndSuppressed) to avoid a
+// lib import cycle via lead-brain; same table, same last-10-digits match.
+async function dndGate(number: string): Promise<{ ok: false; error: string } | null> {
+  const digits = (number || "").replace(/\D/g, "").slice(-10)
+  if (digits.length !== 10) return null // nothing reliable to match — don't block
+  let suppressed: boolean
+  try {
+    const { query } = await import("./db")
+    const res = await query(
+      `SELECT 1 FROM dnd_suppression WHERE right(regexp_replace(phone, '\\D', '', 'g'), 10) = $1 LIMIT 1`,
+      [digits]
+    )
+    suppressed = res.rows.length > 0
+  } catch (e: any) {
+    // FAIL-CLOSED: if we cannot verify the number is NOT on the suppression
+    // list, we do not message it. A transient DB blip must not turn into a
+    // complaint to the regulator.
+    console.error("dndGate check error (failing CLOSED — message suppressed):", e.message)
+    suppressed = true
+  }
+  if (suppressed) {
+    console.log(`🚫 WhatsApp send suppressed — number on DND/opt-out list (…${digits.slice(-4)})`)
+    return { ok: false, error: "Number is on the DND/opt-out suppression list — business-initiated send blocked." }
+  }
+  return null
+}
+
+/**
+ * Template failures split in two: definitive 4xx rejections (template not
+ * approved, bad param, not in template manager) — where the fallback free-form
+ * text genuinely helps — and ambiguous failures (timeout after Meta may have
+ * accepted, 5xx). Falling back on the AMBIGUOUS kind double-messages the
+ * customer: the template lands AND the fallback text lands. Only 4xx falls
+ * back now.
+ */
+function isDefinitiveTemplateError(status?: number): boolean {
+  return typeof status === "number" && status >= 400 && status < 500
+}
+
 /** Normalize an Indian number to digits with country code: 98765 43210 → 919876543210 */
 function normalizeNumber(to: string): string {
   let digits = to.replace(/\D/g, "")
@@ -32,7 +79,17 @@ function normalizeNumber(to: string): string {
   return digits
 }
 
-async function graphPost(payload: Record<string, any>): Promise<{ ok: boolean; id?: string; error?: string }> {
+/**
+ * Shape check after normalization. This business is India-only (Exotel India
+ * caller IDs, ₹ pricing), so a valid target is exactly 91 + 10 digits — the
+ * old `length >= 11` check accepted 13+ digit garbage (e.g. 0091-prefixed
+ * numbers double-prefixed) straight through to Meta.
+ */
+function isValidNormalizedNumber(n: string): boolean {
+  return /^91\d{10}$/.test(n)
+}
+
+async function graphPost(payload: Record<string, any>): Promise<{ ok: boolean; id?: string; error?: string; status?: number }> {
   if (!configured()) {
     return { ok: false, error: "WhatsApp Cloud API not configured — set WHATSAPP_TOKEN and WHATSAPP_PHONE_NUMBER_ID in .env" }
   }
@@ -49,7 +106,7 @@ async function graphPost(payload: Record<string, any>): Promise<{ ok: boolean; i
     const data: any = await res.json().catch(() => ({}))
     if (!res.ok) {
       const msg = data?.error?.message || `HTTP ${res.status}`
-      return { ok: false, error: msg }
+      return { ok: false, error: msg, status: res.status }
     }
     return { ok: true, id: data?.messages?.[0]?.id }
   } catch (e: any) {
@@ -97,7 +154,7 @@ export async function sendWhatsAppText(
   message: string
 ): Promise<{ ok: boolean; id?: string; error?: string }> {
   const number = normalizeNumber(to)
-  if (number.length < 11) return { ok: false, error: `Invalid number: ${to}` }
+  if (!isValidNormalizedNumber(number)) return { ok: false, error: `Invalid number: ${to}` }
   return graphPost({
     to: number,
     type: "text",
@@ -122,7 +179,9 @@ export async function sendApplicationLink(
   token: string
 ): Promise<{ ok: boolean; error?: string }> {
   const number = normalizeNumber(to)
-  if (number.length < 11) return { ok: false, error: `Invalid number: ${to}` }
+  if (!isValidNormalizedNumber(number)) return { ok: false, error: `Invalid number: ${to}` }
+  const dnd = await dndGate(number)
+  if (dnd) return dnd
 
   const result = await graphPost({
     to: number,
@@ -140,7 +199,12 @@ export async function sendApplicationLink(
 
   // FALLBACK: if the template isn't approved yet but the customer messaged
   // us in the last 24h, a free-form text still delivers. Better than losing
-  // the lead while waiting for Meta's template review.
+  // the lead while waiting for Meta's template review — but ONLY on a
+  // definitive 4xx rejection. On a timeout/5xx Meta may have already
+  // delivered the template, and falling back double-messages the customer.
+  if (!isDefinitiveTemplateError(result.status)) {
+    return { ok: false, error: `Template failed ambiguously (${result.error}) — fallback suppressed to avoid a double send` }
+  }
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || ""
   if (!appUrl && !process.env.APPLICATION_FORM_URL) {
     return { ok: false, error: `Template failed (${result.error}) and NEXT_PUBLIC_APP_URL not set for fallback` }
@@ -164,7 +228,9 @@ export async function sendApplicationLink(
  */
 export async function sendCallFollowUp(to: string, name: string): Promise<{ ok: boolean; error?: string }> {
   const number = normalizeNumber(to)
-  if (number.length < 11) return { ok: false, error: `Invalid number: ${to}` }
+  if (!isValidNormalizedNumber(number)) return { ok: false, error: `Invalid number: ${to}` }
+  const dnd = await dndGate(number)
+  if (dnd) return dnd
 
   const result = await graphPost({
     to: number,
@@ -180,6 +246,10 @@ export async function sendCallFollowUp(to: string, name: string): Promise<{ ok: 
   // FALLBACK: only delivers if the customer already has an open 24h session
   // with us (e.g. messaged in before). Otherwise this — like the template —
   // will simply fail, which is expected until the template is approved.
+  // Only on a definitive 4xx — see sendApplicationLink's note on double-sends.
+  if (!isDefinitiveTemplateError(result.status)) {
+    return { ok: false, error: `Template failed ambiguously (${result.error}) — fallback suppressed to avoid a double send` }
+  }
   const message = `Hi ${name || "there"}! Thanks for speaking with Priya from Right Agent Group. Feel free to message us here anytime with questions.\n\nWe never ask for OTP, PIN, or any payment. — Right Agent Group, Hyderabad`
   const fallback = await sendWhatsAppText(number, message)
   if (fallback.ok) return { ok: true }
@@ -197,7 +267,9 @@ export async function sendCallFollowUp(to: string, name: string): Promise<{ ok: 
  */
 export async function sendMissedCallFollowUp(to: string, name: string): Promise<{ ok: boolean; error?: string }> {
   const number = normalizeNumber(to)
-  if (number.length < 11) return { ok: false, error: `Invalid number: ${to}` }
+  if (!isValidNormalizedNumber(number)) return { ok: false, error: `Invalid number: ${to}` }
+  const dnd = await dndGate(number)
+  if (dnd) return dnd
 
   const result = await graphPost({
     to: number,
@@ -209,6 +281,11 @@ export async function sendMissedCallFollowUp(to: string, name: string): Promise<
     },
   })
   if (result.ok) return { ok: true }
+
+  // Only on a definitive 4xx — see sendApplicationLink's note on double-sends.
+  if (!isDefinitiveTemplateError(result.status)) {
+    return { ok: false, error: `Template failed ambiguously (${result.error}) — fallback suppressed to avoid a double send` }
+  }
 
   const message = `Hi ${name || "there"}! We tried calling you from Right Agent Group about a loan offer but couldn't reach you. Reply here or call us back anytime.\n\nWe never ask for OTP, PIN, or any payment. — Right Agent Group, Hyderabad`
   const fallback = await sendWhatsAppText(number, message)

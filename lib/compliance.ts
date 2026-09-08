@@ -118,8 +118,12 @@ export async function isDndSuppressed(phone: string): Promise<boolean> {
     )
     return res.rows.length > 0
   } catch (e: any) {
-    console.error("isDndSuppressed check error (failing open — call proceeds):", e.message)
-    return false
+    // FAIL-CLOSED (2026-09 compliance pass): if we cannot verify the number
+    // is NOT on the suppression list, treat it as suppressed. A DB blip must
+    // never cause a dial to a number that asked not to be called — that is a
+    // TRAI-penalizable event, while a missed dial during a blip is not.
+    console.error("isDndSuppressed check error (failing CLOSED — treated as suppressed):", e.message)
+    return true
   }
 }
 

@@ -39,41 +39,53 @@ export default function UploadView() {
     const file = e.target.files?.[0]
     if (!file) return
     setUploading(true)
-    const fd = new FormData()
-    fd.append("file", file)
-    fd.append("type", type)
-    const res = await fetch("/api/upload", { method: "POST", body: fd })
-    const data = await res.json()
-    setUploading(false)
-    if (res.ok) {
-      load()
-      if (type === "contacts" && data.contacts?.length > 0) {
-        setPreview({ uploadId: data.uploadId, contacts: data.contacts })
+    try {
+      const fd = new FormData()
+      fd.append("file", file)
+      fd.append("type", type)
+      const res = await fetch("/api/upload", { method: "POST", body: fd })
+      const data = await res.json()
+      if (res.ok) {
+        load()
+        if (type === "contacts" && data.contacts?.length > 0) {
+          setPreview({ uploadId: data.uploadId, contacts: data.contacts })
+        } else {
+          toast.success(`Uploaded — ${data.rowCount ?? ""} items processed`)
+        }
       } else {
-        toast.success(`Uploaded — ${data.rowCount ?? ""} items processed`)
+        toast.error(`Upload failed: ${data.error}`)
       }
-    } else {
-      toast.error(`Upload failed: ${data.error}`)
+    } catch {
+      // Network failure — surface it, the busy state must always reset.
+      toast.error("Upload failed — check your connection and try again")
+    } finally {
+      setUploading(false)
+      e.target.value = ""
     }
-    e.target.value = ""
   }
 
   async function confirmQueueing() {
     if (!preview) return
     setConfirming(true)
-    const res = await fetch("/api/outbound", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ contacts: preview.contacts }),
-    })
-    const data = await res.json()
-    setConfirming(false)
-    setPreview(null)
-    if (res.ok) {
-      toast.success(`${data.queued} contacts queued — use batch controls below to start calling`)
-      load()
-    } else {
-      toast.error(data.error || "Queueing failed")
+    try {
+      const res = await fetch("/api/outbound", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contacts: preview.contacts }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        toast.success(`${data.queued} contacts queued — use batch controls below to start calling`)
+        load()
+      } else {
+        toast.error(data.error || "Queueing failed")
+      }
+    } catch {
+      // Network failure — surface it, the busy state must always reset.
+      toast.error("Queueing failed — check your connection and try again")
+    } finally {
+      setConfirming(false)
+      setPreview(null)
     }
   }
 
@@ -87,16 +99,22 @@ export default function UploadView() {
 
   async function runBatch() {
     setProcessing(true)
-    const res = await fetch("/api/outbound/process", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ concurrency: batchMode === "sequential" ? 1 : concurrency, limit: callLimit }),
-    })
-    const data = await res.json()
-    setProcessing(false)
-    if (res.ok) toast.success(`Dialed ${data.called}/${data.total} calls (${data.failed} failed)`)
-    else toast.error(data.error || "Batch calling failed")
-    load()
+    try {
+      const res = await fetch("/api/outbound/process", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ concurrency: batchMode === "sequential" ? 1 : concurrency, limit: callLimit }),
+      })
+      const data = await res.json()
+      if (res.ok) toast.success(`Dialed ${data.called}/${data.total} calls (${data.failed} failed)`)
+      else toast.error(data.error || "Batch calling failed")
+    } catch {
+      // Network failure — surface it, the busy state must always reset.
+      toast.error("Batch calling failed — check your connection and try again")
+    } finally {
+      setProcessing(false)
+      load()
+    }
   }
 
   const STATUS_STYLE: Record<string, { color: string }> = {

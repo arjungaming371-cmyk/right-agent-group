@@ -64,7 +64,11 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
               style={{
                 display: "flex", alignItems: "center", gap: 10,
                 maxWidth: 480, padding: "11px 14px 11px 12px",
-                background: "rgba(14,19,32,0.97)", border: "1px solid var(--border)",
+                /* Themed surface — the old hardcoded rgba(14,19,32,0.97) panel
+                   put near-black text (light-theme --text-primary) on a
+                   near-black panel. var(--bg-card) resolves correctly in
+                   every theme (dark #0e1320, light #ffffff). */
+                background: "var(--bg-card)", border: "1px solid var(--border)",
                 borderRadius: 12, boxShadow: "var(--shadow-soft)",
                 backdropFilter: "blur(12px)", pointerEvents: "auto",
                 animation: t.leaving ? "toastOut 0.18s ease forwards" : "toastIn 0.22s cubic-bezier(0.21,1.02,0.73,1)",

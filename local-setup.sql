@@ -416,3 +416,129 @@ ALTER TABLE knowledge_base ADD COLUMN IF NOT EXISTS source_url TEXT;
 ALTER TABLE knowledge_base ADD COLUMN IF NOT EXISTS source_filename TEXT;
 ALTER TABLE knowledge_base ADD COLUMN IF NOT EXISTS last_fetched_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_kb_source_url ON knowledge_base (source_url) WHERE source_url IS NOT NULL;
+
+-- ============================================================
+-- SCHEMA SYNC (2026-09): mirrors for the July 20 – Aug 12 migrations.
+-- These were previously only created by run-migrations.js, so a fresh
+-- db:setup was silently missing features that exist on a migrated
+-- database. Blocks below mirror, in order:
+--   2026-07-20_lead_pinning, 2026-07-20_loan_edit_requests,
+--   2026-07-22_call_instructions, 2026-07-22_login_otps,
+--   2026-07-25_callback_scheduling, 2026-07-25_team_profiles,
+--   2026-07-26_developer_role, 2026-07-28_profile_fields,
+--   2026-08-12_add_loan_tenure
+-- All idempotent; safe to re-run.
+-- ============================================================
+
+-- Lead pinning (2026-07-20_lead_pinning)
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS pinned BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS pinned_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_leads_pinned ON leads (pinned, pinned_at DESC) WHERE pinned = true;
+
+-- Loan application edit requests (2026-07-20_loan_edit_requests)
+CREATE TABLE IF NOT EXISTS loan_application_edit_requests (
+  id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  loan_application_id  UUID NOT NULL REFERENCES loan_applications(id) ON DELETE CASCADE,
+  lead_id              UUID REFERENCES leads(id),
+  proposed_by          TEXT NOT NULL,
+  reason               TEXT,
+  previous_values      JSONB NOT NULL,
+  proposed_values      JSONB NOT NULL,
+  status               TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+  reviewed_by          TEXT,
+  reviewed_at          TIMESTAMPTZ,
+  created_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_loan_edit_requests_pending ON loan_application_edit_requests (status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_loan_edit_requests_app ON loan_application_edit_requests (loan_application_id, created_at DESC);
+ALTER TABLE loan_applications ADD COLUMN IF NOT EXISTS last_edited_at TIMESTAMPTZ;
+
+-- notifications.type must know about loan_edit_request (widen the CHECK the
+-- same way the migration does — guarded so re-runs don't error).
+ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_type_check;
+ALTER TABLE notifications ADD CONSTRAINT notifications_type_check
+  CHECK (type IN ('loan_application', 'escalation', 'login', 'whatsapp_message', 'loan_edit_request'));
+
+-- Persisted per-call instructions (2026-07-22_call_instructions)
+ALTER TABLE voice_calls ADD COLUMN IF NOT EXISTS instructions TEXT;
+
+-- Login OTPs for two-factor auth (2026-07-22_login_otps)
+CREATE TABLE IF NOT EXISTS login_otps (
+  email      TEXT PRIMARY KEY,
+  code_hash  TEXT NOT NULL,
+  attempts   INT NOT NULL DEFAULT 0,
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Callback scheduling (2026-07-25_callback_scheduling)
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS callback_at TIMESTAMPTZ;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS callback_note TEXT;
+CREATE INDEX IF NOT EXISTS idx_leads_callback_at ON leads (callback_at) WHERE callback_at IS NOT NULL;
+
+-- Team profiles (2026-07-25_team_profiles + 2026-07-28_profile_fields)
+CREATE TABLE IF NOT EXISTS team_profiles (
+  email          TEXT PRIMARY KEY,
+  display_name   TEXT,
+  avatar_url     TEXT,
+  last_login_at  TIMESTAMPTZ,
+  created_at     TIMESTAMPTZ DEFAULT now()
+);
+ALTER TABLE team_profiles ADD COLUMN IF NOT EXISTS phone TEXT;
+ALTER TABLE team_profiles ADD COLUMN IF NOT EXISTS address TEXT;
+ALTER TABLE team_profiles ADD COLUMN IF NOT EXISTS age INTEGER;
+ALTER TABLE team_profiles ADD COLUMN IF NOT EXISTS profile_customized BOOLEAN NOT NULL DEFAULT false;
+
+-- Developer role + logs (2026-07-26_developer_role)
+ALTER TABLE allowed_emails DROP CONSTRAINT IF EXISTS allowed_emails_role_check;
+ALTER TABLE allowed_emails ADD CONSTRAINT allowed_emails_role_check
+  CHECK (role IN ('admin', 'agent', 'viewer', 'developer'));
+CREATE TABLE IF NOT EXISTS developer_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email TEXT NOT NULL,
+  action TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'info',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_developer_logs_email ON developer_logs(email, created_at DESC);
+
+-- Loan tenure (2026-08-12_add_loan_tenure)
+ALTER TABLE loan_applications ADD COLUMN IF NOT EXISTS loan_tenure INTEGER;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS loan_tenure INTEGER;
+
+-- ============================================================
+-- INTEGRITY HARDENING (2026-09 reliability pass)
+-- ============================================================
+
+-- Meta retries webhooks concurrently; dedupe is SELECT-then-INSERT, so only
+-- a UNIQUE index makes it race-proof. Partial: inserts without an ID keep
+-- working. (This is what lib's dedupe path relies on.)
+CREATE UNIQUE INDEX IF NOT EXISTS uq_wa_messages_wa_message_id
+  ON whatsapp_messages (wa_message_id) WHERE wa_message_id IS NOT NULL;
+
+-- Duplicate leads (same last-10-digits phone) split a customer's call/WhatsApp
+-- history across two rows. phone_key is the normalized match key the app
+-- actually dedupes by; on a FRESH database it is UNIQUE from day one. On an
+-- EXISTING database use migrations/2026-09-09_integrity_hardening.sql, which
+-- adds the column + a duplicate report WITHOUT enforcing uniqueness (existing
+-- duplicates are a business decision, not an automatic merge).
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS phone_key TEXT
+  GENERATED ALWAYS AS (right(regexp_replace(phone, '\D', '', 'g'), 10)) STORED;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_leads_phone_key ON leads (phone_key) WHERE phone_key <> '';
+-- Keep the plain lookup too for existing query plans.
+CREATE INDEX IF NOT EXISTS idx_leads_phone_key ON leads (phone_key);
+
+-- Foreign-key columns the dashboard filters/sorts by constantly.
+CREATE INDEX IF NOT EXISTS idx_loan_apps_lead   ON loan_applications (lead_id);
+CREATE INDEX IF NOT EXISTS idx_loan_apps_phone  ON loan_applications (phone);
+CREATE INDEX IF NOT EXISTS idx_loan_apps_status ON loan_applications (status);
+CREATE INDEX IF NOT EXISTS idx_comm_logs_lead   ON comm_logs (lead_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_calls_created    ON voice_calls (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_created    ON audit_logs (created_at DESC);
+
+-- updated_at is consulted for "qualified in the last N days" style metrics,
+-- but most UPDATE paths never set it. Maintain it automatically for leads.
+CREATE EXTENSION IF NOT EXISTS moddatetime;
+DROP TRIGGER IF EXISTS trg_leads_updated_at ON leads;
+CREATE TRIGGER trg_leads_updated_at BEFORE UPDATE ON leads
+  FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);

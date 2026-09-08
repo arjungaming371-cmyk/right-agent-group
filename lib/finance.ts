@@ -222,7 +222,16 @@ export function buildEmiInstruction(customerMessage: string, fallback: { loanAmo
   const loanType = detectLoanType(customerMessage) || detectLoanType(fallback.loanType || "") || "Home Loan"
   const rateInfo = BEST_RATES[loanType] || BEST_RATES["Home Loan"]
 
-  const principal = parseAmount(customerMessage) || fallback.loanAmount || 2000000 // sane default: 20L
+  // INCOME IS NOT PRINCIPAL (2026-09 fix): "my salary is 50k, what's the EMI?"
+  // put 50,000 through parseAmount and Priya quoted an exact EMI for a ₹50k
+  // LOAN. When the message is income/eligibility-framed, the number it
+  // carries is earnings — skip it and ground the principal in what the lead
+  // record knows (or the 20L default). Trade-off: "I earn 80k and want a
+  // 20 lakh loan, what's the EMI?" now quotes the default-amount EMI instead
+  // of 20L — Priya then confirms the amount in conversation, which is far
+  // safer than quoting an exact figure on a wrong principal.
+  const incomeFramed = isIncomeOrEligibility
+  const principal = (incomeFramed ? null : parseAmount(customerMessage)) || fallback.loanAmount || 2000000 // sane default: 20L
   const tenureMonths = parseTenureMonths(customerMessage) || rateInfo.maxTenureYears * 12
 
   const emi = calculateEMI(principal, rateInfo.ratePct, tenureMonths)

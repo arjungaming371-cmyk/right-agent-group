@@ -313,3 +313,51 @@
   0%, 100% { opacity: 0.5; }
   50% { opacity: 0.9; }
 }
+
+/* Custom sleek audio & volume range slider */
+input[type="range"].audio-range-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  outline: none;
+  cursor: pointer;
+  margin: 0;
+  padding: 0;
+  vertical-align: middle;
+}
+
+input[type="range"].audio-range-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #2dd4a0;
+  cursor: pointer;
+  box-shadow: 0 0 8px rgba(45, 212, 160, 0.7);
+  border: 2px solid #0e1320;
+  transition: transform 0.12s ease;
+}
+
+input[type="range"].audio-range-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.3);
+}
+
+input[type="range"].audio-range-slider::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #2dd4a0;
+  cursor: pointer;
+  box-shadow: 0 0 8px rgba(45, 212, 160, 0.7);
+  border: 2px solid #0e1320;
+}
+
+input[type="range"].audio-range-slider::-moz-range-track {
+  height: 6px;
+  border-radius: 999px;
+  background: transparent;
+}
+

@@ -9,6 +9,7 @@
 import { db, query } from "./db"
 import { sendMail, isMailConfigured } from "./mail"
 import { createNotification } from "./notifications"
+import { escapeHtml } from "./utils"
 
 // English / Hindi / Telugu frustration & escalation markers.
 // Deliberately conservative — false positives annoy operators.
@@ -87,9 +88,9 @@ async function sendEscalationEmail(channel: "Phone call" | "WhatsApp", leadId: s
     <div style="font-size:16px;font-weight:700;color:#fff">A caller needs a human, now</div>
   </div>
   <div style="border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px;padding:24px">
-    <p style="font-size:14px;margin:0 0 10px"><strong>${channel}</strong> with <strong>${leadName}</strong>${leadPhone ? ` (${leadPhone})` : ""}</p>
+    <p style="font-size:14px;margin:0 0 10px"><strong>${channel}</strong> with <strong>${escapeHtml(leadName)}</strong>${leadPhone ? ` (${escapeHtml(leadPhone)})` : ""}</p>
     <div style="background:#f9fafb;border-left:3px solid #fb5670;border-radius:6px;padding:12px 14px;font-size:13px;color:#374151;margin:0 0 14px">
-      "${snippet.slice(0, 200)}"
+      "${escapeHtml(snippet.slice(0, 200))}"
     </div>
     <p style="font-size:13px;color:#6b7280;margin:0">Open the dashboard's Communication Log to see the full thread and step in.</p>
   </div>

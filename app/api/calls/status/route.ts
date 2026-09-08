@@ -86,28 +86,42 @@ export async function POST(req: NextRequest) {
     // — nobody should get two WhatsApp messages for one call.
     // "failed" outcomes are skipped too: usually a bad/invalid number, not a
     // real miss worth following up on.
+    // RACE GATE (2026-09 fix): Meta/Exotel retry webhooks concurrently, and
+    // two retries could both read followup_sent=false and both send. The
+    // conditional UPDATE claims the follow-up atomically — only the retry
+    // that flips the flag gets to send.
     if (!call.followup_sent) {
-      const { data: lead } = await db.from("leads").select("name, phone, whatsapp_number").eq("id", call.lead_id).single()
-      const target = lead?.whatsapp_number || lead?.phone
+      let claimWon = false
+      try {
+        const claim = await query(
+          `UPDATE voice_calls SET followup_sent = true WHERE twilio_call_sid = $1 AND (followup_sent IS NOT TRUE) RETURNING 1`,
+          [callSid]
+        )
+        claimWon = (claim.rowCount || 0) > 0
+      } catch (claimError: any) {
+        console.error("followup claim error:", claimError.message)
+      }
+      if (claimWon) {
+        const { data: lead } = await db.from("leads").select("name, phone, whatsapp_number").eq("id", call.lead_id).single()
+        const target = lead?.whatsapp_number || lead?.phone
 
-      if (target && outcome === "resolved" && transcript.length > 0) {
-        const result = await sendCallFollowUp(target, lead?.name || "there")
-        await db.from("voice_calls").update({ followup_sent: true }).eq("twilio_call_sid", callSid)
-        await db.from("comm_logs").insert({
-          lead_id: call.lead_id,
-          type: "whatsapp",
-          summary: result.ok ? "Post-call WhatsApp follow-up sent" : `Post-call WhatsApp follow-up failed: ${result.error}`,
-          outcome: result.ok ? "sent" : "failed",
-        })
-      } else if (target && outcome === "missed") {
-        const result = await sendMissedCallFollowUp(target, lead?.name || "there")
-        await db.from("voice_calls").update({ followup_sent: true }).eq("twilio_call_sid", callSid)
-        await db.from("comm_logs").insert({
-          lead_id: call.lead_id,
-          type: "whatsapp",
-          summary: result.ok ? "Missed-call WhatsApp follow-up sent" : `Missed-call WhatsApp follow-up failed: ${result.error}`,
-          outcome: result.ok ? "sent" : "failed",
-        })
+        if (target && outcome === "resolved" && transcript.length > 0) {
+          const result = await sendCallFollowUp(target, lead?.name || "there")
+          await db.from("comm_logs").insert({
+            lead_id: call.lead_id,
+            type: "whatsapp",
+            summary: result.ok ? "Post-call WhatsApp follow-up sent" : `Post-call WhatsApp follow-up failed: ${result.error}`,
+            outcome: result.ok ? "sent" : "failed",
+          })
+        } else if (target && outcome === "missed") {
+          const result = await sendMissedCallFollowUp(target, lead?.name || "there")
+          await db.from("comm_logs").insert({
+            lead_id: call.lead_id,
+            type: "whatsapp",
+            summary: result.ok ? "Missed-call WhatsApp follow-up sent" : `Missed-call WhatsApp follow-up failed: ${result.error}`,
+            outcome: result.ok ? "sent" : "failed",
+          })
+        }
       }
     }
 

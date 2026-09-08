@@ -1,9 +1,17 @@
 import { NextResponse } from "next/server"
+import { requireRole } from "@/lib/auth"
 import { checkLLMHealth } from "@/lib/llm"
 import { checkDbHealth } from "@/lib/db"
 import { checkTtsHealth } from "@/lib/tts"
 
-export async function GET() {
+export async function GET(req: Request) {
+  // This route dumps the whole config surface (PG host/db, Exotel SID, env-var
+  // presence, row counts, raw provider errors) — admin eyes only. It still
+  // sits behind the session middleware; this is the defense-in-depth re-check
+  // every route in this app applies to itself.
+  const session = await requireRole(req, ["admin"])
+  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+
   const results: Record<string, string> = {}
 
   results.PG_HOST       = process.env.PG_HOST       ?? "❌ NOT SET"

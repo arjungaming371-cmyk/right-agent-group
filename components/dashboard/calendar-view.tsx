@@ -62,21 +62,27 @@ export default function CalendarView({ role }: { role: "admin" | "agent" | "view
 
   async function saveCallback(leadId: string, callbackAt: string | null, note: string | null) {
     setSaving(true)
-    const res = await fetch(`/api/leads/${leadId}/callback`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ callbackAt, note }),
-    })
-    setSaving(false)
-    if (res.ok) {
-      toast.success(callbackAt ? "Callback scheduled" : "Callback cleared")
-      setSelected(null)
-      setScheduling(false)
-      setScheduleLeadId(""); setScheduleDateTime(""); setScheduleNote("")
-      load()
-    } else {
-      const data = await res.json().catch(() => ({}))
-      toast.error(data.error || "Could not save callback")
+    try {
+      const res = await fetch(`/api/leads/${leadId}/callback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ callbackAt, note }),
+      })
+      if (res.ok) {
+        toast.success(callbackAt ? "Callback scheduled" : "Callback cleared")
+        setSelected(null)
+        setScheduling(false)
+        setScheduleLeadId(""); setScheduleDateTime(""); setScheduleNote("")
+        load()
+      } else {
+        const data = await res.json().catch(() => ({}))
+        toast.error(data.error || "Could not save callback")
+      }
+    } catch {
+      // Network failure — surface it, the busy state must always reset.
+      toast.error("Could not save callback — check your connection and try again")
+    } finally {
+      setSaving(false)
     }
   }
 
