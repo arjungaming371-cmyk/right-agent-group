@@ -9,6 +9,7 @@ import { SkeletonList } from "../ui/skeleton"
 import { useToast } from "../ui/toast"
 import { calculateEMI, totalInterest, formatINR, BEST_RATES, detectLoanType } from "@/lib/finance"
 import LoanFormCustomizerModal from "./loan-form-customizer-modal"
+import VoiceDictation from "../ui/voice-dictation"
 
 function EmiEstimate({ loanAmount, loanType }: { loanAmount: number; loanType: string }) {
   const canonical = detectLoanType(loanType) || "Home Loan"
@@ -301,7 +302,22 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
                 </a>
               </div>
             </div>
-            <input placeholder="Search name or phone..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ width: "100%", height: 34, fontSize: 12.5 }} />
+            <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+              <input
+                placeholder="Search name or phone..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                style={{ width: "100%", height: 34, fontSize: 12.5, paddingRight: 34 }}
+              />
+              <div style={{ position: "absolute", right: 2, top: "50%", transform: "translateY(-50%)" }}>
+                <VoiceDictation
+                  onTranscript={(spoken) => setSearch(prev => (prev ? `${prev} ${spoken}` : spoken))}
+                  size={14}
+                  style={{ width: 28, height: 28, border: "none", background: "transparent" }}
+                  title="Speak to search applications"
+                />
+              </div>
+            </div>
           </div>
 
           <div style={{ flex: 1, overflowY: "auto" }}>
@@ -465,13 +481,18 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
                   <label style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", display: "block", marginBottom: 4 }}>
                     Customer Name *
                   </label>
-                  <input
-                    required
-                    value={newApp.customer_name}
-                    onChange={(e) => setNewApp({ ...newApp, customer_name: e.target.value })}
-                    placeholder="e.g. Rahul Sharma"
-                    style={{ width: "100%", height: 38 }}
-                  />
+                  <div style={{ position: "relative" }}>
+                    <input
+                      required
+                      value={newApp.customer_name}
+                      onChange={(e) => setNewApp({ ...newApp, customer_name: e.target.value })}
+                      placeholder="e.g. Rahul Sharma"
+                      style={{ width: "100%", height: 38, paddingRight: 34 }}
+                    />
+                    <div style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)" }}>
+                      <VoiceDictation onTranscript={(t: string) => setNewApp((prev) => ({ ...prev, customer_name: prev.customer_name ? `${prev.customer_name} ${t}` : t }))} title="Speak customer name" />
+                    </div>
+                  </div>
                 </div>
                 <div>
                   <label style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", display: "block", marginBottom: 4 }}>
@@ -581,12 +602,17 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
                   <label style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", display: "block", marginBottom: 4 }}>
                     City
                   </label>
-                  <input
-                    value={newApp.city}
-                    onChange={(e) => setNewApp({ ...newApp, city: e.target.value })}
-                    placeholder="e.g. Hyderabad"
-                    style={{ width: "100%", height: 38 }}
-                  />
+                  <div style={{ position: "relative" }}>
+                    <input
+                      value={newApp.city}
+                      onChange={(e) => setNewApp({ ...newApp, city: e.target.value })}
+                      placeholder="e.g. Hyderabad"
+                      style={{ width: "100%", height: 38, paddingRight: 34 }}
+                    />
+                    <div style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)" }}>
+                      <VoiceDictation onTranscript={(t: string) => setNewApp((prev) => ({ ...prev, city: prev.city ? `${prev.city} ${t}` : t }))} title="Speak city" />
+                    </div>
+                  </div>
                 </div>
                 <div>
                   <label style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", display: "block", marginBottom: 4 }}>
@@ -608,12 +634,17 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
                 <label style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", display: "block", marginBottom: 4 }}>
                   Residential Address
                 </label>
-                <input
-                  value={newApp.address}
-                  onChange={(e) => setNewApp({ ...newApp, address: e.target.value })}
-                  placeholder="Plot/Flat No, Street, Landmark"
-                  style={{ width: "100%", height: 38 }}
-                />
+                <div style={{ position: "relative" }}>
+                  <input
+                    value={newApp.address}
+                    onChange={(e) => setNewApp({ ...newApp, address: e.target.value })}
+                    placeholder="Plot/Flat No, Street, Landmark"
+                    style={{ width: "100%", height: 38, paddingRight: 34 }}
+                  />
+                  <div style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)" }}>
+                    <VoiceDictation onTranscript={(t: string) => setNewApp((prev) => ({ ...prev, address: prev.address ? `${prev.address} ${t}` : t }))} title="Speak address" />
+                  </div>
+                </div>
               </div>
 
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 10 }}>

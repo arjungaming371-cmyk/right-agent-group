@@ -48,17 +48,17 @@ const NAV_SECTIONS: NavSection[] = [
   {
     title: "Overview",
     items: [
-      { key: "analytics", label: "Analytics",        icon: BarChart3, roles: ["admin", "agent", "viewer"] },
-      { key: "leads",     label: "Leads",             icon: Users,     roles: ["admin", "agent", "viewer"] },
-      { key: "loans",     label: "Loan Applications", icon: FileText,  roles: ["admin", "agent", "viewer"] },
+      { key: "analytics", label: "Analytics",        icon: BarChart3, roles: ["admin", "agent", "viewer", "branch_manager"] },
+      { key: "leads",     label: "Leads",             icon: Users,     roles: ["admin", "agent", "viewer", "branch_manager"] },
+      { key: "loans",     label: "Loan Applications", icon: FileText,  roles: ["admin", "agent", "viewer", "branch_manager"] },
     ],
   },
   {
     title: "Engagement",
     items: [
-      { key: "voice",    label: "Voice Logs",        icon: Phone,          roles: ["admin", "agent", "viewer"] },
-      { key: "whatsapp", label: "WhatsApp Chat",     icon: MessageCircle,  roles: ["admin", "agent", "viewer"] },
-      { key: "comms",    label: "Communication Log", icon: Activity,       roles: ["admin", "agent", "viewer"] },
+      { key: "voice",    label: "Voice Logs",        icon: Phone,          roles: ["admin", "agent", "viewer", "branch_manager"] },
+      { key: "whatsapp", label: "WhatsApp Chat",     icon: MessageCircle,  roles: ["admin", "agent", "viewer", "branch_manager"] },
+      { key: "comms",    label: "Communication Log", icon: Activity,       roles: ["admin", "agent", "viewer", "branch_manager"] },
       // Calendar view intentionally not linked from the nav (hidden from the
       // UI per request) — the feature/component/API routes stay fully
       // intact, "calendar" just isn't in this list so nothing navigates
@@ -72,7 +72,7 @@ const NAV_SECTIONS: NavSection[] = [
       { key: "security", label: "Security",       icon: ShieldCheck,  roles: ["admin"] },
       { key: "upload",   label: "Upload & Data",  icon: UploadCloud,  roles: ["admin"] },
       { key: "script",   label: "Priya's Script", icon: ScrollText,   roles: ["admin"] },
-      { key: "knowledge",label: "Knowledge Base", icon: BookOpen,     roles: ["admin", "agent"] },
+      { key: "knowledge",label: "Knowledge Base", icon: BookOpen,     roles: ["admin", "agent", "branch_manager"] },
     ],
   },
   {
@@ -158,7 +158,7 @@ export default function DashboardShell() {
       setSessionBranchId(d.branchId ?? null)
       setCanSwitch(!!d.canSwitchBranch)
       // Branch switcher options for the parent account.
-      if (d.canSwitchBranch) {
+      if (d.canSwitchBranch || d.branchId) {
         fetch("/api/branches").then(r => r.json()).then(list => {
           if (Array.isArray(list)) setAllBranches(list.map((b: any) => ({ id: b.id, name: b.name, code: b.code })))
         }).catch(() => {})
@@ -329,7 +329,7 @@ export default function DashboardShell() {
               </div>
             </div>
           ))}
-          {role === "admin" && (
+          {(role === "admin" || role === "branch_manager") && (
             <div className="mb-1 mt-3">
               <div className="mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">Team</div>
               <a
@@ -338,7 +338,7 @@ export default function DashboardShell() {
                 style={{ border: "1px solid transparent", fontWeight: 480 }}
               >
                 <UserCog size={16} strokeWidth={1.8} className="text-[var(--text-muted)] group-hover:text-[var(--text-secondary)]" />
-                <span className="flex-1 truncate">Team Access</span>
+                <span className="flex-1 truncate">{role === "branch_manager" ? "Branch Team" : "Team Access"}</span>
               </a>
             </div>
           )}
@@ -417,7 +417,7 @@ export default function DashboardShell() {
 
           {/* Branch switcher — the parent account's "which branch am I working
               on right now" control. Writes + reads everywhere scope to this. */}
-          {canSwitch && (
+          {canSwitch ? (
             <select
               aria-label="Active branch"
               title="Active branch — admins see everything when set to All"
@@ -430,7 +430,15 @@ export default function DashboardShell() {
                 <option key={b.id} value={b.id}>{b.name} ({b.code})</option>
               ))}
             </select>
-          )}
+          ) : sessionBranchId ? (
+            <div
+              className="hidden h-9 items-center gap-1.5 rounded-[10px] border border-[var(--accent-green)]/30 bg-[var(--accent-green)]/10 px-3 text-[12px] font-semibold text-[var(--accent-green)] lg:flex"
+              title="Assigned Branch Scope"
+            >
+              <Building2 size={13} strokeWidth={2.2} />
+              <span>{allBranches.find(b => b.id === sessionBranchId)?.name || "Branch Portal"}</span>
+            </div>
+          ) : null}
 
           <div className="mx-1 hidden h-6 w-px bg-[var(--border)] lg:block" />
 
@@ -463,7 +471,7 @@ export default function DashboardShell() {
           {view === "upload"   && role === "admin" && <UploadView />}
           {view === "script"   && role === "admin" && <ScriptView />}
           {view === "branches" && (role === "admin" || role === "branch_manager") && <BranchesView role={role} branchId={sessionBranchId} />}
-          {view === "knowledge" && (role === "admin" || role === "agent") && <KnowledgeBaseView role={role} />}
+          {view === "knowledge" && (role === "admin" || role === "agent" || role === "branch_manager") && <KnowledgeBaseView role={role} />}
           {view === "dev-logs" && role === "developer" && <DeveloperLogsView userEmail={userEmail} />}
         </main>
       </div>

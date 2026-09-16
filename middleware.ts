@@ -35,6 +35,7 @@ const PUBLIC_EXACT = [
   "/api/system/status", // coarse booleans only — no error details (see route)
   "/api/security/flags", // one boolean, read back by this middleware itself
   "/api/branding", // white-label public branding (public-safe fields only)
+  "/api/form-config", // public form schema for customer loan form
   "/api/lead-brain/scan-idle", "/api/prompt-tuner/scan",
 ]
 

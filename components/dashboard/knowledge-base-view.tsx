@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react"
 import { BookOpen, Plus, Pencil, Trash2, X, Check, FileUp, FileText, Link2, RefreshCw } from "lucide-react"
 import { useToast } from "../ui/toast"
 import { Skeleton } from "../ui/skeleton"
+import VoiceDictation from "../ui/voice-dictation"
 
 type Entry = {
   id: string
@@ -314,21 +315,32 @@ export default function KnowledgeBaseView({ role }: { role: Role }) {
             <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 20 }}>{editingId ? "Edit Entry" : "Add Knowledge Base Entry"}</div>
             <div style={{ marginBottom: 12 }}>
               <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Question / Title *</label>
-              <input
-                value={form.title}
-                onChange={(e) => setForm({ ...form, title: e.target.value })}
-                placeholder="e.g. Minimum loan amount"
-              />
+              <div style={{ position: "relative" }}>
+                <input
+                  value={form.title}
+                  onChange={(e) => setForm({ ...form, title: e.target.value })}
+                  placeholder="e.g. Minimum loan amount"
+                  style={{ width: "100%", paddingRight: 36 }}
+                />
+                <div style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)" }}>
+                  <VoiceDictation onTranscript={(t: string) => setForm((prev) => ({ ...prev, title: prev.title ? `${prev.title} ${t}` : t }))} title="Dictate title" />
+                </div>
+              </div>
             </div>
             <div style={{ marginBottom: 12 }}>
               <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Answer / Facts *</label>
-              <textarea
-                value={form.content}
-                onChange={(e) => setForm({ ...form, content: e.target.value })}
-                placeholder="e.g. The minimum home loan amount is ₹5,00,000 and maximum is ₹75,00,000, subject to eligibility."
-                rows={5}
-                style={{ width: "100%", background: "var(--bg-card)", border: "1px solid var(--border)", color: "var(--text-primary)", borderRadius: 8, padding: 10, fontSize: 13, resize: "vertical" }}
-              />
+              <div style={{ position: "relative" }}>
+                <textarea
+                  value={form.content}
+                  onChange={(e) => setForm({ ...form, content: e.target.value })}
+                  placeholder="e.g. The minimum home loan amount is ₹5,00,000 and maximum is ₹75,00,000, subject to eligibility."
+                  rows={5}
+                  style={{ width: "100%", background: "var(--bg-card)", border: "1px solid var(--border)", color: "var(--text-primary)", borderRadius: 8, padding: "10px 36px 10px 10px", fontSize: 13, resize: "vertical" }}
+                />
+                <div style={{ position: "absolute", right: 8, top: 10 }}>
+                  <VoiceDictation onTranscript={(t: string) => setForm((prev) => ({ ...prev, content: prev.content ? `${prev.content} ${t}` : t }))} title="Dictate answer" />
+                </div>
+              </div>
             </div>
             <div style={{ marginBottom: 12 }}>
               <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Category (optional)</label>

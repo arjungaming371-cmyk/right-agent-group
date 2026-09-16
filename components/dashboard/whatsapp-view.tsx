@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, useCallback } from "react"
 import { Search, Send, MessageCircle, ChevronLeft, CheckCircle2, Zap, Lock, Pin, Info, X, Phone, MapPin, Wallet, Languages, Tag, StickyNote, Smile, PhoneCall, Plus } from "lucide-react"
 import { useToast } from "../ui/toast"
 import { usePolling } from "@/lib/use-poll"
+import VoiceDictation from "../ui/voice-dictation"
 
 type Lead = {
   id: string; name: string; phone: string
@@ -406,6 +407,7 @@ export default function WhatsAppView({ role }: { role: Role }) {
                 onChange={e => setSearch(e.target.value)}
                 style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: WA.textPrimary, fontSize: 14, padding: 0 }}
               />
+              <VoiceDictation onTranscript={(t: string) => setSearch(t)} title="Search contacts by voice" />
             </div>
           </div>
 
@@ -606,6 +608,20 @@ export default function WhatsAppView({ role }: { role: Role }) {
                       disabled={ready === false}
                       style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: WA.textPrimary, fontSize: 15, padding: "10px 8px", minHeight: 36 }}
                     />
+                    <VoiceDictation
+                      onTranscript={(spoken) => {
+                        setText(prev => (prev ? `${prev} ${spoken}` : spoken))
+                      }}
+                      size={17}
+                      style={{
+                        border: "none",
+                        background: "transparent",
+                        color: WA.textSecondary,
+                        width: 32,
+                        height: 32,
+                      }}
+                      title="Speak to type message"
+                    />
                   </div>
                   <button
                     onClick={send}
@@ -764,18 +780,25 @@ export default function WhatsAppView({ role }: { role: Role }) {
                 <label style={{ fontSize: 11, fontWeight: 600, color: WA.textSecondary, textTransform: "uppercase", display: "block", marginBottom: 6 }}>
                   Contact Name (optional)
                 </label>
-                <input
-                  type="text"
-                  value={newChatName}
-                  disabled={!!selectedLeadId}
-                  onChange={(e) => setNewChatName(e.target.value)}
-                  placeholder="e.g. Suresh V"
-                  style={{
-                    width: "100%", height: 38, background: WA.headerBg, border: `1px solid ${WA.hairline}`,
-                    borderRadius: 8, color: WA.textPrimary, padding: "0 12px", outline: "none",
-                    opacity: selectedLeadId ? 0.5 : 1,
-                  }}
-                />
+                <div style={{ position: "relative" }}>
+                  <input
+                    type="text"
+                    value={newChatName}
+                    disabled={!!selectedLeadId}
+                    onChange={(e) => setNewChatName(e.target.value)}
+                    placeholder="e.g. Suresh V"
+                    style={{
+                      width: "100%", height: 38, background: WA.headerBg, border: `1px solid ${WA.hairline}`,
+                      borderRadius: 8, color: WA.textPrimary, padding: "0 34px 0 12px", outline: "none",
+                      opacity: selectedLeadId ? 0.5 : 1,
+                    }}
+                  />
+                  {!selectedLeadId && (
+                    <div style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)" }}>
+                      <VoiceDictation onTranscript={(t: string) => setNewChatName((prev) => prev ? `${prev} ${t}` : t)} title="Speak contact name" />
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 10 }}>

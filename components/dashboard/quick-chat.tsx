@@ -1,6 +1,7 @@
 "use client"
 import { useState, useRef, useEffect } from "react"
 import { MessageSquareText, Bot, X, Send, Sparkles, Plus, History, Trash2, ArrowLeft, MessageCircle } from "lucide-react"
+import VoiceDictation from "../ui/voice-dictation"
 
 type Message = { role: "user" | "assistant"; content: string }
 type ChatSummary = { id: string; title: string; created_at: string; updated_at: string }
@@ -378,13 +379,21 @@ export default function QuickChat({ role = "agent", userEmail = "" }: { role?: U
             </div>
           )}
 
-          <div style={{ padding: 12, borderTop: "1px solid var(--border)", display: "flex", gap: 8 }}>
+          <div style={{ padding: 12, borderTop: "1px solid var(--border)", display: "flex", gap: 8, alignItems: "center" }}>
             <input
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => e.key === "Enter" && send()}
               placeholder="Ask about leads, calls, loans…"
               style={{ flex: 1, fontSize: 13, height: 36 }}
+            />
+            <VoiceDictation
+              onTranscript={(spoken) => {
+                setInput(prev => (prev ? `${prev} ${spoken}` : spoken))
+              }}
+              size={15}
+              style={{ width: 36, height: 36, borderRadius: 9 }}
+              title="Speak message"
             />
             <button onClick={() => send()} disabled={loading || !input.trim()} aria-label="Send" style={{
               width: 36, height: 36, borderRadius: 9, background: "var(--gradient-brand)", border: "none",

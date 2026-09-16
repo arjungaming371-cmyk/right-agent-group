@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Search, Users, FileText, Phone, ArrowRight, CornerDownLeft } from "lucide-react"
 import type { ViewKey } from "../dashboard/shell"
+import VoiceDictation from "./voice-dictation"
 
 type Result = {
   id: string
@@ -147,6 +148,14 @@ export default function CommandPalette({ open, onClose, onNavigate, allowedViews
             onKeyDown={onKeyDown}
             placeholder="Search leads, applications, calls…"
             style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: "var(--text-primary)", fontSize: 15, padding: 0 }}
+          />
+          <VoiceDictation
+            onTranscript={(spoken) => {
+              setQ(prev => (prev ? `${prev} ${spoken}` : spoken))
+            }}
+            size={15}
+            style={{ width: 28, height: 28, border: "none", background: "transparent" }}
+            title="Speak to search"
           />
           <span className="kbd">esc</span>
         </div>

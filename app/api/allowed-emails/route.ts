@@ -11,9 +11,13 @@ const VALID_ROLES: Role[] = ["admin", "agent", "viewer", "developer", "branch_ma
 // unauthenticated calls, but we verify the role again here — never trust a
 // single layer for an access-control endpoint.
 export async function GET(req: NextRequest) {
-  const session = await requireRole(req, ["admin"])
+  const session = await requireRole(req, ["admin", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
-  // Rows with the full-access role never appear in the admin-facing list.
+
+  // Admin sees all branches; branch_manager sees only teammates in their own branch.
+  const isBM = session.role === "branch_manager"
+  const branchFilter = isBM && session.branchId ? `AND ae.branch_id = '${session.branchId}'` : ""
+
   const r = await query(
     `SELECT ae.email, ae.added_by, ae.role, ae.created_at, ae.branch_id, ae.display_name,
             tp.display_name AS profile_name, tp.avatar_url,
@@ -21,14 +25,18 @@ export async function GET(req: NextRequest) {
        FROM allowed_emails ae
        LEFT JOIN branches b ON b.id = ae.branch_id
        LEFT JOIN team_profiles tp ON lower(tp.email) = lower(ae.email)
-      WHERE ae.role != 'developer' ORDER BY ae.created_at DESC`
+      WHERE ae.role != 'developer' ${branchFilter} ORDER BY ae.created_at DESC`
   )
-  const branches = await query(`SELECT id, name, code FROM branches ORDER BY name`)
-  return NextResponse.json({ emails: r.rows, you: session.email, branches: branches.rows })
+  
+  const branches = isBM && session.branchId
+    ? await query(`SELECT id, name, code FROM branches WHERE id = $1 ORDER BY name`, [session.branchId])
+    : await query(`SELECT id, name, code FROM branches ORDER BY name`)
+
+  return NextResponse.json({ emails: r.rows, you: session.email, branches: branches.rows, isBranchManager: isBM })
 }
 
 export async function POST(req: NextRequest) {
-  const session = await requireRole(req, ["admin"])
+  const session = await requireRole(req, ["admin", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   let body: any
@@ -41,14 +49,25 @@ export async function POST(req: NextRequest) {
   if (!EMAIL_RE.test(email) || email.length > 254) {
     return NextResponse.json({ error: "invalid email address" }, { status: 400 })
   }
+
+  const isBM = session.role === "branch_manager"
   let role: Role = VALID_ROLES.includes(body?.role) ? body.role : "agent"
+
+  // Branch managers can only add agents or viewers to their own branch
+  if (isBM) {
+    if (role !== "agent" && role !== "viewer") {
+      return NextResponse.json({ error: "Branch managers can only add Loan Officers and Viewers to their branch." }, { status: 403 })
+    }
+    if (!session.branchId) {
+      return NextResponse.json({ error: "Branch manager session is not pinned to a branch." }, { status: 400 })
+    }
+  }
+
   const displayName = String(body?.displayName || body?.display_name || "").trim()
 
-  // Multi-branch binding: agents/viewers/branch_managers can be pinned to a
-  // branch at invite time. Their session carries that branchId from login on;
-  // they see and touch ONLY that branch's data.
-  let branchId: string | null = null
-  if (body?.branch_id) {
+  // Multi-branch binding
+  let branchId: string | null = isBM ? (session.branchId || null) : null
+  if (!isBM && body?.branch_id) {
     const b = await query(`SELECT id FROM branches WHERE id = $1`, [String(body.branch_id)])
     if (!b.rowCount) return NextResponse.json({ error: "unknown branch" }, { status: 400 })
     branchId = b.rows[0].id
@@ -103,7 +122,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const session = await requireRole(req, ["admin"])
+  const session = await requireRole(req, ["admin", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   let body: any
@@ -116,11 +135,26 @@ export async function PATCH(req: NextRequest) {
   const email = String(body?.email || "").trim().toLowerCase()
   if (!email) return NextResponse.json({ error: "email required" }, { status: 400 })
 
+  const isBM = session.role === "branch_manager"
+  if (isBM) {
+    // Verify target belongs to BM's branch and is an agent or viewer
+    const target = await query(`SELECT role, branch_id FROM allowed_emails WHERE lower(email) = $1`, [email])
+    if (!target.rowCount || target.rows[0].branch_id !== session.branchId) {
+      return NextResponse.json({ error: "Teammate not found in your branch." }, { status: 404 })
+    }
+    if (target.rows[0].role !== "agent" && target.rows[0].role !== "viewer") {
+      return NextResponse.json({ error: "Cannot modify this member." }, { status: 403 })
+    }
+    if (body?.role && body.role !== "agent" && body.role !== "viewer") {
+      return NextResponse.json({ error: "Branch managers can only assign Loan Officer or Viewer roles." }, { status: 403 })
+    }
+  }
+
   const role: Role | undefined = VALID_ROLES.includes(body?.role) ? body.role : undefined
-  const branchId = body?.branch_id !== undefined ? (body.branch_id ? String(body.branch_id) : null) : undefined
+  const branchId = !isBM && body?.branch_id !== undefined ? (body.branch_id ? String(body.branch_id) : null) : undefined
   const displayName = body?.displayName !== undefined ? String(body.displayName).trim() : undefined
 
-  if (role === "branch_manager" && !branchId) {
+  if (role === "branch_manager" && !branchId && !isBM) {
     return NextResponse.json({ error: "branch_manager requires an allotted branch" }, { status: 400 })
   }
 
@@ -159,26 +193,35 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const session = await requireRole(req, ["admin"])
+  const session = await requireRole(req, ["admin", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const email = String(new URL(req.url).searchParams.get("email") || "").trim().toLowerCase()
   if (!EMAIL_RE.test(email)) return NextResponse.json({ error: "invalid email" }, { status: 400 })
 
-  // Safety: a user cannot remove their own access (prevents locking everyone
-  // out one by one), the ADMIN_EMAIL bootstrap account can never be removed,
-  // and some roles are protected from admin removal entirely.
   if (email === session.email) return NextResponse.json({ error: "you cannot remove your own access" }, { status: 400 })
   if (email === (process.env.ADMIN_EMAIL || "").toLowerCase()) {
     return NextResponse.json({ error: "the admin email cannot be removed" }, { status: 400 })
   }
 
   const targetUser = await query(
-    `SELECT role FROM allowed_emails WHERE lower(email) = $1 LIMIT 1`,
+    `SELECT role, branch_id FROM allowed_emails WHERE lower(email) = $1 LIMIT 1`,
     [email]
   )
-  if (targetUser.rows.length > 0 && targetUser.rows[0].role === "developer") {
-    return NextResponse.json({ error: "This account cannot be removed." }, { status: 400 })
+  if (targetUser.rows.length === 0) {
+    return NextResponse.json({ error: "User not found" }, { status: 404 })
+  }
+
+  const targetRole = targetUser.rows[0].role
+  if (targetRole === "developer" || targetRole === "admin") {
+    return NextResponse.json({ error: "This account cannot be removed." }, { status: 403 })
+  }
+
+  const isBM = session.role === "branch_manager"
+  if (isBM) {
+    if (targetUser.rows[0].branch_id !== session.branchId) {
+      return NextResponse.json({ error: "Teammate not in your branch." }, { status: 403 })
+    }
   }
 
   await query(`DELETE FROM allowed_emails WHERE lower(email) = $1`, [email])

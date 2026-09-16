@@ -8,6 +8,7 @@ import { usePolling } from "@/lib/use-poll"
 import { useToast } from "../ui/toast"
 import { Skeleton } from "../ui/skeleton"
 import LeadMemoryModal from "./lead-memory-modal"
+import VoiceDictation from "../ui/voice-dictation"
 
 import { PRODUCT_GROUPS, LOAN_TYPES } from "@/lib/products"
 
@@ -317,14 +318,22 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
         <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--border)" }}>
           {/* Single compact filter row */}
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <div style={{ position: "relative", width: 200 }}>
+            <div style={{ position: "relative", width: 230, display: "flex", alignItems: "center" }}>
               <Search size={13} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
               <input
-                placeholder="Search name, phone or code (RAG-0042)…"
+                placeholder="Search name, phone or code…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                style={{ width: "100%", height: 34, fontSize: 12.5, paddingLeft: 30 }}
+                style={{ width: "100%", height: 34, fontSize: 12.5, paddingLeft: 30, paddingRight: 34 }}
               />
+              <div style={{ position: "absolute", right: 2, top: "50%", transform: "translateY(-50%)" }}>
+                <VoiceDictation
+                  onTranscript={(spoken) => setSearch(prev => (prev ? `${prev} ${spoken}` : spoken))}
+                  size={14}
+                  style={{ width: 28, height: 28, border: "none", background: "transparent" }}
+                  title="Speak to search leads"
+                />
+              </div>
             </div>
             <select value={ageFilter} onChange={(e) => setAgeFilter(e.target.value)} style={{ height: 34, fontSize: 12, width: 110 }}>
               <option value="all">All Ages</option>
@@ -495,7 +504,18 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
             {[["name", "Full Name *"], ["phone", "Phone *"], ["address", "Address"], ["loan_amount", "Loan Amount (₹)"]].map(([k, l]) => (
               <div key={k} style={{ marginBottom: 12 }}>
                 <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>{l}</label>
-                <input value={(form as any)[k]} onChange={(e) => setForm({ ...form, [k]: e.target.value })} />
+                <div style={{ position: "relative" }}>
+                  <input
+                    value={(form as any)[k]}
+                    onChange={(e) => setForm({ ...form, [k]: e.target.value })}
+                    style={{ width: "100%", paddingRight: (k === "name" || k === "address") ? 36 : undefined }}
+                  />
+                  {(k === "name" || k === "address") && (
+                    <div style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)" }}>
+                      <VoiceDictation onTranscript={(t: string) => setForm((prev) => ({ ...prev, [k]: (prev as any)[k] ? `${(prev as any)[k]} ${t}` : t }))} title={`Speak ${l}`} />
+                    </div>
+                  )}
+                </div>
               </div>
             ))}
             <div style={{ marginBottom: 12 }}>
@@ -523,13 +543,18 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
             <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 4 }}>Call {callTarget.name}</div>
             <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16 }}>{callTarget.phone}</div>
             <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>What should Priya talk about? (optional)</label>
-            <textarea
-              value={callInstructions}
-              onChange={(e) => setCallInstructions(e.target.value)}
-              placeholder="e.g. Follow up on his home loan enquiry, mention the 8.4% rate offer"
-              rows={4}
-              style={{ width: "100%", background: "var(--bg-card)", border: "1px solid var(--border)", color: "var(--text-primary)", borderRadius: 8, padding: 10, fontSize: 13, resize: "vertical" }}
-            />
+            <div style={{ position: "relative" }}>
+              <textarea
+                value={callInstructions}
+                onChange={(e) => setCallInstructions(e.target.value)}
+                placeholder="e.g. Follow up on his home loan enquiry, mention the 8.4% rate offer"
+                rows={4}
+                style={{ width: "100%", background: "var(--bg-card)", border: "1px solid var(--border)", color: "var(--text-primary)", borderRadius: 8, padding: "10px 36px 10px 10px", fontSize: 13, resize: "vertical" }}
+              />
+              <div style={{ position: "absolute", right: 8, top: 10 }}>
+                <VoiceDictation onTranscript={(t: string) => setCallInstructions((prev) => prev ? `${prev} ${t}` : t)} title="Dictate call instructions" />
+              </div>
+            </div>
             <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
               <button onClick={() => setCallTarget(null)} style={{ flex: 1, padding: 10, background: "transparent", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text-secondary)" }}>Cancel</button>
               <button onClick={startCall} disabled={calling === callTarget.id} className="btn-primary" style={{ flex: 1, height: 40 }}>
@@ -546,13 +571,18 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
           <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, padding: 28, width: 440 }}>
             <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 4 }}>Message {waTarget.name}</div>
             <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16 }}>{waTarget.whatsapp_number || waTarget.phone}</div>
-            <textarea
-              value={waText}
-              onChange={(e) => setWaText(e.target.value)}
-              placeholder="Type a WhatsApp message…"
-              rows={4}
-              style={{ width: "100%", background: "var(--bg-card)", border: "1px solid var(--border)", color: "var(--text-primary)", borderRadius: 8, padding: 10, fontSize: 13, resize: "vertical" }}
-            />
+            <div style={{ position: "relative" }}>
+              <textarea
+                value={waText}
+                onChange={(e) => setWaText(e.target.value)}
+                placeholder="Type a WhatsApp message…"
+                rows={4}
+                style={{ width: "100%", background: "var(--bg-card)", border: "1px solid var(--border)", color: "var(--text-primary)", borderRadius: 8, padding: "10px 36px 10px 10px", fontSize: 13, resize: "vertical" }}
+              />
+              <div style={{ position: "absolute", right: 8, top: 10 }}>
+                <VoiceDictation onTranscript={(t: string) => setWaText((prev) => prev ? `${prev} ${t}` : t)} title="Dictate WhatsApp message" />
+              </div>
+            </div>
             <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
               <button onClick={() => setWaTarget(null)} style={{ flex: 1, padding: 10, background: "transparent", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text-secondary)" }}>Cancel</button>
               <button onClick={sendWa} disabled={waSending || !waText.trim()} style={{ flex: 1, height: 40, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7, background: "linear-gradient(135deg, var(--accent-green), var(--accent-green))", border: "none", borderRadius: 10, color: "white", fontWeight: 600, fontSize: 13, boxShadow: "0 4px 16px -4px rgba(45,212,160,0.45)", opacity: waSending || !waText.trim() ? 0.5 : 1 }}>

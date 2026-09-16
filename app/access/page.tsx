@@ -5,9 +5,12 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { ArrowLeft, LogOut, Shield, UserCog, Eye, UserPlus, Users, Trash2, Building2, Pencil, Check, X } from "lucide-react"
+import { ArrowLeft, LogOut, Shield, UserCog, Eye, UserPlus, Users, Trash2, Building2, Pencil, Check, X, SlidersHorizontal, Plus } from "lucide-react"
 import { ToastProvider, useToast } from "@/components/ui/toast"
 import { SkeletonList } from "@/components/ui/skeleton"
+import { RoleManagerModal, type RoleDefinition } from "@/components/dashboard/role-manager-modal"
+import { BranchManagerModal, type BranchOption } from "@/components/dashboard/branch-manager-modal"
+import { VoiceDictation } from "@/components/ui/voice-dictation"
 
 type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
 type AllowedEmail = {
@@ -20,17 +23,22 @@ type AllowedEmail = {
   branch_code?: string | null
   display_name?: string | null
 }
-type BranchOption = { id: string; name: string; code: string }
 
-const ROLE_META: Record<"admin" | "agent" | "viewer" | "branch_manager", { label: string; desc: string; color: string; icon: typeof Shield }> = {
+const DEFAULT_ROLE_META: Record<string, { label: string; desc: string; color: string; icon: typeof Shield }> = {
   admin:  { label: "Admin",        desc: "Full access, including this page. Max 2 admins total.",     color: "var(--accent-violet)", icon: Shield },
   agent:  { label: "Loan Officer", desc: "Leads, loans, calls, WhatsApp, analytics — no settings",    color: "var(--accent-cyan)", icon: UserCog },
   viewer: { label: "Viewer",       desc: "Same views as Loan Officer, strictly read-only",            color: "var(--text-muted)", icon: Eye },
   branch_manager: { label: "Branch Manager", desc: "Runs ONE branch — sees only that branch's data",   color: "var(--accent-green)", icon: Building2 },
 }
 
-function RoleBadge({ role }: { role: Role }) {
-  const meta = ROLE_META[role as "admin" | "agent" | "viewer" | "branch_manager"] ?? ROLE_META.agent
+function RoleBadge({ role, customRole }: { role: Role; customRole?: RoleDefinition }) {
+  const meta = customRole
+    ? {
+        label: customRole.label,
+        color: customRole.color,
+        icon: customRole.baseRole === "admin" ? Shield : customRole.baseRole === "branch_manager" ? Building2 : customRole.baseRole === "viewer" ? Eye : UserCog,
+      }
+    : (DEFAULT_ROLE_META[role] ?? DEFAULT_ROLE_META.agent)
   const Icon = meta.icon
   return (
     <span style={{
@@ -52,35 +60,55 @@ function AccessPageInner() {
   const [emails, setEmails] = useState<AllowedEmail[]>([])
   const [you, setYou] = useState("")
   const [branches, setBranches] = useState<BranchOption[]>([])
+  const [roles, setRoles] = useState<RoleDefinition[]>([])
+  const [isRoleModalOpen, setIsRoleModalOpen] = useState(false)
+  const [isBranchModalOpen, setIsBranchModalOpen] = useState(false)
 
   // Add form state
   const [newName, setNewName] = useState("")
   const [newEmail, setNewEmail] = useState("")
-  const [newRole, setNewRole] = useState<"admin" | "agent" | "viewer" | "branch_manager">("agent")
+  const [selectedRoleId, setSelectedRoleId] = useState<string>("agent")
   const [newBranch, setNewBranch] = useState<string>("")
   const [busy, setBusy] = useState(false)
   const [confirmTarget, setConfirmTarget] = useState<string | null>(null)
+  const [isBranchManager, setIsBranchManager] = useState(false)
   const [profiles, setProfiles] = useState<Record<string, { displayName: string | null; avatarUrl: string | null; phone?: string | null; address?: string | null; age?: number | null }>>({})
 
   // Edit modal state
   const [editingMember, setEditingMember] = useState<AllowedEmail | null>(null)
   const [editName, setEditName] = useState("")
-  const [editRole, setEditRole] = useState<Role>("agent")
+  const [editRoleId, setEditRoleId] = useState<string>("agent")
   const [editBranch, setEditBranch] = useState<string>("")
   const [savingEdit, setSavingEdit] = useState(false)
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/allowed-emails")
-      if (res.status === 401) {
+      const [emailRes, rolesRes] = await Promise.all([
+        fetch("/api/allowed-emails"),
+        fetch("/api/roles-config").catch(() => null),
+      ])
+
+      if (emailRes.status === 401) {
         router.replace("/dashboard")
         return
       }
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = await res.json()
+      if (!emailRes.ok) throw new Error(`HTTP ${emailRes.status}`)
+      const data = await emailRes.json()
       setEmails(data.emails || [])
       setYou(data.you || "")
       setBranches(data.branches || [])
+      setIsBranchManager(!!data.isBranchManager)
+      if (data.isBranchManager && data.branches?.[0]?.id) {
+        setNewBranch(data.branches[0].id)
+      }
+
+      if (rolesRes && rolesRes.ok) {
+        const rolesData = await rolesRes.json()
+        if (Array.isArray(rolesData.roles)) {
+          setRoles(rolesData.roles)
+        }
+      }
+
       setLoading(false)
 
       fetch("/api/team").then(async (r) => {
@@ -104,6 +132,17 @@ function AccessPageInner() {
     e.preventDefault()
     const email = newEmail.trim().toLowerCase()
     if (!email) return
+
+    const selectedRoleDef = roles.find(r => r.id === selectedRoleId)
+    const baseRole = selectedRoleDef ? selectedRoleDef.baseRole : (selectedRoleId as Role)
+    const roleTitle = selectedRoleDef?.label || baseRole
+
+    // If custom title is given or custom role is selected, combine or format cleanly
+    let finalDisplayName = newName.trim()
+    if (!finalDisplayName && selectedRoleDef && !selectedRoleDef.isDefault) {
+      finalDisplayName = selectedRoleDef.label
+    }
+
     setBusy(true)
     try {
       const res = await fetch("/api/allowed-emails", {
@@ -111,18 +150,18 @@ function AccessPageInner() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           email,
-          displayName: newName.trim() || undefined,
-          role: newRole,
-          branch_id: newRole === "branch_manager" ? newBranch : newBranch || undefined,
+          displayName: finalDisplayName || undefined,
+          role: baseRole,
+          branch_id: baseRole === "branch_manager" ? newBranch : newBranch || undefined,
         }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || "Failed")
       setNewEmail("")
       setNewName("")
-      setNewRole("agent")
-      setNewBranch("")
-      toast.success(`${newName ? newName : email} added as ${ROLE_META[newRole].label}`)
+      setSelectedRoleId("agent")
+      setNewBranch(isBranchManager && branches?.[0]?.id ? branches[0].id : "")
+      toast.success(`${finalDisplayName ? finalDisplayName : email} added as ${roleTitle}`)
       await load()
     } catch (err: any) {
       toast.error(err.message)
@@ -135,7 +174,8 @@ function AccessPageInner() {
     const profile = profiles[member.email.toLowerCase()]
     setEditingMember(member)
     setEditName(profile?.displayName || member.display_name || "")
-    setEditRole(member.role)
+    // Match to existing role id if possible
+    setEditRoleId(member.role)
     setEditBranch(member.branch_id || "")
   }
 
@@ -143,6 +183,10 @@ function AccessPageInner() {
     e.preventDefault()
     if (!editingMember) return
     setSavingEdit(true)
+
+    const selectedRoleDef = roles.find(r => r.id === editRoleId)
+    const baseRole = selectedRoleDef ? selectedRoleDef.baseRole : (editRoleId as Role)
+
     try {
       const res = await fetch("/api/allowed-emails", {
         method: "PATCH",
@@ -150,7 +194,7 @@ function AccessPageInner() {
         body: JSON.stringify({
           email: editingMember.email,
           displayName: editName.trim(),
-          role: editRole,
+          role: baseRole,
           branch_id: editBranch || null,
         }),
       })
@@ -200,9 +244,14 @@ function AccessPageInner() {
               <Users size={19} strokeWidth={2} />
             </div>
             <div>
-              <h1 style={{ fontSize: 20, fontWeight: 700, letterSpacing: "-0.02em" }}>Team Access & Branch Allotment</h1>
+              <h1 style={{ fontSize: 20, fontWeight: 700, letterSpacing: "-0.02em" }}>
+                {isBranchManager ? "Branch Teammates & Loan Officers" : "Team Access & Branch Allotment"}
+              </h1>
               <p style={{ fontSize: 12.5, color: "var(--text-muted)", marginTop: 1 }}>
-                Allot branches to staff, name team members, and customize permissions{you ? <span> · signed in as <span style={{ color: "var(--text-secondary)" }}>{you}</span></span> : null}
+                {isBranchManager
+                  ? `Manage loan officers and viewers assigned to your branch (${branches[0]?.name || "Branch"})`
+                  : `Allot branches to staff, name team members, and customize permissions`}
+                {you ? <span> · signed in as <span style={{ color: "var(--text-secondary)" }}>{you}</span></span> : null}
               </p>
             </div>
           </div>
@@ -219,18 +268,41 @@ function AccessPageInner() {
         </div>
 
         {/* Role legend */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-secondary)" }}>
+            Available Roles & Permissions ({roles.length || 4})
+          </div>
+          {!isBranchManager && (
+            <button
+              type="button"
+              onClick={() => setIsRoleModalOpen(true)}
+              className="btn-ghost"
+              style={{ fontSize: 12, height: 32, display: "inline-flex", alignItems: "center", gap: 6 }}
+            >
+              <SlidersHorizontal size={13} /> Manage Custom Roles
+            </button>
+          )}
+        </div>
+
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12, marginBottom: 20 }}>
-          {(Object.keys(ROLE_META) as ("admin" | "agent" | "viewer" | "branch_manager")[]).map(r => {
-            const meta = ROLE_META[r]
-            const Icon = meta.icon
+          {(roles.length > 0 ? roles : [
+            { id: "admin", label: "Admin", desc: "Full access, including this page. Max 2 admins total.", color: "var(--accent-violet)", baseRole: "admin" as Role },
+            { id: "agent", label: "Loan Officer", desc: "Leads, loans, calls, WhatsApp, analytics — no settings", color: "var(--accent-cyan)", baseRole: "agent" as Role },
+            { id: "viewer", label: "Viewer", desc: "Same views as Loan Officer, strictly read-only", color: "var(--text-muted)", baseRole: "viewer" as Role },
+            { id: "branch_manager", label: "Branch Manager", desc: "Runs ONE branch — sees only that branch's data", color: "var(--accent-green)", baseRole: "branch_manager" as Role },
+            { id: "branch_admin", label: "Branch Admin", desc: "Administers branch operations and staff for a branch", color: "var(--accent-blue)", baseRole: "branch_manager" as Role },
+          ])
+            .filter(r => !isBranchManager || (r.baseRole === "agent" || r.baseRole === "viewer"))
+            .map(r => {
+            const Icon = r.baseRole === "admin" ? Shield : r.baseRole === "branch_manager" ? Building2 : r.baseRole === "viewer" ? Eye : UserCog
             return (
-              <div key={r} style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: "14px 16px", display: "flex", gap: 12, alignItems: "flex-start" }}>
-                <span style={{ width: 30, height: 30, borderRadius: 8, background: `${meta.color}1c`, border: `1px solid ${meta.color}3d`, display: "inline-flex", alignItems: "center", justifyContent: "center", color: meta.color, flexShrink: 0 }}>
+              <div key={r.id} style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: "14px 16px", display: "flex", gap: 12, alignItems: "flex-start" }}>
+                <span style={{ width: 30, height: 30, borderRadius: 8, background: `${r.color}1c`, border: `1px solid ${r.color}3d`, display: "inline-flex", alignItems: "center", justifyContent: "center", color: r.color, flexShrink: 0 }}>
                   <Icon size={14} strokeWidth={2} />
                 </span>
                 <div>
-                  <div style={{ fontSize: 13.5, fontWeight: 600 }}>{meta.label}</div>
-                  <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2, lineHeight: 1.45 }}>{meta.desc}</div>
+                  <div style={{ fontSize: 13.5, fontWeight: 600 }}>{r.label}</div>
+                  <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2, lineHeight: 1.45 }}>{r.desc}</div>
                 </div>
               </div>
             )
@@ -239,18 +311,47 @@ function AccessPageInner() {
 
         {/* Add teammate */}
         <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: "18px 20px", marginBottom: 20 }}>
-          <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
-            <UserPlus size={15} strokeWidth={2} style={{ color: "var(--text-secondary)" }} />
-            Add Teammate & Allot Branch
+          <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <UserPlus size={15} strokeWidth={2} style={{ color: "var(--text-secondary)" }} />
+              {isBranchManager ? "Add Officer or Viewer to Your Branch" : "Add Teammate & Allot Branch"}
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => setIsRoleModalOpen(true)}
+                className="btn-ghost"
+                style={{ fontSize: 11.5, height: 28, padding: "0 10px", display: "inline-flex", alignItems: "center", gap: 5 }}
+                title="Add, edit, or delete options in the Role dropdown"
+              >
+                <Plus size={12} /> Add / Delete Role
+              </button>
+              {!isBranchManager && (
+                <button
+                  type="button"
+                  onClick={() => setIsBranchModalOpen(true)}
+                  className="btn-ghost"
+                  style={{ fontSize: 11.5, height: 28, padding: "0 10px", display: "inline-flex", alignItems: "center", gap: 5 }}
+                  title="Add or delete branch options in the Branch dropdown"
+                >
+                  <Plus size={12} /> Add / Delete Branch
+                </button>
+              )}
+            </div>
           </div>
-          <form onSubmit={addEmail} style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <input
-              type="text"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              placeholder="Full Name (e.g. Ramesh Kumar)"
-              style={{ flex: "1 1 180px", height: 40 }}
-            />
+          <form onSubmit={addEmail} style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+            <div style={{ position: "relative", flex: "1 1 180px" }}>
+              <input
+                type="text"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                placeholder="Full Name (e.g. Ramesh Kumar)"
+                style={{ width: "100%", height: 40, paddingRight: 36 }}
+              />
+              <div style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)" }}>
+                <VoiceDictation onTranscript={(t: string) => setNewName((prev) => (prev ? `${prev} ${t}` : t))} title="Dictate name" />
+              </div>
+            </div>
             <input
               type="email"
               required
@@ -259,38 +360,95 @@ function AccessPageInner() {
               placeholder="teammate@gmail.com"
               style={{ flex: "1 1 200px", height: 40 }}
             />
-            <select
-              value={newRole}
-              onChange={(e) => setNewRole(e.target.value as "admin" | "agent" | "viewer" | "branch_manager")}
-              style={{ width: 160, height: 40 }}
-            >
-              <option value="agent">Loan Officer</option>
-              <option value="viewer">Viewer</option>
-              <option value="branch_manager">Branch Manager</option>
-              <option value="admin">Admin</option>
-            </select>
-            <select
-              value={newBranch}
-              onChange={(e) => setNewBranch(e.target.value)}
-              style={{ width: 180, height: 40 }}
-              title="Allot a branch to this teammate"
-            >
-              <option value="">All Branches / HQ</option>
-              {branches.map((b) => <option key={b.id} value={b.id}>{b.name} ({b.code})</option>)}
-            </select>
+            
+            {/* Role dropdown with + trigger */}
+            <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+              <select
+                value={selectedRoleId}
+                onChange={(e) => setSelectedRoleId(e.target.value)}
+                style={{ width: 165, height: 40 }}
+                title="Select role or job title"
+              >
+                {roles.filter(r => !isBranchManager || (r.baseRole === "agent" || r.baseRole === "viewer")).length > 0 ? (
+                  roles
+                    .filter(r => !isBranchManager || (r.baseRole === "agent" || r.baseRole === "viewer"))
+                    .map(r => (
+                      <option key={r.id} value={r.id}>
+                        {r.label}
+                      </option>
+                    ))
+                ) : (
+                  <>
+                    <option value="agent">Loan Officer</option>
+                    <option value="viewer">Viewer</option>
+                    {!isBranchManager && <option value="branch_manager">Branch Manager</option>}
+                    {!isBranchManager && <option value="admin">Admin</option>}
+                  </>
+                )}
+              </select>
+              <button
+                type="button"
+                onClick={() => setIsRoleModalOpen(true)}
+                title="Add new role or delete existing roles"
+                className="btn-ghost"
+                style={{ height: 40, width: 36, padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+              >
+                <Plus size={15} />
+              </button>
+            </div>
+
+            {/* Branch dropdown or fixed branch badge */}
+            {!isBranchManager ? (
+              <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                <select
+                  value={newBranch}
+                  onChange={(e) => setNewBranch(e.target.value)}
+                  style={{ width: 175, height: 40 }}
+                  title="Allot a branch to this teammate"
+                >
+                  <option value="">All Branches / HQ</option>
+                  {branches.map((b) => <option key={b.id} value={b.id}>{b.name} ({b.code})</option>)}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => setIsBranchModalOpen(true)}
+                  title="Add or delete branches"
+                  className="btn-ghost"
+                  style={{ height: 40, width: 36, padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                >
+                  <Plus size={15} />
+                </button>
+              </div>
+            ) : (
+              <div
+                style={{
+                  height: 40, padding: "0 14px", display: "inline-flex", alignItems: "center", gap: 6,
+                  borderRadius: 10, border: "1px solid var(--border)", background: "var(--bg-secondary)",
+                  fontSize: 12.5, color: "var(--accent-green)", fontWeight: 600,
+                }}
+              >
+                <Building2 size={13} strokeWidth={2.2} />
+                <span>{branches[0]?.name || "Your Branch"}</span>
+              </div>
+            )}
+
             <button type="submit" disabled={busy} className="btn-primary" style={{ height: 40, padding: "0 22px", opacity: busy ? 0.6 : 1 }}>
               <UserPlus size={14} strokeWidth={2.2} /> Add +
             </button>
           </form>
           <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 10 }}>
-            Set their name as required, assign their role, and allot them to a specific branch so they only manage leads and calls for that branch.
+            {isBranchManager
+              ? "Add loan officers and staff members directly to your branch. They will only see leads, calls, and applications for this branch."
+              : "Set their name as required, assign their role, and allot them to a specific branch so they only manage leads and calls for that branch. Click the + next to either dropdown to add or remove choices."}
           </div>
         </div>
 
         {/* Team list */}
         <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
           <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div style={{ fontWeight: 600, fontSize: 14 }}>Team Members & Branch Allotments</div>
+            <div style={{ fontWeight: 600, fontSize: 14 }}>
+              {isBranchManager ? `Branch Members (${branches[0]?.name || "This Branch"})` : "Team Members & Branch Allotments"}
+            </div>
             <span style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 6, padding: "3px 10px", fontSize: 12, color: "var(--text-muted)" }}>
               {emails.length} {emails.length === 1 ? "person" : "people"}
             </span>
@@ -308,6 +466,7 @@ function AccessPageInner() {
           {!loading && emails.map((e) => {
             const profile = profiles[e.email.toLowerCase()]
             const displayName = profile?.displayName || e.display_name
+            const customRole = roles.find(r => r.baseRole === e.role && (displayName?.toLowerCase().includes(r.label.toLowerCase()) || r.id === e.role))
             return (
             <div key={e.email} style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 20px", borderBottom: "1px solid var(--border-light)" }}>
               {profile?.avatarUrl ? (
@@ -336,7 +495,7 @@ function AccessPageInner() {
                 <span>{e.branch_name ? `${e.branch_name} (${e.branch_code})` : "All Branches (HQ)"}</span>
               </div>
 
-              <RoleBadge role={e.role} />
+              <RoleBadge role={e.role} customRole={customRole} />
 
               <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                 {/* Edit member button */}
@@ -425,49 +584,105 @@ function AccessPageInner() {
 
               <div>
                 <label style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", display: "block", marginBottom: 6 }}>
-                  Custom Name / Title
+                  Custom Name / Job Title
                 </label>
-                <input
-                  type="text"
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  placeholder="e.g. Ramesh Kumar (Senior Loan Manager)"
-                  style={{ width: "100%", height: 38 }}
-                />
+                <div style={{ position: "relative" }}>
+                  <input
+                    type="text"
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    placeholder="e.g. Ramesh Kumar (Senior Loan Manager)"
+                    style={{ width: "100%", height: 38, paddingRight: 36 }}
+                  />
+                  <div style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)" }}>
+                    <VoiceDictation onTranscript={(t: string) => setEditName((prev) => (prev ? `${prev} ${t}` : t))} title="Dictate name" />
+                  </div>
+                </div>
               </div>
 
               <div>
-                <label style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", display: "block", marginBottom: 6 }}>
-                  Role & Permissions
-                </label>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase" }}>
+                    Role & Permissions
+                  </label>
+                  {!isBranchManager && (
+                    <button
+                      type="button"
+                      onClick={() => setIsRoleModalOpen(true)}
+                      style={{ background: "none", border: "none", color: "var(--accent-cyan)", fontSize: 11, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 3 }}
+                    >
+                      <Plus size={11} /> Manage Roles
+                    </button>
+                  )}
+                </div>
                 <select
-                  value={editRole}
-                  onChange={(e) => setEditRole(e.target.value as Role)}
+                  value={editRoleId}
+                  onChange={(e) => setEditRoleId(e.target.value)}
                   style={{ width: "100%", height: 38 }}
                 >
-                  <option value="agent">Loan Officer</option>
-                  <option value="viewer">Viewer</option>
-                  <option value="branch_manager">Branch Manager</option>
-                  <option value="admin">Admin</option>
+                  {roles.filter(r => !isBranchManager || (r.baseRole === "agent" || r.baseRole === "viewer")).length > 0 ? (
+                    roles
+                      .filter(r => !isBranchManager || (r.baseRole === "agent" || r.baseRole === "viewer"))
+                      .map(r => (
+                        <option key={r.id} value={r.id}>
+                          {r.label} ({r.baseRole})
+                        </option>
+                      ))
+                  ) : (
+                    <>
+                      <option value="agent">Loan Officer</option>
+                      <option value="viewer">Viewer</option>
+                      {!isBranchManager && (
+                        <>
+                          <option value="branch_manager">Branch Manager</option>
+                          <option value="admin">Admin</option>
+                        </>
+                      )}
+                    </>
+                  )}
                 </select>
               </div>
 
               <div>
-                <label style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", display: "block", marginBottom: 6 }}>
-                  Allotted Branch
-                </label>
-                <select
-                  value={editBranch}
-                  onChange={(e) => setEditBranch(e.target.value)}
-                  style={{ width: "100%", height: 38 }}
-                >
-                  <option value="">All Branches / HQ Access</option>
-                  {branches.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.name} ({b.code})
-                    </option>
-                  ))}
-                </select>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase" }}>
+                    Allotted Branch
+                  </label>
+                  {!isBranchManager && (
+                    <button
+                      type="button"
+                      onClick={() => setIsBranchModalOpen(true)}
+                      style={{ background: "none", border: "none", color: "var(--accent-green)", fontSize: 11, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 3 }}
+                    >
+                      <Plus size={11} /> Manage Branches
+                    </button>
+                  )}
+                </div>
+                {isBranchManager ? (
+                  <div
+                    style={{
+                      height: 38, padding: "0 12px", display: "flex", alignItems: "center", gap: 6,
+                      borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-secondary)",
+                      fontSize: 12.5, color: "var(--accent-green)", fontWeight: 600,
+                    }}
+                  >
+                    <Building2 size={13} strokeWidth={2.2} />
+                    <span>{branches[0]?.name || "Your Branch"}</span>
+                  </div>
+                ) : (
+                  <select
+                    value={editBranch}
+                    onChange={(e) => setEditBranch(e.target.value)}
+                    style={{ width: "100%", height: 38 }}
+                  >
+                    <option value="">All Branches / HQ Access</option>
+                    {branches.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name} ({b.code})
+                      </option>
+                    ))}
+                  </select>
+                )}
                 <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
                   Pinning an officer or manager to a branch scopes all leads, calls, WhatsApp, and loan applications to that branch.
                 </div>
@@ -495,6 +710,30 @@ function AccessPageInner() {
           </div>
         </div>
       )}
+
+      {/* Role Manager Modal */}
+      <RoleManagerModal
+        isOpen={isRoleModalOpen}
+        onClose={() => setIsRoleModalOpen(false)}
+        roles={roles}
+        isBranchManager={isBranchManager}
+        onRolesUpdated={(updated) => {
+          setRoles(updated)
+          if (!updated.some(r => r.id === selectedRoleId)) {
+            setSelectedRoleId("agent")
+          }
+        }}
+      />
+
+      {/* Branch Manager Modal */}
+      <BranchManagerModal
+        isOpen={isBranchModalOpen}
+        onClose={() => setIsBranchModalOpen(false)}
+        branches={branches}
+        onBranchesUpdated={() => {
+          load()
+        }}
+      />
     </main>
   )
 }
