@@ -3,7 +3,8 @@
 
 $ProjectDir = if ($PSScriptRoot) { $PSScriptRoot } elseif ($MyInvocation.MyCommand.Path) { Split-Path -Parent $MyInvocation.MyCommand.Path } else { (Get-Location).Path }
 Set-Location $ProjectDir
-$FFmpegBin = "C:\Users\Hello\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg.Essentials_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-8.1.1-essentials_build\bin"
+$ffmpegCmd = Get-Command ffmpeg -ErrorAction SilentlyContinue
+$FFmpegBin = if ($ffmpegCmd) { Split-Path -Parent $ffmpegCmd.Source } else { "C:\Users\Lenovo\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-8.1.2-full_build\bin" }
 $env:PATH = "$ProjectDir;$FFmpegBin;" + $env:PATH
 
 Write-Host ""

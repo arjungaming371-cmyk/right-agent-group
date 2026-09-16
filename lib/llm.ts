@@ -335,12 +335,15 @@ function groqBody(messages: ChatMessage[], opts: CompletionOpts, stream: boolean
   }
   const modelName = opts.model || GROQ_MODEL
   const isReasoning = modelName.includes("gpt-oss") || modelName.includes("qwen")
+  const baseTokens = opts.numPredict ?? 300
+  const maxTokens = isReasoning ? Math.max(baseTokens + 500, 800) : baseTokens
   return JSON.stringify({
     model: modelName,
     messages,
     stream,
     temperature: opts.temperature ?? 0.6,
-    max_tokens: opts.numPredict ?? 300,
+    max_tokens: maxTokens,
+    ...(isReasoning ? { reasoning_format: "hidden" } : {}),
     // Groq's JSON mode requires the word "JSON" in a message — all our JSON
     // prompts start with "Return ONLY valid JSON", so this is safe to map.
     ...(opts.json && !isReasoning ? { response_format: { type: "json_object" } } : {}),
