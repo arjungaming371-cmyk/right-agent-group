@@ -14,16 +14,32 @@ export async function GET(req: Request) {
 
   const results: Record<string, string> = {}
 
+  const sttProvider = (process.env.STT_PROVIDER || "local").toLowerCase()
+  const ttsCallProvider = (process.env.TTS_CALL_PROVIDER || "edge").toLowerCase()
+  const llmProvider = (process.env.LLM_PROVIDER || "groq").toLowerCase()
+
   results.PG_HOST       = process.env.PG_HOST       ?? "❌ NOT SET"
   results.PG_DATABASE   = process.env.PG_DATABASE   ?? "❌ NOT SET"
-  results.GROQ_API_KEY  = process.env.GROQ_API_KEY ? "✅ set" : "❌ NOT SET (AI brain will fail)"
-  results.GROQ_MODEL    = process.env.GROQ_MODEL   ?? "llama-3.3-70b-versatile (default)"
+  results.LLM_PROVIDER  = llmProvider
+  results.GROQ_API_KEY  = llmProvider === "sarvam"
+    ? (process.env.GROQ_API_KEY ? "✅ set (unused — LLM_PROVIDER=sarvam)" : "— not set (fine, LLM_PROVIDER=sarvam)")
+    : (process.env.GROQ_API_KEY ? "✅ set" : "❌ NOT SET (AI brain will fail)")
+  results.SARVAM_API_KEY = process.env.SARVAM_API_KEY
+    ? (sttProvider === "sarvam" || ttsCallProvider === "sarvam" || llmProvider === "sarvam" ? "✅ set" : "✅ set (unused by current providers)")
+    : (sttProvider === "sarvam" || ttsCallProvider === "sarvam" || llmProvider === "sarvam" ? "❌ NOT SET (selected provider will fail)" : "— not set (fine, all providers local/groq)")
+  results.GROQ_MODEL    = process.env.GROQ_MODEL   ?? "openai/gpt-oss-120b (default)"
   results.CALL_PROVIDER = "exotel"
   results.EXOTEL_SID    = process.env.EXOTEL_SID ? "✅ set" : "❌ NOT SET"
   results.EXOTEL_CALLER = process.env.EXOTEL_CALLER_ID ?? "❌ NOT SET"
   results.APP_URL       = process.env.NEXT_PUBLIC_APP_URL ?? "❌ NOT SET"
-  results.EDGE_TTS      = "free Microsoft neural voices (no key needed)"
-  results.STT_SERVICE   = process.env.STT_SERVICE_URL ?? "http://127.0.0.1:3003 (default)"
+  results.CALL_STT      = sttProvider === "sarvam"
+    ? `sarvam cloud (${process.env.SARVAM_STT_MODEL ?? "saaras:v4"}, mode=${process.env.SARVAM_STT_MODE ?? "translit"}) — no local STT service needed`
+    : `local Whisper @ ${process.env.STT_SERVICE_URL ?? "http://127.0.0.1:3003 (default)"}`
+  results.CALL_TTS      = ttsCallProvider === "sarvam"
+    ? `sarvam cloud (${process.env.SARVAM_TTS_MODEL ?? "bulbul:v3"}, speaker=${process.env.SARVAM_TTS_SPEAKER ?? "priya"}) — no local TTS service needed`
+    : ttsCallProvider === "cartesia"
+      ? `cartesia cloud (${process.env.CARTESIA_MODEL ?? "sonic-3.6"}, voice=${process.env.CARTESIA_VOICE_ID ? "configured" : "❌ CARTESIA_VOICE_ID NOT SET"}) — no local TTS service needed`
+      : `local Edge TTS @ ${process.env.TTS_SERVICE_URL ?? "http://127.0.0.1:3004 (default)"} (free Microsoft neural voices)`
   results.EXOTEL_FLOW   = process.env.EXOTEL_FLOW_APP_ID ? "✅ set" : "❌ NOT SET (outbound calls will fail)"
   results.WHATSAPP_API  = process.env.WHATSAPP_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID ? "✅ Cloud API configured" : "❌ WHATSAPP_TOKEN / WHATSAPP_PHONE_NUMBER_ID NOT SET"
   results.INTERNAL_KEY  = process.env.WHATSAPP_SERVICE_KEY ? "✅ key set" : "❌ WHATSAPP_SERVICE_KEY NOT SET (voicebot/STT will reject requests)"
@@ -34,22 +50,22 @@ export async function GET(req: Request) {
   const dbHealth = await checkDbHealth()
   results.postgresql = dbHealth.ok ? `✅ ${dbHealth.message}` : `❌ ${dbHealth.message}`
 
-  // Test Groq
+  // Test Groq / Sarvam LLM
   const llmHealth = await checkLLMHealth()
-  results.groq = llmHealth.ok ? `✅ ${llmHealth.message}` : `❌ ${llmHealth.message}`
+  results.llm = llmHealth.ok ? `✅ ${llmHealth.message}` : `❌ ${llmHealth.message}`
 
-  // Test Groq generation
+  // Test LLM generation
   if (llmHealth.ok) {
     try {
       const { chatWithLLM } = await import("@/lib/llm")
       const reply = await chatWithLLM([{ role: "user", content: "Say: Hello I am Priya" }], "english")
-      results.groq_test = `✅ Working: "${reply.slice(0, 60)}"`
+      results.llm_test = `✅ Working: "${reply.slice(0, 60)}"`
     } catch (e: any) {
-      results.groq_test = `❌ ${e.message}`
+      results.llm_test = `❌ ${e.message}`
     }
   }
 
-  // Test Edge TTS
+  // Test TTS (provider-selectable: edge | sarvam | cartesia | elevenlabs)
   const ttsHealth = await checkTtsHealth()
   results.tts = ttsHealth.ok ? `✅ ${ttsHealth.message}` : `❌ ${ttsHealth.message}`
 

@@ -2,7 +2,7 @@
 ### From a blank server to a live AI calling system, step by step
 
 **What you need before starting:**
-- A server (client's own machine or VPS) with Ubuntu 22.04 / 24.04, minimum 16GB RAM, an NVIDIA GPU (**recommended** — speech recognition (Whisper) is much faster with one; Priya's voice (Edge TTS) doesn't need a GPU at all), and 40GB free disk
+- A server (client's own machine or VPS) with Ubuntu 22.04 / 24.04, minimum 16GB RAM, an NVIDIA GPU (**recommended** for the DEFAULT local voice stack — speech recognition (Whisper) is much faster with one; Priya's voice (Edge TTS) doesn't need a GPU at all), and 40GB free disk. **Going cloud instead?** With `STT_PROVIDER=sarvam` + a cloud `TTS_CALL_PROVIDER` (see CLOUD-VOICE-GUIDE.md) neither the GPU nor the 16GB RAM applies — a small 2–4GB instance runs the whole system, since the Python voice services are skipped entirely
 - A domain name pointed at the server's IP (e.g. `console.rightgroupeagent.com` → A record)
 - An Exotel account with an ExoPhone number and API access
 - A Google account (for creating the login credentials)
@@ -168,7 +168,15 @@ pm2 start npm --name web -- start
 
 ---
 
-## STEP 8 — Start the three helper services
+## STEP 8 — Start the helper services
+
+> **Cloud voice shortcut (AWS / no GPU):** before this step, set
+> `STT_PROVIDER=sarvam` and `TTS_CALL_PROVIDER=sarvam` (or `cartesia`) in
+> `.env` — then **skip the STT and TTS services below entirely**. The
+> voicebot transcribes and synthesizes through the cloud APIs; no Python,
+> no venvs, no ~3GB model, no GPU. Full comparison, costs and knobs:
+> **CLOUD-VOICE-GUIDE.md**. The local-services path below remains the free
+> default and works exactly as before.
 
 **WhatsApp** — official Meta Cloud API: there is NO local WhatsApp service and NO QR
 scan anymore. Follow **SETUP-GUIDE-CLOUD-API.md** to get the 4 Meta values into `.env`

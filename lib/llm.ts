@@ -1,18 +1,47 @@
-// Priya's brain — Groq API (llama-3.3-70b, streaming). Job on calls: build
-// trust fast, handle objections, and collect name + address + WhatsApp
-// number, then hand off to the WhatsApp form link.
+// Priya's brain — Groq API (llama-3.3-70b / gpt-oss, streaming) by default,
+// with an optional Sarvam-105B path for fully-Sarvam deployments.
+// Job on calls: build trust fast, handle objections, and collect name +
+// address + WhatsApp number, then hand off to the WhatsApp form link.
+//
+//   LLM_PROVIDER=groq    (default) api.groq.com — free tier, fastest tokens
+//   LLM_PROVIDER=sarvam            api.sarvam.ai/v1 — OpenAI-compatible chat
+//                                  completions. sarvam-105b-conversations is
+//                                  post-trained for real-time dialogue and
+//                                  voice-agent workloads, and handles Indic
+//                                  scripts + code-mixed text natively. Every
+//                                  JSON-mode utility call (lead extraction,
+//                                  Lead Brain, prompt tuner) runs on it too.
 
 export type Language = "english" | "hindi" | "telugu"
 
 import { DEFAULT_SCRIPTS as SHARED_DEFAULT_SCRIPTS } from "./default-scripts"
+
+const LLM_PROVIDER = (process.env.LLM_PROVIDER || "groq").toLowerCase()
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY || ""
 const GROQ_URL = (process.env.GROQ_URL || "https://api.groq.com/openai/v1").replace(/\/$/, "")
 const GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b"
 const GROQ_UTILITY_MODEL = process.env.GROQ_UTILITY_MODEL || "openai/gpt-oss-20b"
 
-console.log("GROQ_MODEL in llm.ts resolved to:", GROQ_MODEL)
-console.log("GROQ_UTILITY_MODEL in llm.ts resolved to:", GROQ_UTILITY_MODEL)
+// Sarvam LLM (used when LLM_PROVIDER=sarvam). Auth is the api-subscription-key
+// header; Authorization: Bearer is ALSO accepted (useful for OpenAI-compatible
+// tooling) so both are sent. reasoning_effort is DISABLED by default: thinking
+// mode is on by default for sarvam-105b, reasoning tokens bill as completion
+// tokens, and a voice agent cannot wait them out. Set SARVAM_REASONING_EFFORT
+// to low/medium/high to re-enable it for non-call workloads.
+const SARVAM_API_KEY = (process.env.SARVAM_API_KEY || "").trim()
+const SARVAM_LLM_URL = (process.env.SARVAM_LLM_URL || "https://api.sarvam.ai/v1").replace(/\/$/, "")
+const SARVAM_LLM_MODEL = process.env.SARVAM_LLM_MODEL || "sarvam-105b-conversations"
+const SARVAM_LLM_UTILITY_MODEL = process.env.SARVAM_LLM_UTILITY_MODEL || SARVAM_LLM_MODEL
+const SARVAM_REASONING_EFFORT = (process.env.SARVAM_REASONING_EFFORT || "").trim().toLowerCase()
+
+console.log(`LLM provider: ${LLM_PROVIDER}`)
+if (LLM_PROVIDER === "sarvam") {
+  console.log("SARVAM_LLM_MODEL in llm.ts resolved to:", SARVAM_LLM_MODEL)
+} else {
+  console.log("GROQ_MODEL in llm.ts resolved to:", GROQ_MODEL)
+  console.log("GROQ_UTILITY_MODEL in llm.ts resolved to:", GROQ_UTILITY_MODEL)
+}
 
 /**
  * Whether it's safe to spend one extra small completion call mid-turn
@@ -251,6 +280,23 @@ type CompletionOpts = {
 }
 
 function groqBody(messages: ChatMessage[], opts: CompletionOpts, stream: boolean) {
+  if (LLM_PROVIDER === "sarvam") {
+    return JSON.stringify({
+      model: opts.model === GROQ_UTILITY_MODEL ? SARVAM_LLM_UTILITY_MODEL
+        : opts.model || SARVAM_LLM_MODEL,
+      messages,
+      stream,
+      temperature: opts.temperature ?? 0.6,
+      max_tokens: opts.numPredict ?? 300,
+      // Voice-agent default: reasoning OFF. When explicitly re-enabled via
+      // env, skip JSON mode — reasoning tokens can eat the whole budget
+      // before the JSON ever starts (same guard as the reasoning models above).
+      ...(SARVAM_REASONING_EFFORT
+        ? { reasoning_effort: SARVAM_REASONING_EFFORT }
+        : { reasoning_effort: null }),
+      ...(opts.json && !SARVAM_REASONING_EFFORT ? { response_format: { type: "json_object" } } : {}),
+    })
+  }
   const modelName = opts.model || GROQ_MODEL
   const isReasoning = modelName.includes("gpt-oss") || modelName.includes("qwen")
   return JSON.stringify({
@@ -265,38 +311,61 @@ function groqBody(messages: ChatMessage[], opts: CompletionOpts, stream: boolean
   })
 }
 
+// Sarvam's chat endpoint is OpenAI-compatible — the SAME request/stream
+// parsers work for both providers; only the URL, auth headers, and body
+// tweaks differ (see groqBody above).
 const GROQ_HEADERS = { "Content-Type": "application/json", Authorization: `Bearer ${GROQ_API_KEY}` }
+const SARVAM_HEADERS = {
+  "Content-Type": "application/json",
+  "api-subscription-key": SARVAM_API_KEY,
+  Authorization: `Bearer ${SARVAM_API_KEY}`,
+}
 
-function assertGroqConfigured(): void {
+function llmEndpoint(): string {
+  return LLM_PROVIDER === "sarvam" ? `${SARVAM_LLM_URL}/chat/completions` : `${GROQ_URL}/chat/completions`
+}
+
+function llmHeaders(): Record<string, string> {
+  return LLM_PROVIDER === "sarvam" ? SARVAM_HEADERS : GROQ_HEADERS
+}
+
+function assertLlmConfigured(): void {
+  if (LLM_PROVIDER === "sarvam") {
+    if (!SARVAM_API_KEY) throw new Error("LLM_PROVIDER=sarvam but SARVAM_API_KEY is not set — the AI brain cannot run without it")
+    return
+  }
   if (!GROQ_API_KEY) throw new Error("GROQ_API_KEY is not set — the AI brain cannot run without it")
 }
 
+// Back-compat alias — used by call sites that predate the provider switch.
+const assertGroqConfigured = assertLlmConfigured
+
 async function groqChatRequest(messages: ChatMessage[], opts: CompletionOpts, signal: AbortSignal): Promise<string> {
-  const res = await fetch(`${GROQ_URL}/chat/completions`, {
+  const res = await fetch(llmEndpoint(), {
     method: "POST",
-    headers: GROQ_HEADERS,
+    headers: llmHeaders(),
     signal,
     body: groqBody(messages, opts, false),
   })
-  if (!res.ok) throw new Error(`Groq HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`)
+  if (!res.ok) throw new Error(`${LLM_PROVIDER} HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`)
   const data = await res.json()
   return data?.choices?.[0]?.message?.content || ""
 }
 
-/** Streaming Groq completion (SSE). Returns full text; deltas go to onChunk. */
+/** Streaming completion (SSE) — Groq AND Sarvam are OpenAI-compatible. */
 async function groqChatStream(
   messages: ChatMessage[],
   opts: CompletionOpts,
   signal: AbortSignal,
   onChunk: (delta: string) => void
 ): Promise<string> {
-  const res = await fetch(`${GROQ_URL}/chat/completions`, {
+  const res = await fetch(llmEndpoint(), {
     method: "POST",
-    headers: GROQ_HEADERS,
+    headers: llmHeaders(),
     signal,
     body: groqBody(messages, opts, true),
   })
-  if (!res.ok || !res.body) throw new Error(`Groq HTTP ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`)
+  if (!res.ok || !res.body) throw new Error(`${LLM_PROVIDER} HTTP ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`)
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ""
@@ -972,8 +1041,48 @@ export function detectLanguage(text: string): Language {
  * GROQ_UTILITY_MODEL would otherwise stay invisible until a lead extraction
  * or Lead Brain run silently started failing in the background, which is
  * exactly the kind of breakage nobody notices for a week.
+ *
+ * Sarvam has no per-model GET /models endpoint, so both models are verified
+ * with one tiny max_tokens=1 chat completion instead — that also proves the
+ * key, the endpoint, AND that reasoning-off mode is accepted.
  */
 export async function checkLLMHealth(): Promise<{ ok: boolean; message: string }> {
+  if (LLM_PROVIDER === "sarvam") {
+    if (!SARVAM_API_KEY) return { ok: false, message: "LLM_PROVIDER=sarvam but SARVAM_API_KEY is not set" }
+    const models = Array.from(new Set([SARVAM_LLM_MODEL, SARVAM_LLM_UTILITY_MODEL]))
+    try {
+      const results = await Promise.all(
+        models.map(async (model) => {
+          try {
+            const res = await fetch(`${SARVAM_LLM_URL}/chat/completions`, {
+              method: "POST",
+              headers: SARVAM_HEADERS,
+              signal: AbortSignal.timeout(15000),
+              body: JSON.stringify({
+                model,
+                messages: [{ role: "user", content: "OK" }],
+                max_tokens: 1,
+                reasoning_effort: null,
+              }),
+            })
+            return { model, ok: res.ok, status: res.status }
+          } catch (e: any) {
+            return { model, ok: false, status: 0, error: e.message }
+          }
+        })
+      )
+      const failed = results.filter((r) => !r.ok)
+      if (failed.length === 0) return { ok: true, message: `Sarvam ready with ${models.join(" + ")}` }
+      return {
+        ok: false,
+        message: failed.map((f) => `${f.model}: ${f.error || `HTTP ${f.status}`}`).join("; ") +
+          " — check SARVAM_API_KEY / SARVAM_LLM_MODEL",
+      }
+    } catch (e: any) {
+      return { ok: false, message: `Cannot reach Sarvam: ${e.message}` }
+    }
+  }
+
   if (!GROQ_API_KEY) return { ok: false, message: "GROQ_API_KEY is not set" }
   const models = Array.from(new Set([GROQ_MODEL, GROQ_UTILITY_MODEL]))
   try {

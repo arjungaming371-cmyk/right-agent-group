@@ -4,11 +4,24 @@
 // caller's audio as base64 PCM (16-bit, 8kHz, mono). We run the full voice
 // pipeline ourselves:
 //
-//   caller audio → silence-based endpointing → STT (self-hosted Whisper)
+//   caller audio → silence-based endpointing → STT
 //     → Next.js /api/calls/turn (Groq = Priya's brain, DB, WhatsApp link)
-//     → TTS (self-hosted Edge TTS, server/tts-service — free Microsoft
-//       neural voices, one per language, no GPU/API key needed)
-//     → downsample to 8kHz PCM → streamed back to the caller.
+//     → TTS → telephony filter chain → downsample to 8kHz PCM → caller.
+//
+// STT and TTS are provider-selectable (see server/voice-providers.js):
+//
+//   STT_PROVIDER=local   (default)  self-hosted Whisper, server/stt-service
+//   STT_PROVIDER=sarvam             Sarvam Saaras cloud STT — mode=translit
+//                                   returns Roman Tenglish/Hinglish directly
+//   TTS_CALL_PROVIDER=edge  (default) self-hosted Edge TTS, server/tts-service
+//   TTS_CALL_PROVIDER=sarvam        Sarvam Bulbul v3 cloud TTS
+//   TTS_CALL_PROVIDER=cartesia      Cartesia Sonic cloud TTS
+//
+// Cloud TTS audio goes through the SAME ffmpeg telephony chain and cache as
+// the local service — loudness normalization is what carries the voice on a
+// phone line, and it must not depend on where synthesis happened. The cloud
+// providers need NO Python services, NO GPU, and NO model downloads: on AWS
+// the stt-service/tts-service venvs can be skipped entirely.
 //
 // Exotel setup: Voicebot applet URL = wss://YOUR-DOMAIN/voicebot
 // (nginx proxies /voicebot → ws://127.0.0.1:3002). Set VOICEBOT_WS_KEY in
@@ -23,6 +36,7 @@ require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") }
 const crypto = require("crypto")
 const { WebSocketServer } = require("ws")
 const { spawn } = require("child_process")
+const voiceProviders = require("./voice-providers")
 
 const PORT = parseInt(process.env.VOICEBOT_PORT || "3002")
 // APP_INTERNAL_URL first: the app runs on the same machine, and going through
@@ -34,6 +48,16 @@ const STT_URL = process.env.STT_URL || process.env.STT_SERVICE_URL || "http://12
 
 if (!API_KEY) {
   console.error("FATAL: WHATSAPP_SERVICE_KEY not set — the voicebot cannot authenticate to the app.")
+  process.exit(1)
+}
+
+// Cloud voice providers need their keys present NOW, not on call #1 — a
+// missing Sarvam key would otherwise surface as mid-call STT/TTS errors with
+// the caller already on the line. Same fail-fast contract as the API_KEY
+// check above.
+const _providerErrors = voiceProviders.validateConfig()
+if (_providerErrors.length) {
+  for (const err of _providerErrors) console.error("FATAL: " + err)
   process.exit(1)
 }
 
@@ -105,7 +129,7 @@ const ECHO_PROBE = (process.env.VOICEBOT_ECHO_PROBE || "0").trim() === "1"
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
-// ---------- STT: self-hosted faster-whisper (server/stt-service.py) ----------
+// ---------- STT: self-hosted faster-whisper OR Sarvam cloud (see voice-providers.js) ----------
 function pcmToWav(pcm) {
   const header = Buffer.alloc(44)
   header.write("RIFF", 0)
@@ -134,6 +158,13 @@ function pcmToWav(pcm) {
 // speech into Telugu script and lock the call.
 const STT_TIMEOUT_MS = parseInt(process.env.VOICEBOT_STT_TIMEOUT_MS || "10000")
 async function speechToText(pcm, language) {
+  // Cloud provider path (STT_PROVIDER=sarvam). The providers module owns the
+  // full contract — returns the same {text, lowConfidence} shape as the local
+  // service, so endUtterance() cannot tell the difference.
+  const cloud = await voiceProviders.transcribe(pcmToWav(pcm), language)
+  if (cloud) return cloud
+
+  // Local Whisper path (STT_PROVIDER=local, the default).
   const t0 = Date.now()
   const res = await fetch(`${STT_URL}/transcribe?language=${encodeURIComponent(language)}`, {
     method: "POST",
@@ -188,10 +219,17 @@ const START_FALLBACK_PHRASE = {
   hindi: "नमस्ते! मैं राइट एजेंट ग्रुप से बोल रही हूँ।",
 }
 
-// ---------- TTS: server/tts-service — Edge TTS, native Telugu/Hindi voices + English for loanwords ----------
+// ---------- TTS: server/tts-service (Edge) OR Sarvam/Cartesia cloud ----------
 const TTS_URL = process.env.TTS_SERVICE_URL || "http://127.0.0.1:3004"
 
 async function synthesizeSpeech(text, language) {
+  // Cloud provider path (TTS_CALL_PROVIDER=sarvam|cartesia) — returns WAV,
+  // which flows through the same audioToPcm8k ffmpeg chain below as the
+  // local service's MP3. Caller-heard loudness stays identical by design.
+  const cloud = await voiceProviders.synthesize(text, language)
+  if (cloud) return cloud
+
+  // Local Edge TTS path (TTS_CALL_PROVIDER=edge, the default).
   const t0 = Date.now()
   const res = await fetch(`${TTS_URL}/synthesize`, {
     method: "POST",
@@ -325,7 +363,12 @@ async function prewarm() {
       headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
       body: JSON.stringify({ event: "end", callSid: "__prewarm__", duration: 0 }),
     }).catch((e) => console.error("prewarm app:", e.message)),
-    fetch(`${STT_URL}/health`, { headers: { "x-api-key": API_KEY } }).catch(() => {}),
+    // Only meaningful with STT_PROVIDER=local — with a cloud provider there
+    // is no local service to warm, and the .catch() made that harmless but
+    // the log line made it look broken.
+    ...(voiceProviders.sttProviderName() === "local"
+      ? [fetch(`${STT_URL}/health`, { headers: { "x-api-key": API_KEY } }).catch(() => {})]
+      : []),
   ]
   await Promise.allSettled(jobs)
   // Prewarm every fixed caller-facing line into the TTS cache: clarify
@@ -1169,7 +1212,7 @@ wss.on("connection", (ws, req) => {
   ws.on("error", (e) => console.error("ws error:", e.message))
 })
 
-console.log(`Voicebot server listening on ws://127.0.0.1:${PORT}/voicebot (put nginx wss in front) — TTS: edge-tts @ ${TTS_URL}`)
+console.log(`Voicebot server listening on ws://127.0.0.1:${PORT}/voicebot (put nginx wss in front) — ${voiceProviders.describeCallPipeline()}`)
 console.log(`   barge-in: ${BARGE_IN ? `ON (energy>${BARGE_ENERGY} for ${BARGE_MIN_MS}ms, ${PLAYBACK_LEAD_MS}ms playback lead)` : "off — set VOICEBOT_BARGE_IN=1 to enable"}`)
 
 // Fire-and-forget: the socket is already accepting calls, so a slow warm-up

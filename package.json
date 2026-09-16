@@ -9,6 +9,7 @@
     "db:setup": "node scripts/setup-db.js",
     "db:check": "node scripts/smoke-test.js",
     "test:voicebot": "node scripts/voicebot-selftest.js",
+    "test:providers": "node scripts/voice-providers-test.js",
     "test:transcript": "node scripts/transcript-correction-test.js",
     "bench:turn": "node scripts/turn-latency-bench.js"
   },
