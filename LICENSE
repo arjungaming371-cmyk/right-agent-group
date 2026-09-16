@@ -1,0 +1,93 @@
+PROPRIETARY SOFTWARE LICENSE
+
+Copyright (c) 2026 Ajay Kumar, Arjun Team (NAIT x Malla Reddy College, Hyderabad) ("Licensor")
+Software: Right Agent Group Operations Console, including all source code,
+scripts, configuration, prompts, and documentation in this repository
+(the "Software").
+
+ALL RIGHTS RESERVED. This is not open-source software. Possessing a copy of
+this code does not grant any rights beyond what is explicitly stated below.
+
+---
+
+1. GRANT OF LICENSE
+
+Licensor grants [CUSTOMER / BUSINESS NAME] ("Licensee") a limited,
+non-exclusive, non-transferable, non-sublicensable license to install, run,
+and use the Software solely for Licensee's own internal business operations,
+on hardware owned or controlled by Licensee, effective from the date stated
+in the associated purchase/services agreement (the "Effective Date").
+
+This license does not transfer ownership of the Software. Licensor retains
+all right, title, and interest in and to the Software, including all
+copyright, trade secret, and intellectual property rights, whether or not
+registered.
+
+2. WHAT LICENSEE MAY DO
+
+  - Run the Software for its own business (calls, WhatsApp, leads, loan
+    applications, dashboards, and related use) on infrastructure it owns
+    or controls.
+  - Configure, customize the visible branding/copy, and connect its own
+    third-party accounts (Google, Groq, Exotel, Meta, hosting/tunnel
+    providers) to operate the Software.
+  - Make backup copies solely for its own disaster-recovery purposes.
+
+3. WHAT LICENSEE MAY NOT DO
+
+Licensee shall NOT, without Licensor's prior written consent:
+
+  a. Sell, resell, rent, lease, sublicense, distribute, or otherwise
+     transfer the Software or any copy, in whole or in part, to any third
+     party, whether unmodified, modified, or rebranded.
+  b. Use the Software, or any part of it, to build or operate a product or
+     service offered commercially to any party other than Licensee's own
+     end customers as a user of Licensee's own business (i.e. Licensee may
+     serve ITS customers through the Software, but may not turn around and
+     sell the Software itself, or a derivative of it, to another business).
+  c. Remove, obscure, or alter any copyright, proprietary, or attribution
+     notices contained in the Software.
+  d. Share the source code with any third party, including contractors or
+     consultants, without a written confidentiality obligation at least as
+     protective as this license.
+  e. Reverse engineer, decompile, or use the Software's design, prompts, or
+     architecture to build a competing product for resale to others.
+
+4. TERM AND TERMINATION
+
+This license is effective until terminated. It terminates automatically,
+without notice, if Licensee breaches Section 3. Licensor may also terminate
+for non-payment under the associated purchase/services agreement, subject
+to any cure period stated there. Upon termination, Licensee must stop using
+the Software and delete all copies, except as needed to preserve Licensee's
+own historical business data.
+
+5. NO WARRANTY
+
+THE SOFTWARE IS PROVIDED "AS IS," WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT. Licensor is not liable for
+any damages arising from use of the Software, to the maximum extent
+permitted by law.
+
+6. THIRD-PARTY SERVICES
+
+The Software integrates with third-party services (Groq, Exotel, Meta/
+WhatsApp, Google, Cloudflare/ngrok, and others). Licensee is solely
+responsible for its own accounts, credentials, and costs with those
+services, and for complying with their respective terms of service.
+
+7. GOVERNING LAW
+
+This license is governed by the laws of India. Any dispute arising from it
+is subject to the exclusive jurisdiction of the courts of Hyderabad,
+Telangana.
+
+---
+
+NOTE TO LICENSOR: This file is a baseline starting point, not a substitute
+for a lawyer-reviewed agreement. Before any commercial deal, have a lawyer
+review and adapt this alongside a full purchase/services agreement that
+covers price, payment terms, support/AMC scope, delivery milestones, and
+liability limits specific to that deal. Fill in the bracketed fields above
+for each customer.

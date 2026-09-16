@@ -1,0 +1,31 @@
+# Cloudflare NAMED tunnel config — Right Agent Group
+#
+# Save as:  C:\Users\<YOU>\.cloudflared\config.yml
+#
+# One-time setup:
+#   winget install Cloudflare.cloudflared
+#   cloudflared tunnel login
+#   cloudflared tunnel create rag              <- note the Tunnel ID it prints
+#   cloudflared tunnel route dns rag your-domain.com
+#   (then set CF_TUNNEL_NAME=rag in .env — START.ps1 uses it)
+#
+# WHY THIS FILE MATTERS: a quick tunnel only forwards port 3000, so the
+# Exotel Voicebot applet (wss://your-domain.com/voicebot -> port 3002)
+# can NEVER connect. The ingress rules below route /voicebot to the
+# voicebot server and everything else to the website.
+
+tunnel: rag
+credentials-file: C:\Users\YOUR_USERNAME\.cloudflared\YOUR_TUNNEL_ID.json
+
+ingress:
+  # Exotel voicebot WebSocket -> server/voicebot-server.js
+  - hostname: your-domain.com
+    path: ^/voicebot.*
+    service: http://127.0.0.1:3002
+
+  # Everything else -> Next.js website
+  - hostname: your-domain.com
+    service: http://127.0.0.1:3000
+
+  # Required catch-all
+  - service: http_status:404

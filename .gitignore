@@ -1,0 +1,38 @@
+# dependencies
+node_modules/
+server/node_modules/
+server/stt-service/venv/
+
+# builds
+.next/
+out/
+*.tsbuildinfo
+
+# env & secrets — NEVER commit these
+.env
+.env.local
+.env.production
+.claude/settings.local.json
+
+
+# logs & OS junk
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# STT model cache
+server/stt-service/models/
+server/stt-service/__pycache__/
+server/tts-service/venv/
+server/tts-service/__pycache__/
+
+# manual TTS/STT test output — these accumulate in the repo root every time
+# someone tests voice output by hand; never meant to be committed
+/*.mp3
+/*.wav
+/*.pcm
+debug-audio/
+
+# pg_dump output from BACKUP.ps1 — real customer data, never commit it
+backups/

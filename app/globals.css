@@ -1,0 +1,363 @@
+@import 'tailwindcss';
+
+:root {
+  --bg-primary: #05070c;
+  --bg-secondary: #0a0e17;
+  --bg-card: #0e1320;
+  --bg-card-hover: #131929;
+  --bg-sidebar: #070a12;
+  --border: #1c2437;
+  --border-light: #161d2e;
+  --text-primary: #eef1f7;
+  --text-secondary: #9aa5bd;
+  /* Lifted from #64708c: that only reached ~3.7:1 on a card and dipped
+     under 3:1 on hover-tinted rows, and this variable carries a lot of
+     small secondary text. */
+  --text-muted: #727e9c;
+  --accent-blue: #5b7cfa;
+  --accent-blue-dim: #3d5af1;
+  --accent-violet: #8b7cff;
+  --accent-green: #2dd4a0;
+  --accent-red: #fb5670;
+  --accent-yellow: #f7b731;
+  --accent-purple: #a78bfa;
+  --accent-cyan: #38bdf8;
+  --gradient-brand: linear-gradient(135deg, #8b7cff 0%, #5b7cfa 45%, #38bdf8 100%);
+  /* Subtle surface tints. On a dark base these are white at low alpha; a
+     light theme has to invert them or they vanish into the background,
+     which is why they are variables and not literal rgba(255,255,255,...). */
+  --overlay-soft: rgba(255,255,255,0.025);
+  --overlay-hover: rgba(255,255,255,0.045);
+  --overlay-chip: rgba(255,255,255,0.07);
+  --overlay-line: rgba(255,255,255,0.07);
+  --shadow-soft: 0 1px 2px rgba(0,0,0,0.5), 0 10px 32px -12px rgba(0,0,0,0.6);
+  --shadow-glow: 0 8px 32px -8px rgba(91,124,250,0.45);
+  --radius-lg: 14px;
+  --radius-md: 10px;
+  --radius-sm: 7px;
+}
+
+/* ---------- Themes ----------
+   "Dark" above is the default (:root, no attribute). Every other theme is
+   selected by [data-theme="..."] on <html> (see lib/theme.ts) and only ever
+   needs to override the variables that actually change — components read
+   these variables, never a theme name, so nothing outside this file and
+   lib/theme.ts needs to know a given theme exists. */
+
+/* Midnight — OLED-friendly near-black, same accents as Dark */
+:root[data-theme="midnight"] {
+  --bg-primary: #000000;
+  --bg-secondary: #050505;
+  --bg-card: #0a0a0a;
+  --bg-card-hover: #121212;
+  --bg-sidebar: #000000;
+  --border: #1f1f1f;
+  --border-light: #161616;
+  --text-primary: #ffffff;
+  --text-secondary: #a3a3a3;
+  --text-muted: #6b6b6b;
+  --shadow-soft: 0 1px 2px rgba(0,0,0,0.7), 0 10px 32px -12px rgba(0,0,0,0.8);
+}
+
+/* Dark Emerald — same dark base as Dark, teal/green accent instead of violet/blue */
+:root[data-theme="emerald"] {
+  --accent-blue: #14b8a6;
+  --accent-blue-dim: #0d9488;
+  --accent-violet: #10b981;
+  --accent-green: #34d399;
+  --accent-cyan: #22d3ee;
+  --gradient-brand: linear-gradient(135deg, #10b981 0%, #14b8a6 45%, #38bdf8 100%);
+  --shadow-glow: 0 8px 32px -8px rgba(16,185,129,0.4);
+}
+
+/* Light — a genuine light mode, not a lightened dark theme */
+:root[data-theme="light"] {
+  --bg-primary: #f5f6fa;
+  --bg-secondary: #ffffff;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f1f3f9;
+  --bg-sidebar: #ffffff;
+  --border: #e3e6ee;
+  --border-light: #edf0f6;
+  --text-primary: #1a1f2e;
+  --text-secondary: #565f78;
+  /* Darker than the dark theme's muted equivalent looks — on a white card
+     #8992a8 only reaches ~2.9:1, well under the 4.5:1 needed for the small
+     text this variable is mostly used for. */
+  --text-muted: #6a7288;
+  --accent-blue: #4a6cf0;
+  --accent-blue-dim: #3654d6;
+  --accent-violet: #7c6ae8;
+  /* Green and yellow are darker here than a straight "light equivalent" of
+     the dark accents — those land near 3:1 on a white card, and both are
+     used for small text (lead scores, status chips), not just fills. */
+  --accent-green: #0f8a68;
+  --accent-red: #d43a58;
+  --accent-yellow: #a66d05;
+  --accent-purple: #8865d9;
+  --accent-cyan: #1791c4;
+  /* Inverted: dark ink at low alpha, so the same tints read as gentle grey
+     on white instead of disappearing. */
+  --overlay-soft: rgba(20,25,45,0.025);
+  --overlay-hover: rgba(20,25,45,0.05);
+  --overlay-chip: rgba(20,25,45,0.06);
+  --overlay-line: rgba(20,25,45,0.09);
+  --gradient-brand: linear-gradient(135deg, #7c6ae8 0%, #4a6cf0 45%, #1791c4 100%);
+  --shadow-soft: 0 1px 2px rgba(20,25,45,0.06), 0 10px 28px -14px rgba(20,25,45,0.14);
+  --shadow-glow: 0 8px 28px -10px rgba(74,108,240,0.25);
+}
+:root[data-theme="light"] body {
+  background: radial-gradient(1100px 550px at 12% -8%, rgba(124,106,232,0.05), transparent 60%),
+              radial-gradient(900px 480px at 105% -5%, rgba(23,145,196,0.04), transparent 55%),
+              var(--bg-primary);
+}
+:root[data-theme="light"] .glass {
+  background: rgba(255,255,255,0.85);
+  border: 1px solid rgba(20,25,45,0.06);
+}
+:root[data-theme="light"] ::-webkit-scrollbar-thumb { background: #d5d9e4; }
+:root[data-theme="light"] ::-webkit-scrollbar-thumb:hover { background: #c2c7d6; }
+
+/* Base resets & element defaults — layered so Tailwind utilities always win */
+@layer base {
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { color-scheme: dark; }
+
+  body {
+    background:
+      radial-gradient(1100px 550px at 12% -8%, rgba(139,124,255,0.07), transparent 60%),
+      radial-gradient(900px 480px at 105% -5%, rgba(56,189,248,0.055), transparent 55%),
+      var(--bg-primary);
+    color: var(--text-primary);
+    font-family: var(--font-inter), -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    letter-spacing: -0.011em;
+  }
+
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #232c42; border-radius: 999px; }
+  ::-webkit-scrollbar-thumb:hover { background: #2e3a56; }
+
+  input, select, textarea {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    border-radius: var(--radius-md);
+    padding: 9px 13px;
+    font-size: 13.5px;
+    font-family: inherit;
+    outline: none;
+    width: 100%;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+  }
+  input:hover, select:hover, textarea:hover { border-color: #273148; }
+  input:focus, select:focus, textarea:focus {
+    border-color: var(--accent-blue);
+    box-shadow: 0 0 0 3px rgba(91,124,250,0.16);
+    background: var(--bg-card);
+  }
+  input::placeholder, textarea::placeholder { color: var(--text-muted); }
+
+  button {
+    cursor: pointer;
+    font-size: 14px;
+    font-family: inherit;
+    transition: transform 0.1s ease, opacity 0.15s ease, background 0.15s ease,
+                border-color 0.15s ease, box-shadow 0.15s ease, color 0.15s ease;
+  }
+  button:active { transform: scale(0.985); }
+  button:disabled { cursor: not-allowed; }
+
+  a { color: inherit; text-decoration: none; }
+}
+
+/* Reusable premium primitives — components layer so utilities can override */
+@layer components {
+  .glass {
+    background: rgba(12,16,26,0.78);
+    backdrop-filter: blur(18px) saturate(150%);
+    -webkit-backdrop-filter: blur(18px) saturate(150%);
+    border: 1px solid rgba(255,255,255,0.055);
+  }
+
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-soft);
+  }
+
+  .btn-primary {
+    display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+    background: var(--gradient-brand);
+    color: #fff; border: none; border-radius: 10px;
+    font-weight: 600; font-size: 13px; padding: 0 16px; height: 36px;
+    box-shadow: 0 4px 16px -4px rgba(91,124,250,0.5), inset 0 1px 0 rgba(255,255,255,0.18);
+    white-space: nowrap;
+  }
+  .btn-primary:hover { filter: brightness(1.08); box-shadow: 0 6px 22px -4px rgba(91,124,250,0.6), inset 0 1px 0 rgba(255,255,255,0.18); }
+  .btn-primary:disabled { opacity: 0.45; filter: none; }
+
+  .btn-ghost {
+    display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+    background: transparent; color: var(--text-secondary);
+    border: 1px solid var(--border); border-radius: 10px;
+    font-weight: 500; font-size: 13px; padding: 0 14px; height: 36px;
+    white-space: nowrap;
+  }
+  .btn-ghost:hover { background: rgba(255,255,255,0.04); color: var(--text-primary); border-color: #2b3550; }
+
+  .icon-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 34px; height: 34px; border-radius: 9px; flex-shrink: 0;
+    background: var(--bg-secondary); border: 1px solid var(--border);
+    color: var(--text-secondary);
+  }
+  .icon-btn:hover { color: var(--text-primary); border-color: #2b3550; background: var(--bg-card-hover); }
+
+  .gradient-text {
+    background: var(--gradient-brand);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .kbd {
+    display: inline-flex; align-items: center; justify-content: center;
+    padding: 1px 6px; border-radius: 5px;
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08);
+    font-size: 10.5px; font-weight: 500; color: var(--text-muted);
+    font-family: inherit; letter-spacing: 0.02em;
+  }
+
+  .toggle {
+    position: relative; width: 44px; height: 24px;
+    background: #1d2438; border-radius: 12px; border: none;
+    cursor: pointer; transition: background 0.2s;
+    display: inline-block; flex-shrink: 0;
+  }
+  .toggle.on { background: var(--accent-blue); }
+  .toggle::after {
+    content: ''; position: absolute; top: 2px; left: 2px;
+    width: 20px; height: 20px; background: white;
+    border-radius: 50%; transition: left 0.2s;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.35);
+  }
+  .toggle.on::after { left: 22px; }
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes pulse-dot {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(45,212,160,0.55); }
+  50% { box-shadow: 0 0 0 5px rgba(45,212,160,0); }
+}
+@keyframes shimmer {
+  0% { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+@keyframes toastIn {
+  from { opacity: 0; transform: translateY(10px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes toastOut {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(6px) scale(0.97); }
+}
+@keyframes paletteIn {
+  from { opacity: 0; transform: translateY(-8px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.spin { animation: spin 1s linear infinite; }
+
+/* Promo page (app/apply) — blobs, marquee, reveal-on-scroll, audio bars */
+@keyframes blobFloat1 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(40px, -30px) scale(1.08); }
+  66% { transform: translate(-30px, 20px) scale(0.95); }
+}
+@keyframes blobFloat2 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  40% { transform: translate(-50px, 30px) scale(1.1); }
+  70% { transform: translate(30px, -20px) scale(0.92); }
+}
+@keyframes marqueeScroll {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+@keyframes revealUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.reveal {
+  opacity: 0;
+}
+.reveal.in {
+  animation: revealUp 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+@keyframes audioBar {
+  0%, 100% { transform: scaleY(0.3); }
+  50% { transform: scaleY(1); }
+}
+@keyframes heroGlow {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 0.9; }
+}
+
+/* Custom sleek audio & volume range slider */
+input[type="range"].audio-range-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  outline: none;
+  cursor: pointer;
+  margin: 0;
+  padding: 0;
+  vertical-align: middle;
+}
+
+input[type="range"].audio-range-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #2dd4a0;
+  cursor: pointer;
+  box-shadow: 0 0 8px rgba(45, 212, 160, 0.7);
+  border: 2px solid #0e1320;
+  transition: transform 0.12s ease;
+}
+
+input[type="range"].audio-range-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.3);
+}
+
+input[type="range"].audio-range-slider::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #2dd4a0;
+  cursor: pointer;
+  box-shadow: 0 0 8px rgba(45, 212, 160, 0.7);
+  border: 2px solid #0e1320;
+}
+
+input[type="range"].audio-range-slider::-moz-range-track {
+  height: 6px;
+  border-radius: 999px;
+  background: transparent;
+}
+
