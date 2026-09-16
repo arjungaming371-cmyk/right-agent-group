@@ -41,8 +41,11 @@ if (!MODE) {
         ...process.env,
         ...env,
         SELFTEST_MODE: id,
-        // The module exits at require time without this.
+        // The module exits at require time without these.
         WHATSAPP_SERVICE_KEY: process.env.WHATSAPP_SERVICE_KEY || "selftest-key",
+        // Cloud-only pipeline: provider validation needs a key present (any
+        // non-empty value works — no real API call happens in this selftest).
+        SARVAM_API_KEY: process.env.SARVAM_API_KEY || "selftest-key",
         // dotenv never overrides already-set vars, so these beat .env.
       },
     })

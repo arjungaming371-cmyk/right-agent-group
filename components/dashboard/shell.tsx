@@ -3,7 +3,8 @@ import { useState, useEffect } from "react"
 import dynamic from "next/dynamic"
 import {
   Users, FileText, Phone, MessageCircle, Activity, ShieldCheck, UploadCloud,
-  ScrollText, LogOut, Mic, BarChart3, UserCog, Search, Menu, X, BookOpen, type LucideIcon,
+  ScrollText, LogOut, Mic, BarChart3, UserCog, Search, Menu, X, BookOpen,
+  Building2, type LucideIcon,
 } from "lucide-react"
 import { ToastProvider } from "../ui/toast"
 import CommandPalette from "../ui/command-palette"
@@ -29,12 +30,13 @@ import ThemeSwitcher from "./theme-switcher"
 import DeveloperLogsView from "./developer-logs-view"
 import CalendarView from "./calendar-view"
 import ProfileModal from "./profile-modal"
+import BranchesView from "./branches-view"
 import { usePolling } from "@/lib/use-poll"
 
-export type ViewKey = "leads" | "loans" | "voice" | "whatsapp" | "comms" | "calendar" | "security" | "upload" | "script" | "knowledge" | "analytics" | "dev-logs"
-export type Role = "admin" | "agent" | "viewer" | "developer"
+export type ViewKey = "leads" | "loans" | "voice" | "whatsapp" | "comms" | "calendar" | "security" | "upload" | "script" | "knowledge" | "analytics" | "branches" | "dev-logs"
+export type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
 
-const ROLE_LABEL: Record<Role, string> = { admin: "Administrator", agent: "Loan Officer", viewer: "Viewer", developer: "Administrator" }
+const ROLE_LABEL: Record<Role, string> = { admin: "Administrator", agent: "Loan Officer", viewer: "Viewer", developer: "Administrator", branch_manager: "Branch Manager" }
 
 type NavItem = { key: ViewKey; label: string; icon: LucideIcon; roles: Role[] }
 type NavSection = { title: string; items: NavItem[] }
@@ -66,6 +68,7 @@ const NAV_SECTIONS: NavSection[] = [
   {
     title: "System",
     items: [
+      { key: "branches", label: "Branches & Staff AI", icon: Building2, roles: ["admin", "branch_manager"] },
       { key: "security", label: "Security",       icon: ShieldCheck,  roles: ["admin"] },
       { key: "upload",   label: "Upload & Data",  icon: UploadCloud,  roles: ["admin"] },
       { key: "script",   label: "Priya's Script", icon: ScrollText,   roles: ["admin"] },
@@ -91,6 +94,7 @@ const VIEW_TITLES: Record<ViewKey, { title: string; sub: string }> = {
   security: { title: "Security",           sub: "Access control and audit policy" },
   upload:   { title: "Upload & Data",      sub: "Upload contacts, scripts, and files for AI campaigns" },
   script:   { title: "Priya's Script",     sub: "View and edit what Priya says on every call" },
+  branches: { title: "Branches & Staff AI", sub: "Sub-accounts, AI Employees, per-branch scripts, quotas, and billing meters" },
   knowledge:{ title: "Knowledge Base",     sub: "Facts Priya can pull into any call or chat, on any turn" },
   "dev-logs": { title: "Activity Logs",   sub: "Your activity, login history, and system events" },
 }
@@ -113,6 +117,9 @@ export default function DashboardShell() {
   const [counts, setCounts] = useState({ leads: 0, loans: 0, whatsapp: 0 })
   const [userEmail, setUserEmail] = useState("")
   const [role, setRole] = useState<Role>("viewer") // safest default until the real role loads
+  const [sessionBranchId, setSessionBranchId] = useState<string | null>(null)
+  const [allBranches, setAllBranches] = useState<{ id: string; name: string; code: string }[]>([])
+  const [canSwitch, setCanSwitch] = useState(false)
   const [showProfile, setShowProfile] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   // Search text seeded into a view when jumping there from the command palette.
@@ -148,8 +155,27 @@ export default function DashboardShell() {
     fetch("/api/auth/me").then(r => r.json()).then(d => {
       setUserEmail(d.email || "")
       if (d.role) setRole(d.role)
+      setSessionBranchId(d.branchId ?? null)
+      setCanSwitch(!!d.canSwitchBranch)
+      // Branch switcher options for the parent account.
+      if (d.canSwitchBranch) {
+        fetch("/api/branches").then(r => r.json()).then(list => {
+          if (Array.isArray(list)) setAllBranches(list.map((b: any) => ({ id: b.id, name: b.name, code: b.code })))
+        }).catch(() => {})
+      }
     }).catch(() => {})
   }, [])
+
+  async function switchBranch(id: string | null) {
+    await fetch("/api/auth/branch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ branchId: id }),
+    })
+    // The new scope is signed into the session cookie — reload so every
+    // view refetches with the new branch filter.
+    window.location.reload()
+  }
 
   // Matches the 15s poll used by leads-view/loan-apps-view so the sidebar
   // badges don't lag a full extra cycle behind the visible lists.
@@ -389,6 +415,23 @@ export default function DashboardShell() {
           <StatusPill icon={Mic} label="Voice Bot" />
           <StatusPill icon={MessageCircle} label="WhatsApp" />
 
+          {/* Branch switcher — the parent account's "which branch am I working
+              on right now" control. Writes + reads everywhere scope to this. */}
+          {canSwitch && (
+            <select
+              aria-label="Active branch"
+              title="Active branch — admins see everything when set to All"
+              className="hidden h-9 max-w-[190px] items-center rounded-[10px] border border-[var(--border)] bg-[var(--bg-secondary)] px-2.5 text-[12.5px] font-medium text-[var(--text-secondary)] outline-none lg:flex"
+              value={sessionBranchId || ""}
+              onChange={(e) => switchBranch(e.target.value || null)}
+            >
+              <option value="">All branches (HQ)</option>
+              {allBranches.map((b) => (
+                <option key={b.id} value={b.id}>{b.name} ({b.code})</option>
+              ))}
+            </select>
+          )}
+
           <div className="mx-1 hidden h-6 w-px bg-[var(--border)] lg:block" />
 
           {/* Global search — opens the command palette (also Ctrl+K) */}
@@ -419,6 +462,7 @@ export default function DashboardShell() {
           {view === "security" && role === "admin" && <SecurityView />}
           {view === "upload"   && role === "admin" && <UploadView />}
           {view === "script"   && role === "admin" && <ScriptView />}
+          {view === "branches" && (role === "admin" || role === "branch_manager") && <BranchesView role={role} branchId={sessionBranchId} />}
           {view === "knowledge" && (role === "admin" || role === "agent") && <KnowledgeBaseView role={role} />}
           {view === "dev-logs" && role === "developer" && <DeveloperLogsView userEmail={userEmail} />}
         </main>

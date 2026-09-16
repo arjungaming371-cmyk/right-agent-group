@@ -34,6 +34,7 @@ const PUBLIC_EXACT = [
   "/api/whatsapp", "/api/calls/turn", "/api/calls/status", "/api/calls/passthru", "/api/digest",
   "/api/system/status", // coarse booleans only — no error details (see route)
   "/api/security/flags", // one boolean, read back by this middleware itself
+  "/api/branding", // white-label public branding (public-safe fields only)
   "/api/lead-brain/scan-idle", "/api/prompt-tuner/scan",
 ]
 

@@ -1,4 +1,6 @@
 "use client"
+
+type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
 import { useEffect, useState } from "react"
 import { BadgeCheck, Download, PenLine, Check, X, History } from "lucide-react"
 import { formatCurrency, timeAgo, formatDateTime } from "@/lib/utils"
@@ -62,7 +64,7 @@ function Avatar({ name }: { name: string }) {
   )
 }
 
-export default function LoanAppsView({ role, initialSearch }: { role: "admin" | "agent" | "viewer" | "developer"; initialSearch?: string }) {
+export default function LoanAppsView({ role, initialSearch }: { role: Role; initialSearch?: string }) {
   const canEdit = role !== "viewer"
   const toast = useToast()
   const [apps, setApps] = useState<LoanApp[]>([])

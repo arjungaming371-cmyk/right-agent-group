@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db, query } from "@/lib/db"
 import { requireRole } from "@/lib/auth"
+import { sessionBranchId } from "@/lib/branches"
 import { normalizePhone, phoneLast10, PHONE_MATCH_SQL } from "@/lib/phone"
 
 // STEP 1: Upload + PARSE ONLY — does NOT call anyone automatically.
 // Creates leads + queues them as "pending". Use /api/upload/confirm to trigger calls.
 export async function POST(req: NextRequest) {
-  if (!(await requireRole(req, ["admin"]))) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+  const session = await requireRole(req, ["admin", "branch_manager"])
+  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+  // Uploaded leads + the file record belong to the session's active branch.
+  const branchId = sessionBranchId(session)
   const formData = await req.formData()
   const file = formData.get("file") as File | null
   const type = formData.get("type") as string ?? "contacts"
@@ -25,7 +29,7 @@ export async function POST(req: NextRequest) {
     const rowCount = rows.length
 
     const { data: uploadRecord } = await db.from("uploaded_files").insert({
-      filename, type, row_count: rowCount, processed: 0, status: "pending_review"
+      filename, type, row_count: rowCount, processed: 0, status: "pending_review", branch_id: branchId, uploaded_by: session.email
     }).select().single()
 
     const parsedContacts: any[] = []
@@ -52,7 +56,7 @@ export async function POST(req: NextRequest) {
         if (!lead) {
           const created = await db.from("leads").insert({
             name, phone, language: lang, product_interest: product,
-            notes, source: "CSV Upload", status: "new"
+            notes, source: "CSV Upload", status: "new", branch_id: branchId
           }).select().single()
           lead = created.data
         }
@@ -60,7 +64,7 @@ export async function POST(req: NextRequest) {
         // Queue as PENDING — NOT called yet, waits for explicit confirmation
         await db.from("outbound_queue").insert({
           name, phone, language: lang, product_interest: product, notes,
-          status: "pending", lead_id: lead?.id ?? null
+          status: "pending", lead_id: lead?.id ?? null, branch_id: branchId
         })
 
         parsedContacts.push({ name, phone, language: lang, product_interest: product, leadId: lead?.id })
@@ -85,7 +89,7 @@ export async function POST(req: NextRequest) {
   }
 
   if (type === "script") {
-    await db.from("uploaded_files").insert({ filename, type: "script", row_count: 0, processed: 0, status: "done" })
+    await db.from("uploaded_files").insert({ filename, type: "script", row_count: 0, processed: 0, status: "done", branch_id: branchId, uploaded_by: session.email })
     return NextResponse.json({ ok: true, rowCount: 0 })
   }
 

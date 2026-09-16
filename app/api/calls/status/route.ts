@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db, query } from "@/lib/db"
 import { generateLeadSummary } from "@/lib/llm"
-import { sendCallFollowUp, sendMissedCallFollowUp } from "@/lib/whatsapp"
+import { sendCallFollowUp, sendMissedCallFollowUp, branchWhatsAppCtx } from "@/lib/whatsapp"
 import { refreshLeadScore } from "@/lib/scoring"
 import { rateLimit, clientIp } from "@/lib/rate-limit"
 import { runPostCallAnalysis } from "@/lib/lead-brain"
@@ -104,9 +104,12 @@ export async function POST(req: NextRequest) {
       if (claimWon) {
         const { data: lead } = await db.from("leads").select("name, phone, whatsapp_number").eq("id", call.lead_id).single()
         const target = lead?.whatsapp_number || lead?.phone
+        // Per-branch WhatsApp: the follow-up goes from the BRANCH's WABA
+        // number (and passes the branch quota gate), or the company number.
+        const waBranch = await branchWhatsAppCtx(call.branch_id)
 
         if (target && outcome === "resolved" && transcript.length > 0) {
-          const result = await sendCallFollowUp(target, lead?.name || "there")
+          const result = await sendCallFollowUp(target, lead?.name || "there", waBranch)
           await db.from("comm_logs").insert({
             lead_id: call.lead_id,
             type: "whatsapp",
@@ -114,7 +117,7 @@ export async function POST(req: NextRequest) {
             outcome: result.ok ? "sent" : "failed",
           })
         } else if (target && outcome === "missed") {
-          const result = await sendMissedCallFollowUp(target, lead?.name || "there")
+          const result = await sendMissedCallFollowUp(target, lead?.name || "there", waBranch)
           await db.from("comm_logs").insert({
             lead_id: call.lead_id,
             type: "whatsapp",

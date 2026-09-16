@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server"
 import { apiError } from "@/lib/api-error"
 import { db, query } from "@/lib/db"
-import { sendApplicationLink } from "@/lib/whatsapp"
+import { sendApplicationLink, branchWhatsAppCtx } from "@/lib/whatsapp"
 import { requireRole } from "@/lib/auth"
 import { randomUUID } from "crypto"
 
 export async function POST(req: NextRequest) {
-  if (!(await requireRole(req, ["admin", "agent"]))) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+  if (!(await requireRole(req, ["admin", "agent", "branch_manager"]))) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const { leadId, phone, loanType } = await req.json()
   if (!leadId || !phone) {
@@ -22,8 +22,11 @@ export async function POST(req: NextRequest) {
     const token = randomUUID()
     await query(`INSERT INTO form_links (token, lead_id) VALUES ($1, $2)`, [token, leadId])
 
-    // Send WhatsApp message with form link
-    const result = await sendApplicationLink(phone, lead.name || "there", token)
+    // Send WhatsApp message with form link — from the LEAD's branch WABA
+    // number when it has one, so the message lands on the number the
+    // customer associates with that branch.
+    const waBranch = await branchWhatsAppCtx(lead.branch_id)
+    const result = await sendApplicationLink(phone, lead.name || "there", token, waBranch)
 
     if (!result.ok) {
       // Still save the token even if WA send fails — admin can share manually

@@ -1,13 +1,11 @@
 // Priya's voice — dashboard chat "speak" feature.
 //
-//   TTS_PROVIDER=edge       (default) Microsoft Edge neural voices via the
-//                            free `msedge-tts` package. No API key, no cost,
-//                            no external account. Indian-accented voices for
-//                            English/Hindi/Telugu.
-//   TTS_PROVIDER=sarvam     Sarvam Bulbul v3 cloud TTS (Indian languages,
-//                            code-mixed text native). Requires SARVAM_API_KEY.
-//                            Returns WAV — same voice family the phone calls
-//                            use when TTS_CALL_PROVIDER=sarvam.
+// Cloud-only providers (the local Edge TTS stack was removed):
+//
+//   TTS_PROVIDER=sarvam     (default) Sarvam Bulbul v3 cloud TTS (Indian
+//                            languages, code-mixed text native). Requires
+//                            SARVAM_API_KEY. Returns WAV — same voice family
+//                            the phone calls use when TTS_CALL_PROVIDER=sarvam.
 //   TTS_PROVIDER=cartesia   Cartesia Sonic cloud TTS. Requires CARTESIA_API_KEY
 //                            + CARTESIA_VOICE_ID. Returns WAV — same voice as
 //                            phone calls when TTS_CALL_PROVIDER=cartesia.
@@ -19,40 +17,9 @@
 // TTS_CALL_PROVIDER and shares SARVAM_API_KEY / CARTESIA_* config through
 // server/voice-providers.js.
 
-import { MsEdgeTTS, OUTPUT_FORMAT } from "msedge-tts"
 import type { Language } from "./llm"
 
-const PROVIDER = (process.env.TTS_PROVIDER || "edge").toLowerCase()
-
-// ---------- Edge TTS (default — free, no key) ----------
-const EDGE_VOICES: Record<Language, string> = {
-  english: "en-IN-NeerjaNeural",
-  // Hinglish/Tenglish are written in Roman script, so the Indian-English
-  // voice pronounces them naturally — and Priya keeps ONE consistent voice
-  // across all three languages. (hi-IN/te-IN voices read Latin text with
-  // English word rules, which sounds wrong for romanized Hindi/Telugu.)
-  hindi: "en-IN-NeerjaNeural",
-  telugu: "en-IN-NeerjaNeural",
-}
-
-async function edgeSpeech(text: string, language: Language): Promise<Buffer | null> {
-  try {
-    const tts = new MsEdgeTTS()
-    await tts.setMetadata(EDGE_VOICES[language] || EDGE_VOICES.english, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3)
-    const { audioStream } = tts.toStream(text)
-    const chunks: Buffer[] = []
-    await new Promise<void>((resolve, reject) => {
-      audioStream.on("data", (c: Buffer) => chunks.push(c))
-      audioStream.on("end", () => resolve())
-      audioStream.on("error", reject)
-    })
-    const buf = Buffer.concat(chunks)
-    return buf.length > 0 ? buf : null
-  } catch (e: any) {
-    console.error("Edge TTS error:", e.message)
-    return null
-  }
-}
+const PROVIDER = (process.env.TTS_PROVIDER || "sarvam").toLowerCase()
 
 // ---------- Sarvam TTS (Bulbul v3 — Indian languages, code-mixed native) ----------
 const SARVAM_API_KEY = (process.env.SARVAM_API_KEY || "").trim()
@@ -190,20 +157,20 @@ export async function textToSpeech(text: string, language: Language = "english")
   if (!clean) return null
 
   if (PROVIDER === "elevenlabs") return elevenLabsSpeech(clean)
-  if (PROVIDER === "sarvam") return sarvamSpeech(clean, language)
   if (PROVIDER === "cartesia") return cartesiaSpeech(clean, language)
-  return edgeSpeech(clean, language)
+  return sarvamSpeech(clean, language)
 }
 
 /**
  * The MIME type textToSpeech() returns for the CURRENT provider — the /api/tts
- * route sets its Content-Type from this. Sarvam/Cartesia return WAV, the
- * older providers MP3; browsers play both, but labelling WAV as audio/mpeg
- * makes some players refuse it.
+ * route sets its Content-Type from this. Sarvam/Cartesia return WAV, ElevenLabs
+ * MP3; browsers play both, but labelling WAV as audio/mpeg makes some players
+ * refuse it.
  */
 export function ttsAudioMime(): string {
-  if (PROVIDER === "sarvam" || PROVIDER === "cartesia") return "audio/wav"
-  return "audio/mpeg"
+  if (PROVIDER === "cartesia") return "audio/wav"
+  if (PROVIDER === "elevenlabs") return "audio/mpeg"
+  return "audio/wav" // sarvam (default)
 }
 
 /** Health check for the TTS service. */
@@ -241,8 +208,8 @@ export async function checkTtsHealth(): Promise<{ ok: boolean; message: string }
       : { ok: false, message: "Cartesia TTS failed — check CARTESIA_API_KEY / CARTESIA_VOICE_ID / server internet access" }
   }
 
-  const buf = await edgeSpeech("test", "english")
+  const buf = await sarvamSpeech("test", "english")
   return buf
-    ? { ok: true, message: "TTS working — Edge neural voices (free, no key needed)" }
-    : { ok: false, message: "Edge TTS failed — check server internet access" }
+    ? { ok: true, message: `TTS working — Sarvam ${SARVAM_TTS_MODEL} (speaker: ${SARVAM_TTS_SPEAKER})` }
+    : { ok: false, message: "Sarvam TTS failed — check SARVAM_API_KEY and server internet access" }
 }

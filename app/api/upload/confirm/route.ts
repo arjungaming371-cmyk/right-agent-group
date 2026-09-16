@@ -2,16 +2,21 @@ import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { makeCall as makeOutboundCall } from "@/lib/exotel"
 import { requireRole } from "@/lib/auth"
+import { sessionBranchId, checkQuota, recordUsage } from "@/lib/branches"
 import { checkCallCompliance } from "@/lib/compliance"
 
 // STEP 2: User explicitly confirms — THIS triggers the actual calls
 export async function POST(req: NextRequest) {
-  if (!(await requireRole(req, ["admin"]))) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+  const session = await requireRole(req, ["admin", "branch_manager"])
+  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+  const branchId = sessionBranchId(session)
   const { uploadId, leadIds } = await req.json()
 
   if (!leadIds || !Array.isArray(leadIds) || leadIds.length === 0) {
     return NextResponse.json({ error: "leadIds array required" }, { status: 400 })
   }
+  const quota = await checkQuota(branchId, "call")
+  if (!quota.ok) return NextResponse.json({ error: quota.reason }, { status: 403 })
 
   let called = 0
   let failed = 0
@@ -34,7 +39,7 @@ export async function POST(req: NextRequest) {
         continue
       }
 
-      const call = await makeOutboundCall(lead.phone, lead.id, lead.language || "telugu")
+      const call = await makeOutboundCall(lead.phone, lead.id, lead.language || "telugu", undefined, branchId || lead.branch_id)
 
       await db.from("voice_calls").insert({
         lead_id: lead.id,
@@ -43,7 +48,10 @@ export async function POST(req: NextRequest) {
         status: "initiated",
         language: lead.language || "telugu",
         phone: lead.phone,
+        branch_id: lead.branch_id || branchId,
       })
+      const callBranch = lead.branch_id || branchId
+      if (callBranch) recordUsage(callBranch, "call")
 
       await db.from("outbound_queue").update({ status: "called" }).eq("lead_id", lead.id)
       called++

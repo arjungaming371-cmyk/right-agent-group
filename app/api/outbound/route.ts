@@ -3,19 +3,29 @@ import { apiError } from "@/lib/api-error"
 import { db } from "@/lib/db"
 import { makeCall } from "@/lib/exotel"
 import { requireRole } from "@/lib/auth"
+import { sessionBranchId, checkQuota, recordUsage } from "@/lib/branches"
 import { checkCallCompliance } from "@/lib/compliance"
 import { normalizePhone } from "@/lib/phone"
 
-export async function GET() {
-  const { data } = await db.from("outbound_queue").select("*").order("created_at", { ascending: false }).limit(200)
+export async function GET(req: NextRequest) {
+  const session = await requireRole(req, ["admin", "agent", "viewer", "branch_manager"])
+  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+  const branchId = sessionBranchId(session)
+  let q = db.from("outbound_queue").select("*")
+  if (branchId) q = q.eq("branch_id", branchId)
+  const { data } = await q.order("created_at", { ascending: false }).limit(200)
   return NextResponse.json(data ?? [])
 }
 
 export async function POST(req: NextRequest) {
   // Both modes below either queue contacts for a real outbound call campaign
   // or trigger one immediately — same privilege level as /api/calls POST.
-  if (!(await requireRole(req, ["admin", "agent"]))) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+  const session = await requireRole(req, ["admin", "agent", "branch_manager"])
+  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const body = await req.json()
+  // Multi-branch: everything queued/called here belongs to the session's
+  // active branch (null for HQ admins viewing the whole company).
+  const branchId = sessionBranchId(session)
 
   // Batch mode: { contacts: [...] } — queue without calling
   if (body.contacts && Array.isArray(body.contacts)) {
@@ -33,7 +43,8 @@ export async function POST(req: NextRequest) {
             name: contact.name, phone: contact.phone,
             language: contact.language || "telugu",
             product_interest: contact.product_interest,
-            source: "CSV Upload", status: "new"
+            source: "CSV Upload", status: "new",
+            branch_id: branchId,
           }).select().single()
           leadId = lead?.id
         }
@@ -44,6 +55,7 @@ export async function POST(req: NextRequest) {
           product_interest: contact.product_interest,
           lead_id: leadId || null,
           status: "pending",
+          branch_id: branchId,
         })
         queued++
       } catch (e) {
@@ -61,6 +73,10 @@ export async function POST(req: NextRequest) {
   if (!compliance.allowed) {
     return NextResponse.json({ error: compliance.reason }, { status: 403 })
   }
+  const quota = await checkQuota(branchId, "call")
+  if (!quota.ok) {
+    return NextResponse.json({ error: quota.reason }, { status: 403 })
+  }
 
   try {
     // Dedupe
@@ -72,24 +88,28 @@ export async function POST(req: NextRequest) {
         name: name || "Unknown", phone,
         language: language || "telugu",
         product_interest, notes,
-        source: "Manual Queue", status: "new"
+        source: "Manual Queue", status: "new",
+        branch_id: branchId,
       }).select().single()
       leadId = lead?.id
     }
 
     // Trigger call immediately
-    const call = await makeCall(phone, leadId || "", language || "telugu")
+    const call = await makeCall(phone, leadId || "", language || "telugu", undefined, branchId)
 
     await db.from("voice_calls").insert({
       lead_id: leadId, twilio_call_sid: call.sid,
       direction: "outbound", status: "initiated",
       language: language || "telugu", phone,
+      branch_id: branchId,
     })
+    if (branchId) recordUsage(branchId, "call")
 
     await db.from("outbound_queue").insert({
       name, phone, language: language || "telugu",
       product_interest, notes, lead_id: leadId,
       status: "called",
+      branch_id: branchId,
     })
 
     return NextResponse.json({ ok: true, callSid: call.sid })

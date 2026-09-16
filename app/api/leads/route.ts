@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { apiError } from "@/lib/api-error"
 import { db, query } from "@/lib/db"
 import { requireRole } from "@/lib/auth"
+import { sessionBranchId } from "@/lib/branches"
 import { logAudit } from "@/lib/audit"
 import { normalizePhone, phoneLast10, PHONE_MATCH_SQL } from "@/lib/phone"
 
@@ -43,9 +44,21 @@ export async function GET(req: NextRequest) {
   const loanType = searchParams.get("loanType")
   const interested = searchParams.get("interested") // "interested" | "not_interested" | "unknown"
 
+  // Multi-branch scoping: branch-bound sessions only ever see their own
+  // branch's leads (NULL branch = HQ data stays admin-only).
+  const session = await requireRole(req, ["admin", "agent", "viewer", "branch_manager"])
+  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+  const branchId = sessionBranchId(session)
+
   const where: string[] = []
   const params: any[] = []
   let i = 1
+
+  if (branchId) {
+    where.push(`leads.branch_id = $${i}`)
+    params.push(branchId)
+    i++
+  }
 
   if (search) {
     // Phone/name/lead_code stay ILIKE (partial-digit and partial-name matches
@@ -117,13 +130,15 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await requireRole(req, ["admin", "agent"])
+  const session = await requireRole(req, ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const body = await req.json()
   if (!body.phone) return NextResponse.json({ error: "phone required" }, { status: 400 })
   // Store every phone the same way (+91XXXXXXXXXX) so calls/WhatsApp/manual
   // entries for the same person always land on the same lead.
   body.phone = normalizePhone(body.phone)
+  // New leads belong to the session's active branch (null = HQ scope).
+  body.branch_id = sessionBranchId(session)
 
   // Dedupe: one lead per phone number, matched on the last 10 digits so
   // format differences never create a duplicate row.
@@ -131,7 +146,11 @@ export async function POST(req: NextRequest) {
     const existing = await query(`SELECT id FROM leads WHERE ${PHONE_MATCH_SQL}`, [phoneLast10(body.phone)])
     if (existing.rows.length > 0) {
       const id = existing.rows[0].id
-      const { data, error } = await db.from("leads").update({ ...body, updated_at: new Date().toISOString() }).eq("id", id).select().single()
+      // On dedupe-update, do NOT move the lead between branches — the lead
+      // belongs to the branch that first captured it. A branch user updating
+      // an HQ-owned lead must not silently pull it into their branch.
+      const { branch_id: _keepOriginalBranch, ...editable } = body
+      const { data, error } = await db.from("leads").update({ ...editable, updated_at: new Date().toISOString() }).eq("id", id).select().single()
       if (error) return apiError(error)
       logAudit("lead updated (via dedupe)", session.email, { leadId: id, phone: body.phone })
       return NextResponse.json(data)
@@ -147,22 +166,31 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const session = await requireRole(req, ["admin", "agent"])
+  const session = await requireRole(req, ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const { id, ...updates } = await req.json()
-  const { data, error } = await db.from("leads").update({ ...updates, updated_at: new Date().toISOString() }).eq("id", id).select().single()
+  delete updates.branch_id // branch moves are an admin action via /api/branches, not a lead edit
+  // Branch-scoped users may only update leads inside their branch.
+  const branchId = sessionBranchId(session)
+  let leadQuery = db.from("leads").update({ ...updates, updated_at: new Date().toISOString() })
+  if (branchId) leadQuery = leadQuery.eq("branch_id", branchId)
+  const { data, error } = await leadQuery.eq("id", id).select().single()
   if (error) return apiError(error)
+  if (!data) return NextResponse.json({ error: "lead not found in your branch" }, { status: 404 })
   logAudit("lead updated", session.email, { leadId: id, fields: Object.keys(updates) })
   return NextResponse.json(data)
 }
 
 export async function DELETE(req: NextRequest) {
-  const session = await requireRole(req, ["admin", "agent"])
+  const session = await requireRole(req, ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const { searchParams } = new URL(req.url)
   const id = searchParams.get("id")
   if (!id) return NextResponse.json({ error: "id required" }, { status: 400 })
-  const { error } = await db.from("leads").delete().eq("id", id)
+  const branchId = sessionBranchId(session)
+  let delQuery = db.from("leads").delete()
+  if (branchId) delQuery = delQuery.eq("branch_id", branchId)
+  const { error } = await delQuery.eq("id", id)
   if (error) return apiError(error)
   logAudit("lead deleted", session.email, { leadId: id })
   return NextResponse.json({ ok: true })

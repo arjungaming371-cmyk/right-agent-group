@@ -7,23 +7,25 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { ArrowLeft, LogOut, Shield, UserCog, Eye, UserPlus, Users, Trash2 } from "lucide-react"
+import { ArrowLeft, LogOut, Shield, UserCog, Eye, UserPlus, Users, Trash2, Building2 } from "lucide-react"
 import { ToastProvider, useToast } from "@/components/ui/toast"
 import { SkeletonList } from "@/components/ui/skeleton"
 
-type Role = "admin" | "agent" | "viewer" | "developer"
-type AllowedEmail = { email: string; added_by: string | null; role: Role; created_at: string }
+type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
+type AllowedEmail = { email: string; added_by: string | null; role: Role; created_at: string; branch_id?: string | null; branch_name?: string | null; branch_code?: string | null }
+type BranchOption = { id: string; name: string; code: string }
 
 // Only roles assignable/visible through this page — a separate full-access
 // role exists but is deliberately not surfaced here.
-const ROLE_META: Record<"admin" | "agent" | "viewer", { label: string; desc: string; color: string; icon: typeof Shield }> = {
+const ROLE_META: Record<"admin" | "agent" | "viewer" | "branch_manager", { label: string; desc: string; color: string; icon: typeof Shield }> = {
   admin:  { label: "Admin",        desc: "Full access, including this page. Max 2 admins total.",     color: "var(--accent-violet)", icon: Shield },
   agent:  { label: "Loan Officer", desc: "Leads, loans, calls, WhatsApp, analytics — no settings",    color: "var(--accent-cyan)", icon: UserCog },
   viewer: { label: "Viewer",       desc: "Same views as Loan Officer, strictly read-only",            color: "var(--text-muted)", icon: Eye },
+  branch_manager: { label: "Branch Manager", desc: "Runs ONE branch — sees only that branch's data",   color: "var(--accent-green)", icon: Building2 },
 }
 
 function RoleBadge({ role }: { role: Role }) {
-  const meta = ROLE_META[role as "admin" | "agent" | "viewer"] ?? ROLE_META.agent
+  const meta = ROLE_META[role as "admin" | "agent" | "viewer" | "branch_manager"] ?? ROLE_META.agent
   const Icon = meta.icon
   return (
     <span style={{
@@ -44,8 +46,10 @@ function AccessPageInner() {
   const [loading, setLoading] = useState(true)
   const [emails, setEmails] = useState<AllowedEmail[]>([])
   const [you, setYou] = useState("")
+  const [branches, setBranches] = useState<BranchOption[]>([])
   const [newEmail, setNewEmail] = useState("")
-  const [newRole, setNewRole] = useState<"admin" | "agent" | "viewer">("agent")
+  const [newRole, setNewRole] = useState<"admin" | "agent" | "viewer" | "branch_manager">("agent")
+  const [newBranch, setNewBranch] = useState<string>("")
   const [busy, setBusy] = useState(false)
   const [confirmTarget, setConfirmTarget] = useState<string | null>(null)
   const [profiles, setProfiles] = useState<Record<string, { displayName: string | null; avatarUrl: string | null; phone?: string | null; address?: string | null; age?: number | null }>>({})
@@ -61,6 +65,7 @@ function AccessPageInner() {
       const data = await res.json()
       setEmails(data.emails || [])
       setYou(data.you || "")
+      setBranches(data.branches || [])
       setLoading(false)
 
       // Name/avatar per person — captured automatically from Google at
@@ -92,12 +97,13 @@ function AccessPageInner() {
       const res = await fetch("/api/allowed-emails", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, role: newRole }),
+        body: JSON.stringify({ email, role: newRole, branch_id: newRole === "branch_manager" ? newBranch : newBranch || undefined }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || "Failed")
       setNewEmail("")
       setNewRole("agent")
+      setNewBranch("")
       toast.success(`${email} can now log in as ${ROLE_META[newRole].label}`)
       await load()
     } catch (err: any) {
@@ -195,19 +201,29 @@ function AccessPageInner() {
             />
             <select
               value={newRole}
-              onChange={(e) => setNewRole(e.target.value as "admin" | "agent" | "viewer")}
-              style={{ width: 150, height: 40 }}
+              onChange={(e) => setNewRole(e.target.value as "admin" | "agent" | "viewer" | "branch_manager")}
+              style={{ width: 170, height: 40 }}
             >
               <option value="agent">Loan Officer</option>
               <option value="viewer">Viewer</option>
+              <option value="branch_manager">Branch Manager</option>
               <option value="admin">Admin</option>
+            </select>
+            <select
+              value={newBranch}
+              onChange={(e) => setNewBranch(e.target.value)}
+              style={{ width: 180, height: 40 }}
+              title="Pin this teammate to a branch (optional for officers, required for branch managers)"
+            >
+              <option value="">All branches / HQ</option>
+              {branches.map((b) => <option key={b.id} value={b.id}>{b.name} ({b.code})</option>)}
             </select>
             <button type="submit" disabled={busy} className="btn-primary" style={{ height: 40, padding: "0 22px", opacity: busy ? 0.6 : 1 }}>
               <UserPlus size={14} strokeWidth={2.2} /> Add
             </button>
           </form>
           <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 10 }}>
-            They sign in with Google using this exact Gmail address. You can change a role later by re-adding the same email with the new role.
+            They sign in with Google using this exact Gmail address. You can change a role later by re-adding the same email with the new role. Pin a teammate to a branch so they only ever see that branch's data (required for Branch Managers).
           </div>
         </div>
 
@@ -261,6 +277,11 @@ function AccessPageInner() {
                 )}
               </div>
               <RoleBadge role={e.role} />
+              {e.branch_name && (
+                <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", border: "1px solid var(--border)", borderRadius: 6, padding: "3px 8px", whiteSpace: "nowrap" }}>
+                  {e.branch_name}
+                </span>
+              )}
               {confirmTarget === e.email ? (
                 <div style={{ display: "flex", gap: 6 }}>
                   <button

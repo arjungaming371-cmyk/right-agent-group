@@ -8,7 +8,7 @@ import { isValidUUID } from "@/lib/lead-brain"
 // dashboard-set only (not Priya parsing spoken dates live on a call).
 // Powers the dashboard's Calendar view.
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const session = await requireRole(req, ["admin", "agent"])
+  const session = await requireRole(req, ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const { id } = await params

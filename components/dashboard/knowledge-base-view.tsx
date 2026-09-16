@@ -1,4 +1,6 @@
 "use client"
+
+type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
 import { useEffect, useRef, useState } from "react"
 import { BookOpen, Plus, Pencil, Trash2, X, Check, FileUp, FileText, Link2, RefreshCw } from "lucide-react"
 import { useToast } from "../ui/toast"
@@ -27,7 +29,7 @@ const SOURCE_BADGE: Record<Entry["source_type"], { label: string; color: string 
   url: { label: "URL", color: "var(--accent-green)" },
 }
 
-export default function KnowledgeBaseView({ role }: { role: "admin" | "agent" | "viewer" | "developer" }) {
+export default function KnowledgeBaseView({ role }: { role: Role }) {
   const canEdit = role !== "viewer"
   const toast = useToast()
   const [entries, setEntries] = useState<Entry[]>([])

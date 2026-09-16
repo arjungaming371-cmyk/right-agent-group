@@ -48,7 +48,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 // AI control. Pass `facts: { someKey: null }` to explicitly clear a fact
 // (still locks it — AI won't refill it until unlocked).
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const session = await requireRole(req, ["admin", "agent"])
+  const session = await requireRole(req, ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const { id } = await params

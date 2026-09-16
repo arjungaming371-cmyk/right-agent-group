@@ -58,12 +58,21 @@ export async function GET(req: NextRequest) {
 
     // ---- ALLOWLIST CHECK + ROLE LOOKUP ----
     // ADMIN_EMAIL is always the "admin" role, regardless of what's in the DB.
-    // Everyone else's role comes from allowed_emails.role (defaults to "agent").
+    // Everyone else's role comes from allowed_emails.role (defaults to "agent")
+    // — and their ORG/BRANCH binding comes from the same row (multi-branch:
+    // branch_manager and branch-bound agents get their scope stamped into the
+    // session at login; they cannot change it afterwards).
     const adminEmail = (process.env.ADMIN_EMAIL || "").toLowerCase()
     let role: Role | null = adminEmail !== "" && email === adminEmail ? "admin" : null
+    let orgId: string | null = null
+    let branchId: string | null = null
     if (!role) {
-      const r = await query(`SELECT role FROM allowed_emails WHERE lower(email) = $1 LIMIT 1`, [email])
-      if (r.rowCount) role = (r.rows[0].role as Role) || "agent"
+      const r = await query(`SELECT role, org_id, branch_id FROM allowed_emails WHERE lower(email) = $1 LIMIT 1`, [email])
+      if (r.rowCount) {
+        role = (r.rows[0].role as Role) || "agent"
+        orgId = r.rows[0].org_id || null
+        branchId = r.rows[0].branch_id || null
+      }
     }
     if (!role) {
       console.warn(`Login DENIED for ${email} — not in allowed_emails`)
@@ -114,7 +123,7 @@ export async function GET(req: NextRequest) {
           html: `<p>Your one-time sign-in code is:</p><p style="font-size:28px;font-weight:700;letter-spacing:4px">${code}</p><p>It expires in 10 minutes. If you didn't try to sign in, you can ignore this email.</p>`,
         }).catch((e) => console.error("2FA mail error:", e.message))
 
-        const pending = await createOtpPendingToken(email, role, safeNext)
+        const pending = await createOtpPendingToken(email, role, safeNext, { orgId, branchId })
         const res = NextResponse.redirect(`${appUrl}/login?otp=1`)
         res.cookies.set("otp_pending", pending, { httpOnly: true, secure: appUrl.startsWith("https"), sameSite: "lax", path: "/", maxAge: 600 })
         res.cookies.delete("oauth_state")
@@ -136,7 +145,7 @@ export async function GET(req: NextRequest) {
       createNotification({ type: "login", title: "Team member signed in", body: `${email} (${role})` })
     }
 
-    const token = await createSessionToken(email, role)
+    const token = await createSessionToken(email, role, { orgId, branchId })
     const res = NextResponse.redirect(`${appUrl}${safeNext}`)
     res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions(appUrl.startsWith("https")))
     res.cookies.delete("oauth_state")

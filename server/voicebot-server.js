@@ -5,23 +5,19 @@
 // pipeline ourselves:
 //
 //   caller audio → silence-based endpointing → STT
-//     → Next.js /api/calls/turn (Groq = Priya's brain, DB, WhatsApp link)
+//     → Next.js /api/calls/turn (Groq/Sarvam = Priya's brain, DB, WhatsApp link)
 //     → TTS → telephony filter chain → downsample to 8kHz PCM → caller.
 //
-// STT and TTS are provider-selectable (see server/voice-providers.js):
+// STT and TTS are 100% cloud (see server/voice-providers.js):
 //
-//   STT_PROVIDER=local   (default)  self-hosted Whisper, server/stt-service
-//   STT_PROVIDER=sarvam             Sarvam Saaras cloud STT — mode=translit
-//                                   returns Roman Tenglish/Hinglish directly
-//   TTS_CALL_PROVIDER=edge  (default) self-hosted Edge TTS, server/tts-service
-//   TTS_CALL_PROVIDER=sarvam        Sarvam Bulbul v3 cloud TTS
-//   TTS_CALL_PROVIDER=cartesia      Cartesia Sonic cloud TTS
+//   STT:  Sarvam Saaras (saaras:v4, mode=translit → Roman Tenglish/Hinglish)
+//   TTS:  TTS_CALL_PROVIDER=sarvam (default) Sarvam Bulbul v3
+//         TTS_CALL_PROVIDER=cartesia   Cartesia Sonic
 //
-// Cloud TTS audio goes through the SAME ffmpeg telephony chain and cache as
-// the local service — loudness normalization is what carries the voice on a
-// phone line, and it must not depend on where synthesis happened. The cloud
-// providers need NO Python services, NO GPU, and NO model downloads: on AWS
-// the stt-service/tts-service venvs can be skipped entirely.
+// Cloud TTS audio goes through the SAME ffmpeg telephony chain and cache —
+// loudness normalization is what carries the voice on a phone line, and it
+// must not depend on where synthesis happened. No Python services, NO GPU,
+// and NO model downloads: on AWS a small 2–4GB instance runs everything.
 //
 // Exotel setup: Voicebot applet URL = wss://YOUR-DOMAIN/voicebot
 // (nginx proxies /voicebot → ws://127.0.0.1:3002). Set VOICEBOT_WS_KEY in
@@ -44,7 +40,6 @@ const PORT = parseInt(process.env.VOICEBOT_PORT || "3002")
 // proxy buffering the NDJSON stream (which would undo sentence streaming).
 const APP_URL = process.env.APP_INTERNAL_URL || process.env.NEXT_PUBLIC_APP_URL || "http://127.0.0.1:3000"
 const API_KEY = process.env.WHATSAPP_SERVICE_KEY || "" // shared internal service key
-const STT_URL = process.env.STT_URL || process.env.STT_SERVICE_URL || "http://127.0.0.1:3003" // self-hosted Whisper (server/stt-service)
 
 if (!API_KEY) {
   console.error("FATAL: WHATSAPP_SERVICE_KEY not set — the voicebot cannot authenticate to the app.")
@@ -148,47 +143,35 @@ function pcmToWav(pcm) {
   return Buffer.concat([header, pcm])
 }
 
-// language="auto" → Whisper auto-detects per utterance. NOTE: the per-utterance
-// call below actually passes the call's KNOWN language (see endUtterance) —
-// "auto" only happens if the caller's language line is something STT doesn't
-// map. Detection per utterance is what makes mid-call language switching work:
+// STT language hints: each utterance passes the call's KNOWN language (see
+// endUtterance). SARVAM_STT_AUTO=1 switches to auto-detect instead.
+// Detection per utterance is what makes mid-call language switching work:
 // the transcript comes back in the script the caller actually spoke
 // (Telugu/Devanagari/Latin), and the turn API switches Priya's language from
 // that. Forcing the current call language here would transliterate English
 // speech into Telugu script and lock the call.
 const STT_TIMEOUT_MS = parseInt(process.env.VOICEBOT_STT_TIMEOUT_MS || "10000")
 async function speechToText(pcm, language) {
-  // Cloud provider path (STT_PROVIDER=sarvam). The providers module owns the
-  // full contract — returns the same {text, lowConfidence} shape as the local
-  // service, so endUtterance() cannot tell the difference.
-  const cloud = await voiceProviders.transcribe(pcmToWav(pcm), language)
-  if (cloud) return cloud
-
-  // Local Whisper path (STT_PROVIDER=local, the default).
+  // Cloud-only: Sarvam Saaras owns the full contract — returns
+  // {text, lowConfidence}. Throws on failure; the caller-facing error
+  // handling below takes over.
   const t0 = Date.now()
-  const res = await fetch(`${STT_URL}/transcribe?language=${encodeURIComponent(language)}`, {
-    method: "POST",
-    headers: { "Content-Type": "audio/wav", "x-api-key": API_KEY },
-    body: pcmToWav(pcm),
-    // A hung STT request used to wedge the whole call: endUtterance awaited
-    // forever with processing=true, which drops all inbound frames — the
-    // caller sat on dead air with no recovery until they hung up. 10s is well
-    // above the healthy 1-4s STT takes for a ≤15s utterance on CPU.
-    signal: AbortSignal.timeout(STT_TIMEOUT_MS),
-  })
-  if (!res.ok) {
-    const hint = res.status === 503 ? " (STT busy — another call is being transcribed)" : ""
-    throw new Error(`STT service HTTP ${res.status}${hint} — is server/stt-service running?`)
+  try {
+    const out = await voiceProviders.transcribe(pcmToWav(pcm), language)
+    console.log(`⏱ STT: ${Date.now() - t0}ms`)
+    return out
+  } catch (e) {
+    // Keep the historical 503 hint semantics: Sarvam rate-limiting looks like
+    // 429, and a busy account is the closest analogue of the old busy STT.
+    const msg = String(e?.message || e)
+    if (msg.includes("429")) throw new Error("STT provider rate-limited (Sarvam 429) — retry shortly")
+    throw e
   }
-  const data = await res.json()
-  console.log(`⏱ STT: ${Date.now() - t0}ms`)
-  return { text: (data?.text || "").trim(), lowConfidence: !!data?.low_confidence }
 }
 
-// Said when the STT service flags its own transcript as unreliable (see
-// low_confidence in server/stt-service/app.py) — asking the caller to repeat
-// beats sending Whisper's best guess at noise into the LLM, which otherwise
-// confidently replies to words the caller never said.
+// Said when the STT provider flags its own transcript as unreliable — asking
+// the caller to repeat beats sending a best guess at noise into the LLM, which
+// otherwise confidently replies to words the caller never said.
 const CLARIFY_PHRASE = {
   english: "Sorry, I didn't quite catch that — could you say that again?",
   // Native script, like every other fixed line the caller hears: the TTS
@@ -219,31 +202,18 @@ const START_FALLBACK_PHRASE = {
   hindi: "नमस्ते! मैं राइट एजेंट ग्रुप से बोल रही हूँ।",
 }
 
-// ---------- TTS: server/tts-service (Edge) OR Sarvam/Cartesia cloud ----------
-const TTS_URL = process.env.TTS_SERVICE_URL || "http://127.0.0.1:3004"
+// ---------- TTS: Sarvam / Cartesia cloud ----------
 
-async function synthesizeSpeech(text, language) {
-  // Cloud provider path (TTS_CALL_PROVIDER=sarvam|cartesia) — returns WAV,
-  // which flows through the same audioToPcm8k ffmpeg chain below as the
-  // local service's MP3. Caller-heard loudness stays identical by design.
-  const cloud = await voiceProviders.synthesize(text, language)
-  if (cloud) return cloud
-
-  // Local Edge TTS path (TTS_CALL_PROVIDER=edge, the default).
-  const t0 = Date.now()
-  const res = await fetch(`${TTS_URL}/synthesize`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
-    body: JSON.stringify({ text, language: language || "telugu" }),
-    signal: AbortSignal.timeout(30000),
-  })
-  if (!res.ok) throw new Error(`TTS service HTTP ${res.status} — is server/tts-service running?`)
-  const buf = Buffer.from(await res.arrayBuffer())
-  console.log(`⏱ TTS: ${Date.now() - t0}ms  ("${text.slice(0, 40)}${text.length > 40 ? "…" : ""}")`)
-  return buf
+async function synthesizeSpeech(text, language, voice) {
+  // Cloud-only path (TTS_CALL_PROVIDER=sarvam|cartesia) — returns WAV, which
+  // flows through the audioToPcm8k ffmpeg chain below. Caller-heard loudness
+  // is normalized by that chain regardless of the provider. `voice` is the
+  // call's AI-Employee voice ({provider, speaker}, from the branch's primary
+  // employee via the start response) — null = deployment default voice.
+  return voiceProviders.synthesize(text, language, voice)
 }
 
-// Playback loudness. Edge TTS output downsampled to 8kHz lands quiet on a
+// Playback loudness. Raw 24kHz cloud TTS downsampled to 8kHz lands quiet on a
 // phone line ("low voice" — caller feedback), so boost by default. alimiter
 // caps peaks so the gain can't clip into distortion. Tune per deployment
 // with VOICEBOT_TTS_VOLUME (1 = no boost).
@@ -258,14 +228,12 @@ const TTS_VOLUME = Math.max(0.5, Math.min(4, parseFloat(process.env.VOICEBOT_TTS
 // so the gain works only on real speech.
 //
 // acompressor is the actual fix for "sometimes too quiet, sometimes too
-// loud": Edge TTS level swings sentence to sentence, and especially between
-// the native and English voices stitched into one reply (see
-// server/tts-service) — a static gain can only ever be right for one of
-// them. Pulling peaks down before the makeup gain raises AVERAGE loudness,
-// which is what actually carries on a phone line, instead of just making the
-// loudest syllable clip.
+// loud": cloud TTS level swings sentence to sentence — a static gain can only
+// ever be right for one of them. Pulling peaks down before the makeup gain
+// raises AVERAGE loudness, which is what actually carries on a phone line,
+// instead of just making the loudest syllable clip.
 //
-// Measured on real Edge TTS output (the three public/promo/audio clips
+// Measured on real TTS output (the three public/promo/audio clips
 // concatenated, so the native+English level swing is in the test):
 //   plain volume=2.0  →  -14.6 LUFS integrated, -15.1 dB RMS
 //   this chain        →  -12.5 LUFS integrated, -12.9 dB RMS
@@ -316,16 +284,25 @@ function audioToPcm8k(audio) {
 }
 
 // Memo cache for FIXED phrases (greetings, closings, clarify prompts). These
-// are byte-identical on every call, so re-paying the Edge TTS round-trip +
+// are byte-identical on every call, so re-paying the TTS round-trip +
 // ffmpeg convert for them is pure dead air on the caller's ear. Capped and
 // length-limited so an LLM reply (never identical twice) can't grow it.
 const TTS_CACHE_MAX = 64
 const TTS_CACHE_MAX_CHARS = 300
 const ttsCache = new Map()
 
-async function textToSpeechPcm8k(text, language) {
+// Cache key includes the voice identity — two branches with different AI
+// Employees must never hear each other's voice out of a shared cache entry.
+// Empty voice prefix = deployment default, so prewarmed fixed lines stay
+// shared with every default-voice call.
+function ttsCacheKey(text, language, voice) {
+  const v = voice?.speaker ? `${voice.provider || ""}:${voice.speaker}` : ""
+  return `${v}\u0000${language}\u0000${text}`
+}
+
+async function textToSpeechPcm8k(text, language, voice) {
   const cacheable = text.length <= TTS_CACHE_MAX_CHARS
-  const key = `${language}\u0000${text}`
+  const key = ttsCacheKey(text, language, voice)
   if (cacheable) {
     const hit = ttsCache.get(key)
     if (hit) {
@@ -333,7 +310,7 @@ async function textToSpeechPcm8k(text, language) {
       return hit
     }
   }
-  const pcm = await audioToPcm8k(await synthesizeSpeech(text, language))
+  const pcm = await audioToPcm8k(await synthesizeSpeech(text, language, voice))
   if (cacheable && pcm.length > 0) {
     if (ttsCache.size >= TTS_CACHE_MAX) ttsCache.delete(ttsCache.keys().next().value)
     ttsCache.set(key, pcm)
@@ -342,17 +319,17 @@ async function textToSpeechPcm8k(text, language) {
 }
 
 // The FIRST call after a restart used to pay every cold start at once, with
-// the caller already on the line: the TTS service imports edge_tts/pydub and
-// resolves ffmpeg lazily inside the request, Next.js compiles /api/calls/turn
-// on first hit, and the DB pool opens its first connection. Measured as
-// several seconds of silence before Priya's first word. Pay all of it at boot
-// instead — nobody is listening yet. Failures here are non-fatal: a warm-up
-// that can't reach a service just means call #1 is as slow as it used to be.
+// the caller already on the line: ffmpeg resolves lazily inside the request,
+// Next.js compiles /api/calls/turn on first hit, and the DB pool opens its
+// first connection. Measured as several seconds of silence before Priya's
+// first word. Pay all of it at boot instead — nobody is listening yet.
+// Failures here are non-fatal: a warm-up that can't reach a service just
+// means call #1 is as slow as it used to be.
 async function prewarm() {
   const t0 = Date.now()
   const jobs = [
-    // Warms edge_tts + pydub/ffmpeg in the TTS service AND ffmpeg in this
-    // process. Both languages that need the segment-stitching path.
+    // Warms ffmpeg in this process AND pays the first cloud TTS round-trip
+    // (DNS + TLS + key check) for both providers' default path.
     textToSpeechPcm8k("Namaskaram!", "telugu").catch((e) => console.error("prewarm TTS(te):", e.message)),
     textToSpeechPcm8k("Hello!", "english").catch((e) => console.error("prewarm TTS(en):", e.message)),
     // Compiles/JITs the turn route and opens the DB pool. "warmup" is not a
@@ -363,12 +340,6 @@ async function prewarm() {
       headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
       body: JSON.stringify({ event: "end", callSid: "__prewarm__", duration: 0 }),
     }).catch((e) => console.error("prewarm app:", e.message)),
-    // Only meaningful with STT_PROVIDER=local — with a cloud provider there
-    // is no local service to warm, and the .catch() made that harmless but
-    // the log line made it look broken.
-    ...(voiceProviders.sttProviderName() === "local"
-      ? [fetch(`${STT_URL}/health`, { headers: { "x-api-key": API_KEY } }).catch(() => {})]
-      : []),
   ]
   await Promise.allSettled(jobs)
   // Prewarm every fixed caller-facing line into the TTS cache: clarify
@@ -471,6 +442,7 @@ class CallSession {
     this.streamSid = null
     this.callSid = null
     this.language = "telugu"   // Telugu-first; the turn API confirms/switches per caller
+    this.voice = null          // AI-Employee voice override, set by the start response
     this.startedAt = Date.now() // for real call duration (Voice Logs showed 0:00 without it)
     this.buffer = []          // PCM chunks of current utterance
     this.speechMs = 0
@@ -700,14 +672,22 @@ class CallSession {
     const start = msg.start || {}
     this.callSid = start.call_sid || start.callSid || start.CallSid || null
     const from = start.from || start.From || ""
-    console.log(`▶ call start sid=${this.callSid} from=${from}`)
+    // Multi-branch routing: the CALLED number (the branch's DLT-approved
+    // ExoPhone) decides which branch serves an inbound call. Exotel's field
+    // name varies by applet version — forward every plausible spelling and
+    // let the app's resolver pick (it matches on last 10 digits).
+    const to = start.to || start.To || start.called_number || start.dial_to || start.callee || ""
+    console.log(`▶ call start sid=${this.callSid} from=${from} to=${to || "?"}`)
     // BEFORE the API call, not after — this is what stops Exotel's ringback.
     this.startComfortNoise()
     const t0 = Date.now()
     try {
-      const r = await callTurnApi({ event: "start", callSid: this.callSid || "unknown", from })
+      const r = await callTurnApi({ event: "start", callSid: this.callSid || "unknown", from, to })
       console.log(`⏱ start API (answer → greeting text): ${Date.now() - t0}ms`)
       this.language = r.language || "english"
+      // The branch's AI-Employee voice for this call (null = default).
+      this.voice = r.voice && r.voice.speaker ? r.voice : null
+      if (this.voice) console.log(`🎙 voice: ${this.voice.provider}/${this.voice.speaker}`)
       await this.speak(r.text)
       console.log(`⏱ answer → greeting fully spoken: ${Date.now() - t0}ms`)
     } catch (e) {
@@ -842,13 +822,13 @@ class CallSession {
           console.log(`   saved ${f}`)
         } catch (e) { console.error("   dump failed:", e.message) }
       }
-      // Pass the call's KNOWN language instead of "auto" — this guides Whisper
+      // Pass the call's KNOWN language as the STT hint — this guides Saaras
       // to decode in the correct script, preventing language cross-talk.
       const turnT0 = Date.now()
       const { text: transcript, lowConfidence } = await speechToText(pcm, this.language)
       console.log(`👂 [${this.language}]${lowConfidence ? " LOW-CONFIDENCE" : ""} "${transcript}"`)
       if (!transcript) {
-        // Real speech (≥ MIN_SPEECH_MS above threshold) but Whisper returned
+        // Real speech (≥ MIN_SPEECH_MS above threshold) but STT returned
         // nothing: silence here would leave the caller hanging after their
         // turn. Ask for a repeat, same as the low-confidence path.
         console.log("🎙 transcript empty after real speech — asking to repeat")
@@ -1035,7 +1015,7 @@ class CallSession {
         // from cache; if even that isn't cached (TTS was down before boot),
         // there is genuinely nothing we can say, so log and move on.
         const fbText = FALLBACK_PHRASE[this.language] || FALLBACK_PHRASE.english
-        const fbPcm = ttsCache.get(`${this.language}\u0000${fbText}`)
+        const fbPcm = ttsCache.get(ttsCacheKey(fbText, this.language, this.voice))
         if (fbPcm && clean !== fbText) {
           console.log("🗣 (tts-failed fallback)")
           await this.playPcm(fbPcm, epoch)
@@ -1049,7 +1029,7 @@ class CallSession {
     return this.synthChain.then(() =>
       this.closed || epoch !== this.speechEpoch
         ? null
-        : textToSpeechPcm8k(text, this.language).catch((e) => {
+        : textToSpeechPcm8k(text, this.language, this.voice).catch((e) => {
             console.error("TTS error:", e.message)
             return null
           })

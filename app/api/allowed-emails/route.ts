@@ -5,7 +5,7 @@ import { requireRole, type Role } from "@/lib/auth"
 export const dynamic = "force-dynamic"
 
 const EMAIL_RE = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/
-const VALID_ROLES: Role[] = ["admin", "agent", "viewer", "developer"]
+const VALID_ROLES: Role[] = ["admin", "agent", "viewer", "developer", "branch_manager"]
 
 // Team access management is admin-only. Middleware already blocks
 // unauthenticated calls, but we verify the role again here — never trust a
@@ -14,8 +14,13 @@ export async function GET(req: NextRequest) {
   const session = await requireRole(req, ["admin"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   // Rows with the full-access role never appear in the admin-facing list.
-  const r = await query(`SELECT email, added_by, role, created_at FROM allowed_emails WHERE role != 'developer' ORDER BY created_at DESC`)
-  return NextResponse.json({ emails: r.rows, you: session.email })
+  const r = await query(
+    `SELECT ae.email, ae.added_by, ae.role, ae.created_at, ae.branch_id, b.name AS branch_name, b.code AS branch_code
+       FROM allowed_emails ae LEFT JOIN branches b ON b.id = ae.branch_id
+      WHERE ae.role != 'developer' ORDER BY ae.created_at DESC`
+  )
+  const branches = await query(`SELECT id, name, code FROM branches ORDER BY name`)
+  return NextResponse.json({ emails: r.rows, you: session.email, branches: branches.rows })
 }
 
 export async function POST(req: NextRequest) {
@@ -33,6 +38,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "invalid email address" }, { status: 400 })
   }
   let role: Role = VALID_ROLES.includes(body?.role) ? body.role : "agent"
+
+  // Multi-branch binding: agents/viewers/branch_managers can be pinned to a
+  // branch at invite time. Their session carries that branchId from login on;
+  // they see and touch ONLY that branch's data.
+  let branchId: string | null = null
+  if (body?.branch_id) {
+    const b = await query(`SELECT id FROM branches WHERE id = $1`, [String(body.branch_id)])
+    if (!b.rowCount) return NextResponse.json({ error: "unknown branch" }, { status: 400 })
+    branchId = b.rows[0].id
+  }
+  if (role === "branch_manager" && !branchId) {
+    return NextResponse.json({ error: "branch_manager requires a branch" }, { status: 400 })
+  }
 
   const adminEmailEnv = (process.env.ADMIN_EMAIL || "").toLowerCase()
   if (email === adminEmailEnv) {
@@ -68,11 +86,11 @@ export async function POST(req: NextRequest) {
   }
 
   await query(
-    `INSERT INTO allowed_emails (email, added_by, role) VALUES ($1, $2, $3)
-     ON CONFLICT (email) DO UPDATE SET role = $3`,
-    [email, session.email, role]
+    `INSERT INTO allowed_emails (email, added_by, role, branch_id) VALUES ($1, $2, $3, $4)
+     ON CONFLICT (email) DO UPDATE SET role = $3, branch_id = $4`,
+    [email, session.email, role, branchId]
   )
-  return NextResponse.json({ ok: true, email, role })
+  return NextResponse.json({ ok: true, email, role, branch_id: branchId })
 }
 
 export async function DELETE(req: NextRequest) {

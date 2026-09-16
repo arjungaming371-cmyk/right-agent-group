@@ -7,7 +7,7 @@
 // Config is read once at require time, so — like voicebot-selftest.js — this
 // script re-spawns itself once per scenario:
 //
-//   A  defaults            — local/edge selection, validation, dispatch nulls
+//   A  defaults            — cloud-only selection, validation, dispatch
 //   B  validation errors   — cloud providers selected without keys
 //   C  sarvam calls        — STT multipart + TTS payload, mocked fetch
 //   D  cartesia calls      — TTS payload + audio bytes, mocked fetch
@@ -23,9 +23,9 @@ const SCENARIO = process.env.PROVIDER_TEST_SCENARIO || ""
 // ---------- runner ----------
 if (!SCENARIO) {
   const scenarios = [
-    ["A", "defaults + dispatch + validation (local/edge)", {}],
+    ["A", "defaults + dispatch + validation (cloud-only)", {}],
     ["B", "validation errors (cloud without keys)", {
-      STT_PROVIDER: "sarvam", TTS_CALL_PROVIDER: "cartesia",
+      TTS_CALL_PROVIDER: "cartesia",
     }],
     ["C", "sarvam STT + TTS payloads (mocked fetch)", {
       STT_PROVIDER: "sarvam", TTS_CALL_PROVIDER: "sarvam",
@@ -33,6 +33,7 @@ if (!SCENARIO) {
     }],
     ["D", "cartesia TTS payload (mocked fetch)", {
       TTS_CALL_PROVIDER: "cartesia",
+      SARVAM_API_KEY: "test-key-sarvam", // STT is always Sarvam — key stays required
       CARTESIA_API_KEY: "test-key-cartesia",
       CARTESIA_VOICE_ID: "11111111-2222-3333-4444-555555555555",
     }],
@@ -79,19 +80,21 @@ function fakeWav() {
 }
 
 async function scenarioA() {
-  check("A1 stt provider default", vp.sttProviderName() === "local", vp.sttProviderName())
-  check("A2 tts provider default", vp.ttsCallProviderName() === "edge", vp.ttsCallProviderName())
-  check("A3 validation passes", vp.validateConfig().length === 0, JSON.stringify(vp.validateConfig()))
-  check("A4 dispatch transcribe → null (falls back to local)",
-    (await vp.transcribe(fakeWav(), "telugu")) === null)
-  check("A5 dispatch synthesize → null (falls back to local)",
-    (await vp.synthesize("hello", "telugu")) === null)
-  check("A6 describe mentions local stack", /Whisper/.test(vp.describeCallPipeline()) && /Edge/.test(vp.describeCallPipeline()))
+  check("A1 stt provider is always sarvam (cloud-only)", vp.sttProviderName() === "sarvam", vp.sttProviderName())
+  check("A2 tts provider default", vp.ttsCallProviderName() === "sarvam", vp.ttsCallProviderName())
+  check("A3 validation fails without SARVAM_API_KEY", vp.validateConfig().length > 0, JSON.stringify(vp.validateConfig()))
+  let threw = false
+  try { await vp.transcribe(fakeWav(), "telugu") } catch { threw = true }
+  check("A4 dispatch transcribe throws without key (no silent fallback)", threw)
+  let threwTts = false
+  try { await vp.synthesize("hello", "telugu") } catch { threwTts = true }
+  check("A5 dispatch synthesize throws without key (no silent fallback)", threwTts)
+  check("A6 describe mentions the cloud stack", /Sarvam/.test(vp.describeCallPipeline()) && !/Whisper|Edge/.test(vp.describeCallPipeline()), vp.describeCallPipeline())
 }
 
 async function scenarioB() {
   const errors = vp.validateConfig()
-  check("B1 validation catches missing Sarvam key (STT)", errors.some((e) => /STT_PROVIDER=sarvam but SARVAM_API_KEY/.test(e)), JSON.stringify(errors))
+  check("B1 validation catches missing Sarvam key (required for cloud STT + TTS)", errors.some((e) => /SARVAM_API_KEY/.test(e)), JSON.stringify(errors))
   check("B2 validation catches missing Cartesia key", errors.some((e) => /CARTESIA_API_KEY/.test(e)))
   check("B3 validation catches missing Cartesia voice", errors.some((e) => /CARTESIA_VOICE_ID/.test(e)))
   check("B4 fails fast (non-empty)", errors.length >= 3, `got ${errors.length}`)
@@ -165,6 +168,18 @@ async function scenarioC() {
     const dispatched = await vp.synthesize("hello", "english")
     check("C18 dispatch synthesize returns cloud audio", Buffer.isBuffer(dispatched) && dispatched.length > 0)
   } finally { restore() }
+
+  // --- Per-AI-Employee voice override (multi-branch) ---
+  captured = []
+  restore = await mockFetchOnce(
+    () => ({ ok: true, json: async () => ({ audios: [wav.toString("base64")] }) }),
+    captured
+  )
+  try {
+    await vp.synthesize("hello", "english", { provider: "sarvam", speaker: "shubh" })
+    const sent = JSON.parse(captured[0].init.body)
+    check("C19 employee voice override reaches the payload", sent.speaker === "shubh", sent.speaker)
+  } finally { restore() }
 }
 
 async function scenarioD() {
@@ -192,6 +207,39 @@ async function scenarioD() {
     check("D11 wav output", sent.output_format?.container === "wav" && sent.output_format?.encoding === "pcm_s16le")
     check("D12 no generation_config at speed 1.0", sent.generation_config === undefined)
   } finally { restore() }
+
+  // --- Per-AI-Employee voice overrides (multi-branch) ---
+  const capturedV1 = []
+  let restoreV = await mockFetchOnce(
+    () => ({ ok: true, arrayBuffer: async () => wav.buffer.slice(wav.byteOffset, wav.byteOffset + wav.byteLength) }),
+    capturedV1
+  )
+  try {
+    await vp.cartesiaTts("hello", "english", "custom-voice-id")
+    const sent = JSON.parse(capturedV1[0].init.body)
+    check("D14 employee voice-id override", sent.voice?.id === "custom-voice-id", JSON.stringify(sent.voice))
+  } finally { restoreV() }
+
+  const capturedV2 = []
+  restoreV = await mockFetchOnce(
+    () => ({ ok: true, arrayBuffer: async () => wav.buffer.slice(wav.byteOffset, wav.byteOffset + wav.byteLength) }),
+    capturedV2
+  )
+  try {
+    await vp.synthesize("hello", "english", { provider: "cartesia", speaker: "voice-abc" })
+    check("D15 dispatch honors a cartesia employee voice", JSON.parse(capturedV2[0].init.body).voice?.id === "voice-abc")
+  } finally { restoreV() }
+
+  const capturedV3 = []
+  restoreV = await mockFetchOnce(
+    () => ({ ok: true, json: async () => ({ audios: [wav.toString("base64")] }) }),
+    capturedV3
+  )
+  try {
+    await vp.synthesize("hello", "english", { provider: "sarvam", speaker: "ritu" })
+    const req = capturedV3[0]
+    check("D16 dispatch honors a sarvam employee voice over the cartesia default", req.url.includes("sarvam.ai/text-to-speech") && JSON.parse(req.init.body).speaker === "ritu", req.url)
+  } finally { restoreV() }
 
   // --- retry: one 500 then success ---
   const flaky = []
@@ -223,7 +271,7 @@ async function scenarioD() {
 
 async function scenarioE() {
   // Hindi text must never come out of the Telugu voice, and vice versa —
-  // the same guarantee server/tts-service's _voice_for() gives the Edge path.
+  // the same guarantee the old Edge TTS service's _voice_for() gave.
   check("E1 telugu script + declared hindi → te-IN",
     vp.resolveTtsLocale("నమస్కారం sir, loan కావాలా?", "hindi", { english: "en-IN", hindi: "hi-IN", telugu: "te-IN" }) === "te-IN")
   check("E2 devanagari + declared telugu → hi-IN",

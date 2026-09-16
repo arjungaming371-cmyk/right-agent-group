@@ -4,13 +4,14 @@ import { MessageSquareText, Bot, X, Send, Sparkles, Plus, History, Trash2, Arrow
 
 type Message = { role: "user" | "assistant"; content: string }
 type ChatSummary = { id: string; title: string; created_at: string; updated_at: string }
-type UserRole = "admin" | "agent" | "viewer" | "developer"
+type UserRole = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
 
 const GREETINGS: Record<UserRole, string> = {
   admin: "Hi! I'm the ops assistant with full read access to leads, calls, loan applications, WhatsApp activity, security, analytics, and the audit log. How can I help you today?",
   agent: "Hi! I'm the ops assistant. I can help with leads, calls, and WhatsApp insights. What would you like to know?",
   viewer: "Hi! I'm the ops assistant. I can show you reporting and insights. What would you like to know?",
   developer: "Hi! I'm your private developer assistant with full console access. I can help with system queries, logs, and development tasks. This chat is private and hidden from admins.",
+  branch_manager: "Hi! I'm the ops assistant for your branch. I can help with your branch's leads, calls, and WhatsApp activity. What would you like to know?",
 }
 
 const QUICK_COMMANDS = [

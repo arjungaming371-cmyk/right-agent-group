@@ -11,7 +11,7 @@ import { AI_EDITABLE_LOAN_FIELDS, type AiEditableLoanField } from "@/lib/llm"
 // time (defense in depth — never trust a stored value as a safe SQL
 // identifier just because it passed validation once already).
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const session = await requireRole(req, ["admin", "agent"])
+  const session = await requireRole(req, ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const { id } = await params

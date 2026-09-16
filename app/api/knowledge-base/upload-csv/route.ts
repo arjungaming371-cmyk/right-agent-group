@@ -8,7 +8,7 @@ import { parseCsvToEntries } from "@/lib/kb-ingest"
 // Expected columns (case-insensitive, flexible naming): title/question/q,
 // content/answer/a, category (optional).
 export async function POST(req: NextRequest) {
-  const session = await requireRole(req, ["admin", "agent"])
+  const session = await requireRole(req, ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const formData = await req.formData().catch(() => null)

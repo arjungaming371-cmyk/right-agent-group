@@ -15,7 +15,7 @@ export async function GET() {
 
 // POST — create an entry. admin+agent, same tier as leads/loan_applications.
 export async function POST(req: NextRequest) {
-  const session = await requireRole(req, ["admin", "agent"])
+  const session = await requireRole(req, ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const body = await req.json().catch(() => ({}))
   const title = typeof body.title === "string" ? body.title.trim() : ""
@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
 
 // PATCH — update an entry.
 export async function PATCH(req: NextRequest) {
-  const session = await requireRole(req, ["admin", "agent"])
+  const session = await requireRole(req, ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const body = await req.json().catch(() => ({}))
   const { id, ...rest } = body
@@ -56,7 +56,7 @@ export async function PATCH(req: NextRequest) {
 
 // DELETE — remove an entry (?id=...).
 export async function DELETE(req: NextRequest) {
-  const session = await requireRole(req, ["admin", "agent"])
+  const session = await requireRole(req, ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const id = new URL(req.url).searchParams.get("id")
   if (!id) return NextResponse.json({ error: "id required" }, { status: 400 })

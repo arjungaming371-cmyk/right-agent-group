@@ -8,6 +8,11 @@
 //   WHATSAPP_PHONE_NUMBER_ID  Phone Number ID from WhatsApp Manager (NOT the phone number)
 //   WHATSAPP_FORM_TEMPLATE    approved utility template name (default: loan_application_form)
 //
+// MULTI-BRANCH: every send accepts an optional branch context. A branch with
+// its own WABA number (branches.whatsapp_token / whatsapp_phone_number_id)
+// sends from ITS number; everyone else uses the env-level credentials. Inbound
+// webhooks route by metadata.phone_number_id → branch (app/api/whatsapp).
+//
 // Pricing reality (India, 2026): replies inside the 24h service window are
 // FREE and unlimited. Only business-initiated template sends cost money
 // (utility ≈ ₹0.115 + GST per message).
@@ -19,8 +24,36 @@ const FORM_TEMPLATE = process.env.WHATSAPP_FORM_TEMPLATE || "loan_application_fo
 const CALL_FOLLOWUP_TEMPLATE = process.env.WHATSAPP_CALL_FOLLOWUP_TEMPLATE || "call_followup"
 const MISSED_CALL_TEMPLATE = process.env.WHATSAPP_MISSED_CALL_TEMPLATE || "missed_call_followup"
 
-function configured(): boolean {
-  return !!(TOKEN && PHONE_ID)
+/** Branch context for a send — resolved once per flow, passed everywhere. */
+export type BranchWhatsAppCtx = {
+  id: string
+  whatsappToken?: string | null
+  whatsappPhoneNumberId?: string | null
+  brandName?: string | null
+} | null
+
+/** Load a branch's WhatsApp context (null → env-level default credentials). */
+export async function branchWhatsAppCtx(branchId: string | null | undefined): Promise<BranchWhatsAppCtx> {
+  if (!branchId) return null
+  try {
+    const { getBranch } = await import("./branches")
+    const b = await getBranch(branchId)
+    if (!b) return null
+    return { id: b.id, whatsappToken: b.whatsapp_token, whatsappPhoneNumberId: b.whatsapp_phone_number_id, brandName: b.brand_name }
+  } catch {
+    return null
+  }
+}
+
+/** Per-send credentials: the branch's WABA when it has one, else the env default. */
+function credsFor(branch?: BranchWhatsAppCtx): { token: string; phoneId: string; configured: boolean } {
+  const token = branch?.whatsappToken || TOKEN
+  const phoneId = branch?.whatsappPhoneNumberId || PHONE_ID
+  return { token, phoneId, configured: !!(token && phoneId) }
+}
+
+function defaultBranding(): string {
+  return process.env.NEXT_PUBLIC_ORG_NAME || "Right Agent Group"
 }
 
 // ---- DND / opt-out gate (2026-09 compliance pass) ----
@@ -89,16 +122,19 @@ function isValidNormalizedNumber(n: string): boolean {
   return /^91\d{10}$/.test(n)
 }
 
-async function graphPost(payload: Record<string, any>): Promise<{ ok: boolean; id?: string; error?: string; status?: number }> {
-  if (!configured()) {
-    return { ok: false, error: "WhatsApp Cloud API not configured — set WHATSAPP_TOKEN and WHATSAPP_PHONE_NUMBER_ID in .env" }
+async function graphPost(payload: Record<string, any>, branch?: BranchWhatsAppCtx): Promise<{ ok: boolean; id?: string; error?: string; status?: number }> {
+  const { token, phoneId, configured } = credsFor(branch)
+  if (!configured) {
+    return { ok: false, error: branch
+      ? "Branch WhatsApp number not configured — set it in Branches, or leave blank to use the company number"
+      : "WhatsApp Cloud API not configured — set WHATSAPP_TOKEN and WHATSAPP_PHONE_NUMBER_ID in .env" }
   }
   try {
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 15000)
-    const res = await fetch(`${GRAPH}/${PHONE_ID}/messages`, {
+    const res = await fetch(`${GRAPH}/${phoneId}/messages`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${TOKEN}` },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       signal: controller.signal,
       body: JSON.stringify({ messaging_product: "whatsapp", ...payload }),
     })
@@ -115,24 +151,20 @@ async function graphPost(payload: Record<string, any>): Promise<{ ok: boolean; i
 }
 
 /**
- * Downloads an inbound media attachment (document, audio, image, ...) by its
- * WhatsApp media ID. Two-step Meta flow: resolve the media ID to a
- * short-lived signed URL, then fetch that URL — both need the same bearer
- * token, but the second request is to a different (CDN) host so it can't be
- * combined into one call.
+ * Download media with EXPLICIT credentials — the branch webhook path calls
+ * this with the branch's own token (the media ID belongs to that WABA).
  */
-export async function downloadWhatsAppMedia(mediaId: string): Promise<{ buffer: Buffer; mimeType: string } | null> {
-  if (!configured()) return null
+async function downloadMediaWith(mediaId: string, token: string): Promise<{ buffer: Buffer; mimeType: string } | null> {
   try {
     const metaRes = await fetch(`${GRAPH}/${mediaId}`, {
-      headers: { Authorization: `Bearer ${TOKEN}` },
+      headers: { Authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(10000),
     })
     const meta: any = await metaRes.json().catch(() => ({}))
     if (!metaRes.ok || !meta?.url) return null
 
     const fileRes = await fetch(meta.url, {
-      headers: { Authorization: `Bearer ${TOKEN}` },
+      headers: { Authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(20000),
     })
     if (!fileRes.ok) return null
@@ -144,6 +176,22 @@ export async function downloadWhatsAppMedia(mediaId: string): Promise<{ buffer: 
   }
 }
 
+/** Default (env-credentialed) media download — kept for existing callers. */
+export async function downloadWhatsAppMedia(mediaId: string): Promise<{ buffer: Buffer; mimeType: string } | null> {
+  if (!TOKEN) return null
+  return downloadMediaWith(mediaId, TOKEN)
+}
+
+/** Branch-scoped media download (voice notes sent TO a branch's WABA number). */
+export async function downloadBranchWhatsAppMedia(
+  mediaId: string,
+  branch: BranchWhatsAppCtx
+): Promise<{ buffer: Buffer; mimeType: string } | null> {
+  const { token } = credsFor(branch)
+  if (!token) return null
+  return downloadMediaWith(mediaId, token)
+}
+
 /**
  * Free-form text message. Delivered only inside the 24-hour customer
  * service window (i.e. the customer messaged us first). Perfect for the
@@ -151,15 +199,23 @@ export async function downloadWhatsAppMedia(mediaId: string): Promise<{ buffer: 
  */
 export async function sendWhatsAppText(
   to: string,
-  message: string
+  message: string,
+  branch?: BranchWhatsAppCtx
 ): Promise<{ ok: boolean; id?: string; error?: string }> {
   const number = normalizeNumber(to)
   if (!isValidNormalizedNumber(number)) return { ok: false, error: `Invalid number: ${to}` }
-  return graphPost({
+  const result = await graphPost({
     to: number,
     type: "text",
     text: { preview_url: true, body: String(message) },
-  })
+  }, branch)
+  // Meter every outbound message (free window replies AND fallbacks) so the
+  // branch's WhatsApp bill allocation reflects reality.
+  if (result.ok && branch) {
+    const { recordUsage } = await import("./branches")
+    recordUsage(branch.id, "whatsapp")
+  }
+  return result
 }
 
 /**
@@ -176,12 +232,22 @@ export async function sendWhatsAppText(
 export async function sendApplicationLink(
   to: string,
   name: string,
-  token: string
+  token: string,
+  branch?: BranchWhatsAppCtx
 ): Promise<{ ok: boolean; error?: string }> {
   const number = normalizeNumber(to)
   if (!isValidNormalizedNumber(number)) return { ok: false, error: `Invalid number: ${to}` }
   const dnd = await dndGate(number)
   if (dnd) return dnd
+  if (branch) {
+    const { checkQuota } = await import("./branches")
+    const quota = await checkQuota(branch.id, "whatsapp")
+    if (!quota.ok) {
+      console.warn(`⛔ template send blocked by branch quota: ${quota.reason}`)
+      return { ok: false, error: quota.reason }
+    }
+  }
+  const brand = branch?.brandName || defaultBranding()
 
   const result = await graphPost({
     to: number,
@@ -194,7 +260,7 @@ export async function sendApplicationLink(
         { type: "button", sub_type: "url", index: "0", parameters: [{ type: "text", text: token }] },
       ],
     },
-  })
+  }, branch)
   if (result.ok) return { ok: true }
 
   // FALLBACK: if the template isn't approved yet but the customer messaged
@@ -210,8 +276,8 @@ export async function sendApplicationLink(
     return { ok: false, error: `Template failed (${result.error}) and NEXT_PUBLIC_APP_URL not set for fallback` }
   }
   const formBase = (process.env.APPLICATION_FORM_URL || `${appUrl}/form`).replace(/\/$/, "")
-  const message = `Hi ${name || "there"}! Thanks for speaking with Priya from Right Agent Group. Please complete your loan application here: ${formBase}/${token}\n\nWe never ask for OTP, PIN, or any payment. — Right Agent Group, Hyderabad`
-  const fallback = await sendWhatsAppText(number, message)
+  const message = `Hi ${name || "there"}! Thanks for speaking with Priya from ${brand}. Please complete your loan application here: ${formBase}/${token}\n\nWe never ask for OTP, PIN, or any payment. — ${brand}`
+  const fallback = await sendWhatsAppText(number, message, branch)
   if (fallback.ok) return { ok: true }
   return { ok: false, error: `Template: ${result.error} | Fallback: ${fallback.error}` }
 }
@@ -226,11 +292,20 @@ export async function sendApplicationLink(
  *         Feel free to message us here anytime with questions.
  *         We never ask for OTP, PIN, or any payment. — Right Agent Group, Hyderabad
  */
-export async function sendCallFollowUp(to: string, name: string): Promise<{ ok: boolean; error?: string }> {
+export async function sendCallFollowUp(to: string, name: string, branch?: BranchWhatsAppCtx): Promise<{ ok: boolean; error?: string }> {
   const number = normalizeNumber(to)
   if (!isValidNormalizedNumber(number)) return { ok: false, error: `Invalid number: ${to}` }
   const dnd = await dndGate(number)
   if (dnd) return dnd
+  if (branch) {
+    const { checkQuota } = await import("./branches")
+    const quota = await checkQuota(branch.id, "whatsapp")
+    if (!quota.ok) {
+      console.warn(`⛔ template send blocked by branch quota: ${quota.reason}`)
+      return { ok: false, error: quota.reason }
+    }
+  }
+  const brand = branch?.brandName || defaultBranding()
 
   const result = await graphPost({
     to: number,
@@ -240,7 +315,7 @@ export async function sendCallFollowUp(to: string, name: string): Promise<{ ok: 
       language: { code: "en" },
       components: [{ type: "body", parameters: [{ type: "text", text: name || "there" }] }],
     },
-  })
+  }, branch)
   if (result.ok) return { ok: true }
 
   // FALLBACK: only delivers if the customer already has an open 24h session
@@ -250,8 +325,8 @@ export async function sendCallFollowUp(to: string, name: string): Promise<{ ok: 
   if (!isDefinitiveTemplateError(result.status)) {
     return { ok: false, error: `Template failed ambiguously (${result.error}) — fallback suppressed to avoid a double send` }
   }
-  const message = `Hi ${name || "there"}! Thanks for speaking with Priya from Right Agent Group. Feel free to message us here anytime with questions.\n\nWe never ask for OTP, PIN, or any payment. — Right Agent Group, Hyderabad`
-  const fallback = await sendWhatsAppText(number, message)
+  const message = `Hi ${name || "there"}! Thanks for speaking with Priya from ${brand}. Feel free to message us here anytime with questions.\n\nWe never ask for OTP, PIN, or any payment. — ${brand}`
+  const fallback = await sendWhatsAppText(number, message, branch)
   if (fallback.ok) return { ok: true }
   return { ok: false, error: `Template: ${result.error} | Fallback: ${fallback.error}` }
 }
@@ -265,11 +340,20 @@ export async function sendCallFollowUp(to: string, name: string): Promise<{ ok: 
  *         offer but couldn't reach you. Reply here or call us back anytime.
  *         We never ask for OTP, PIN, or any payment. — Right Agent Group, Hyderabad
  */
-export async function sendMissedCallFollowUp(to: string, name: string): Promise<{ ok: boolean; error?: string }> {
+export async function sendMissedCallFollowUp(to: string, name: string, branch?: BranchWhatsAppCtx): Promise<{ ok: boolean; error?: string }> {
   const number = normalizeNumber(to)
   if (!isValidNormalizedNumber(number)) return { ok: false, error: `Invalid number: ${to}` }
   const dnd = await dndGate(number)
   if (dnd) return dnd
+  if (branch) {
+    const { checkQuota } = await import("./branches")
+    const quota = await checkQuota(branch.id, "whatsapp")
+    if (!quota.ok) {
+      console.warn(`⛔ template send blocked by branch quota: ${quota.reason}`)
+      return { ok: false, error: quota.reason }
+    }
+  }
+  const brand = branch?.brandName || defaultBranding()
 
   const result = await graphPost({
     to: number,
@@ -279,7 +363,7 @@ export async function sendMissedCallFollowUp(to: string, name: string): Promise<
       language: { code: "en" },
       components: [{ type: "body", parameters: [{ type: "text", text: name || "there" }] }],
     },
-  })
+  }, branch)
   if (result.ok) return { ok: true }
 
   // Only on a definitive 4xx — see sendApplicationLink's note on double-sends.
@@ -287,15 +371,15 @@ export async function sendMissedCallFollowUp(to: string, name: string): Promise<
     return { ok: false, error: `Template failed ambiguously (${result.error}) — fallback suppressed to avoid a double send` }
   }
 
-  const message = `Hi ${name || "there"}! We tried calling you from Right Agent Group about a loan offer but couldn't reach you. Reply here or call us back anytime.\n\nWe never ask for OTP, PIN, or any payment. — Right Agent Group, Hyderabad`
-  const fallback = await sendWhatsAppText(number, message)
+  const message = `Hi ${name || "there"}! We tried calling you from ${brand} about a loan offer but couldn't reach you. Reply here or call us back anytime.\n\nWe never ask for OTP, PIN, or any payment. — ${brand}`
+  const fallback = await sendWhatsAppText(number, message, branch)
   if (fallback.ok) return { ok: true }
   return { ok: false, error: `Template: ${result.error} | Fallback: ${fallback.error}` }
 }
 
 /** Health check for the dashboard — verifies the token and number are live with Meta. */
 export async function checkWhatsAppHealth(): Promise<{ ok: boolean; message: string }> {
-  if (!configured()) {
+  if (!(TOKEN && PHONE_ID)) {
     return { ok: false, message: "Not configured — set WHATSAPP_TOKEN and WHATSAPP_PHONE_NUMBER_ID in .env" }
   }
   try {

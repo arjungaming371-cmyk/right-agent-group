@@ -51,7 +51,8 @@ export async function POST(req: NextRequest) {
   ).catch(() => {})
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || ""
-  const token = await createSessionToken(pending.email, pending.role)
+  // Carry the branch scope decided at OAuth time into the real session.
+  const token = await createSessionToken(pending.email, pending.role, { orgId: pending.orgId, branchId: pending.branchId })
   const res = NextResponse.json({ ok: true, next: pending.next || "/" })
   res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions(appUrl.startsWith("https")))
   res.cookies.delete("otp_pending")

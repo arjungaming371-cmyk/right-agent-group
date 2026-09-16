@@ -1,8 +1,11 @@
 # Right Agent Group - one-shot machine setup
-# Run this FIRST, before any of the external accounts (Google/Groq/Exotel/
-# Meta/Cloudflare) exist. It automates everything that doesn't require a
-# human clicking through someone else's website: power settings, installing
-# Node/Python/PostgreSQL, project dependencies, and the database schema.
+# Run this FIRST, before any of the external accounts (Google/Groq/Sarvam/
+# Exotel/Meta/Cloudflare) exist. It automates everything that doesn't require
+# a human clicking through someone else's website: power settings, installing
+# Node/PostgreSQL, project dependencies, and the database schema.
+#
+# NOTE: there is no Python here on purpose — the voice pipeline is 100% cloud
+# (Sarvam STT + TTS), so the old local Whisper/Edge-TTS services are gone.
 #
 # What this script deliberately does NOT do - these need a human, on their
 # own device, under their own identity, no matter who's logged in:
@@ -57,16 +60,15 @@ try {
 }
 
 # ============================================================
-# [2] Core software - Node.js, Python, PostgreSQL
+# [2] Core software - Node.js, PostgreSQL
 # ============================================================
-Write-Step 2 "Core software (Node.js, Python, PostgreSQL)"
+Write-Step 2 "Core software (Node.js, PostgreSQL)"
 
 $hasWinget = Get-Command winget -ErrorAction SilentlyContinue
 if (-not $hasWinget) {
     Write-Warn "winget not found (needs Windows 10 1809+ / App Installer from the Microsoft Store)."
-    Write-Warn "Install these three manually, then re-run this script:"
+    Write-Warn "Install these two manually, then re-run this script:"
     Write-Warn "  Node.js LTS  -> https://nodejs.org"
-    Write-Warn "  Python 3.11+ -> https://www.python.org/downloads/windows/  (tick 'Add to PATH')"
     Write-Warn "  PostgreSQL   -> https://www.postgresql.org/download/windows/"
 } else {
     if (Get-Command node -ErrorAction SilentlyContinue) {
@@ -77,13 +79,7 @@ if (-not $hasWinget) {
         Write-Ok "Node.js installed"
     }
 
-    if (Get-Command python -ErrorAction SilentlyContinue) {
-        Write-Skip "Python ($(python --version))"
-    } else {
-        Write-Host "    Installing Python..."
-        winget install -e --id Python.Python.3.11 --accept-package-agreements --accept-source-agreements | Out-Null
-        Write-Ok "Python installed"
-    }
+    # Python is intentionally NOT installed — the voice pipeline is cloud-only.
 
     $pgService = Get-Service -Name "postgresql*" -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($pgService) {
@@ -139,12 +135,11 @@ function Set-EnvSecretIfBlank($key) {
 }
 Set-EnvSecretIfBlank "AUTH_SECRET"
 Set-EnvSecretIfBlank "WHATSAPP_SERVICE_KEY"
-# STT_API_KEY reads from WHATSAPP_SERVICE_KEY at runtime if left blank - nothing to fill here.
 
 # ============================================================
 # [4] Project dependencies
 # ============================================================
-Write-Step 4 "Project dependencies (npm + Python venvs)"
+Write-Step 4 "Project dependencies (npm)"
 
 if (Test-Path "node_modules") {
     Write-Skip "Website npm packages"
@@ -164,19 +159,9 @@ if (Test-Path "server\node_modules") {
     Write-Ok "Voicebot dependencies installed"
 }
 
-foreach ($svc in @("stt-service", "tts-service")) {
-    $venvPath = "server\$svc\venv"
-    if (Test-Path $venvPath) {
-        Write-Skip "$svc Python environment"
-    } else {
-        Write-Host "    Setting up $svc (this downloads real packages - stt-service also grabs a ~3GB speech model on first run)..."
-        Push-Location "server\$svc"
-        python -m venv venv
-        .\venv\Scripts\pip install -r requirements.txt
-        Pop-Location
-        Write-Ok "$svc environment ready"
-    }
-}
+# The voice pipeline is cloud-only (Sarvam STT/TTS) — no Python services to
+# set up. If a legacy install still has server\stt-service or server\tts-service
+# folders with venvs, they are simply unused and can be deleted.
 
 # ============================================================
 # [5] Database - create it, then apply every migration in order
@@ -225,7 +210,8 @@ Write-Host "Everything installable is installed. What's left needs a human," -Fo
 Write-Host "on their own device, under their own identity:" -ForegroundColor White
 Write-Host ""
 Write-Host "  1. Create these accounts (in the CUSTOMER'S name, not yours):" -ForegroundColor Yellow
-Write-Host "       - Groq          -> console.groq.com               (GROQ_API_KEY)"
+Write-Host "       - Sarvam AI     -> dashboard.sarvam.ai            (SARVAM_API_KEY - REQUIRED, powers STT + default TTS)"
+Write-Host "       - Groq          -> console.groq.com               (GROQ_API_KEY - optional if LLM_PROVIDER=sarvam)"
 Write-Host "       - Google OAuth  -> console.cloud.google.com       (GOOGLE_CLIENT_ID / _SECRET)"
 Write-Host "       - Exotel        -> my.exotel.com                  (EXOTEL_SID / _API_KEY / _API_TOKEN / _CALLER_ID)"
 Write-Host "       - Meta WhatsApp -> see SETUP-GUIDE-CLOUD-API.md    (WHATSAPP_TOKEN / _PHONE_NUMBER_ID / _APP_SECRET)"

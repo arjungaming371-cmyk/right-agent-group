@@ -106,7 +106,7 @@ export default function AboutPage() {
               { category: "Backend", tech: "Node.js, API Routes, Express" },
               { category: "Database", tech: "PostgreSQL, Supabase, Redis" },
               { category: "AI/ML", tech: "Groq API, Whisper STT" },
-              { category: "Voice", tech: "Exotel, Whisper STT, Edge TTS" },
+              { category: "Voice", tech: "Exotel, Sarvam AI (STT/TTS), Cartesia" },
               { category: "Messaging", tech: "Meta WhatsApp Cloud API" },
               { category: "Auth", tech: "Google OAuth, HMAC, JWT" },
               { category: "Deployment", tech: "Dedicated on-premise server, Cloudflare Tunnel" },

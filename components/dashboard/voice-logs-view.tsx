@@ -1,4 +1,6 @@
 "use client"
+
+type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
 import { useEffect, useRef, useState, useMemo } from "react"
 import {
   Bot, Check, Copy, Download, ExternalLink, FastForward, FileAudio,
@@ -39,7 +41,7 @@ function proxyRecordingUrl(url: string | null): string | null {
   return url
 }
 
-export default function VoiceLogsView({ role }: { role: "admin" | "agent" | "viewer" | "developer" }) {
+export default function VoiceLogsView({ role }: { role: Role }) {
   const canEdit = role !== "viewer"
   const toast = useToast()
   const [calls, setCalls]   = useState<Call[]>([])

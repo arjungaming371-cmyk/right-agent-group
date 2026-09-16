@@ -1,8 +1,0 @@
-# Pinned (2026-09 reliability pass) — edge-tts was completely unpinned, and
-# Microsoft's free endpoint occasionally changes protocol details that break
-# newer/older releases. If your venv already works, `pip freeze` and keep
-# those exact versions instead of blindly upgrading.
-edge-tts==7.0.0
-
-fastapi==0.115.6
-uvicorn[standard]==0.32.1

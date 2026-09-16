@@ -3,16 +3,18 @@ import { db, query } from "@/lib/db"
 import { startCall, handleTurn, handleTurnStream, correctLastSpokenReply } from "@/lib/voice-conversation"
 import { detectLanguage, type Language } from "@/lib/llm"
 import { PHONE_MATCH_SQL } from "@/lib/phone"
+import { resolveBranchByCallerId, recordUsage, getBranchVoice } from "@/lib/branches"
 
 export const dynamic = "force-dynamic"
 
 // Internal bridge for server/voicebot-server.js (Exotel WebSocket voicebot).
 // Protected by the shared service key — NOT for public use.
 //
-//  { event: "start", callSid, from }
-//     → resolves lead + language (outbound: by the voice_calls row created
-//       when the call was placed; inbound: by matching the caller's phone,
-//       creating a new lead if unknown), returns Priya's greeting.
+//  { event: "start", callSid, from, to }
+//     → resolves lead + language + BRANCH (outbound: by the voice_calls row
+//       created when the call was placed; inbound: by the CALLED number —
+//       the branch's DLT-approved ExoPhone — then by matching the caller's
+//       phone, creating a new lead if unknown), returns Priya's greeting.
 //
 //  { event: "turn", callSid, speech }
 //     → runs one conversation turn, returns { text, hangup }.
@@ -71,20 +73,30 @@ export async function POST(req: NextRequest) {
 
   try {
     if (event === "start") {
-      // 1) Outbound call? The outbound route already stored sid → lead + language.
+      // 1) Outbound call? The outbound route already stored sid → lead + language
+      //    (+ branch_id when the caller worked from a branch context).
       const { data: existing } = await db
         .from("voice_calls")
-        .select("lead_id, language, direction")
+        .select("lead_id, language, direction, branch_id")
         .eq("twilio_call_sid", callSid)
         .single()
 
       let leadId: string = existing?.lead_id || ""
       let language = normalizeLanguage(existing?.language)
       let direction: "inbound" | "outbound" = existing?.direction === "inbound" ? "inbound" : "outbound"
+      let branchId: string | null = existing?.branch_id || null
 
-      // 2) Inbound call? Match the caller's number to a lead, or create one.
+      // 2) Inbound call? The CALLED number (the branch's DLT ExoPhone) decides
+      //    which branch serves it; then match the caller's number to a lead, or
+      //    create one under that branch.
       if (!leadId && body?.from) {
         direction = "inbound"
+        // Multi-branch routing: the ExoPhone the caller dialed. Falls back to
+        // null (HQ / env-level Exotel account) when no branch claims it.
+        if (!branchId) {
+          const branch = await resolveBranchByCallerId(body?.to || body?.To || process.env.EXOTEL_CALLER_ID)
+          branchId = branch?.id || null
+        }
         const digits = String(body.from).replace(/\D/g, "")
         const phone = digits.length === 10 ? `+91${digits}` : `+${digits}`
         // Match on the last 10 digits, not exact string — a manually added
@@ -104,20 +116,23 @@ export async function POST(req: NextRequest) {
           // database that predates the migration still behaves correctly.
           const { data: newLead } = await db
             .from("leads")
-            .insert({ name: `Caller ${digits.slice(-4)}`, phone, source: "inbound_call", status: "new", language: "telugu" })
+            .insert({ name: `Caller ${digits.slice(-4)}`, phone, source: "inbound_call", status: "new", language: "telugu", branch_id: branchId })
             .select()
             .single()
           leadId = newLead?.id || ""
         }
         // record the inbound call row
         await db.from("voice_calls").upsert(
-          { twilio_call_sid: callSid, lead_id: leadId || null, direction: "inbound", status: "in-progress", language, phone },
+          { twilio_call_sid: callSid, lead_id: leadId || null, direction: "inbound", status: "in-progress", language, phone, branch_id: branchId },
           { onConflict: "twilio_call_sid" }
         )
       }
 
       const greeting = await startCall(leadId, callSid, language, direction)
-      return NextResponse.json({ text: greeting, language, leadId, hangup: false })
+      // The branch's primary AI Employee's voice — the voicebot uses it for
+      // every synthesis on this call (null = deployment default voice).
+      const voice = await getBranchVoice(branchId)
+      return NextResponse.json({ text: greeting, language, leadId, branchId, voice, hangup: false })
     }
 
     if (event === "turn") {
@@ -126,7 +141,7 @@ export async function POST(req: NextRequest) {
 
       const { data: call } = await db
         .from("voice_calls")
-        .select("lead_id, language, phone, instructions, direction")
+        .select("lead_id, language, phone, instructions, direction, branch_id")
         .eq("twilio_call_sid", callSid)
         .single()
 
@@ -152,6 +167,7 @@ export async function POST(req: NextRequest) {
         // creation time from the dashboard's "What should Priya talk about?"
         // field (app/api/calls POST).
         instructions: (typeof body?.instructions === "string" ? body.instructions.slice(0, 1000) : undefined) || call?.instructions || undefined,
+        branchId: call?.branch_id || null,
       }
 
       // STREAMING MODE (body.stream === true): NDJSON, one object per line.
@@ -188,14 +204,20 @@ export async function POST(req: NextRequest) {
       const duration = Math.max(0, Math.min(24 * 3600, parseInt(String(body?.duration ?? "0")) || 0))
       // GREATEST: never shrink a duration the Exotel status webhook already
       // wrote; only fill it in when nothing else did (inbound voicebot calls).
-      await query(
+      const ended = await query(
         `UPDATE voice_calls
             SET duration = GREATEST(duration, $2),
                 status = CASE WHEN status IN ('initiated', 'in-progress') THEN 'completed' ELSE status END,
                 updated_at = now()
-          WHERE twilio_call_sid = $1`,
+          WHERE twilio_call_sid = $1
+          RETURNING branch_id`,
         [callSid, duration]
       )
+      // Per-branch billing meter: real talk-time + one completed call.
+      const branchId = ended.rows[0]?.branch_id
+      if (branchId) {
+        recordUsage(branchId, "call_seconds", duration)
+      }
       return NextResponse.json({ ok: true })
     }
 

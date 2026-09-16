@@ -2,7 +2,7 @@
 ### From a blank server to a live AI calling system, step by step
 
 **What you need before starting:**
-- A server (client's own machine or VPS) with Ubuntu 22.04 / 24.04, minimum 16GB RAM, an NVIDIA GPU (**recommended** for the DEFAULT local voice stack — speech recognition (Whisper) is much faster with one; Priya's voice (Edge TTS) doesn't need a GPU at all), and 40GB free disk. **Going cloud instead?** With `STT_PROVIDER=sarvam` + a cloud `TTS_CALL_PROVIDER` (see CLOUD-VOICE-GUIDE.md) neither the GPU nor the 16GB RAM applies — a small 2–4GB instance runs the whole system, since the Python voice services are skipped entirely
+- A server (client's own machine or VPS) with Ubuntu 22.04 / 24.04. **The voice pipeline is 100% cloud** (Sarvam Saaras STT + Sarvam/Cartesia TTS — there are no local voice services, no GPU, no Python), so a small **2–4GB RAM instance with 20GB disk** runs the whole system (see CLOUD-VOICE-GUIDE.md for sizing and provider setup)
 - A domain name pointed at the server's IP (e.g. `console.rightgroupeagent.com` → A record)
 - An Exotel account with an ExoPhone number and API access
 - A Google account (for creating the login credentials)
@@ -190,22 +190,10 @@ npm install
 pm2 start voicebot-server.js --name voicebot
 ```
 
-**STT service** (speech recognition — first start downloads a ~3GB model, be patient):
-```bash
-cd ~/right-agent-group/server/stt-service
-python3 -m venv venv
-./venv/bin/pip install -r requirements.txt
-STT_API_KEY=PASTE_YOUR_WHATSAPP_SERVICE_KEY pm2 start "./venv/bin/uvicorn app:app --host 127.0.0.1 --port 3003" --name stt
-```
-(If the GPU isn't picked up: `./venv/bin/pip install nvidia-cublas-cu12 nvidia-cudnn-cu12` and `pm2 restart stt`.)
-
-**TTS service** (Priya's voice — Edge TTS, free, no GPU needed):
-```bash
-cd ~/right-agent-group/server/tts-service
-python3 -m venv venv
-./venv/bin/pip install -r requirements.txt
-TTS_API_KEY=PASTE_YOUR_WHATSAPP_SERVICE_KEY pm2 start "./venv/bin/uvicorn app:app --host 127.0.0.1 --port 3004" --name tts
-```
+> There is no STT/TTS service to install — the voice pipeline is 100% cloud
+> (Sarvam Saaras STT + Sarvam/Cartesia TTS, see CLOUD-VOICE-GUIDE.md). If you
+> are migrating an OLD install that still has `server/stt-service` or
+> `server/tts-service` folders, delete them; the app no longer starts them.
 
 Make everything survive reboots:
 ```bash

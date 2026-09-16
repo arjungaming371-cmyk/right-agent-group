@@ -11,7 +11,7 @@ import { isValidUUID, mergeFacts } from "@/lib/lead-brain"
 // real (awaited) Groq call here is fine — the live call/WhatsApp path
 // never hits this route.
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const session = await requireRole(req, ["admin", "agent"])
+  const session = await requireRole(req, ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const { id } = await params

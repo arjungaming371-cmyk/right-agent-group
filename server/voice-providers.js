@@ -1,40 +1,40 @@
 // Right Agent Group — cloud voice providers for the Exotel voicebot.
 //
-// Lets Priya run on AWS (or any VM) WITHOUT the self-hosted Python STT/TTS
-// services: no Whisper model to host, no GPU, no venv, no extra setup —
-// the voice pipeline becomes three HTTPS calls per turn.
+// The voice pipeline is 100% cloud — there is NO self-hosted STT/TTS service
+// anymore (server/stt-service and server/tts-service were removed). No
+// Whisper model to host, no GPU, no venv, no extra setup — the pipeline is
+// three HTTPS calls per turn, which also makes multi-branch deployments
+// trivial: the same container serves every branch.
 //
-//   STT_PROVIDER=sarvam   → api.sarvam.ai/speech-to-text   (Saaras, batch per utterance)
-//   TTS_CALL_PROVIDER=sarvam   → api.sarvam.ai/text-to-speech   (Bulbul v3)
+//   STT_PROVIDER=sarvam   → api.sarvam.ai/speech-to-text   (Saaras, batch per utterance)  [only STT]
+//   TTS_CALL_PROVIDER=sarvam   → api.sarvam.ai/text-to-speech   (Bulbul v3)  [default]
 //   TTS_CALL_PROVIDER=cartesia → api.cartesia.ai/tts/bytes      (Sonic 3.6)
-//   (default for both: "edge"/"local" — the self-hosted services, unchanged)
 //
 // WHY mode="translit" ON STT: the app's entire conversation layer is written
 // for Roman-script Tenglish/Hinglish (lib/llm.ts language rules, WhatsApp
-// cross-channel memory, Lead Brain analysis). The local Whisper service
-// transcribes in native script, then transliterates to Roman via
-// indic-transliteration (server/stt-service/app.py). Sarvam's Saaras does
-// that natively with mode="translit" — one call, same contract.
+// cross-channel memory, Lead Brain analysis). Sarvam's Saaras produces that
+// natively with mode="translit" — one call, Roman text out, no transliteration
+// library to maintain.
 //
 // WHY THE ffmpeg CHAIN STAYS: cloud TTS returns studio-quality WAV at 24kHz,
-// which lands just as quiet on a phone line as Edge TTS did. voicebot-server's
+// which lands quiet on a phone line without normalization. voicebot-server's
 // audioToPcm8k (band-pass → compressor → makeup gain → limiter → 8kHz) is
 // applied to ALL providers identically — measured on real calls, it is what
 // carries the voice, so it is deliberately not provider-conditional.
 //
-// Script guard, ported from server/tts-service/app.py's _voice_for(): a Hindi
+// Script guard (ported from the old tts-service's _voice_for()): a Hindi
 // reply must never come out of the Telugu voice (or vice versa) because the
 // call's declared language went stale after the caller switched. Native
 // script in the text overrides the declared language for both cloud TTS
-// providers, exactly like the Edge service does.
+// providers.
 //
 // No new npm dependencies: multipart bodies are assembled by hand, everything
 // is plain Node 22 fetch.
 
 // ---------- Configuration ----------
 
-const STT_PROVIDER = (process.env.STT_PROVIDER || "local").toLowerCase()
-const TTS_CALL_PROVIDER = (process.env.TTS_CALL_PROVIDER || process.env.TTS_PROVIDER || "edge").toLowerCase()
+const STT_PROVIDER = "sarvam" // cloud-only pipeline — Saaras is the only STT
+const TTS_CALL_PROVIDER = (process.env.TTS_CALL_PROVIDER || process.env.TTS_PROVIDER || "sarvam").toLowerCase()
 
 const SARVAM_API_KEY = (process.env.SARVAM_API_KEY || "").trim()
 const SARVAM_BASE = (process.env.SARVAM_URL || "https://api.sarvam.ai").replace(/\/$/, "")
@@ -42,8 +42,8 @@ const SARVAM_STT_MODEL = process.env.SARVAM_STT_MODEL || "saaras:v4"
 // translit = Romanized output (Tenglish/Hinglish). transcribe = native script.
 // codemix = Indic words in native script with English words in Latin.
 const SARVAM_STT_MODE = process.env.SARVAM_STT_MODE || "translit"
-// Default: pass the call's known language as a recognition hint (same as the
-// local Whisper path). SARVAM_STT_AUTO=1 always auto-detects instead — use it
+// Default: pass the call's known language as a recognition hint. SARVAM_STT_AUTO=1
+// always auto-detects instead — use it
 // if callers switch languages mid-sentence so often the hint hurts more.
 const SARVAM_STT_AUTO = (process.env.SARVAM_STT_AUTO || "0").trim() === "1"
 
@@ -71,7 +71,7 @@ const SARVAM_STT_LOCALES = { english: "en-IN", hindi: "hi-IN", telugu: "te-IN" }
 const SARVAM_TTS_LOCALES = { english: "en-IN", hindi: "hi-IN", telugu: "te-IN" }
 const CARTESIA_LOCALES = { english: "en-IN", hindi: "hi-IN", telugu: "te-IN" }
 
-// Same script detection as server/tts-service/app.py.
+// Same script detection as the old tts-service (kept for behavior parity).
 const _TELUGU_RE = /[\u0C00-\u0C7F]/g // ఀ-౿
 const _DEVANAGARI_RE = /[\u0900-\u097F]/g // ऀ-ॿ
 
@@ -134,8 +134,7 @@ async function fetchWithRetry(url, init, tries = 2) {
 // caps utterances at 15s (MAX_UTTERANCE_MS), so every utterance fits.
 // 8kHz telephony audio is supported natively; no upsampling needed.
 //
-// Returns { text, lowConfidence } — the SAME shape as the local Whisper
-// service, so voicebot-server's endUtterance() logic is untouched.
+// Returns { text, lowConfidence }.
 // Sarvam's batch response carries no per-segment confidence figure, so
 // lowConfidence is always false: the empty-transcript path still asks the
 // caller to repeat, which is the failure mode that mattered live.
@@ -179,14 +178,17 @@ async function sarvamStt(wavBuffer, language) {
 
 // ---------- Sarvam TTS (Bulbul v3) ----------
 
-async function sarvamTts(text, language) {
+// speakerOverride: per-AI-Employee voice (ai_employees.voice_speaker);
+// falsy → the deployment default (SARVAM_TTS_SPEAKER).
+async function sarvamTts(text, language, speakerOverride) {
   if (!SARVAM_API_KEY) throw new Error("SARVAM_API_KEY is not set — cannot use TTS_CALL_PROVIDER=sarvam")
+  const speaker = speakerOverride || SARVAM_TTS_SPEAKER
   const locale = resolveTtsLocale(text, language, SARVAM_TTS_LOCALES)
   const body = {
     text,
     model: SARVAM_TTS_MODEL,
     language_code: locale,
-    speaker: SARVAM_TTS_SPEAKER,
+    speaker,
     speech_sample_rate: SARVAM_TTS_SAMPLE_RATE,
     output_audio_codec: "wav",
   }
@@ -202,7 +204,7 @@ async function sarvamTts(text, language) {
   const audioB64 = Array.isArray(data?.audios) ? data.audios.join("") : ""
   const wav = Buffer.from(audioB64, "base64")
   if (wav.length < 100) throw new Error("Sarvam TTS returned empty audio")
-  console.log(`⏱ TTS(sarvam ${SARVAM_TTS_MODEL}/${SARVAM_TTS_SPEAKER}@${locale}): ${Date.now() - t0}ms  ("${text.slice(0, 40)}${text.length > 40 ? "…" : ""}")`)
+  console.log(`⏱ TTS(sarvam ${SARVAM_TTS_MODEL}/${speaker}@${locale}): ${Date.now() - t0}ms  ("${text.slice(0, 40)}${text.length > 40 ? "…" : ""}")`)
   return wav
 }
 
@@ -212,14 +214,17 @@ async function sarvamTts(text, language) {
 // WAV/pcm_s16le at CARTESIA_SAMPLE_RATE; ffmpeg in voicebot-server converts
 // to 8kHz PCM for Exotel with the shared telephony filter chain.
 
-async function cartesiaTts(text, language) {
+// voiceIdOverride: per-AI-Employee Cartesia voice ID (ai_employees.voice_speaker
+// when voice_provider=cartesia); falsy → the deployment default.
+async function cartesiaTts(text, language, voiceIdOverride) {
   if (!CARTESIA_API_KEY) throw new Error("CARTESIA_API_KEY is not set — cannot use TTS_CALL_PROVIDER=cartesia")
-  if (!CARTESIA_VOICE_ID) throw new Error("CARTESIA_VOICE_ID is not set — pick a voice at https://play.cartesia.ai/voices")
+  const voiceId = voiceIdOverride || CARTESIA_VOICE_ID
+  if (!voiceId) throw new Error("CARTESIA_VOICE_ID is not set — pick a voice at https://play.cartesia.ai/voices")
   const locale = resolveTtsLocale(text, language, CARTESIA_LOCALES)
   const body = {
     model_id: CARTESIA_MODEL,
     transcript: text,
-    voice: { id: CARTESIA_VOICE_ID },
+    voice: { id: voiceId },
     language: locale,
     output_format: { container: "wav", encoding: "pcm_s16le", sample_rate: CARTESIA_SAMPLE_RATE },
   }
@@ -255,54 +260,68 @@ function ttsCallProviderName() {
 }
 
 async function transcribe(wavBuffer, language) {
-  if (STT_PROVIDER === "sarvam") return sarvamStt(wavBuffer, language)
-  return null // caller falls back to the local service path
+  // Cloud-only: Saaras is the only STT. Throws on failure — the voicebot's
+  // caller-facing error handling takes over (clarify/fallback phrases).
+  return sarvamStt(wavBuffer, language)
 }
 
-async function synthesize(text, language) {
-  if (TTS_CALL_PROVIDER === "sarvam") return sarvamTts(text, language)
-  if (TTS_CALL_PROVIDER === "cartesia") return cartesiaTts(text, language)
-  return null // caller falls back to the local Edge service path
+/**
+ * Synthesize one sentence.
+ *
+ * voiceOverride — the call's AI Employee voice, `{ provider, speaker }`,
+ * resolved at call start from the branch's primary employee (see
+ * lib/branches.ts getBranchVoice). provider picks the engine, speaker is a
+ * Sarvam speaker name or a Cartesia voice ID. null/unusable → the
+ * deployment default dispatch (TTS_CALL_PROVIDER + env voice), so
+ * single-tenant behaviour is byte-identical to before.
+ */
+async function synthesize(text, language, voiceOverride) {
+  const vo = voiceOverride || null
+  // Employee explicitly wants Cartesia and it is usable.
+  if (vo?.provider === "cartesia" && CARTESIA_API_KEY && (vo.speaker || CARTESIA_VOICE_ID)) {
+    return cartesiaTts(text, language, vo.speaker)
+  }
+  // Employee explicitly wants Sarvam (always usable — the key is mandatory).
+  if (vo?.provider === "sarvam" && SARVAM_API_KEY) {
+    return sarvamTts(text, language, vo.speaker)
+  }
+  // No usable override — default dispatch, threading through a same-provider
+  // speaker override if the employee's provider happens to match.
+  if (TTS_CALL_PROVIDER === "cartesia") {
+    return cartesiaTts(text, language, vo?.provider === "cartesia" ? vo.speaker : undefined)
+  }
+  return sarvamTts(text, language, vo?.provider === "sarvam" ? vo.speaker : undefined)
 }
 
 /** Boot-time config validation — fail fast with a message that names the fix. */
 function validateConfig() {
   const errors = []
-  if (STT_PROVIDER === "sarvam" && !SARVAM_API_KEY) {
-    errors.push("STT_PROVIDER=sarvam but SARVAM_API_KEY is not set (get one at dashboard.sarvam.ai)")
-  }
-  if (TTS_CALL_PROVIDER === "sarvam" && !SARVAM_API_KEY) {
-    errors.push("TTS_CALL_PROVIDER=sarvam but SARVAM_API_KEY is not set")
+  // STT is always Sarvam now.
+  if (!SARVAM_API_KEY) {
+    errors.push("SARVAM_API_KEY is not set — the cloud STT (and default TTS) cannot work without it (get one at dashboard.sarvam.ai)")
   }
   if (TTS_CALL_PROVIDER === "cartesia") {
     if (!CARTESIA_API_KEY) errors.push("TTS_CALL_PROVIDER=cartesia but CARTESIA_API_KEY is not set")
     if (!CARTESIA_VOICE_ID) errors.push("TTS_CALL_PROVIDER=cartesia but CARTESIA_VOICE_ID is not set (pick one at play.cartesia.ai/voices)")
   }
-  if (STT_PROVIDER !== "local" && STT_PROVIDER !== "sarvam") {
-    errors.push(`STT_PROVIDER="${STT_PROVIDER}" is not a known provider (local | sarvam)`)
-  }
-  if (!["edge", "local", "sarvam", "cartesia"].includes(TTS_CALL_PROVIDER)) {
-    errors.push(`TTS_CALL_PROVIDER="${TTS_CALL_PROVIDER}" is not a known provider (edge | sarvam | cartesia)`)
+  if (!["sarvam", "cartesia"].includes(TTS_CALL_PROVIDER)) {
+    errors.push(`TTS_CALL_PROVIDER="${TTS_CALL_PROVIDER}" is not a known provider (sarvam | cartesia)`)
   }
   return errors
 }
 
 function describeCallPipeline() {
-  const stt = STT_PROVIDER === "sarvam"
-    ? `Sarvam ${SARVAM_STT_MODEL} mode=${SARVAM_STT_MODE} (cloud)`
-    : "self-hosted Whisper (server/stt-service)"
-  const tts = TTS_CALL_PROVIDER === "sarvam"
-    ? `Sarvam ${SARVAM_TTS_MODEL} speaker=${SARVAM_TTS_SPEAKER} (cloud)`
-    : TTS_CALL_PROVIDER === "cartesia"
-      ? `Cartesia ${CARTESIA_MODEL} (cloud)`
-      : "self-hosted Edge TTS (server/tts-service)"
+  const stt = `Sarvam ${SARVAM_STT_MODEL} mode=${SARVAM_STT_MODE} (cloud)`
+  const tts = TTS_CALL_PROVIDER === "cartesia"
+    ? `Cartesia ${CARTESIA_MODEL} (cloud)`
+    : `Sarvam ${SARVAM_TTS_MODEL} speaker=${SARVAM_TTS_SPEAKER} (cloud)`
   return `STT: ${stt} | TTS: ${tts}`
 }
 
 module.exports = {
   // config introspection
   sttProviderName, ttsCallProviderName, validateConfig, describeCallPipeline,
-  // dispatchers (return null = "not mine, use the local path")
+  // dispatchers (throw on failure — caller-facing error handling takes over)
   transcribe, synthesize,
   // direct provider calls (exported for tests + reuse)
   sarvamStt, sarvamTts, cartesiaTts,

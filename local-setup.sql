@@ -542,3 +542,136 @@ CREATE EXTENSION IF NOT EXISTS moddatetime;
 DROP TRIGGER IF EXISTS trg_leads_updated_at ON leads;
 CREATE TRIGGER trg_leads_updated_at BEFORE UPDATE ON leads
   FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
+
+-- ============================================================
+-- MULTI-BRANCH (MULTI-TENANT) ARCHITECTURE (2026-09-16)
+-- Mirrors migrations/2026-09-16_multi_branch.sql so a fresh
+-- db:setup provisions the same schema. Idempotent. See that
+-- migration for the full design commentary.
+-- ============================================================
+
+-- Parent account (owns billing; one per deployment)
+CREATE TABLE IF NOT EXISTS organizations (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name          TEXT NOT NULL,
+  plan          TEXT NOT NULL DEFAULT 'standard',
+  billing_email TEXT,
+  billing_notes JSONB NOT NULL DEFAULT '{}',
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+INSERT INTO organizations (name)
+SELECT 'Right Agent Group'
+WHERE NOT EXISTS (SELECT 1 FROM organizations);
+
+-- Branch sub-accounts (own DLT ExoPhone, own WhatsApp number, branding, quotas)
+CREATE TABLE IF NOT EXISTS branches (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id        UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  name          TEXT NOT NULL,
+  code          TEXT NOT NULL UNIQUE,
+  region        TEXT,
+  status        TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended')),
+  exotel_sid         TEXT,
+  exotel_api_key     TEXT,
+  exotel_api_token   TEXT,
+  exotel_caller_id   TEXT,
+  exotel_flow_app_id TEXT,
+  whatsapp_phone_number_id TEXT,
+  whatsapp_token           TEXT,
+  whatsapp_display_name    TEXT,
+  brand_name         TEXT,
+  brand_logo_url     TEXT,
+  brand_primary_color TEXT NOT NULL DEFAULT '#4f46e5',
+  brand_tagline      TEXT,
+  monthly_call_limit      INTEGER,
+  monthly_whatsapp_limit  INTEGER,
+  max_ai_employees        INTEGER,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_branches_org    ON branches (org_id);
+CREATE INDEX IF NOT EXISTS idx_branches_caller ON branches (exotel_caller_id);
+CREATE INDEX IF NOT EXISTS idx_branches_wa_pid ON branches (whatsapp_phone_number_id);
+
+-- AI Employees (shared across branches or dedicated to one)
+CREATE TABLE IF NOT EXISTS ai_employees (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id        UUID REFERENCES organizations(id) ON DELETE CASCADE,
+  name          TEXT NOT NULL,
+  description   TEXT,
+  voice_provider TEXT NOT NULL DEFAULT 'sarvam' CHECK (voice_provider IN ('sarvam', 'cartesia')),
+  voice_speaker  TEXT,
+  languages     TEXT[] NOT NULL DEFAULT ARRAY['english','hindi','telugu'],
+  scope         TEXT NOT NULL DEFAULT 'dedicated' CHECK (scope IN ('shared', 'dedicated')),
+  is_active     BOOLEAN NOT NULL DEFAULT true,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_ai_employees_org ON ai_employees (org_id);
+
+CREATE TABLE IF NOT EXISTS branch_ai_employees (
+  branch_id   UUID NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+  employee_id UUID NOT NULL REFERENCES ai_employees(id) ON DELETE CASCADE,
+  is_primary  BOOLEAN NOT NULL DEFAULT false,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (branch_id, employee_id)
+);
+
+-- Per-branch script overrides (branch+employee+language → branch+language → ai_scripts)
+CREATE TABLE IF NOT EXISTS branch_scripts (
+  id          SERIAL PRIMARY KEY,
+  branch_id   UUID NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+  employee_id UUID REFERENCES ai_employees(id) ON DELETE CASCADE,
+  language    TEXT NOT NULL,
+  content     TEXT NOT NULL,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_by  TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_branch_scripts
+  ON branch_scripts (branch_id, COALESCE(employee_id, '00000000-0000-0000-0000-000000000000'::uuid), language);
+
+-- Per-branch usage meter (centralized billing allocation)
+CREATE TABLE IF NOT EXISTS branch_usage (
+  branch_id         UUID NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+  month             TEXT NOT NULL,
+  calls_made        INTEGER NOT NULL DEFAULT 0,
+  call_seconds      INTEGER NOT NULL DEFAULT 0,
+  whatsapp_messages INTEGER NOT NULL DEFAULT 0,
+  stt_seconds       NUMERIC(12,2) NOT NULL DEFAULT 0,
+  tts_characters    INTEGER NOT NULL DEFAULT 0,
+  llm_tokens        INTEGER NOT NULL DEFAULT 0,
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (branch_id, month)
+);
+
+-- Branch scoping on the data tables (NULL = HQ / pre-multi-branch rows)
+ALTER TABLE leads             ADD COLUMN IF NOT EXISTS branch_id UUID REFERENCES branches(id);
+ALTER TABLE voice_calls       ADD COLUMN IF NOT EXISTS branch_id UUID REFERENCES branches(id);
+ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS branch_id UUID REFERENCES branches(id);
+ALTER TABLE outbound_queue    ADD COLUMN IF NOT EXISTS branch_id UUID REFERENCES branches(id);
+ALTER TABLE loan_applications ADD COLUMN IF NOT EXISTS branch_id UUID REFERENCES branches(id);
+ALTER TABLE uploaded_files    ADD COLUMN IF NOT EXISTS branch_id UUID REFERENCES branches(id);
+
+CREATE INDEX IF NOT EXISTS idx_leads_branch          ON leads (branch_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_voice_calls_branch    ON voice_calls (branch_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_wa_messages_branch    ON whatsapp_messages (branch_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_outbound_branch       ON outbound_queue (branch_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_loan_apps_branch      ON loan_applications (branch_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_uploaded_files_branch ON uploaded_files (branch_id, created_at DESC);
+
+-- Team binding + branch_manager role
+ALTER TABLE allowed_emails ADD COLUMN IF NOT EXISTS org_id    UUID REFERENCES organizations(id);
+ALTER TABLE allowed_emails ADD COLUMN IF NOT EXISTS branch_id UUID REFERENCES branches(id);
+
+ALTER TABLE allowed_emails DROP CONSTRAINT IF EXISTS allowed_emails_role_check;
+ALTER TABLE allowed_emails ADD CONSTRAINT allowed_emails_role_check
+  CHECK (role IN ('admin', 'agent', 'viewer', 'developer', 'branch_manager'));
+
+CREATE EXTENSION IF NOT EXISTS moddatetime;
+DROP TRIGGER IF EXISTS trg_branches_updated_at ON branches;
+CREATE TRIGGER trg_branches_updated_at BEFORE UPDATE ON branches
+  FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
+DROP TRIGGER IF EXISTS trg_organizations_updated_at ON organizations;
+CREATE TRIGGER trg_organizations_updated_at BEFORE UPDATE ON organizations
+  FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);

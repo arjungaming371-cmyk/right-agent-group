@@ -9,7 +9,7 @@ import { fetchAndExtractUrl } from "@/lib/kb-ingest"
 // dashboard's "Refresh" button) updates the existing entry in place
 // instead of creating a duplicate.
 export async function POST(req: NextRequest) {
-  const session = await requireRole(req, ["admin", "agent"])
+  const session = await requireRole(req, ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const body = await req.json().catch(() => ({}))

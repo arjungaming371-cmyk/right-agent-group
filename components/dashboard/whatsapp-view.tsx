@@ -1,4 +1,6 @@
 "use client"
+
+type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
 import { useEffect, useRef, useState, useCallback } from "react"
 import { Search, Send, MessageCircle, ChevronLeft, CheckCircle2, Zap, Lock, Pin, Info, X, Phone, MapPin, Wallet, Languages, Tag, StickyNote, Smile, PhoneCall } from "lucide-react"
 import { useToast } from "../ui/toast"
@@ -118,7 +120,7 @@ function InfoRow({ icon: Icon, label, value }: { icon: any; label: string; value
   )
 }
 
-export default function WhatsAppView({ role }: { role: "admin" | "agent" | "viewer" | "developer" }) {
+export default function WhatsAppView({ role }: { role: Role }) {
   const canEdit = role !== "viewer"
   const toast = useToast()
   const [leads, setLeads]       = useState<Lead[]>([])

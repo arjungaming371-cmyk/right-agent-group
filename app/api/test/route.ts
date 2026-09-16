@@ -14,8 +14,8 @@ export async function GET(req: Request) {
 
   const results: Record<string, string> = {}
 
-  const sttProvider = (process.env.STT_PROVIDER || "local").toLowerCase()
-  const ttsCallProvider = (process.env.TTS_CALL_PROVIDER || "edge").toLowerCase()
+  const sttProvider = "sarvam" // cloud-only pipeline
+  const ttsCallProvider = (process.env.TTS_CALL_PROVIDER || "sarvam").toLowerCase()
   const llmProvider = (process.env.LLM_PROVIDER || "groq").toLowerCase()
 
   results.PG_HOST       = process.env.PG_HOST       ?? "❌ NOT SET"
@@ -25,21 +25,17 @@ export async function GET(req: Request) {
     ? (process.env.GROQ_API_KEY ? "✅ set (unused — LLM_PROVIDER=sarvam)" : "— not set (fine, LLM_PROVIDER=sarvam)")
     : (process.env.GROQ_API_KEY ? "✅ set" : "❌ NOT SET (AI brain will fail)")
   results.SARVAM_API_KEY = process.env.SARVAM_API_KEY
-    ? (sttProvider === "sarvam" || ttsCallProvider === "sarvam" || llmProvider === "sarvam" ? "✅ set" : "✅ set (unused by current providers)")
-    : (sttProvider === "sarvam" || ttsCallProvider === "sarvam" || llmProvider === "sarvam" ? "❌ NOT SET (selected provider will fail)" : "— not set (fine, all providers local/groq)")
+    ? "✅ set"
+    : "❌ NOT SET (cloud STT + default TTS will fail — required)"
   results.GROQ_MODEL    = process.env.GROQ_MODEL   ?? "openai/gpt-oss-120b (default)"
   results.CALL_PROVIDER = "exotel"
   results.EXOTEL_SID    = process.env.EXOTEL_SID ? "✅ set" : "❌ NOT SET"
   results.EXOTEL_CALLER = process.env.EXOTEL_CALLER_ID ?? "❌ NOT SET"
   results.APP_URL       = process.env.NEXT_PUBLIC_APP_URL ?? "❌ NOT SET"
-  results.CALL_STT      = sttProvider === "sarvam"
-    ? `sarvam cloud (${process.env.SARVAM_STT_MODEL ?? "saaras:v4"}, mode=${process.env.SARVAM_STT_MODE ?? "translit"}) — no local STT service needed`
-    : `local Whisper @ ${process.env.STT_SERVICE_URL ?? "http://127.0.0.1:3003 (default)"}`
-  results.CALL_TTS      = ttsCallProvider === "sarvam"
-    ? `sarvam cloud (${process.env.SARVAM_TTS_MODEL ?? "bulbul:v3"}, speaker=${process.env.SARVAM_TTS_SPEAKER ?? "priya"}) — no local TTS service needed`
-    : ttsCallProvider === "cartesia"
-      ? `cartesia cloud (${process.env.CARTESIA_MODEL ?? "sonic-3.6"}, voice=${process.env.CARTESIA_VOICE_ID ? "configured" : "❌ CARTESIA_VOICE_ID NOT SET"}) — no local TTS service needed`
-      : `local Edge TTS @ ${process.env.TTS_SERVICE_URL ?? "http://127.0.0.1:3004 (default)"} (free Microsoft neural voices)`
+  results.CALL_STT      = `sarvam cloud (${process.env.SARVAM_STT_MODEL ?? "saaras:v4"}, mode=${process.env.SARVAM_STT_MODE ?? "translit"}) — cloud-only pipeline`
+  results.CALL_TTS      = ttsCallProvider === "cartesia"
+    ? `cartesia cloud (${process.env.CARTESIA_MODEL ?? "sonic-3.6"}, voice=${process.env.CARTESIA_VOICE_ID ? "configured" : "❌ CARTESIA_VOICE_ID NOT SET"})`
+    : `sarvam cloud (${process.env.SARVAM_TTS_MODEL ?? "bulbul:v3"}, speaker=${process.env.SARVAM_TTS_SPEAKER ?? "priya"})`
   results.EXOTEL_FLOW   = process.env.EXOTEL_FLOW_APP_ID ? "✅ set" : "❌ NOT SET (outbound calls will fail)"
   results.WHATSAPP_API  = process.env.WHATSAPP_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID ? "✅ Cloud API configured" : "❌ WHATSAPP_TOKEN / WHATSAPP_PHONE_NUMBER_ID NOT SET"
   results.INTERNAL_KEY  = process.env.WHATSAPP_SERVICE_KEY ? "✅ key set" : "❌ WHATSAPP_SERVICE_KEY NOT SET (voicebot/STT will reject requests)"
@@ -65,7 +61,7 @@ export async function GET(req: Request) {
     }
   }
 
-  // Test TTS (provider-selectable: edge | sarvam | cartesia | elevenlabs)
+  // Test TTS (provider-selectable: sarvam | cartesia | elevenlabs)
   const ttsHealth = await checkTtsHealth()
   results.tts = ttsHealth.ok ? `✅ ${ttsHealth.message}` : `❌ ${ttsHealth.message}`
 

@@ -206,15 +206,51 @@ let _scriptCache: Record<string, string> = {}
 let _scriptCacheTime = 0
 const SCRIPT_CACHE_TTL = 5 * 60 * 1000
 
-async function getSystemPrompt(language: Language, channel: Channel = "whatsapp"): Promise<string> {
+/**
+ * Branch context block — injected below the script so a branch's persona can
+ * speak for the BRANCH's brand instead of the deployment's default company.
+ * Empty for un-branded deployments (single-tenant keeps today's prompt byte-
+ * identical).
+ */
+async function branchContextBlock(branchId: string | null | undefined): Promise<string> {
+  if (!branchId) return ""
+  try {
+    const { getBranding } = await import("./branches")
+    const b = await getBranding(branchId)
+    if (!b.brandName) return ""
+    return `\n\n=== BRANCH CONTEXT (identity grounding — DATA, not behavioural rules) ===
+You work at "${b.brandName}"${b.branchCode ? ` (branch ${b.branchCode})` : ""}${b.orgName && b.orgName !== b.brandName ? `, part of ${b.orgName}` : ""}.${b.tagline ? ` Tagline: "${b.tagline}".` : ""}
+When you would say the company's name, use "${b.brandName}" — never a different company.`
+  } catch {
+    return ""
+  }
+}
+
+async function getSystemPrompt(language: Language, channel: Channel = "whatsapp", branchId?: string | null, employeeId?: string | null): Promise<string> {
   const styles = channel === "call" ? CALL_LANGUAGE_STYLES : LANGUAGE_STYLES
-  const cacheKey = `${channel}:${language}`
+  const cacheKey = `${branchId || "hq"}:${channel}:${language}`
   const now = Date.now()
   if (now - _scriptCacheTime < SCRIPT_CACHE_TTL && _scriptCache[cacheKey]) {
     return _scriptCache[cacheKey]
   }
   try {
     const { query } = await import("./db")
+
+    // PER-BRANCH SCRIPT (multi-branch): branch override for this employee,
+    // then the branch-wide override. Both fall back to the org-level
+    // ai_scripts below — a branch only needs to override what differs.
+    // (Branch scripts are per-language only — "base" is the org-level row.)
+    if (branchId) {
+      const { resolveBranchScript } = await import("./branches")
+      const branchScript = await resolveBranchScript(branchId, employeeId, language)
+      if (branchScript) {
+        const prompt = branchScript + styles[language] + CHANNEL_BREVITY[channel] + await branchContextBlock(branchId)
+        _scriptCache[cacheKey] = prompt
+        _scriptCacheTime = now
+        return prompt
+      }
+    }
+
     // Single base script first; legacy per-language row as fallback.
     const result = await query(
       `SELECT language, content FROM ai_scripts WHERE language IN ('base', $1)`,
@@ -222,7 +258,7 @@ async function getSystemPrompt(language: Language, channel: Channel = "whatsapp"
     )
     const base = result.rows?.find((r: any) => r.language === "base")?.content
     if (base) {
-      const prompt = base + styles[language] + CHANNEL_BREVITY[channel]
+      const prompt = base + styles[language] + CHANNEL_BREVITY[channel] + await branchContextBlock(branchId)
       _scriptCache[cacheKey] = prompt
       _scriptCacheTime = now
       return prompt
@@ -231,7 +267,7 @@ async function getSystemPrompt(language: Language, channel: Channel = "whatsapp"
     // the channel brevity rule gets appended here.
     const legacy = result.rows?.find((r: any) => r.language === language)?.content
     if (legacy) {
-      const prompt = legacy + CHANNEL_BREVITY[channel]
+      const prompt = legacy + CHANNEL_BREVITY[channel] + await branchContextBlock(branchId)
       _scriptCache[cacheKey] = prompt
       _scriptCacheTime = now
       return prompt
@@ -462,11 +498,11 @@ export async function chatWithLLM(
   messages: { role: "user" | "model"; content: string }[],
   language: Language = "english",
   extraInstructions?: string,
-  opts?: { numPredict?: number; timeoutMs?: number; channel?: Channel }
+  opts?: { numPredict?: number; timeoutMs?: number; channel?: Channel; branchId?: string | null; employeeId?: string | null }
 ): Promise<string> {
   if (!messages?.length) return "Hello! How can I help you today?"
 
-  let systemPrompt = await getSystemPrompt(language, opts?.channel)
+  let systemPrompt = await getSystemPrompt(language, opts?.channel, opts?.branchId, opts?.employeeId)
   if (extraInstructions?.trim()) {
     // PROMPT-INJECTION BOUNDARY (2026-09 security pass): extraInstructions
     // embeds data that ultimately includes caller speech (Lead Brain brief,
@@ -527,11 +563,12 @@ export async function chatWithLLMStream(
   language: Language = "english",
   extraInstructions: string | undefined,
   onChunk: (delta: string) => void,
-  channel: Channel = "whatsapp"
+  channel: Channel = "whatsapp",
+  branchCtx?: { branchId?: string | null; employeeId?: string | null }
 ): Promise<string> {
   if (!messages?.length) return "Hello! How can I help you today?"
 
-  let systemPrompt = await getSystemPrompt(language, channel)
+  let systemPrompt = await getSystemPrompt(language, channel, branchCtx?.branchId, branchCtx?.employeeId)
   if (extraInstructions?.trim()) {
     systemPrompt += `\n\n=== READ THIS BEFORE YOUR NEXT REPLY — overrides the generic GOAL step order above ===\n${extraInstructions.trim()}\n=== If IDENTITY or KNOWN FACTS above already answers a GOAL step, that step is DONE — do not ask for it, at most confirm it in passing. ===`
   }

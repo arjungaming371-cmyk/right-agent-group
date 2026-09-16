@@ -6,7 +6,7 @@ import { requireRole } from "@/lib/auth"
 // dashboard's approval queue needs); ?status=all|approved|rejected for the
 // history view on a given application.
 export async function GET(req: NextRequest) {
-  const session = await requireRole(req, ["admin", "agent"])
+  const session = await requireRole(req, ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const { searchParams } = new URL(req.url)

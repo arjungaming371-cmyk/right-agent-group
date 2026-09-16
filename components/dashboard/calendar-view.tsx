@@ -1,4 +1,6 @@
 "use client"
+
+type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
 import { useEffect, useState } from "react"
 import { CalendarClock, ChevronLeft, ChevronRight, Phone, RotateCcw, X } from "lucide-react"
 import { useToast } from "../ui/toast"
@@ -22,7 +24,7 @@ function toDateKey(d: Date): string {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
 }
 
-export default function CalendarView({ role }: { role: "admin" | "agent" | "viewer" | "developer" }) {
+export default function CalendarView({ role }: { role: Role }) {
   const canEdit = role !== "viewer"
   const toast = useToast()
 

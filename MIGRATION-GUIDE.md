@@ -17,11 +17,14 @@ URLs, not local audio. So the entire state is **the database plus two files**:
 
 | What | Where it is | How it moves |
 |---|---|---|
-| All leads, calls, WhatsApp history, applications | PostgreSQL | `pg_dump` → `pg_restore` |
+| All leads, calls, WhatsApp history, applications, branches | PostgreSQL | `pg_dump` → `pg_restore` |
 | Every secret and API key | `.env` (gitignored — never in the repo) | copy by hand |
 | ngrok reserved domain | your ngrok **account**, not the machine | just log in on the PC |
-| Whisper speech model (~3GB) | `server/stt-service` cache | don't move it — it re-downloads |
 | Everything else | git | `git clone` |
+
+> The old Whisper model cache row is gone because the local Whisper service is
+> gone — the voice pipeline is 100% cloud (Sarvam STT/TTS), so there is no
+> model to move or re-download on the new machine.
 
 ---
 
@@ -29,21 +32,19 @@ URLs, not local audio. So the entire state is **the database plus two files**:
 
 | | Minimum | Why |
 |---|---|---|
-| RAM | 16GB (32GB comfortable) | Postgres + Node + Python + Whisper all at once |
-| Disk | 40GB free, SSD | ~3GB of that is the speech model |
-| GPU | **NVIDIA, 12GB VRAM** | see below — this is the whole reason to move |
-| Internet | stable, always on | Groq and Edge TTS are called on every single turn |
+| RAM | 8GB (16GB comfortable) | Postgres + Next.js + the voicebot, nothing else |
+| Disk | 20GB free, SSD | the app is small — no models to store |
+| GPU | not needed | STT/TTS are cloud APIs now |
+| Internet | stable, always on | Sarvam (STT + TTS) and the LLM are called on every single turn |
 | Power | never sleeps | inbound calls arrive at any hour |
 
-### The GPU is the point of this move
+### Voice speed is no longer a hardware question
 
-Your laptop runs `STT_MODEL=large-v3` with `STT_FORCE_DEVICE=cpu`. That combination
-transcribes **10–30 seconds per utterance**. On an NVIDIA GPU the same model runs in
-about 2 seconds.
-
-That is the difference between a caller waiting half a minute in silence and a normal
-conversation. If the new PC has no NVIDIA GPU, **do not carry `large-v3` over** — see
-Step 6.
+The old laptop ran local Whisper on CPU, which transcribed **10–30 seconds per
+utterance** — the whole reason big GPUs mattered. That service is gone: STT and
+TTS are Sarvam cloud calls now, so a plain office PC (or a small VPS) keeps call
+latency at a couple of seconds. What matters instead is a **stable internet
+connection**, because every turn is an API round-trip.
 
 ---
 
@@ -55,9 +56,9 @@ Install git and clone the repo first, then:
 PowerShell -ExecutionPolicy Bypass -File scripts\setup-machine.ps1
 ```
 
-This installs Node, Python and PostgreSQL, creates both Python virtualenvs, installs
-npm packages, and creates the empty database schema. It is safe to re-run — every step
-skips itself if already done.
+This installs Node and PostgreSQL, installs npm packages, and creates the empty
+database schema. It is safe to re-run — every step skips itself if already done.
+There is no Python step any more: the voice pipeline is 100% cloud.
 
 Note the PostgreSQL password you set during install. You need it in Step 4.
 
@@ -89,7 +90,7 @@ Onto a USB stick or a shared folder:
 
 That is the entire payload. Two files.
 
-> **Do not** copy `node_modules`, `.next`, or the Python `venv` folders. They contain
+> **Do not** copy `node_modules` or `.next`. They contain
 > machine-specific paths and compiled binaries; Step 1 already made fresh ones.
 
 ---
@@ -129,31 +130,18 @@ are tied to your accounts, not to the machine.
 
 ---
 
-## Step 6 — Point Whisper at the GPU
+## Step 6 — Check the cloud voice keys
 
-**This is the step people forget, and it silently costs you everything the new PC was for.**
-
-`.env` currently says:
-
-```
-STT_FORCE_DEVICE=cpu
-```
-
-**If the PC has an NVIDIA GPU**, change it to:
+The voice pipeline is cloud-only, so the one thing that can silently break the
+first call is a missing/expired **SARVAM_API_KEY**. In `.env` verify:
 
 ```
-STT_FORCE_DEVICE=cuda
+SARVAM_API_KEY=<set, and paid up on dashboard.sarvam.ai>
 ```
 
-**If it does NOT have an NVIDIA GPU**, leave it as `cpu` and also change:
-
-```
-STT_MODEL=small
-```
-
-`large-v3` on a CPU takes 10–30 seconds per utterance, which is unusable on a live
-call. `small` is less accurate but fast enough to hold a conversation. Accuracy you can
-work around; half a minute of dead air you cannot.
+`START.ps1` warns at boot if it is missing — don't ignore that line. (The old
+`STT_PROVIDER` / `STT_MODEL` / `STT_FORCE_DEVICE` lines are obsolete; the local
+Whisper service no longer exists.)
 
 ---
 
@@ -187,42 +175,35 @@ npm run build
 PowerShell -ExecutionPolicy Bypass -File START.ps1
 ```
 
-That starts, in order: PostgreSQL check → Groq key check → Whisper STT (port 3003) →
-TTS (3004) → voicebot (3002) → website (3000) → tunnel.
-
-**First run downloads the ~3GB speech model.** Let it finish before testing.
+That starts, in order: PostgreSQL check → provider key checks → voicebot (3002) →
+website (3000) → tunnel. There is no STT/TTS process and no model download — the
+cloud providers are prewarmed from the voicebot instead.
 
 ---
 
 ## Step 9 — Verify, in this order
 
-**1. Whisper is actually on the GPU** — the single most important check:
+**1. The voicebot is up and its cloud providers validate:**
 
 ```powershell
-curl -H "x-api-key: <WHATSAPP_SERVICE_KEY from .env>" http://127.0.0.1:3003/health
+type logs\voicebot.log | Select-String "pipeline"
 ```
 
-Must report `"device":"cuda"` and `"model":"large-v3"`. If it says `"cpu"` and
-`"small"`, CUDA isn't wired up — go back to Step 6 and fix it before the demo.
+Must show `STT: Sarvam ... (cloud) | TTS: Sarvam ... (cloud)` (or Cartesia). A
+missing Sarvam key would have exited at boot instead.
 
-**2. TTS is alive:**
-
-```powershell
-curl -H "x-api-key: <WHATSAPP_SERVICE_KEY from .env>" http://127.0.0.1:3004/health
-```
-
-**3. Your data came across** — open the dashboard, sign in with Google, and check the
+**2. Your data came across** — open the dashboard, sign in with Google, and check the
 Leads tab shows your real leads and Voice Logs shows past calls. If the login itself
 fails, the OAuth redirect URI doesn't match your ngrok domain.
 
-**4. WhatsApp** — the dashboard's WhatsApp tab should show **Connected**. Send a test
+**3. WhatsApp** — the dashboard's WhatsApp tab should show **Connected**. Send a test
 message to a verified recipient.
 
-**5. A real test call** — call the ExoPhone number. Listen for: Priya answers, hears
+**4. A real test call** — call the ExoPhone number. Listen for: Priya answers, hears
 you, replies in the right language, and the reply arrives without a long silence. Check
 Voice Logs afterwards for a transcript and a non-zero duration.
 
-**6. Re-run the echo probe.** Echo depends on the audio path, so the laptop's result
+**5. Re-run the echo probe.** Echo depends on the audio path, so the laptop's result
 does not transfer:
 
 ```powershell
@@ -258,12 +239,12 @@ while the PC was live.
 |---|---|
 | `db:check` lists missing columns | restore incomplete — re-run Step 4 |
 | Google login fails | OAuth redirect URI doesn't match the ngrok domain |
-| Priya answers but never responds | STT down, or `WHATSAPP_SERVICE_KEY` mismatch — check `logs\stt.err.log` |
-| Long silence before every reply | Whisper on CPU — Step 6 |
+| Priya answers but never responds | Sarvam key missing/expired, or no internet — check `logs\voicebot.log` |
+| Long silence before every reply | Sarvam rate limit or slow network — check the STT timings in `logs\voicebot.log` |
 | No voice at all | ffmpeg missing from PATH |
 | WhatsApp shows Disconnected | `WHATSAPP_TOKEN` expired, or webhook still pointing elsewhere |
 
-Logs live in `logs\` — `stt.err.log` and `voicebot.log` first when calls misbehave.
+Logs live in `logs\` — `voicebot.log` first when calls misbehave.
 
 ---
 
@@ -273,8 +254,8 @@ Logs live in `logs\` — `stt.err.log` and `voicebot.log` first when calls misbe
 PC:      clone repo → scripts\setup-machine.ps1 → install ffmpeg + ngrok
 Laptop:  stop services → BACKUP.ps1 → copy the .dump and .env
 PC:      pg_restore → npm run db:check → drop .env in → fix PG_PASSWORD
-PC:      STT_FORCE_DEVICE=cuda   ← do not skip this
+PC:      verify SARVAM_API_KEY in .env   ← do not skip this
 PC:      ngrok config add-authtoken → npm run build → START.ps1
-PC:      /health says cuda + large-v3 → test call → re-run echo probe
+PC:      voicebot.log shows the cloud pipeline → test call → re-run echo probe
 Laptop:  keep it intact for a week
 ```

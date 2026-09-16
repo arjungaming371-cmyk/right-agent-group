@@ -1,14 +1,21 @@
-import { NextResponse } from "next/server"
+import { NextRequest, NextResponse } from "next/server"
 import { apiError } from "@/lib/api-error"
 import { query } from "@/lib/db"
+import { requireRole } from "@/lib/auth"
+import { sessionBranchId } from "@/lib/branches"
 
 export const dynamic = "force-dynamic"
 
 // One fast query: every lead with a phone, with their latest WhatsApp
 // message and unread count, sorted so active conversations are on top.
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const session = await requireRole(req, ["admin", "agent", "viewer", "branch_manager"])
+  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+  // Branch-scoped users see only conversations on leads of their branch.
+  const branchId = sessionBranchId(session)
   try {
-    const result = await query(`
+    const result = await query(
+      `
       SELECT
         l.id, l.name, l.phone,
         l.pinned, l.pinned_at,
@@ -36,10 +43,12 @@ export async function GET() {
         WHERE lead_id = l.id AND direction = 'inbound' AND status = 'received'
       ) u ON true
       LEFT JOIN lead_memory mem ON mem.lead_id = l.id
-      WHERE l.phone IS NOT NULL AND l.phone != ''
+      WHERE l.phone IS NOT NULL AND l.phone != '' ${branchId ? "AND l.branch_id = $1" : ""}
       ORDER BY l.pinned DESC, l.pinned_at DESC NULLS LAST, lm.created_at DESC NULLS LAST, l.created_at DESC
       LIMIT 100
-    `)
+    `,
+      branchId ? [branchId] : []
+    )
     return NextResponse.json(result.rows)
   } catch (e: any) {
     return apiError(e)

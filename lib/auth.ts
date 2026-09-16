@@ -2,12 +2,26 @@
 // Works in BOTH Next.js Edge middleware and Node API routes (no extra deps).
 //
 // Cookie format:  base64url(payloadJSON) + "." + base64url(hmacSignature)
-// Payload: { email, role, exp } — exp is a unix-seconds expiry.
+// Payload: { email, role, orgId?, branchId?, exp } — exp is a unix-seconds expiry.
+//
+// Multi-branch fields (2026-09):
+//   orgId    — the user's organization (parent account). Usually null: the
+//              deployment has ONE org and admin sees all of it.
+//   branchId — the user's ACTIVE branch scope. Branch-scoped roles
+//              (branch_manager and branch-bound agents/viewers) always carry
+//              their branch here; admins/developers carry null (= "all
+//              branches") or the branch they switched to via /api/auth/branch.
 
-export type Role = "admin" | "agent" | "viewer" | "developer"
+export type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
 
 export const SESSION_COOKIE = "rag_session"
 const SESSION_DAYS = 7
+
+// Roles that may change their own branch scope via /api/auth/branch.
+// Everyone else is pinned to the branch assigned in allowed_emails.
+export function canSwitchBranch(role: Role): boolean {
+  return role === "admin" || role === "developer"
+}
 
 function getSecret(): string {
   const s = process.env.AUTH_SECRET
@@ -40,10 +54,20 @@ async function hmacKey(): Promise<CryptoKey> {
   ])
 }
 
-export type Session = { email: string; role: Role; exp: number }
+export type Session = { email: string; role: Role; exp: number; orgId?: string | null; branchId?: string | null }
 
-export async function createSessionToken(email: string, role: Role): Promise<string> {
-  const payload: Session = { email, role, exp: Math.floor(Date.now() / 1000) + SESSION_DAYS * 86400 }
+export async function createSessionToken(
+  email: string,
+  role: Role,
+  scope?: { orgId?: string | null; branchId?: string | null }
+): Promise<string> {
+  const payload: Session = {
+    email,
+    role,
+    orgId: scope?.orgId ?? null,
+    branchId: scope?.branchId ?? null,
+    exp: Math.floor(Date.now() / 1000) + SESSION_DAYS * 86400,
+  }
   const payloadB64 = toBase64Url(enc.encode(JSON.stringify(payload)))
   const sig = await crypto.subtle.sign("HMAC", await hmacKey(), enc.encode(payloadB64))
   return `${payloadB64}.${toBase64Url(new Uint8Array(sig))}`
@@ -67,7 +91,11 @@ export async function verifySessionToken(token: string | undefined | null): Prom
     if (payload.exp < Math.floor(Date.now() / 1000)) return null
     // Sessions signed before the role field existed: treat as agent, the
     // least-privileged non-viewer role, rather than silently trusting admin.
-    if (payload.role !== "admin" && payload.role !== "agent" && payload.role !== "viewer" && payload.role !== "developer") payload.role = "agent"
+    if (payload.role !== "admin" && payload.role !== "agent" && payload.role !== "viewer" && payload.role !== "developer" && payload.role !== "branch_manager") payload.role = "agent"
+    // Sessions signed before the multi-branch fields existed: normalize to
+    // "no branch scope" (= whole company, legacy single-tenant behaviour).
+    if (payload.orgId === undefined) payload.orgId = null
+    if (payload.branchId === undefined) payload.branchId = null
     return payload
   } catch {
     return null
@@ -89,10 +117,23 @@ export function sessionCookieOptions(secure: boolean) {
 // callback when two_factor_auth is on, consumed by /api/auth/otp once the
 // user types the emailed code. 10-minute expiry, single purpose.
 
-export type OtpPending = { kind: "otp"; email: string; role: Role; next: string; exp: number }
+export type OtpPending = { kind: "otp"; email: string; role: Role; next: string; exp: number; orgId?: string | null; branchId?: string | null }
 
-export async function createOtpPendingToken(email: string, role: Role, next: string): Promise<string> {
-  const payload: OtpPending = { kind: "otp", email, role, next, exp: Math.floor(Date.now() / 1000) + 600 }
+export async function createOtpPendingToken(
+  email: string,
+  role: Role,
+  next: string,
+  scope?: { orgId?: string | null; branchId?: string | null }
+): Promise<string> {
+  const payload: OtpPending = {
+    kind: "otp",
+    email,
+    role,
+    next,
+    orgId: scope?.orgId ?? null,
+    branchId: scope?.branchId ?? null,
+    exp: Math.floor(Date.now() / 1000) + 600,
+  }
   const payloadB64 = toBase64Url(enc.encode(JSON.stringify(payload)))
   const sig = await crypto.subtle.sign("HMAC", await hmacKey(), enc.encode(payloadB64))
   return `${payloadB64}.${toBase64Url(new Uint8Array(sig))}`
@@ -113,6 +154,8 @@ export async function verifyOtpPendingToken(token: string | undefined | null): P
     const payload = JSON.parse(new TextDecoder().decode(fromBase64Url(parts[0]))) as OtpPending
     if (payload?.kind !== "otp" || !payload.email || typeof payload.exp !== "number") return null
     if (payload.exp < Math.floor(Date.now() / 1000)) return null
+    if (payload.orgId === undefined) payload.orgId = null
+    if (payload.branchId === undefined) payload.branchId = null
     return payload
   } catch {
     return null

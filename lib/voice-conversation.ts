@@ -443,8 +443,9 @@ async function completeLeadIfReady(opts: {
   callerPhone?: string
   messages: { role: "user" | "model"; content: string }[]
   reply: string
+  branchId?: string | null
 }): Promise<boolean> {
-  const { leadId, callSid, callerPhone, messages, reply } = opts
+  const { leadId, callSid, callerPhone, messages, reply, branchId } = opts
   const allTurns = [...messages, { role: "model" as const, content: reply }]
   const transcriptText =
     (callerPhone ? `(The customer is calling from: ${callerPhone}. Use this as their whatsapp_number ONLY if they EXPLICITLY said WhatsApp is on this same number — if they never mentioned their WhatsApp number, leave whatsapp_number null.)\n` : "") +
@@ -499,7 +500,12 @@ async function completeLeadIfReady(opts: {
 
     const waNumber = extracted.whatsapp_number
     if (waNumber) {
-      const result = await sendApplicationLink(waNumber, extracted.name || "there", token)
+      // Per-branch WhatsApp: the link goes out from the BRANCH's WABA number
+      // (branded with the branch's name), or the company number when the
+      // branch has none.
+      const { branchWhatsAppCtx } = await import("./whatsapp")
+      const waBranch = await branchWhatsAppCtx(branchId)
+      const result = await sendApplicationLink(waNumber, extracted.name || "there", token, waBranch)
       if (!result.ok) console.error("WhatsApp link send failed:", result.error)
       // Mark this call as already followed-up so the status webhook doesn't
       // ALSO send the generic post-call WhatsApp message once the call ends.
@@ -560,8 +566,10 @@ export async function handleTurn(opts: {
   callerPhone?: string
   instructions?: string
   direction?: "inbound" | "outbound"
+  /** Multi-branch: the branch the call belongs to (branch scripts + branding + per-branch WhatsApp). */
+  branchId?: string | null
 }): Promise<{ text: string; hangup: boolean }> {
-  const { leadId, callSid, speech, language, callerPhone, instructions, direction } = opts
+  const { leadId, callSid, speech, language, callerPhone, instructions, direction, branchId } = opts
 
   // Fire the history-independent reads NOW, so they overlap the transcript
   // read instead of queueing behind it (see startTurnContext).
@@ -602,7 +610,7 @@ export async function handleTurn(opts: {
   let reply = ""
   let rateLimited = false
   try {
-    reply = (await chatWithLLM(messages, language, mergedInstructions || undefined, { channel: "call" })).trim()
+    reply = (await chatWithLLM(messages, language, mergedInstructions || undefined, { channel: "call", branchId })).trim()
     if (!reply) reply = GREETINGS[language]
   } catch (e) {
     console.error("LLM error:", e)
@@ -633,7 +641,7 @@ export async function handleTurn(opts: {
   updateTranscriptAsync(callSid, speech, reply)
   maybeProposeLoanEdit(leadId, "priya_voice", speech)
 
-  const completed = await completeLeadIfReady({ leadId, callSid, callerPhone, messages, reply })
+  const completed = await completeLeadIfReady({ leadId, callSid, callerPhone, messages, reply, branchId })
   if (completed) return { text: CLOSING[language], hangup: true }
 
   return { text: reply, hangup: GOODBYE_RE.test(reply) }
@@ -657,10 +665,12 @@ export async function handleTurnStream(
     callerPhone?: string
     instructions?: string
     direction?: "inbound" | "outbound"
+    /** Multi-branch: the branch the call belongs to (branch scripts + branding + per-branch WhatsApp). */
+    branchId?: string | null
   },
   onSentence: (sentence: string) => void
 ): Promise<{ hangup: boolean }> {
-  const { leadId, callSid, speech, language, callerPhone, instructions, direction } = opts
+  const { leadId, callSid, speech, language, callerPhone, instructions, direction, branchId } = opts
 
   // Fire the history-independent reads NOW, so they overlap the transcript
   // read instead of queueing behind it (see startTurnContext). This is the
@@ -702,7 +712,7 @@ export async function handleTurnStream(
         const { complete, rest } = splitSentences(pending)
         for (const s of complete) onSentence(s)
         pending = rest
-      }, "call")
+      }, "call", { branchId })
     ).trim()
     const tail = pending.trim()
     if (tail) onSentence(tail)
@@ -737,7 +747,7 @@ export async function handleTurnStream(
   await updateTranscriptAsync(callSid, speech, reply)
   maybeProposeLoanEdit(leadId, "priya_voice", speech)
 
-  const completed = await completeLeadIfReady({ leadId, callSid, callerPhone, messages, reply })
+  const completed = await completeLeadIfReady({ leadId, callSid, callerPhone, messages, reply, branchId })
   if (completed) {
     onSentence(CLOSING[language])
     return { hangup: true }

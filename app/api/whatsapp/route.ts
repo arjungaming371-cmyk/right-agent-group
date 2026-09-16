@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server"
 import crypto from "crypto"
 import pool, { query } from "@/lib/db"
 import { chatWithLLM, detectLanguage, type Language } from "@/lib/llm"
-import { sendWhatsAppText, downloadWhatsAppMedia } from "@/lib/whatsapp"
+import { sendWhatsAppText, downloadBranchWhatsAppMedia, type BranchWhatsAppCtx } from "@/lib/whatsapp"
+import { resolveBranchByWhatsAppPhoneId, type BranchRow } from "@/lib/branches"
 import { buildLeadBrief } from "@/lib/lead-brain"
 import { searchKnowledgeBase } from "@/lib/knowledge-base"
 import { buildEmiInstruction, buildEligibilityInstruction, buildRateInstruction, detectLoanType } from "@/lib/finance"
@@ -84,6 +85,20 @@ export async function POST(req: NextRequest) {
         const value = change?.value
         if (!value) continue
 
+        // MULTI-BRANCH ROUTING: metadata.phone_number_id is the WhatsApp
+        // Business number the customer wrote to. A branch with its own WABA
+        // number claims its conversations here; everything else lands on the
+        // company's default (env-credentialed) number.
+        let branch: BranchRow | null = null
+        const phoneNumberId = value?.metadata?.phone_number_id
+        if (phoneNumberId) {
+          branch = await resolveBranchByWhatsAppPhoneId(phoneNumberId)
+          if (branch) console.log(`🏷 WhatsApp inbound routed to branch ${branch.code} (phone_number_id match)`)
+        }
+        const waBranch: BranchWhatsAppCtx = branch
+          ? { id: branch.id, whatsappToken: branch.whatsapp_token, whatsappPhoneNumberId: branch.whatsapp_phone_number_id, brandName: branch.brand_name }
+          : null
+
         // -- Delivery / read receipts → update ticks in the dashboard --
         for (const status of value.statuses || []) {
           if (!status?.id || !status?.status) continue
@@ -96,7 +111,7 @@ export async function POST(req: NextRequest) {
         // -- Inbound customer messages --
         const profileName: string | null = value.contacts?.[0]?.profile?.name || null
         for (const msg of value.messages || []) {
-          await handleInbound(msg, profileName)
+          await handleInbound(msg, profileName, waBranch)
         }
       }
     }
@@ -111,11 +126,12 @@ export async function POST(req: NextRequest) {
 // PDF documents (salary slips, ID proof, bank statements) and voice notes
 // are read, not just acknowledged with a placeholder: PDFs get their text
 // extracted (reusing the same parser as knowledge-base ingestion), voice
-// notes get transcribed through the self-hosted Whisper STT service that
-// already backs live calls. Everything else (images, video, stickers,
-// location) stays a placeholder — genuinely different work (vision model)
-// not in scope here.
-async function resolveInboundText(msg: any): Promise<string> {
+// notes get transcribed through the Sarvam cloud STT that already backs live
+// calls. Everything else (images, video, stickers, location) stays a
+// placeholder — genuinely different work (vision model) not in scope here.
+// Media downloads use the BRANCH's token when the message arrived on a
+// branch's WABA number — the media ID belongs to that account.
+async function resolveInboundText(msg: any, branch: BranchWhatsAppCtx = null): Promise<string> {
   if (msg?.type === "text") return String(msg.text?.body || "").slice(0, 4000)
   if (msg?.type === "button") return String(msg.button?.text || "").slice(0, 4000)
 
@@ -124,7 +140,7 @@ async function resolveInboundText(msg: any): Promise<string> {
     if ((msg.document?.mime_type || "") !== "application/pdf") {
       return `[document message: ${filename} — only PDF documents can be read]`
     }
-    const media = await downloadWhatsAppMedia(msg.document.id)
+    const media = await downloadBranchWhatsAppMedia(msg.document.id, branch)
     if (!media) return `[document message: ${filename} — could not download]`
     try {
       const extracted = (await extractPdfText(media.buffer)).replace(/\s+/g, " ").trim().slice(0, 3000)
@@ -136,7 +152,7 @@ async function resolveInboundText(msg: any): Promise<string> {
   }
 
   if (msg?.type === "audio" && msg.audio?.id) {
-    const media = await downloadWhatsAppMedia(msg.audio.id)
+    const media = await downloadBranchWhatsAppMedia(msg.audio.id, branch)
     if (media) {
       const transcribed = await transcribeAudio(media.buffer)
       if (transcribed) return transcribed
@@ -147,10 +163,10 @@ async function resolveInboundText(msg: any): Promise<string> {
   return `[${msg?.type || "media"} message]`
 }
 
-async function handleInbound(msg: any, profileName: string | null) {
+async function handleInbound(msg: any, profileName: string | null, waBranch: BranchWhatsAppCtx = null) {
   const from = String(msg?.from || "").replace(/\D/g, "")
   const waMessageId = msg?.id ? String(msg.id) : null
-  const text = await resolveInboundText(msg)
+  const text = await resolveInboundText(msg, waBranch)
   if (!from || !text) return
 
   // ---- Dedupe: Meta retries webhooks; process each message exactly once ----
@@ -189,9 +205,9 @@ async function handleInbound(msg: any, profileName: string | null) {
     } else {
       isNewContact = true
       const created = await client.query(
-        `INSERT INTO leads (name, phone, whatsapp_number, source, status)
-         VALUES ($1, $2, $2, 'whatsapp', 'new') RETURNING *`,
-        [profileName || `WA ${last10}`, `+${from}`]
+        `INSERT INTO leads (name, phone, whatsapp_number, source, status, branch_id)
+         VALUES ($1, $2, $2, 'whatsapp', 'new', $3) RETURNING *`,
+        [profileName || `WA ${last10}`, `+${from}`, waBranch?.id || null]
       )
       lead = created.rows[0]
     }
@@ -205,9 +221,9 @@ async function handleInbound(msg: any, profileName: string | null) {
 
   // ---- 2. ALWAYS save the inbound message first ----
   await query(
-    `INSERT INTO whatsapp_messages (lead_id, wa_message_id, phone_number, direction, content, status)
-     VALUES ($1, $2, $3, 'inbound', $4, 'received')`,
-    [lead.id, waMessageId, `+${from}`, text]
+    `INSERT INTO whatsapp_messages (lead_id, wa_message_id, phone_number, direction, content, status, branch_id)
+     VALUES ($1, $2, $3, 'inbound', $4, 'received', $5)`,
+    [lead.id, waMessageId, `+${from}`, text, waBranch?.id || null]
   ).catch(() =>
     query(
       `INSERT INTO whatsapp_messages (lead_id, wa_message_id, direction, content, status)
@@ -326,7 +342,9 @@ async function handleInbound(msg: any, profileName: string | null) {
     // timeoutMs 45s: nobody is on hold for a WhatsApp reply the way they are
     // on a live call — worth the extra wait to actually get a reply instead
     // of the CPU-fallback model timing out on a 400-token generation.
-    aiReply = await chatWithLLM(messages, lang, extraContext, { numPredict: 400, timeoutMs: 45000 })
+    // branchId: per-branch script overrides + white-label identity apply on
+    // WhatsApp too — the branch's AI Employee speaks for THAT branch.
+    aiReply = await chatWithLLM(messages, lang, extraContext, { numPredict: 400, timeoutMs: 45000, branchId: waBranch?.id || null })
     // WhatsApp bold is *single*; the model still slips in markdown ** sometimes.
     if (aiReply) aiReply = aiReply.replace(/\*\*/g, "*")
 
@@ -340,11 +358,13 @@ async function handleInbound(msg: any, profileName: string | null) {
 
   // ---- 4. Send the reply if AI produced one ----
   if (aiReply) {
-    const sent = await sendWhatsAppText(from, aiReply)
+    // Sends from the BRANCH's WABA number when the message arrived on one —
+    // the conversation stays on the number the customer actually wrote to.
+    const sent = await sendWhatsAppText(from, aiReply, waBranch)
     await query(
-      `INSERT INTO whatsapp_messages (lead_id, wa_message_id, phone_number, direction, content, status)
-       VALUES ($1, $2, $3, 'outbound', $4, $5)`,
-      [lead.id, sent.id || null, `+${from}`, aiReply, sent.ok ? "sent" : "failed"]
+      `INSERT INTO whatsapp_messages (lead_id, wa_message_id, phone_number, direction, content, status, branch_id)
+       VALUES ($1, $2, $3, 'outbound', $4, $5, $6)`,
+      [lead.id, sent.id || null, `+${from}`, aiReply, sent.ok ? "sent" : "failed", waBranch?.id || null]
     ).catch(() =>
       query(
         `INSERT INTO whatsapp_messages (lead_id, direction, content, status) VALUES ($1, 'outbound', $2, $3)`,

@@ -1,4 +1,6 @@
 "use client"
+
+type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
 import { useEffect, useState } from "react"
 import { Users, Target, IndianRupee, BadgeCheck, Phone, MessageCircle, RotateCcw, Plus, Search, Link2, Check, Download, Brain, Pin } from "lucide-react"
 import { formatCurrency, timeAgo, formatDateTime } from "@/lib/utils"
@@ -130,7 +132,7 @@ function Avatar({ name }: { name: string }) {
   )
 }
 
-export default function LeadsView({ role, initialSearch }: { role: "admin" | "agent" | "viewer" | "developer"; initialSearch?: string }) {
+export default function LeadsView({ role, initialSearch }: { role: Role; initialSearch?: string }) {
   const canEdit = role !== "viewer"
   const toast = useToast()
   const [leads, setLeads] = useState<Lead[]>([])

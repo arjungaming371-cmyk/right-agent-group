@@ -8,7 +8,7 @@ import { isValidUUID } from "@/lib/lead-brain"
 // view and the WhatsApp Chat view (same leads.pinned column powers both,
 // since a WhatsApp conversation IS a lead under the hood).
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const session = await requireRole(req, ["admin", "agent"])
+  const session = await requireRole(req, ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const { id } = await params
