@@ -438,8 +438,8 @@ export default function BranchesView({ role, branchId }: { role: string; branchI
           />
           <div className="flex items-center gap-3">
             {!isManagerOnly && (
-              <button className={btnPrimary} style={{ background: "var(--gradient-brand)" }} disabled={!scriptDirty || !scriptBranch} onClick={saveScript}>
-                Save branch script
+              <button className={btnPrimary} style={{ background: "var(--gradient-brand)" }} disabled={!scriptBranch} onClick={saveScript}>
+                {currentOverride ? "Save Branch Script" : "+ Add Script Override"}
               </button>
             )}
             {!isManagerOnly && currentOverride && (

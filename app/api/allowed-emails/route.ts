@@ -15,8 +15,12 @@ export async function GET(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   // Rows with the full-access role never appear in the admin-facing list.
   const r = await query(
-    `SELECT ae.email, ae.added_by, ae.role, ae.created_at, ae.branch_id, b.name AS branch_name, b.code AS branch_code
-       FROM allowed_emails ae LEFT JOIN branches b ON b.id = ae.branch_id
+    `SELECT ae.email, ae.added_by, ae.role, ae.created_at, ae.branch_id, ae.display_name,
+            tp.display_name AS profile_name, tp.avatar_url,
+            b.name AS branch_name, b.code AS branch_code
+       FROM allowed_emails ae
+       LEFT JOIN branches b ON b.id = ae.branch_id
+       LEFT JOIN team_profiles tp ON lower(tp.email) = lower(ae.email)
       WHERE ae.role != 'developer' ORDER BY ae.created_at DESC`
   )
   const branches = await query(`SELECT id, name, code FROM branches ORDER BY name`)
@@ -38,6 +42,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "invalid email address" }, { status: 400 })
   }
   let role: Role = VALID_ROLES.includes(body?.role) ? body.role : "agent"
+  const displayName = String(body?.displayName || body?.display_name || "").trim()
 
   // Multi-branch binding: agents/viewers/branch_managers can be pinned to a
   // branch at invite time. Their session carries that branchId from login on;
@@ -54,13 +59,8 @@ export async function POST(req: NextRequest) {
 
   const adminEmailEnv = (process.env.ADMIN_EMAIL || "").toLowerCase()
   if (email === adminEmailEnv) {
-    // The creator's account is always admin via ADMIN_EMAIL regardless of
-    // this table — keep the row consistent with that so the Team Access
-    // list never shows the creator as anything else.
     role = "admin"
   } else if (role === "admin") {
-    // Max 2 admins total: the bootstrap ADMIN_EMAIL (always admin, doesn't
-    // occupy a table row necessarily) + at most 1 more from this table.
     const existingAdmins = await query(
       `SELECT COUNT(*)::int AS n FROM allowed_emails WHERE role = 'admin' AND lower(email) != $1`,
       [email]
@@ -72,7 +72,6 @@ export async function POST(req: NextRequest) {
       )
     }
   } else if (role === "developer") {
-    // Same cap as admin, not exposed through the normal Team Access UI.
     const existingDevs = await query(
       `SELECT COUNT(*)::int AS n FROM allowed_emails WHERE role = 'developer' AND lower(email) != $1`,
       [email]
@@ -86,11 +85,77 @@ export async function POST(req: NextRequest) {
   }
 
   await query(
-    `INSERT INTO allowed_emails (email, added_by, role, branch_id) VALUES ($1, $2, $3, $4)
-     ON CONFLICT (email) DO UPDATE SET role = $3, branch_id = $4`,
-    [email, session.email, role, branchId]
+    `INSERT INTO allowed_emails (email, added_by, role, branch_id, display_name)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (email) DO UPDATE SET role = $3, branch_id = $4, display_name = COALESCE(NULLIF($5, ''), allowed_emails.display_name)`,
+    [email, session.email, role, branchId, displayName || null]
   )
-  return NextResponse.json({ ok: true, email, role, branch_id: branchId })
+
+  if (displayName) {
+    await query(
+      `INSERT INTO team_profiles (email, display_name) VALUES ($1, $2)
+       ON CONFLICT (email) DO UPDATE SET display_name = $2`,
+      [email, displayName]
+    )
+  }
+
+  return NextResponse.json({ ok: true, email, role, branch_id: branchId, displayName })
+}
+
+export async function PATCH(req: NextRequest) {
+  const session = await requireRole(req, ["admin"])
+  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+
+  let body: any
+  try {
+    body = await req.json()
+  } catch {
+    return NextResponse.json({ error: "invalid JSON" }, { status: 400 })
+  }
+
+  const email = String(body?.email || "").trim().toLowerCase()
+  if (!email) return NextResponse.json({ error: "email required" }, { status: 400 })
+
+  const role: Role | undefined = VALID_ROLES.includes(body?.role) ? body.role : undefined
+  const branchId = body?.branch_id !== undefined ? (body.branch_id ? String(body.branch_id) : null) : undefined
+  const displayName = body?.displayName !== undefined ? String(body.displayName).trim() : undefined
+
+  if (role === "branch_manager" && !branchId) {
+    return NextResponse.json({ error: "branch_manager requires an allotted branch" }, { status: 400 })
+  }
+
+  const updates: string[] = []
+  const values: any[] = [email]
+
+  if (role) {
+    values.push(role)
+    updates.push(`role = $${values.length}`)
+  }
+  if (branchId !== undefined) {
+    values.push(branchId)
+    updates.push(`branch_id = $${values.length}`)
+  }
+  if (displayName !== undefined) {
+    values.push(displayName || null)
+    updates.push(`display_name = $${values.length}`)
+  }
+
+  if (updates.length > 0) {
+    await query(
+      `UPDATE allowed_emails SET ${updates.join(", ")} WHERE lower(email) = $1`,
+      values
+    )
+  }
+
+  if (displayName !== undefined && displayName) {
+    await query(
+      `INSERT INTO team_profiles (email, display_name) VALUES ($1, $2)
+       ON CONFLICT (email) DO UPDATE SET display_name = $2`,
+      [email, displayName]
+    )
+  }
+
+  return NextResponse.json({ ok: true, email })
 }
 
 export async function DELETE(req: NextRequest) {

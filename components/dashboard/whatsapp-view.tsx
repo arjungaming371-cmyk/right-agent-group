@@ -2,7 +2,7 @@
 
 type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
 import { useEffect, useRef, useState, useCallback } from "react"
-import { Search, Send, MessageCircle, ChevronLeft, CheckCircle2, Zap, Lock, Pin, Info, X, Phone, MapPin, Wallet, Languages, Tag, StickyNote, Smile, PhoneCall } from "lucide-react"
+import { Search, Send, MessageCircle, ChevronLeft, CheckCircle2, Zap, Lock, Pin, Info, X, Phone, MapPin, Wallet, Languages, Tag, StickyNote, Smile, PhoneCall, Plus } from "lucide-react"
 import { useToast } from "../ui/toast"
 import { usePolling } from "@/lib/use-poll"
 
@@ -134,6 +134,12 @@ export default function WhatsAppView({ role }: { role: Role }) {
   const [tab, setTab]           = useState<"all" | "unread">("all")
   const [showEmoji, setShowEmoji] = useState(false)
   const [calling, setCalling]   = useState(false)
+  const [showNewChatModal, setShowNewChatModal] = useState(false)
+  const [allLeads, setAllLeads] = useState<Lead[]>([])
+  const [selectedLeadId, setSelectedLeadId] = useState("")
+  const [newChatPhone, setNewChatPhone] = useState("")
+  const [newChatName, setNewChatName] = useState("")
+  const [loadingLeadsList, setLoadingLeadsList] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef  = useRef<HTMLInputElement>(null)
   const prevMsgCount = useRef(0)
@@ -147,6 +153,50 @@ export default function WhatsAppView({ role }: { role: Role }) {
   // wrong on mobile, where hitting the back button intentionally sets
   // selected to null to show the contact list again.
   const didInitialSelect = useRef(false)
+
+  async function openNewChatModal() {
+    setShowNewChatModal(true)
+    setLoadingLeadsList(true)
+    try {
+      const res = await fetch("/api/leads")
+      if (res.ok) {
+        const data = await res.json()
+        if (Array.isArray(data)) setAllLeads(data)
+      }
+    } catch {}
+    setLoadingLeadsList(false)
+  }
+
+  function handleStartNewChat(e: React.FormEvent) {
+    e.preventDefault()
+    if (selectedLeadId) {
+      const lead = allLeads.find(l => l.id === selectedLeadId) || leads.find(l => l.id === selectedLeadId)
+      if (lead) {
+        setLeads(prev => prev.some(l => l.id === lead.id) ? prev : [lead, ...prev])
+        setSelected(lead)
+        setShowNewChatModal(false)
+        setSelectedLeadId("")
+        return
+      }
+    }
+    const cleanPhone = newChatPhone.trim().replace(/\D/g, "")
+    if (!cleanPhone) {
+      toast.error("Please enter a valid phone number or pick an existing lead")
+      return
+    }
+    const customLead: Lead = {
+      id: "lead-" + Date.now(),
+      name: newChatName.trim() || newChatPhone.trim(),
+      phone: newChatPhone.trim(),
+      whatsapp_number: newChatPhone.trim(),
+    }
+    setLeads(prev => [customLead, ...prev])
+    setSelected(customLead)
+    setShowNewChatModal(false)
+    setNewChatPhone("")
+    setNewChatName("")
+    setSelectedLeadId("")
+  }
 
   const checkStatus = useCallback(async () => {
     try {
@@ -328,9 +378,19 @@ export default function WhatsAppView({ role }: { role: Role }) {
         >
 
           {/* Header */}
-          <div style={{ padding: "16px 16px", background: WA.headerBg, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div style={{ fontWeight: 600, fontSize: 19, color: WA.textPrimary }}>Chats</div>
+          <div style={{ padding: "14px 16px", background: WA.headerBg, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div style={{ fontWeight: 600, fontSize: 18, color: WA.textPrimary }}>Chats</div>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <button
+                onClick={openNewChatModal}
+                title="Start a new chat with a contact"
+                style={{
+                  background: WA.teal, border: "none", borderRadius: 6, color: "white",
+                  padding: "4px 9px", fontSize: 11.5, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer"
+                }}
+              >
+                <Plus size={13} strokeWidth={2.4} /> New Chat +
+              </button>
               <div style={{ width: 8, height: 8, borderRadius: "50%", background: ready ? WA.tealBright : "var(--accent-red)" }} title={ready ? "Connected" : "Disconnected"} />
               <span style={{ fontSize: 11, fontWeight: 500, color: ready ? WA.tealBright : "var(--accent-red)" }}>{ready ? "Live" : "Offline"}</span>
             </div>
@@ -631,6 +691,118 @@ export default function WhatsAppView({ role }: { role: Role }) {
           </div>
         )}
       </div>
+
+      {/* New Chat Modal */}
+      {showNewChatModal && (
+        <div style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", backdropFilter: "blur(4px)",
+          display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, padding: 16,
+        }}>
+          <div style={{
+            background: WA.panelBg, border: `1px solid ${WA.hairline}`, borderRadius: 16,
+            maxWidth: 440, width: "100%", padding: 24, boxShadow: "0 24px 48px rgba(0,0,0,0.5)",
+            color: WA.textPrimary,
+          }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
+              <div style={{ fontSize: 17, fontWeight: 600 }}>Start New WhatsApp Chat</div>
+              <button onClick={() => setShowNewChatModal(false)} style={{ background: "transparent", border: "none", color: WA.textSecondary, cursor: "pointer" }}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleStartNewChat} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              {/* Option A: Select existing lead */}
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 600, color: WA.textSecondary, textTransform: "uppercase", display: "block", marginBottom: 6 }}>
+                  Choose from Existing Leads
+                </label>
+                <select
+                  value={selectedLeadId}
+                  onChange={(e) => {
+                    setSelectedLeadId(e.target.value)
+                    if (e.target.value) {
+                      setNewChatPhone("")
+                      setNewChatName("")
+                    }
+                  }}
+                  style={{
+                    width: "100%", height: 38, background: WA.headerBg, border: `1px solid ${WA.hairline}`,
+                    borderRadius: 8, color: WA.textPrimary, padding: "0 10px", outline: "none",
+                  }}
+                >
+                  <option value="">-- Select a Lead --</option>
+                  {allLeads.map((l) => (
+                    <option key={l.id} value={l.id}>
+                      {l.name} ({l.phone})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ textAlign: "center", fontSize: 11, color: WA.textSecondary }}>— OR ENTER A NEW NUMBER —</div>
+
+              {/* Option B: Enter phone number and name */}
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 600, color: WA.textSecondary, textTransform: "uppercase", display: "block", marginBottom: 6 }}>
+                  Phone / WhatsApp Number
+                </label>
+                <input
+                  type="text"
+                  value={newChatPhone}
+                  disabled={!!selectedLeadId}
+                  onChange={(e) => setNewChatPhone(e.target.value)}
+                  placeholder="e.g. 9876543210"
+                  style={{
+                    width: "100%", height: 38, background: WA.headerBg, border: `1px solid ${WA.hairline}`,
+                    borderRadius: 8, color: WA.textPrimary, padding: "0 12px", outline: "none",
+                    opacity: selectedLeadId ? 0.5 : 1,
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 600, color: WA.textSecondary, textTransform: "uppercase", display: "block", marginBottom: 6 }}>
+                  Contact Name (optional)
+                </label>
+                <input
+                  type="text"
+                  value={newChatName}
+                  disabled={!!selectedLeadId}
+                  onChange={(e) => setNewChatName(e.target.value)}
+                  placeholder="e.g. Suresh V"
+                  style={{
+                    width: "100%", height: 38, background: WA.headerBg, border: `1px solid ${WA.hairline}`,
+                    borderRadius: 8, color: WA.textPrimary, padding: "0 12px", outline: "none",
+                    opacity: selectedLeadId ? 0.5 : 1,
+                  }}
+                />
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 10 }}>
+                <button
+                  type="button"
+                  onClick={() => setShowNewChatModal(false)}
+                  style={{
+                    height: 38, padding: "0 16px", borderRadius: 8, border: `1px solid ${WA.hairline}`,
+                    background: "transparent", color: WA.textSecondary, cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  style={{
+                    height: 38, padding: "0 20px", borderRadius: 8, border: "none",
+                    background: WA.teal, color: "white", fontWeight: 600, cursor: "pointer",
+                  }}
+                >
+                  Start Chat +
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
