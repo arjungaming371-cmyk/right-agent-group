@@ -245,12 +245,10 @@ function AccessPageInner() {
             </div>
             <div>
               <h1 style={{ fontSize: 20, fontWeight: 700, letterSpacing: "-0.02em" }}>
-                {isBranchManager ? "Branch Teammates & Loan Officers" : "Team Access & Branch Allotment"}
+                Team Access & Staff Permissions
               </h1>
               <p style={{ fontSize: 12.5, color: "var(--text-muted)", marginTop: 1 }}>
-                {isBranchManager
-                  ? `Manage loan officers and viewers assigned to your branch (${branches[0]?.name || "Branch"})`
-                  : `Allot branches to staff, name team members, and customize permissions`}
+                Manage team members, roles, and permissions
                 {you ? <span> · signed in as <span style={{ color: "var(--text-secondary)" }}>{you}</span></span> : null}
               </p>
             </div>
@@ -289,12 +287,10 @@ function AccessPageInner() {
             { id: "admin", label: "Admin", desc: "Full access, including this page. Max 2 admins total.", color: "var(--accent-violet)", baseRole: "admin" as Role },
             { id: "agent", label: "Loan Officer", desc: "Leads, loans, calls, WhatsApp, analytics — no settings", color: "var(--accent-cyan)", baseRole: "agent" as Role },
             { id: "viewer", label: "Viewer", desc: "Same views as Loan Officer, strictly read-only", color: "var(--text-muted)", baseRole: "viewer" as Role },
-            { id: "branch_manager", label: "Branch Manager", desc: "Runs ONE branch — sees only that branch's data", color: "var(--accent-green)", baseRole: "branch_manager" as Role },
-            { id: "branch_admin", label: "Branch Admin", desc: "Administers branch operations and staff for a branch", color: "var(--accent-blue)", baseRole: "branch_manager" as Role },
           ])
-            .filter(r => !isBranchManager || (r.baseRole === "agent" || r.baseRole === "viewer"))
+            .filter(r => r.baseRole !== "branch_manager")
             .map(r => {
-            const Icon = r.baseRole === "admin" ? Shield : r.baseRole === "branch_manager" ? Building2 : r.baseRole === "viewer" ? Eye : UserCog
+            const Icon = r.baseRole === "admin" ? Shield : r.baseRole === "viewer" ? Eye : UserCog
             return (
               <div key={r.id} style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: "14px 16px", display: "flex", gap: 12, alignItems: "flex-start" }}>
                 <span style={{ width: 30, height: 30, borderRadius: 8, background: `${r.color}1c`, border: `1px solid ${r.color}3d`, display: "inline-flex", alignItems: "center", justifyContent: "center", color: r.color, flexShrink: 0 }}>
@@ -314,7 +310,7 @@ function AccessPageInner() {
           <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <UserPlus size={15} strokeWidth={2} style={{ color: "var(--text-secondary)" }} />
-              {isBranchManager ? "Add Officer or Viewer to Your Branch" : "Add Teammate & Allot Branch"}
+              Add Teammate
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               <button
@@ -326,17 +322,6 @@ function AccessPageInner() {
               >
                 <Plus size={12} /> Add / Delete Role
               </button>
-              {!isBranchManager && (
-                <button
-                  type="button"
-                  onClick={() => setIsBranchModalOpen(true)}
-                  className="btn-ghost"
-                  style={{ fontSize: 11.5, height: 28, padding: "0 10px", display: "inline-flex", alignItems: "center", gap: 5 }}
-                  title="Add or delete branch options in the Branch dropdown"
-                >
-                  <Plus size={12} /> Add / Delete Branch
-                </button>
-              )}
             </div>
           </div>
           <form onSubmit={addEmail} style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
@@ -358,7 +343,7 @@ function AccessPageInner() {
               value={newEmail}
               onChange={(e) => setNewEmail(e.target.value)}
               placeholder="teammate@gmail.com"
-              style={{ flex: "1 1 200px", height: 40 }}
+              style={{ flex: "1 1 220px", height: 40 }}
             />
             
             {/* Role dropdown with + trigger */}
@@ -366,12 +351,12 @@ function AccessPageInner() {
               <select
                 value={selectedRoleId}
                 onChange={(e) => setSelectedRoleId(e.target.value)}
-                style={{ width: 165, height: 40 }}
+                style={{ width: 175, height: 40 }}
                 title="Select role or job title"
               >
-                {roles.filter(r => !isBranchManager || (r.baseRole === "agent" || r.baseRole === "viewer")).length > 0 ? (
+                {roles.filter(r => r.baseRole !== "branch_manager").length > 0 ? (
                   roles
-                    .filter(r => !isBranchManager || (r.baseRole === "agent" || r.baseRole === "viewer"))
+                    .filter(r => r.baseRole !== "branch_manager")
                     .map(r => (
                       <option key={r.id} value={r.id}>
                         {r.label}
@@ -381,8 +366,7 @@ function AccessPageInner() {
                   <>
                     <option value="agent">Loan Officer</option>
                     <option value="viewer">Viewer</option>
-                    {!isBranchManager && <option value="branch_manager">Branch Manager</option>}
-                    {!isBranchManager && <option value="admin">Admin</option>}
+                    <option value="admin">Admin</option>
                   </>
                 )}
               </select>
@@ -397,49 +381,12 @@ function AccessPageInner() {
               </button>
             </div>
 
-            {/* Branch dropdown or fixed branch badge */}
-            {!isBranchManager ? (
-              <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-                <select
-                  value={newBranch}
-                  onChange={(e) => setNewBranch(e.target.value)}
-                  style={{ width: 175, height: 40 }}
-                  title="Allot a branch to this teammate"
-                >
-                  <option value="">All Branches / HQ</option>
-                  {branches.map((b) => <option key={b.id} value={b.id}>{b.name} ({b.code})</option>)}
-                </select>
-                <button
-                  type="button"
-                  onClick={() => setIsBranchModalOpen(true)}
-                  title="Add or delete branches"
-                  className="btn-ghost"
-                  style={{ height: 40, width: 36, padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
-                >
-                  <Plus size={15} />
-                </button>
-              </div>
-            ) : (
-              <div
-                style={{
-                  height: 40, padding: "0 14px", display: "inline-flex", alignItems: "center", gap: 6,
-                  borderRadius: 10, border: "1px solid var(--border)", background: "var(--bg-secondary)",
-                  fontSize: 12.5, color: "var(--accent-green)", fontWeight: 600,
-                }}
-              >
-                <Building2 size={13} strokeWidth={2.2} />
-                <span>{branches[0]?.name || "Your Branch"}</span>
-              </div>
-            )}
-
             <button type="submit" disabled={busy} className="btn-primary" style={{ height: 40, padding: "0 22px", opacity: busy ? 0.6 : 1 }}>
               <UserPlus size={14} strokeWidth={2.2} /> Add +
             </button>
           </form>
           <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 10 }}>
-            {isBranchManager
-              ? "Add loan officers and staff members directly to your branch. They will only see leads, calls, and applications for this branch."
-              : "Set their name as required, assign their role, and allot them to a specific branch so they only manage leads and calls for that branch. Click the + next to either dropdown to add or remove choices."}
+            Set teammate name, email, and choose their role. Click the + next to Role to add or customize job titles.
           </div>
         </div>
 
@@ -447,7 +394,7 @@ function AccessPageInner() {
         <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
           <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div style={{ fontWeight: 600, fontSize: 14 }}>
-              {isBranchManager ? `Branch Members (${branches[0]?.name || "This Branch"})` : "Team Members & Branch Allotments"}
+              Team Members
             </div>
             <span style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 6, padding: "3px 10px", fontSize: 12, color: "var(--text-muted)" }}>
               {emails.length} {emails.length === 1 ? "person" : "people"}
@@ -487,12 +434,6 @@ function AccessPageInner() {
                 <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                   {displayName ? e.email : `Added by ${e.added_by || "—"}`}
                 </div>
-              </div>
-
-              {/* Allotted branch badge */}
-              <div style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 9px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-secondary)", fontSize: 11.5, color: "var(--text-secondary)" }}>
-                <Building2 size={12} strokeWidth={2} style={{ color: "var(--accent-blue)" }} />
-                <span>{e.branch_name ? `${e.branch_name} (${e.branch_code})` : "All Branches (HQ)"}</span>
               </div>
 
               <RoleBadge role={e.role} customRole={customRole} />
@@ -643,50 +584,7 @@ function AccessPageInner() {
                 </select>
               </div>
 
-              <div>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                  <label style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase" }}>
-                    Allotted Branch
-                  </label>
-                  {!isBranchManager && (
-                    <button
-                      type="button"
-                      onClick={() => setIsBranchModalOpen(true)}
-                      style={{ background: "none", border: "none", color: "var(--accent-green)", fontSize: 11, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 3 }}
-                    >
-                      <Plus size={11} /> Manage Branches
-                    </button>
-                  )}
-                </div>
-                {isBranchManager ? (
-                  <div
-                    style={{
-                      height: 38, padding: "0 12px", display: "flex", alignItems: "center", gap: 6,
-                      borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-secondary)",
-                      fontSize: 12.5, color: "var(--accent-green)", fontWeight: 600,
-                    }}
-                  >
-                    <Building2 size={13} strokeWidth={2.2} />
-                    <span>{branches[0]?.name || "Your Branch"}</span>
-                  </div>
-                ) : (
-                  <select
-                    value={editBranch}
-                    onChange={(e) => setEditBranch(e.target.value)}
-                    style={{ width: "100%", height: 38 }}
-                  >
-                    <option value="">All Branches / HQ Access</option>
-                    {branches.map((b) => (
-                      <option key={b.id} value={b.id}>
-                        {b.name} ({b.code})
-                      </option>
-                    ))}
-                  </select>
-                )}
-                <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
-                  Pinning an officer or manager to a branch scopes all leads, calls, WhatsApp, and loan applications to that branch.
-                </div>
-              </div>
+
 
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 10 }}>
                 <button

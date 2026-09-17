@@ -68,11 +68,10 @@ const NAV_SECTIONS: NavSection[] = [
   {
     title: "System",
     items: [
-      { key: "branches", label: "Branches & Staff AI", icon: Building2, roles: ["admin", "branch_manager"] },
       { key: "security", label: "Security",       icon: ShieldCheck,  roles: ["admin"] },
       { key: "upload",   label: "Upload & Data",  icon: UploadCloud,  roles: ["admin"] },
       { key: "script",   label: "Priya's Script", icon: ScrollText,   roles: ["admin"] },
-      { key: "knowledge",label: "Knowledge Base", icon: BookOpen,     roles: ["admin", "agent", "branch_manager"] },
+      { key: "knowledge",label: "Knowledge Base", icon: BookOpen,     roles: ["admin", "agent"] },
     ],
   },
   {
@@ -415,32 +414,7 @@ export default function DashboardShell() {
           <StatusPill icon={Mic} label="Voice Bot" />
           <StatusPill icon={MessageCircle} label="WhatsApp" />
 
-          {/* Branch switcher — the parent account's "which branch am I working
-              on right now" control. Writes + reads everywhere scope to this. */}
-          {canSwitch ? (
-            <select
-              aria-label="Active branch"
-              title="Active branch — admins see everything when set to All"
-              className="hidden h-9 max-w-[190px] items-center rounded-[10px] border border-[var(--border)] bg-[var(--bg-secondary)] px-2.5 text-[12.5px] font-medium text-[var(--text-secondary)] outline-none lg:flex"
-              value={sessionBranchId || ""}
-              onChange={(e) => switchBranch(e.target.value || null)}
-            >
-              <option value="">All branches (HQ)</option>
-              {allBranches.map((b) => (
-                <option key={b.id} value={b.id}>{b.name} ({b.code})</option>
-              ))}
-            </select>
-          ) : sessionBranchId ? (
-            <div
-              className="hidden h-9 items-center gap-1.5 rounded-[10px] border border-[var(--accent-green)]/30 bg-[var(--accent-green)]/10 px-3 text-[12px] font-semibold text-[var(--accent-green)] lg:flex"
-              title="Assigned Branch Scope"
-            >
-              <Building2 size={13} strokeWidth={2.2} />
-              <span>{allBranches.find(b => b.id === sessionBranchId)?.name || "Branch Portal"}</span>
-            </div>
-          ) : null}
 
-          <div className="mx-1 hidden h-6 w-px bg-[var(--border)] lg:block" />
 
           {/* Global search — opens the command palette (also Ctrl+K) */}
           <button
