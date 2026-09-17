@@ -1,7 +1,7 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
-import { Mic, MicOff, Loader2 } from "lucide-react"
+import { useState, useRef, useEffect } from "react"
+import { Mic, Loader2 } from "lucide-react"
 
 interface VoiceDictationProps {
   onTranscript: (text: string) => void
@@ -11,7 +11,7 @@ interface VoiceDictationProps {
   style?: React.CSSProperties
   title?: string
   append?: boolean
-  lang?: string // default "en-IN" (supports Indian English, Hindi, Telugu etc.)
+  lang?: string // default "en-IN"
 }
 
 export function VoiceDictation({
@@ -24,99 +24,139 @@ export function VoiceDictation({
   lang = "en-IN",
 }: VoiceDictationProps) {
   const [listening, setListening] = useState(false)
-  const [supported, setSupported] = useState(true)
+  const [initializing, setInitializing] = useState(false)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const recognitionRef = useRef<any>(null)
+  const onTranscriptRef = useRef(onTranscript)
 
+  // Keep latest callback reference without tearing down recognition
   useEffect(() => {
-    // Web Speech API check (standard or webkit prefixed)
+    onTranscriptRef.current = onTranscript
+  }, [onTranscript])
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.abort()
+        } catch {}
+      }
+    }
+  }, [])
+
+  const startListening = async () => {
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
 
     if (!SpeechRecognition) {
-      setSupported(false)
+      alert("Voice speech recognition is not supported in this browser. Please use Google Chrome or Microsoft Edge.")
+      return
+    }
+
+    setInitializing(true)
+    setErrorMessage(null)
+
+    try {
+      // 1. Explicitly prompt and ensure microphone permission
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+        // release the stream right away so recognition can take over
+        stream.getTracks().forEach((track) => track.stop())
+      }
+    } catch (permErr: any) {
+      console.warn("Microphone permission error:", permErr)
+      setInitializing(false)
+      alert("Microphone permission was denied. Please allow microphone access in your browser address bar and try again.")
       return
     }
 
     try {
+      // Abort any previous instance
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.abort()
+        } catch {}
+      }
+
       const recognition = new SpeechRecognition()
       recognition.continuous = false
       recognition.interimResults = false
       recognition.lang = lang
+      recognition.maxAlternatives = 1
 
       recognition.onstart = () => {
+        setInitializing(false)
         setListening(true)
       }
 
       recognition.onresult = (event: any) => {
         const transcript = event.results[0]?.[0]?.transcript
-        if (transcript) {
-          onTranscript(transcript)
+        if (transcript && onTranscriptRef.current) {
+          onTranscriptRef.current(transcript)
         }
       }
 
       recognition.onerror = (event: any) => {
         console.warn("Speech recognition error:", event.error)
         setListening(false)
+        setInitializing(false)
+        if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+          alert("Microphone access is blocked. Please enable microphone permission for this site in your browser settings.")
+        } else if (event.error === "no-speech") {
+          // just silent timeout
+        } else if (event.error === "network") {
+          console.warn("Speech recognition network notice.")
+        }
       }
 
       recognition.onend = () => {
         setListening(false)
+        setInitializing(false)
       }
 
       recognitionRef.current = recognition
-    } catch (e) {
-      console.warn("Speech recognition init error:", e)
-      setSupported(false)
+      recognition.start()
+    } catch (err: any) {
+      console.error("Failed to start SpeechRecognition:", err)
+      setListening(false)
+      setInitializing(false)
     }
+  }
 
-    return () => {
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.stop()
-        } catch {}
-      }
+  const stopListening = () => {
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop()
+      } catch {}
     }
-  }, [lang, onTranscript])
+    setListening(false)
+    setInitializing(false)
+  }
 
   const toggleListening = (e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
 
-    if (!supported) {
-      alert("Voice speech recognition is not supported in this browser. Please use Google Chrome or Microsoft Edge.")
-      return
-    }
-
-    if (disabled || !recognitionRef.current) return
+    if (disabled) return
 
     if (listening) {
-      try {
-        recognitionRef.current.stop()
-      } catch {}
-      setListening(false)
+      stopListening()
     } else {
-      try {
-        recognitionRef.current.start()
-        setListening(true)
-      } catch (err) {
-        console.warn("Could not start speech recognition:", err)
-        setListening(false)
-      }
+      startListening()
     }
   }
-
-  if (!supported) return null
 
   return (
     <button
       type="button"
       onClick={toggleListening}
-      disabled={disabled}
-      title={listening ? "Listening... click to stop" : title}
+      disabled={disabled || initializing}
+      title={listening ? "Listening... speak now (click to stop)" : initializing ? "Accessing microphone..." : title}
       aria-label={listening ? "Stop voice dictation" : "Start voice dictation"}
       style={{
-        background: listening ? "rgba(239, 68, 68, 0.18)" : "transparent",
-        border: listening ? "1px solid rgba(239, 68, 68, 0.5)" : "1px solid var(--border)",
+        background: listening ? "rgba(239, 68, 68, 0.22)" : initializing ? "rgba(6, 182, 212, 0.15)" : "transparent",
+        border: listening ? "1.5px solid #ef4444" : initializing ? "1px solid var(--accent-cyan)" : "1px solid var(--border)",
         borderRadius: 8,
         width: 34,
         height: 34,
@@ -124,35 +164,39 @@ export function VoiceDictation({
         alignItems: "center",
         justifyContent: "center",
         cursor: disabled ? "not-allowed" : "pointer",
-        color: listening ? "var(--accent-red)" : "var(--text-muted)",
+        color: listening ? "#ef4444" : initializing ? "var(--accent-cyan)" : "var(--text-muted)",
         transition: "all 0.18s ease",
         flexShrink: 0,
+        position: "relative",
+        boxShadow: listening ? "0 0 12px rgba(239, 68, 68, 0.45)" : "none",
         ...style,
       }}
-      onMouseEnter={e => {
-        if (!listening && !disabled) {
+      onMouseEnter={(e) => {
+        if (!listening && !disabled && !initializing) {
           e.currentTarget.style.color = "var(--accent-cyan)"
           e.currentTarget.style.borderColor = "var(--accent-cyan)"
         }
       }}
-      onMouseLeave={e => {
-        if (!listening) {
+      onMouseLeave={(e) => {
+        if (!listening && !initializing) {
           e.currentTarget.style.color = "var(--text-muted)"
           e.currentTarget.style.borderColor = "var(--border)"
         }
       }}
     >
-      {listening ? (
+      {initializing ? (
+        <Loader2 size={size} className="animate-spin" style={{ color: "var(--accent-cyan)" }} />
+      ) : listening ? (
         <span style={{ position: "relative", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-          <Mic size={size} strokeWidth={2.4} style={{ color: "#ef4444", animation: "pulse 1.2s infinite" }} />
+          <Mic size={size} strokeWidth={2.6} style={{ color: "#ef4444" }} />
           <span
             style={{
               position: "absolute",
-              width: size + 10,
-              height: size + 10,
+              width: size + 12,
+              height: size + 12,
               borderRadius: "50%",
-              background: "rgba(239,68,68,0.25)",
-              animation: "ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite",
+              background: "rgba(239, 68, 68, 0.35)",
+              animation: "ping 1.2s cubic-bezier(0, 0, 0.2, 1) infinite",
             }}
           />
         </span>
