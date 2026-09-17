@@ -5,86 +5,22 @@ import { getSessionFromRequest } from "@/lib/auth"
 
 export const dynamic = "force-dynamic"
 
-const SYSTEM_PROMPT = `You are the Right Agent Group Executive Operations Co-Pilot & Admin Assistant, integrated into the operations dashboard.
+const SYSTEM_PROMPT = `You are the Right Agent Group Internal Operations Assistant, built into the staff dashboard.
 
-You have full data visibility and execution planning capabilities across:
-- Leads pipeline, qualification, and contact details
-- Incoming loan applications and approvals
-- Priya's Voicebot AI call logs, sentiment, and scripts
-- WhatsApp live conversations and escalations
-- Knowledge Base entries (product policies, rates, FAQs)
-- System compliance, security, and audit logs
+You are NOT Priya and you are NOT on a phone call or WhatsApp chat with a customer. You are a private tool for Right Agent Group staff (admins and loan officers) with broad visibility into the whole business: leads, calls, loan applications, WhatsApp activity, Priya's call scripts, Knowledge Base entries, security settings, the audit log, upload/outbound campaigns, and the team roster.
 
-EXECUTIVE CAPABILITIES:
+You also get full-text SEARCH RESULTS relevant to the staff member's specific question (when present) — this covers ALL leads and loan applications on file, not just the recent handful in the snapshot.
 
-1. SCRIPT WRITING & EDITING:
-   - When asked to write, tune, or rewrite Priya's voicebot call scripts (e.g. Greeting, Loan pitch, Qualification, Objections, Closing), write complete, conversational, persuasive sales scripts.
-   - When proposing to update Priya's script, provide the drafted script text and wrap the proposal in an ACTION PROPOSAL block:
-   \`\`\`action_proposal
-   {
-     "type": "update_script",
-     "title": "Update Priya's Script",
-     "summary": "Brief 1-line summary of script changes",
-     "payload": {
-       "language": "base",
-       "content": "Full revised script text here..."
-     }
-   }
-   \`\`\`
+CAPABILITIES:
+- Live business reporting & data insights across leads, calls, WhatsApp, and loans.
+- Script writing & optimization: When asked to write, tune, or improve Priya's call script (for Personal Loans, Business Loans, Home Loans, etc.), provide complete, professional, high-converting scripts directly in clean markdown with greeting, qualification, objection handling, and closing.
+- Knowledge Base guidance: When asked to draft facts, FAQs, or policies for the Knowledge Base, provide clear, accurate entries ready for staff to review.
+- Data search & analysis: Analyze uploaded files, inspect questions, and summarize pipeline health.
 
-2. KNOWLEDGE BASE WRITING:
-   - When asked to add or update facts, loan interest rates, bank tie-ups, or FAQs that Priya should know during calls and chats, draft the clear facts and propose:
-   \`\`\`action_proposal
-   {
-     "type": "add_kb_entry",
-     "title": "Clear entry title",
-     "summary": "Brief 1-line summary",
-     "payload": {
-       "title": "Title of entry",
-       "content": "Comprehensive facts and policy details",
-       "category": "Loan Policy | Interest Rates | Eligibility | General"
-     }
-   }
-   \`\`\`
-
-3. ADDING LEADS:
-   - When given lead details (from chat, voice dictation, or uploaded documents/images), extract the fields and propose:
-   \`\`\`action_proposal
-   {
-     "type": "add_lead",
-     "title": "Add Lead: [Customer Name]",
-     "summary": "[Phone] · [Product] · ₹[Amount]",
-     "payload": {
-       "name": "Customer Name",
-       "phone": "+91XXXXXXXXXX",
-       "product_interest": "personal | home | business | lap | gold | education",
-       "loan_amount": 500000,
-       "city": "City name",
-       "notes": "Any source or context notes"
-     }
-   }
-   \`\`\`
-
-4. DND SUPPRESSION & SECURITY:
-   - When requested to block a phone number from calls:
-   \`\`\`action_proposal
-   {
-     "type": "add_dnd",
-     "title": "Add to DND: [Phone]",
-     "summary": "Block future calls/messages to this number",
-     "payload": {
-       "phone": "+91XXXXXXXXXX",
-       "reason": "Customer request"
-     }
-   }
-   \`\`\`
-
-MANDATORY SAFETY & APPROVAL PROTOCOL:
-- You do NOT unilaterally change database records silently.
-- Whenever an administrative action is requested, you output the proposed \`\`\`action_proposal ... \`\`\` block in your reply.
-- The UI will automatically render an interactive card with [Approve & Apply] and [Reject] buttons.
-- State clearly: "I've drafted this proposal for your review. Since this modifies system data, please click 'Approve & Apply' above to execute (Admin role required)."
-`
+RULES:
+- Answer using the LIVE DATA SNAPSHOT and SEARCH RESULTS provided below. Never guess or invent numbers or names.
+- Be concise, helpful, and thorough. Format responses with clean bullet points and headings.
+- Never pretend to be talking to a customer — you are assisting the business team.`
 
 async function getStatsSnapshot(): Promise<string> {
   const [
@@ -109,7 +45,6 @@ async function getStatsSnapshot(): Promise<string> {
     recentUploads,
     teamRoster,
     currentScript,
-    topKb,
   ] = await Promise.all([
     query(`SELECT status, COUNT(*)::int AS n FROM leads GROUP BY status ORDER BY n DESC`),
     query(`SELECT COUNT(*)::int AS n FROM leads WHERE created_at > now() - interval '1 day'`),
@@ -149,7 +84,6 @@ async function getStatsSnapshot(): Promise<string> {
     query(`SELECT filename, row_count, status, created_at FROM uploaded_files ORDER BY created_at DESC LIMIT 3`),
     query(`SELECT email, role FROM allowed_emails WHERE role != 'developer' ORDER BY role, email`),
     query(`SELECT language, content FROM ai_scripts WHERE language = 'base' LIMIT 1`).catch(() => ({ rows: [] })),
-    query(`SELECT title, category, content FROM knowledge_base WHERE is_active = true ORDER BY created_at DESC LIMIT 5`).catch(() => ({ rows: [] })),
   ])
 
   const bestLang = langBreakdown.rows[0]
@@ -194,15 +128,10 @@ async function getStatsSnapshot(): Promise<string> {
   )
 
   const scriptSection = section(
-    "CURRENT ACTIVE CALL SCRIPT (Priya)",
+    "ACTIVE CALL SCRIPT EXCERPT",
     currentScript.rows[0]?.content
-      ? `Base script excerpt: "${currentScript.rows[0].content.slice(0, 500)}..."`
-      : "Default base sales script active."
-  )
-
-  const kbSection = section(
-    "RECENT KNOWLEDGE BASE ENTRIES",
-    topKb.rows.map((k: any) => `[${k.category || "General"}] ${k.title}: ${k.content.slice(0, 100)}...`).join("\n") || "No entries yet."
+      ? `"${currentScript.rows[0].content.slice(0, 400)}..."`
+      : "Default base script is active."
   )
 
   const escalationsSection = section(
@@ -243,7 +172,6 @@ async function getStatsSnapshot(): Promise<string> {
     callsSection,
     waSection,
     scriptSection,
-    kbSection,
     escalationsSection,
     securitySection,
     auditSection,
@@ -290,17 +218,14 @@ export async function POST(req: NextRequest) {
   const session = await getSessionFromRequest(req)
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
-  const body = await req.json().catch(() => ({} as any))
-  const { message, history, chatId, attachment } = body
+  const { message, history, chatId, attachment } = await req.json().catch(() => ({}) as any)
   if (typeof message !== "string" || !message.trim() || message.length > 5000) {
     return NextResponse.json({ reply: "Please send a valid message." }, { status: 400 })
   }
 
-  // Construct message with attachment context if user uploaded an image/file
-  let augmentedMessage = message
+  let userContent = message
   if (attachment && typeof attachment === "object" && attachment.name) {
-    augmentedMessage = `[User Attached File: ${attachment.name} (${attachment.type || "file"})]
-${attachment.content ? `File Text Preview:\n${attachment.content.slice(0, 3000)}\n---\n` : ""}${message}`
+    userContent = `[Attached File: ${attachment.name} (${attachment.type || "file"})]\n${attachment.content ? `File Text Preview:\n${attachment.content.slice(0, 3000)}\n---\n` : ""}${message}`
   }
 
   // Verify the chat belongs to this user before persisting anything to it.
@@ -311,9 +236,8 @@ ${attachment.content ? `File Text Preview:\n${attachment.content.slice(0, 3000)}
   }
 
   const [snapshot, searchResults] = await Promise.all([getStatsSnapshot(), searchDatabase(message)])
-  const userInfo = `CURRENT USER: ${session.email} | ROLE: ${session.role}`
-  const fullContext = [SYSTEM_PROMPT, userInfo, snapshot, searchResults].filter(Boolean).join("\n\n")
-  const messages = [...(Array.isArray(history) ? history.slice(-10) : []), { role: "user", content: augmentedMessage }]
+  const fullContext = [SYSTEM_PROMPT, snapshot, searchResults].filter(Boolean).join("\n\n")
+  const messages = [...(Array.isArray(history) ? history.slice(-10) : []), { role: "user", content: userContent }]
 
   const encoder = new TextEncoder()
   const stream = new ReadableStream<Uint8Array>({
@@ -329,7 +253,7 @@ ${attachment.content ? `File Text Preview:\n${attachment.content.slice(0, 3000)}
         if (ownedChatId) {
           await query(
             `INSERT INTO assistant_messages (chat_id, role, content) VALUES ($1, 'user', $2), ($1, 'assistant', $3)`,
-            [ownedChatId, augmentedMessage, fullReply]
+            [ownedChatId, userContent, fullReply]
           )
           await query(
             `UPDATE assistant_chats SET updated_at = now(), title = CASE WHEN title = 'New chat' THEN $2 ELSE title END WHERE id = $1`,

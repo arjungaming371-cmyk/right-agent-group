@@ -2,38 +2,27 @@
 import { useState, useRef, useEffect } from "react"
 import {
   MessageSquareText, Bot, X, Send, Sparkles, Plus, History, Trash2, ArrowLeft,
-  Maximize2, Minimize2, Paperclip, FileText, Image as ImageIcon, CheckCircle2,
-  AlertCircle, ShieldCheck, Loader2, Check, ExternalLink, HelpCircle
+  MessageCircle, Maximize2, Minimize2, Paperclip
 } from "lucide-react"
 import VoiceDictation from "../ui/voice-dictation"
 
-type Message = { role: "user" | "assistant"; content: string; attachment?: { name: string; type: string } }
+type Message = { role: "user" | "assistant"; content: string; attachmentName?: string }
 type ChatSummary = { id: string; title: string; created_at: string; updated_at: string }
 type UserRole = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
 
-interface ActionProposal {
-  id: string
-  type: "update_script" | "add_kb_entry" | "update_kb_entry" | "delete_kb_entry" | "add_lead" | "add_dnd" | "toggle_security"
-  title: string
-  summary: string
-  payload: Record<string, any>
-  status: "pending" | "executing" | "approved" | "rejected"
-  resultMsg?: string
-}
-
 const GREETINGS: Record<UserRole, string> = {
-  admin: "Hi Admin! I'm your Executive Operations Co-Pilot. I can write Priya's scripts, update Knowledge Base entries, add leads, analyze data, inspect uploaded files, and run full reporting. Any system changes require your explicit approval before executing.",
-  agent: "Hi! I'm the ops assistant. I can help you search leads, check loan applications, draft customer replies, and analyze call performance.",
-  viewer: "Hi! I'm the ops assistant. I can show you live reporting, analytics, and business insights.",
-  developer: "Hi! I'm your private developer assistant with system console access, queries, and activity logs.",
-  branch_manager: "Hi! I'm your branch ops assistant. I can help with your branch's leads, calls, and WhatsApp activity.",
+  admin: "Hi! I'm the ops assistant with full read access to leads, calls, loan applications, WhatsApp activity, security, analytics, and the audit log. How can I help you today?",
+  agent: "Hi! I'm the ops assistant. I can help with leads, calls, and WhatsApp insights. What would you like to know?",
+  viewer: "Hi! I'm the ops assistant. I can show you reporting and insights. What would you like to know?",
+  developer: "Hi! I'm your private developer assistant with full console access. I can help with system queries, logs, and development tasks. This chat is private and hidden from admins.",
+  branch_manager: "Hi! I'm the ops assistant for your branch. I can help with your branch's leads, calls, and WhatsApp activity. What would you like to know?",
 }
 
 const QUICK_COMMANDS = [
-  { label: "Draft a new script", query: "Write a high-converting call script for Priya targeting Personal Loans with low interest rates." },
-  { label: "Add Knowledge Base rule", query: "Add a Knowledge Base fact: Our minimum CIBIL score for Home Loans is 680 with interest rates starting at 8.5%." },
-  { label: "Add a new lead", query: "Add a new lead: Ramesh Gupta, phone 9876543210, looking for 5 Lakh Personal Loan." },
-  { label: "Leads today?", query: "How many new leads were added today?" },
+  { label: "How many leads today?", query: "How many new leads were added today?" },
+  { label: "Pending calls", query: "How many calls are pending in the queue?" },
+  { label: "Best performing language", query: "Which language has the most successful calls?" },
+  { label: "Loan applications pending", query: "How many loan applications are pending?" },
 ]
 
 function timeAgoShort(dateStr: string) {
@@ -49,7 +38,7 @@ function timeAgoShort(dateStr: string) {
 const POS_KEY = "opsAssistantFabPos"
 const FAB_SIZE = 56
 const EDGE_MARGIN = 24
-const DRAG_THRESHOLD = 6
+const DRAG_THRESHOLD = 6 // px of movement before a press counts as a drag, not a click
 
 export default function QuickChat({ role = "agent", userEmail = "" }: { role?: UserRole; userEmail?: string }) {
   const [open, setOpen] = useState(false)
@@ -62,9 +51,6 @@ export default function QuickChat({ role = "agent", userEmail = "" }: { role?: U
   // Attachment state
   const [attachedFile, setAttachedFile] = useState<{ name: string; type: string; content?: string } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-
-  // Proposals tracking
-  const [proposals, setProposals] = useState<Record<string, ActionProposal>>({})
 
   function clamp(x: number, y: number) {
     const maxX = window.innerWidth - FAB_SIZE - 8
@@ -119,12 +105,12 @@ export default function QuickChat({ role = "agent", userEmail = "" }: { role?: U
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)
-  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const bottomRef = useRef<HTMLDivElement>(null)
   const streamEpochRef = useRef(0)
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [messages])
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" })
+  }, [messages, open])
 
   async function loadChats() {
     setChatsLoading(true)
@@ -138,26 +124,28 @@ export default function QuickChat({ role = "agent", userEmail = "" }: { role?: U
 
   function openHistory() {
     setView("history")
+    setConfirmDelete(null)
     loadChats()
   }
 
   function startNewChat() {
-    streamEpochRef.current++
+    streamEpochRef.current += 1
+    setLoading(false)
     setChatId(null)
     setMessages([greeting])
     setView("chat")
   }
 
-  async function openChat(id: string) {
+  async function openChat(c: ChatSummary) {
     const epoch = ++streamEpochRef.current
-    setChatId(id)
+    setChatId(c.id)
     setView("chat")
     setLoading(true)
     try {
-      const res = await fetch(`/api/assistant/chats/${id}`)
+      const res = await fetch(`/api/assistant/chats/${c.id}`)
       const data = await res.json()
+      const loaded: Message[] = (data.messages || []).map((m: any) => ({ role: m.role, content: m.content }))
       if (epoch !== streamEpochRef.current) return
-      const loaded = (data.messages || []).map((m: any) => ({ role: m.role, content: m.content }))
       setMessages(loaded.length ? loaded : [greeting])
     } catch {
       if (epoch !== streamEpochRef.current) return
@@ -201,65 +189,6 @@ export default function QuickChat({ role = "agent", userEmail = "" }: { role?: U
     }
   }
 
-  // Execute an approved proposal
-  async function executeProposal(proposal: ActionProposal) {
-    if (role !== "admin") {
-      alert("Only administrators have permission to approve and execute system modifications.")
-      return
-    }
-
-    setProposals(prev => ({
-      ...prev,
-      [proposal.id]: { ...proposal, status: "executing" }
-    }))
-
-    try {
-      const res = await fetch("/api/assistant/action", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: proposal.type, payload: proposal.payload })
-      })
-
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || "Action execution failed")
-
-      setProposals(prev => ({
-        ...prev,
-        [proposal.id]: {
-          ...proposal,
-          status: "approved",
-          resultMsg: data.message || "Executed successfully"
-        }
-      }))
-
-      // Append confirmation message in chat
-      setMessages(prev => [
-        ...prev,
-        {
-          role: "assistant",
-          content: `✅ **Admin Action Completed**: ${data.message || proposal.title}`
-        }
-      ])
-    } catch (err: any) {
-      setProposals(prev => ({
-        ...prev,
-        [proposal.id]: {
-          ...proposal,
-          status: "pending",
-          resultMsg: `Failed: ${err.message}`
-        }
-      }))
-      alert(`Execution error: ${err.message}`)
-    }
-  }
-
-  function rejectProposal(proposal: ActionProposal) {
-    setProposals(prev => ({
-      ...prev,
-      [proposal.id]: { ...proposal, status: "rejected" }
-    }))
-  }
-
   async function send(text?: string) {
     const q = text ?? input
     if ((!q.trim() && !attachedFile) || loading) return
@@ -272,8 +201,8 @@ export default function QuickChat({ role = "agent", userEmail = "" }: { role?: U
       ...messages,
       {
         role: "user",
-        content: q || (currentAttachment ? `Attached file: ${currentAttachment.name}` : ""),
-        attachment: currentAttachment ? { name: currentAttachment.name, type: currentAttachment.type } : undefined
+        content: q || (currentAttachment ? `Attached: ${currentAttachment.name}` : ""),
+        attachmentName: currentAttachment?.name
       }
     ]
     setMessages(newMessages)
@@ -330,10 +259,6 @@ export default function QuickChat({ role = "agent", userEmail = "" }: { role?: U
       }
 
       if (epoch !== streamEpochRef.current) return
-
-      // Parse any action proposals in the final output
-      extractActionProposal(acc)
-
       if (!acc.trim()) {
         setMessages(prev => {
           const copy = [...prev]
@@ -350,517 +275,260 @@ export default function QuickChat({ role = "agent", userEmail = "" }: { role?: U
     }
   }
 
-  // Extract action_proposal code blocks from assistant messages
-  function extractActionProposal(text: string) {
-    const match = text.match(/```(?:action_proposal|json)?\s*(\{[\s\S]*?"type"\s*:\s*"(?:update_script|add_kb_entry|update_kb_entry|delete_kb_entry|add_lead|add_dnd|toggle_security)"[\s\S]*?\})\s*```/)
-    if (match && match[1]) {
-      try {
-        const parsed = JSON.parse(match[1])
-        const proposalId = `prop_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`
-        setProposals(prev => ({
-          ...prev,
-          [proposalId]: {
-            id: proposalId,
-            type: parsed.type,
-            title: parsed.title || "Proposed System Change",
-            summary: parsed.summary || "System modification",
-            payload: parsed.payload || {},
-            status: "pending",
-          }
-        }))
-      } catch (err) {
-        console.warn("Could not parse action proposal:", err)
-      }
-    }
-  }
-
-  // Helper to render an Action Proposal Card
-  function renderProposalCard(proposal: ActionProposal) {
+  if (!open) {
+    const posStyle = pos
+      ? { top: pos.y, left: pos.x }
+      : { bottom: EDGE_MARGIN, right: EDGE_MARGIN }
     return (
-      <div
-        key={proposal.id}
+      <button
+        onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); startDrag(e.clientX, e.clientY) }}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
         style={{
-          marginTop: 10,
-          borderRadius: 12,
-          border: proposal.status === "approved"
-            ? "1px solid rgba(16, 185, 129, 0.4)"
-            : proposal.status === "rejected"
-            ? "1px solid rgba(239, 68, 68, 0.3)"
-            : "1.5px solid var(--accent-violet)",
-          background: "var(--bg-secondary)",
-          padding: 14,
-          boxShadow: "0 4px 14px rgba(0,0,0,0.15)",
+          position: "fixed", ...posStyle, width: FAB_SIZE, height: FAB_SIZE, borderRadius: "50%",
+          background: "var(--gradient-brand)", border: "none", color: "white",
+          fontSize: 22, display: "flex", alignItems: "center", justifyContent: "center",
+          boxShadow: dragging ? "0 12px 36px -6px rgba(79,124,255,0.7), 0 0 0 1px var(--overlay-line)" : "0 8px 28px -6px rgba(79,124,255,0.55), 0 0 0 1px var(--overlay-chip)",
+          cursor: dragging ? "grabbing" : "grab", zIndex: 999,
+          animation: pos ? "none" : "fadeInUp 0.3s ease",
+          touchAction: "none", userSelect: "none",
+          transform: dragging ? "scale(1.06)" : "scale(1)", transition: dragging ? "none" : "transform 0.15s ease",
         }}
+        title="Quick AI Assistant — drag to move"
       >
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-            <ShieldCheck size={16} style={{ color: "var(--accent-violet)" }} />
-            <span style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--accent-violet)" }}>
-              Admin Approval Required
-            </span>
-          </div>
-          <span style={{
-            fontSize: 11, padding: "2px 8px", borderRadius: 6, fontWeight: 600,
-            background: proposal.status === "approved" ? "rgba(16,185,129,0.15)" : proposal.status === "rejected" ? "rgba(239,68,68,0.15)" : "rgba(139,92,246,0.15)",
-            color: proposal.status === "approved" ? "var(--accent-green)" : proposal.status === "rejected" ? "var(--accent-red)" : "var(--accent-violet)"
-          }}>
-            {proposal.type.replace(/_/g, " ").toUpperCase()}
-          </span>
-        </div>
-
-        <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-primary)", marginBottom: 4 }}>
-          {proposal.title}
-        </div>
-        <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 10 }}>
-          {proposal.summary}
-        </div>
-
-        {/* Payload Preview */}
-        <div style={{
-          maxHeight: 140, overflowY: "auto", background: "var(--bg-primary)",
-          borderRadius: 8, padding: 10, fontSize: 11.5, fontFamily: "monospace",
-          border: "1px solid var(--border)", marginBottom: 12, color: "var(--text-secondary)", whiteSpace: "pre-wrap"
-        }}>
-          {proposal.type === "update_script" ? (
-            proposal.payload.content || JSON.stringify(proposal.payload, null, 2)
-          ) : proposal.type === "add_kb_entry" ? (
-            `Title: ${proposal.payload.title}\nCategory: ${proposal.payload.category}\nContent: ${proposal.payload.content}`
-          ) : proposal.type === "add_lead" ? (
-            `Name: ${proposal.payload.name}\nPhone: ${proposal.payload.phone}\nProduct: ${proposal.payload.product_interest}\nAmount: ₹${proposal.payload.loan_amount || "—"}`
-          ) : (
-            JSON.stringify(proposal.payload, null, 2)
-          )}
-        </div>
-
-        {/* Buttons & Status */}
-        {proposal.status === "pending" && (
-          <div>
-            {role === "admin" ? (
-              <div style={{ display: "flex", gap: 8 }}>
-                <button
-                  type="button"
-                  onClick={() => executeProposal(proposal)}
-                  style={{
-                    flex: 1, height: 34, borderRadius: 8, background: "var(--accent-green)",
-                    border: "none", color: "white", fontSize: 12.5, fontWeight: 600,
-                    display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, cursor: "pointer"
-                  }}
-                >
-                  <Check size={14} strokeWidth={2.5} /> Approve & Apply
-                </button>
-                <button
-                  type="button"
-                  onClick={() => rejectProposal(proposal)}
-                  style={{
-                    height: 34, padding: "0 14px", borderRadius: 8, background: "transparent",
-                    border: "1px solid var(--border)", color: "var(--text-muted)", fontSize: 12,
-                    cursor: "pointer"
-                  }}
-                >
-                  Dismiss
-                </button>
-              </div>
-            ) : (
-              <div style={{ fontSize: 12, color: "var(--accent-amber)", display: "flex", alignItems: "center", gap: 6 }}>
-                <AlertCircle size={14} /> Only Administrators can approve and apply this change.
-              </div>
-            )}
-          </div>
-        )}
-
-        {proposal.status === "executing" && (
-          <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "var(--accent-cyan)" }}>
-            <Loader2 size={15} className="animate-spin" /> Applying changes to live system...
-          </div>
-        )}
-
-        {proposal.status === "approved" && (
-          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--accent-green)", fontWeight: 600 }}>
-            <CheckCircle2 size={16} /> Approved & executed by Admin.
-          </div>
-        )}
-
-        {proposal.status === "rejected" && (
-          <div style={{ fontSize: 12, color: "var(--accent-red)" }}>
-            ✕ Proposal dismissed by user.
-          </div>
-        )}
-      </div>
-    )
-  }
-
-  // Render message text and strip raw action proposal json so it looks clean
-  function renderMessageContent(content: string) {
-    const cleanText = content.replace(/```(?:action_proposal|json)?\s*\{[\s\S]*?"type"\s*:\s*"(?:update_script|add_kb_entry|update_kb_entry|delete_kb_entry|add_lead|add_dnd|toggle_security)"[\s\S]*?\}\s*```/g, "").trim()
-    return (
-      <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.55 }}>
-        {cleanText}
-      </div>
+        <MessageSquareText size={22} strokeWidth={2} />
+      </button>
     )
   }
 
   return (
     <>
-      {/* Floating Action Button */}
-      {!open && (
-        <button
-          onClick={() => setOpen(true)}
-          onPointerDown={(e) => startDrag(e.clientX, e.clientY)}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          aria-label="Open Operations Assistant"
-          title="Open AI Operations Assistant"
+      {/* Background overlay when expanded */}
+      {expanded && (
+        <div
+          onClick={() => setExpanded(false)}
           style={{
-            position: "fixed",
-            left: pos ? pos.x : undefined,
-            top: pos ? pos.y : undefined,
-            right: pos ? undefined : EDGE_MARGIN,
-            bottom: pos ? undefined : EDGE_MARGIN,
-            width: FAB_SIZE,
-            height: FAB_SIZE,
-            borderRadius: "50%",
-            background: "var(--gradient-brand)",
-            border: "none",
-            color: "white",
-            cursor: dragging ? "grabbing" : "pointer",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            boxShadow: "0 6px 20px -2px rgba(91,124,250,0.5), 0 2px 8px rgba(0,0,0,0.2)",
-            zIndex: 900,
-            touchAction: "none",
-            userSelect: "none",
-            transition: dragging ? "none" : "transform 0.15s ease",
+            position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)",
+            backdropFilter: "blur(2px)", zIndex: 998
           }}
-        >
-          <Bot size={24} strokeWidth={2.1} />
-        </button>
+        />
       )}
 
-      {/* Main Chat Window */}
-      {open && (
-        <>
-          {/* Dimmed backdrop when maximized */}
-          {expanded && (
-            <div
-              onClick={() => setExpanded(false)}
-              style={{
-                position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)",
-                backdropFilter: "blur(3px)", zIndex: 9998
-              }}
-            />
-          )}
+      <div className="glass" style={{
+        position: "fixed",
+        ...(expanded
+          ? {
+              top: "50%", left: "50%", transform: "translate(-50%, -50%)",
+              width: "min(880px, 92vw)", height: "min(750px, 86vh)",
+              maxWidth: "none", maxHeight: "none", margin: 0,
+            }
+          : {
+              bottom: 12, right: 12, left: "auto", top: "auto",
+              width: 400, height: 560, maxWidth: "calc(100vw - 24px)", maxHeight: "calc(100vh - 24px)",
+            }),
+        borderRadius: 18, boxShadow: "0 20px 60px -12px rgba(0,0,0,0.65), 0 0 0 1px var(--overlay-hover)",
+        display: "flex", flexDirection: "column", zIndex: 999, overflow: "hidden",
+        animation: "fadeInUp 0.2s ease", transition: "width 0.2s ease, height 0.2s ease",
+      }}>
+        {/* Header */}
+        <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+            {view === "history" ? (
+              <button onClick={() => setView("chat")} aria-label="Back to chat" style={{ background: "none", border: "none", color: "var(--text-secondary)", cursor: "pointer", display: "flex", width: 26, height: 26, alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <ArrowLeft size={16} strokeWidth={2} />
+              </button>
+            ) : (
+              <div style={{
+                width: 30, height: 30, borderRadius: 9, background: "var(--gradient-brand)",
+                display: "flex", alignItems: "center", justifyContent: "center", color: "white", flexShrink: 0,
+              }}><Bot size={16} strokeWidth={2} /></div>
+            )}
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: 600, fontSize: 13, display: "flex", alignItems: "center", gap: 5 }}>
+                {view === "history" ? "Chat History" : "Ops Assistant"} {view === "chat" && <Sparkles size={11} style={{ color: "var(--accent-violet)" }} />}
+              </div>
+              <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{view === "history" ? `${chats.length} conversation${chats.length === 1 ? "" : "s"}` : "Internal only · Full data access"}</div>
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+            {view === "chat" && (
+              <>
+                <button onClick={startNewChat} aria-label="New chat" title="New chat" style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", width: 28, height: 28, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center" }}><Plus size={16} strokeWidth={2} /></button>
+                <button onClick={openHistory} aria-label="Chat history" title="Chat history" style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", width: 28, height: 28, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center" }}><History size={16} strokeWidth={2} /></button>
+              </>
+            )}
+            {/* Expand / Minimize button */}
+            <button
+              onClick={() => setExpanded(!expanded)}
+              aria-label={expanded ? "Minimize" : "Maximize"}
+              title={expanded ? "Minimize" : "Maximize"}
+              style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", width: 28, height: 28, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center" }}
+            >
+              {expanded ? <Minimize2 size={15} strokeWidth={2} /> : <Maximize2 size={15} strokeWidth={2} />}
+            </button>
+            <button onClick={() => setOpen(false)} aria-label="Close" style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", width: 28, height: 28, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center" }}><X size={16} strokeWidth={2} /></button>
+          </div>
+        </div>
 
-          <div
-            style={{
-              position: "fixed",
-              zIndex: 9999,
-              ...(expanded
-                ? {
-                    top: "50%",
-                    left: "50%",
-                    transform: "translate(-50%, -50%)",
-                    width: "min(960px, 94vw)",
-                    height: "min(820px, 90vh)",
-                  }
-                : {
-                    right: 24,
-                    bottom: 24,
-                    width: 420,
-                    height: 600,
-                    maxWidth: "calc(100vw - 32px)",
-                    maxHeight: "calc(100vh - 48px)",
-                  }),
-              background: "var(--bg-card)",
-              border: "1px solid var(--border)",
-              borderRadius: 16,
-              display: "flex",
-              flexDirection: "column",
-              boxShadow: "0 24px 60px rgba(0,0,0,0.5), 0 4px 16px rgba(0,0,0,0.2)",
-              overflow: "hidden",
-              transition: "width 0.2s ease, height 0.2s ease",
-            }}
-          >
-            {/* Header */}
-            <div style={{
-              padding: "12px 18px", borderBottom: "1px solid var(--border)",
-              display: "flex", alignItems: "center", justifyContent: "space-between",
-              background: "var(--bg-secondary)"
-            }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                {view === "history" ? (
-                  <button
-                    onClick={() => setView("chat")}
-                    className="btn-ghost"
-                    style={{ width: 30, height: 30, padding: 0, display: "flex", alignItems: "center", justifyContent: "center" }}
-                  >
-                    <ArrowLeft size={16} />
-                  </button>
+        {view === "history" ? (
+          /* ---------- History panel ---------- */
+          <div style={{ flex: 1, overflowY: "auto" }}>
+            <button onClick={startNewChat} style={{
+              width: "calc(100% - 24px)", margin: "12px", display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
+              padding: "9px 0", borderRadius: 10, background: "var(--bg-secondary)", border: "1px dashed var(--border)",
+              color: "var(--text-secondary)", fontSize: 12.5, fontWeight: 500, cursor: "pointer",
+            }}><Plus size={13} strokeWidth={2} /> New chat</button>
+
+            {chatsLoading && <div style={{ padding: 24, textAlign: "center", color: "var(--text-muted)", fontSize: 12.5 }}>Loading…</div>}
+            {!chatsLoading && chats.length === 0 && (
+              <div style={{ padding: "24px 20px", textAlign: "center", color: "var(--text-muted)", fontSize: 12.5 }}>
+                <MessageCircle size={22} strokeWidth={1.4} style={{ opacity: 0.5, marginBottom: 8 }} />
+                <div>No past conversations yet.</div>
+              </div>
+            )}
+            {chats.map(c => (
+              <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderTop: "1px solid var(--border-light)" }}>
+                <button onClick={() => openChat(c)} style={{ flex: 1, minWidth: 0, textAlign: "left", background: c.id === chatId ? "rgba(139,124,255,0.08)" : "transparent", border: "none", borderRadius: 8, padding: "6px 8px", cursor: "pointer" }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 500, color: "var(--text-primary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.title}</div>
+                  <div style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 1 }}>{timeAgoShort(c.updated_at) === "now" ? "now" : `${timeAgoShort(c.updated_at)} ago`}</div>
+                </button>
+                {confirmDelete === c.id ? (
+                  <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                    <button onClick={() => deleteChat(c.id)} style={{ fontSize: 10.5, fontWeight: 600, color: "var(--accent-red)", background: "rgba(251,86,112,0.12)", border: "1px solid rgba(251,86,112,0.35)", borderRadius: 6, padding: "4px 7px" }}>Delete</button>
+                    <button onClick={() => setConfirmDelete(null)} style={{ fontSize: 10.5, color: "var(--text-muted)", background: "transparent", border: "1px solid var(--border)", borderRadius: 6, padding: "4px 7px" }}>Cancel</button>
+                  </div>
                 ) : (
-                  <div style={{
-                    width: 32, height: 32, borderRadius: 8, background: "var(--gradient-brand)",
-                    display: "flex", alignItems: "center", justifyContent: "center", color: "white"
-                  }}>
-                    <Bot size={17} />
-                  </div>
+                  <button onClick={() => setConfirmDelete(c.id)} aria-label={`Delete ${c.title}`} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", width: 26, height: 26, borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <Trash2 size={13} strokeWidth={1.9} />
+                  </button>
                 )}
-                <div>
-                  <div style={{ fontSize: 14, fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }}>
-                    Ops Assistant
-                    <span style={{
-                      fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 4,
-                      background: role === "admin" ? "rgba(139,92,246,0.2)" : "rgba(6,182,212,0.2)",
-                      color: role === "admin" ? "var(--accent-violet)" : "var(--accent-cyan)"
+              </div>
+            ))}
+          </div>
+        ) : (
+          /* ---------- Chat panel ---------- */
+          <>
+            <div style={{ flex: 1, overflowY: "auto", padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
+              {messages.map((msg, i) => {
+                const isPendingStream = loading && i === messages.length - 1 && msg.role === "assistant" && msg.content === ""
+                return (
+                  <div key={i} style={{ display: "flex", justifyContent: msg.role === "user" ? "flex-end" : "flex-start" }}>
+                    <div style={{
+                      maxWidth: expanded ? "75%" : "88%", padding: isPendingStream ? "10px 13px" : "9px 13px", borderRadius: 12, fontSize: 13, lineHeight: 1.5, whiteSpace: "pre-wrap",
+                      background: msg.role === "user" ? "var(--gradient-brand)" : "var(--bg-secondary)",
+                      border: msg.role === "user" ? "none" : "1px solid var(--border)",
+                      color: msg.role === "user" ? "white" : "var(--text-primary)",
                     }}>
-                      {role.toUpperCase()}
-                    </span>
+                      {msg.attachmentName && (
+                        <div style={{
+                          display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 7px",
+                          borderRadius: 6, background: "rgba(255,255,255,0.18)", fontSize: 11, marginBottom: 5
+                        }}>
+                          <Paperclip size={11} /> {msg.attachmentName}
+                        </div>
+                      )}
+                      {isPendingStream ? (
+                        <div style={{ display: "flex", gap: 4 }}>
+                          {[0,1,2].map(d => <span key={d} style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--text-muted)", animation: `bounce 1s ${d*0.15}s infinite` }} />)}
+                        </div>
+                      ) : msg.content}
+                    </div>
                   </div>
-                  <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                    Script Writer · KB Editor · Leads · Full Control
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                {view === "chat" && (
-                  <>
-                    <button
-                      onClick={startNewChat}
-                      title="New chat"
-                      className="btn-ghost"
-                      style={{ width: 32, height: 32, padding: 0, display: "flex", alignItems: "center", justifyContent: "center" }}
-                    >
-                      <Plus size={16} />
-                    </button>
-                    <button
-                      onClick={openHistory}
-                      title="Chat history"
-                      className="btn-ghost"
-                      style={{ width: 32, height: 32, padding: 0, display: "flex", alignItems: "center", justifyContent: "center" }}
-                    >
-                      <History size={16} />
-                    </button>
-                  </>
-                )}
-                <button
-                  onClick={() => setExpanded(!expanded)}
-                  title={expanded ? "Minimize window" : "Expand to full screen"}
-                  className="btn-ghost"
-                  style={{ width: 32, height: 32, padding: 0, display: "flex", alignItems: "center", justifyContent: "center" }}
-                >
-                  {expanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
-                </button>
-                <button
-                  onClick={() => setOpen(false)}
-                  title="Close assistant"
-                  className="btn-ghost"
-                  style={{ width: 32, height: 32, padding: 0, display: "flex", alignItems: "center", justifyContent: "center" }}
-                >
-                  <X size={17} />
-                </button>
-              </div>
+                )
+              })}
+              <div ref={bottomRef} />
             </div>
 
-            {/* View: History */}
-            {view === "history" && (
-              <div style={{ flex: 1, overflowY: "auto", padding: 14 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)", marginBottom: 10, textTransform: "uppercase" }}>
-                  Previous Conversations
-                </div>
-                {chatsLoading && <div style={{ padding: 20, textAlign: "center", color: "var(--text-muted)" }}>Loading history…</div>}
-                {!chatsLoading && chats.length === 0 && (
-                  <div style={{ padding: 24, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
-                    No previous chats found.
-                  </div>
-                )}
-                {!chatsLoading && chats.map(c => (
-                  <div
-                    key={c.id}
-                    onClick={() => openChat(c.id)}
-                    style={{
-                      display: "flex", alignItems: "center", justifyContent: "space-between",
-                      padding: "10px 12px", borderRadius: 8, cursor: "pointer",
-                      background: chatId === c.id ? "var(--bg-secondary)" : "transparent",
-                      border: "1px solid var(--border)", marginBottom: 6,
-                    }}
-                  >
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {c.title}
-                      </div>
-                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                        {timeAgoShort(c.updated_at)} ago
-                      </div>
-                    </div>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); deleteChat(c.id) }}
-                      className="btn-ghost"
-                      style={{ width: 28, height: 28, padding: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)" }}
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  </div>
+            {messages.length <= 1 && (
+              <div style={{ padding: "0 14px 10px", display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {QUICK_COMMANDS.map(c => (
+                  <button key={c.label} onClick={() => send(c.query)} style={{
+                    fontSize: 11, padding: "5px 10px", borderRadius: 14, background: "var(--bg-secondary)",
+                    border: "1px solid var(--border)", color: "var(--text-secondary)", cursor: "pointer",
+                  }}>{c.label}</button>
                 ))}
               </div>
             )}
 
-            {/* View: Chat Messages */}
-            {view === "chat" && (
-              <>
-                <div style={{ flex: 1, overflowY: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
-                  {messages.map((m, idx) => (
-                    <div
-                      key={idx}
-                      style={{
-                        display: "flex",
-                        justifyContent: m.role === "user" ? "flex-end" : "flex-start",
-                      }}
-                    >
-                      <div
-                        style={{
-                          maxWidth: expanded ? "75%" : "88%",
-                          borderRadius: 12,
-                          padding: "10px 14px",
-                          fontSize: 13.5,
-                          background: m.role === "user" ? "var(--gradient-brand)" : "var(--bg-secondary)",
-                          color: m.role === "user" ? "white" : "var(--text-primary)",
-                          border: m.role === "user" ? "none" : "1px solid var(--border)",
-                          boxShadow: "0 2px 6px rgba(0,0,0,0.08)",
-                        }}
-                      >
-                        {/* Attached file pill if user uploaded */}
-                        {m.attachment && (
-                          <div style={{
-                            display: "inline-flex", alignItems: "center", gap: 5, padding: "2px 8px",
-                            borderRadius: 6, background: "rgba(255,255,255,0.2)", fontSize: 11, marginBottom: 6
-                          }}>
-                            <Paperclip size={11} /> {m.attachment.name}
-                          </div>
-                        )}
-
-                        {m.role === "assistant" ? renderMessageContent(m.content) : m.content}
-                      </div>
-                    </div>
-                  ))}
-
-                  {/* Render any parsed proposals for this chat */}
-                  {Object.values(proposals).map(p => renderProposalCard(p))}
-
-                  {loading && (
-                    <div style={{ display: "flex", gap: 6, alignItems: "center", color: "var(--text-muted)", fontSize: 12.5, padding: "4px 8px" }}>
-                      <Loader2 size={14} className="animate-spin text-[var(--accent-cyan)]" />
-                      <span>Ops Assistant is thinking & preparing...</span>
-                    </div>
-                  )}
-                  <div ref={messagesEndRef} />
+            {/* Attached file preview banner */}
+            {attachedFile && (
+              <div style={{
+                padding: "6px 12px", background: "var(--bg-secondary)", borderTop: "1px solid var(--border)",
+                display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 12, color: "var(--text-secondary)"
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <Paperclip size={13} style={{ color: "var(--accent-cyan)" }} />
+                  <span style={{ fontWeight: 600 }}>{attachedFile.name}</span>
                 </div>
-
-                {/* Quick command buttons */}
-                {messages.length <= 2 && (
-                  <div style={{ padding: "0 14px 10px", display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    {QUICK_COMMANDS.map((c, i) => (
-                      <button
-                        key={i}
-                        type="button"
-                        onClick={() => send(c.query)}
-                        style={{
-                          fontSize: 11.5, padding: "4px 10px", borderRadius: 14,
-                          background: "var(--bg-secondary)", border: "1px solid var(--border)",
-                          color: "var(--text-secondary)", cursor: "pointer", transition: "all 0.15s"
-                        }}
-                      >
-                        {c.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                {/* Attached file preview tag */}
-                {attachedFile && (
-                  <div style={{
-                    padding: "6px 14px", background: "var(--bg-secondary)",
-                    borderTop: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between",
-                    fontSize: 12, color: "var(--text-secondary)"
-                  }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <Paperclip size={13} style={{ color: "var(--accent-cyan)" }} />
-                      <span style={{ fontWeight: 600 }}>{attachedFile.name}</span>
-                      <span style={{ fontSize: 11, color: "var(--text-muted)" }}>({attachedFile.type})</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setAttachedFile(null)}
-                      style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer" }}
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-                )}
-
-                {/* Input Toolbar */}
-                <div style={{
-                  padding: 12, borderTop: "1px solid var(--border)",
-                  display: "flex", gap: 8, alignItems: "center", background: "var(--bg-card)"
-                }}>
-                  {/* File Upload Button */}
-                  <input
-                    type="file"
-                    ref={fileInputRef}
-                    onChange={handleFileChange}
-                    accept="image/*,.pdf,.csv,.txt,.json"
-                    style={{ display: "none" }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    title="Attach images, documents, CSV, or text"
-                    style={{
-                      width: 36, height: 36, borderRadius: 8, background: "transparent",
-                      border: "1px solid var(--border)", color: "var(--text-muted)",
-                      display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0
-                    }}
-                  >
-                    <Paperclip size={16} />
-                  </button>
-
-                  <input
-                    value={input}
-                    onChange={e => setInput(e.target.value)}
-                    onKeyDown={e => e.key === "Enter" && send()}
-                    placeholder={role === "admin" ? "Write scripts, add leads, update KB, ask questions…" : "Ask about leads, loans, calls…"}
-                    style={{ flex: 1, fontSize: 13.5, height: 38 }}
-                  />
-
-                  {/* Upgraded Voice Dictation */}
-                  <VoiceDictation
-                    onTranscript={(spoken: string) => {
-                      setInput(prev => (prev ? `${prev} ${spoken}` : spoken))
-                    }}
-                    size={16}
-                    style={{ width: 38, height: 38, borderRadius: 8 }}
-                    title="Speak command (Indian English, Hindi, etc.)"
-                  />
-
-                  {/* Send Button */}
-                  <button
-                    type="button"
-                    onClick={() => send()}
-                    disabled={loading || (!input.trim() && !attachedFile)}
-                    style={{
-                      width: 38, height: 38, borderRadius: 8, background: "var(--gradient-brand)",
-                      border: "none", color: "white", opacity: (loading || (!input.trim() && !attachedFile)) ? 0.4 : 1,
-                      cursor: (loading || (!input.trim() && !attachedFile)) ? "not-allowed" : "pointer",
-                      display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0
-                    }}
-                  >
-                    <Send size={15} strokeWidth={2.2} />
-                  </button>
-                </div>
-              </>
+                <button
+                  type="button"
+                  onClick={() => setAttachedFile(null)}
+                  style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer" }}
+                >
+                  <X size={14} />
+                </button>
+              </div>
             )}
-          </div>
-        </>
-      )}
+
+            {/* Input toolbar */}
+            <div style={{ padding: 12, borderTop: "1px solid var(--border)", display: "flex", gap: 8, alignItems: "center" }}>
+              {/* File Attachment Button */}
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileChange}
+                accept="image/*,.pdf,.csv,.txt,.json"
+                style={{ display: "none" }}
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                title="Attach image or file"
+                aria-label="Attach file"
+                style={{
+                  width: 36, height: 36, borderRadius: 9, background: "transparent",
+                  border: "1px solid var(--border)", color: "var(--text-muted)",
+                  display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0
+                }}
+              >
+                <Paperclip size={15} />
+              </button>
+
+              <input
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && send()}
+                placeholder="Ask about leads, calls, loans, scripts…"
+                style={{ flex: 1, fontSize: 13, height: 36 }}
+              />
+
+              {/* Working Voice Dictation Mic */}
+              <VoiceDictation
+                onTranscript={(spoken: string) => {
+                  setInput(prev => (prev ? `${prev} ${spoken}` : spoken))
+                }}
+                size={15}
+                style={{ width: 36, height: 36, borderRadius: 9 }}
+                title="Speak to type"
+              />
+
+              <button
+                onClick={() => send()}
+                disabled={loading || (!input.trim() && !attachedFile)}
+                aria-label="Send"
+                style={{
+                  width: 36, height: 36, borderRadius: 9, background: "var(--gradient-brand)", border: "none",
+                  color: "white", opacity: (loading || (!input.trim() && !attachedFile)) ? 0.4 : 1, flexShrink: 0,
+                  display: "flex", alignItems: "center", justifyContent: "center", cursor: (loading || (!input.trim() && !attachedFile)) ? "not-allowed" : "pointer"
+                }}
+              >
+                <Send size={15} strokeWidth={2} />
+              </button>
+            </div>
+          </>
+        )}
+        <style>{`@keyframes bounce { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }`}</style>
+      </div>
     </>
   )
 }
