@@ -250,8 +250,6 @@ function AccessPageInner() {
 
   if (checking) return null
 
-  const SUGGESTED_ROLES = ["Loan Officer", "Telecaller", "Verification Lead", "Branch Manager", "Admin", ...roles.map(r => r.label).filter(l => !["Loan Officer", "Telecaller", "Verification Lead", "Branch Manager", "Admin"].includes(l))]
-
   return (
     <main style={{ minHeight: "100vh", padding: "0 20px" }}>
       <div style={{ maxWidth: 880, margin: "0 auto", padding: "36px 0 80px" }}>
@@ -414,42 +412,7 @@ function AccessPageInner() {
               </div>
             </div>
 
-            {/* Quick role suggestions chips */}
-            <div>
-              <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, fontWeight: 600 }}>
-                QUICK ROLE SUGGESTIONS (CLICK TO APPLY):
-              </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {SUGGESTED_ROLES.map(title => (
-                  <button
-                    key={title}
-                    type="button"
-                    onClick={() => {
-                      setNewRoleTitle(title)
-                      const rDef = roles.find(r => r.label.toLowerCase() === title.toLowerCase())
-                      if (rDef) {
-                        setNewBaseRole(rDef.baseRole)
-                        if (rDef.defaultModules) setNewAllowedModules(rDef.defaultModules)
-                      } else if (title === "Admin") {
-                        setNewBaseRole("admin")
-                      } else if (title === "Branch Manager") {
-                        setNewBaseRole("branch_manager")
-                      } else {
-                        setNewBaseRole("agent")
-                      }
-                    }}
-                    style={{
-                      background: newRoleTitle.toLowerCase() === title.toLowerCase() ? "var(--accent-blue)22" : "var(--bg-secondary)",
-                      border: `1px solid ${newRoleTitle.toLowerCase() === title.toLowerCase() ? "var(--accent-blue)" : "var(--border)"}`,
-                      color: newRoleTitle.toLowerCase() === title.toLowerCase() ? "var(--accent-blue)" : "var(--text-secondary)",
-                      borderRadius: 6, padding: "4px 10px", fontSize: 11.5, fontWeight: 500, cursor: "pointer",
-                    }}
-                  >
-                    + {title}
-                  </button>
-                ))}
-              </div>
-            </div>
+
 
             {/* Granular Module Allotment Toggle for Add Form */}
             <div style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 10, padding: "14px 16px" }}>
@@ -653,23 +616,6 @@ function AccessPageInner() {
                   <div style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)" }}>
                     <VoiceDictation onTranscript={(t: string) => setEditRoleTitle((prev) => (prev ? `${prev} ${t}` : t))} title="Dictate role title" />
                   </div>
-                </div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 6 }}>
-                  {SUGGESTED_ROLES.map(title => (
-                    <button
-                      key={title}
-                      type="button"
-                      onClick={() => setEditRoleTitle(title)}
-                      style={{
-                        background: editRoleTitle.toLowerCase() === title.toLowerCase() ? "var(--accent-blue)22" : "var(--bg-secondary)",
-                        border: `1px solid ${editRoleTitle.toLowerCase() === title.toLowerCase() ? "var(--accent-blue)" : "var(--border)"}`,
-                        color: editRoleTitle.toLowerCase() === title.toLowerCase() ? "var(--accent-blue)" : "var(--text-secondary)",
-                        borderRadius: 5, padding: "2px 7px", fontSize: 11, fontWeight: 500, cursor: "pointer",
-                      }}
-                    >
-                      + {title}
-                    </button>
-                  ))}
                 </div>
               </div>
 
