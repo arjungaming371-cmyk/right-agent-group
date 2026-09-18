@@ -5,12 +5,14 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { ArrowLeft, LogOut, Shield, UserCog, Eye, UserPlus, Users, Trash2, Building2, Pencil, Check, X, SlidersHorizontal, Plus } from "lucide-react"
+import { ArrowLeft, LogOut, Shield, UserCog, Eye, UserPlus, Users, Trash2, Building2, Pencil, Check, X, SlidersHorizontal, Plus, Layers } from "lucide-react"
 import { ToastProvider, useToast } from "@/components/ui/toast"
 import { SkeletonList } from "@/components/ui/skeleton"
 import { RoleManagerModal, type RoleDefinition } from "@/components/dashboard/role-manager-modal"
 import { BranchManagerModal, type BranchOption } from "@/components/dashboard/branch-manager-modal"
+import { ModulePicker, ALL_MODULES } from "@/components/dashboard/module-picker"
 import { VoiceDictation } from "@/components/ui/voice-dictation"
+import ThemeSwitcher from "@/components/dashboard/theme-switcher"
 
 type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
 type AllowedEmail = {
@@ -22,6 +24,7 @@ type AllowedEmail = {
   branch_name?: string | null
   branch_code?: string | null
   display_name?: string | null
+  allowed_modules?: string[] | null
 }
 
 const DEFAULT_ROLE_META: Record<string, { label: string; desc: string; color: string; icon: typeof Shield }> = {
@@ -31,23 +34,35 @@ const DEFAULT_ROLE_META: Record<string, { label: string; desc: string; color: st
   branch_manager: { label: "Branch Manager", desc: "Runs ONE branch — sees only that branch's data",   color: "var(--accent-green)", icon: Building2 },
 }
 
-function RoleBadge({ role, customRole }: { role: Role; customRole?: RoleDefinition }) {
-  const meta = customRole
-    ? {
-        label: customRole.label,
-        color: customRole.color,
-        icon: customRole.baseRole === "admin" ? Shield : customRole.baseRole === "branch_manager" ? Building2 : customRole.baseRole === "viewer" ? Eye : UserCog,
-      }
-    : (DEFAULT_ROLE_META[role] ?? DEFAULT_ROLE_META.agent)
-  const Icon = meta.icon
+function RoleBadge({ role, customRole }: { role: string; customRole?: RoleDefinition }) {
+  const isBuiltin = ["admin", "agent", "viewer", "developer", "branch_manager"].includes(role)
+  let label = role
+  let color = "var(--accent-cyan)"
+  let Icon = UserCog
+
+  if (customRole) {
+    label = customRole.label
+    color = customRole.color
+    Icon = customRole.baseRole === "admin" ? Shield : customRole.baseRole === "branch_manager" ? Building2 : customRole.baseRole === "viewer" ? Eye : UserCog
+  } else if (isBuiltin) {
+    const meta = DEFAULT_ROLE_META[role] || DEFAULT_ROLE_META.agent
+    label = meta.label
+    color = meta.color
+    Icon = meta.icon
+  } else {
+    label = role
+    color = "var(--accent-violet)"
+    Icon = UserCog
+  }
+
   return (
     <span style={{
       display: "inline-flex", alignItems: "center", gap: 6,
-      background: `${meta.color}1c`, border: `1px solid ${meta.color}42`, color: meta.color,
+      background: `${color}1c`, border: `1px solid ${color}42`, color: color,
       borderRadius: 7, padding: "4px 10px", fontSize: 12, fontWeight: 600,
     }}>
       <Icon size={12} strokeWidth={2.1} />
-      {meta.label}
+      {label}
     </span>
   )
 }
@@ -67,8 +82,11 @@ function AccessPageInner() {
   // Add form state
   const [newName, setNewName] = useState("")
   const [newEmail, setNewEmail] = useState("")
-  const [selectedRoleId, setSelectedRoleId] = useState<string>("agent")
+  const [newRoleTitle, setNewRoleTitle] = useState("Loan Officer")
+  const [newBaseRole, setNewBaseRole] = useState<Role>("agent")
   const [newBranch, setNewBranch] = useState<string>("")
+  const [newAllowedModules, setNewAllowedModules] = useState<string[] | null>(null)
+  const [showAddModulePicker, setShowAddModulePicker] = useState(true)
   const [busy, setBusy] = useState(false)
   const [confirmTarget, setConfirmTarget] = useState<string | null>(null)
   const [isBranchManager, setIsBranchManager] = useState(false)
@@ -77,8 +95,10 @@ function AccessPageInner() {
   // Edit modal state
   const [editingMember, setEditingMember] = useState<AllowedEmail | null>(null)
   const [editName, setEditName] = useState("")
-  const [editRoleId, setEditRoleId] = useState<string>("agent")
+  const [editRoleTitle, setEditRoleTitle] = useState("Loan Officer")
+  const [editBaseRole, setEditBaseRole] = useState<Role>("agent")
   const [editBranch, setEditBranch] = useState<string>("")
+  const [editAllowedModules, setEditAllowedModules] = useState<string[] | null>(null)
   const [savingEdit, setSavingEdit] = useState(false)
 
   const load = useCallback(async () => {
@@ -133,15 +153,11 @@ function AccessPageInner() {
     const email = newEmail.trim().toLowerCase()
     if (!email) return
 
-    const selectedRoleDef = roles.find(r => r.id === selectedRoleId)
-    const baseRole = selectedRoleDef ? selectedRoleDef.baseRole : (selectedRoleId as Role)
-    const roleTitle = selectedRoleDef?.label || baseRole
+    const roleTitle = newRoleTitle.trim() || "Loan Officer"
+    const lowerRole = roleTitle.toLowerCase()
+    const baseRole: Role = lowerRole === "admin" ? "admin" : lowerRole.includes("branch manager") ? "branch_manager" : "agent"
 
-    // If custom title is given or custom role is selected, combine or format cleanly
     let finalDisplayName = newName.trim()
-    if (!finalDisplayName && selectedRoleDef && !selectedRoleDef.isDefault) {
-      finalDisplayName = selectedRoleDef.label
-    }
 
     setBusy(true)
     try {
@@ -151,16 +167,19 @@ function AccessPageInner() {
         body: JSON.stringify({
           email,
           displayName: finalDisplayName || undefined,
-          role: baseRole,
+          role: roleTitle,
+          baseRole: baseRole,
           branch_id: baseRole === "branch_manager" ? newBranch : newBranch || undefined,
+          allowed_modules: newAllowedModules,
         }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || "Failed")
       setNewEmail("")
       setNewName("")
-      setSelectedRoleId("agent")
+      setNewRoleTitle("Loan Officer")
       setNewBranch(isBranchManager && branches?.[0]?.id ? branches[0].id : "")
+      setNewAllowedModules(null)
       toast.success(`${finalDisplayName ? finalDisplayName : email} added as ${roleTitle}`)
       await load()
     } catch (err: any) {
@@ -174,9 +193,9 @@ function AccessPageInner() {
     const profile = profiles[member.email.toLowerCase()]
     setEditingMember(member)
     setEditName(profile?.displayName || member.display_name || "")
-    // Match to existing role id if possible
-    setEditRoleId(member.role)
+    setEditRoleTitle(member.role || "Loan Officer")
     setEditBranch(member.branch_id || "")
+    setEditAllowedModules(member.allowed_modules ?? null)
   }
 
   async function saveEdit(e: React.FormEvent) {
@@ -184,8 +203,9 @@ function AccessPageInner() {
     if (!editingMember) return
     setSavingEdit(true)
 
-    const selectedRoleDef = roles.find(r => r.id === editRoleId)
-    const baseRole = selectedRoleDef ? selectedRoleDef.baseRole : (editRoleId as Role)
+    const roleTitle = editRoleTitle.trim() || "Loan Officer"
+    const lowerRole = roleTitle.toLowerCase()
+    const baseRole: Role = lowerRole === "admin" ? "admin" : lowerRole.includes("branch manager") ? "branch_manager" : "agent"
 
     try {
       const res = await fetch("/api/allowed-emails", {
@@ -194,8 +214,10 @@ function AccessPageInner() {
         body: JSON.stringify({
           email: editingMember.email,
           displayName: editName.trim(),
-          role: baseRole,
+          role: roleTitle,
+          baseRole: baseRole,
           branch_id: editBranch || null,
+          allowed_modules: editAllowedModules,
         }),
       })
       const data = await res.json()
@@ -228,6 +250,8 @@ function AccessPageInner() {
 
   if (checking) return null
 
+  const SUGGESTED_ROLES = ["Loan Officer", "Telecaller", "Verification Lead", "Branch Manager", "Admin", ...roles.map(r => r.label).filter(l => !["Loan Officer", "Telecaller", "Verification Lead", "Branch Manager", "Admin"].includes(l))]
+
   return (
     <main style={{ minHeight: "100vh", padding: "0 20px" }}>
       <div style={{ maxWidth: 880, margin: "0 auto", padding: "36px 0 80px" }}>
@@ -235,25 +259,25 @@ function AccessPageInner() {
         {/* Header */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 28, flexWrap: "wrap", gap: 14 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-            <div style={{
-              width: 40, height: 40, borderRadius: 11, flexShrink: 0,
-              background: "var(--gradient-brand)",
-              boxShadow: "0 4px 16px -4px rgba(91,124,250,0.6), inset 0 1px 0 rgba(255,255,255,0.25)",
-              display: "flex", alignItems: "center", justifyContent: "center", color: "white",
-            }}>
-              <Users size={19} strokeWidth={2} />
-            </div>
+            <a href="/dashboard" style={{ display: "flex", alignItems: "center", textDecoration: "none" }} title="Back to Dashboard">
+              <img
+                src="/logo.png"
+                alt="Right Agent Group"
+                style={{ height: 42, width: "auto", objectFit: "contain", borderRadius: 8 }}
+              />
+            </a>
             <div>
-              <h1 style={{ fontSize: 20, fontWeight: 700, letterSpacing: "-0.02em" }}>
+              <h1 style={{ fontSize: 20, fontWeight: 700, letterSpacing: "-0.02em", color: "var(--text-primary)" }}>
                 Team Access & Staff Permissions
               </h1>
-              <p style={{ fontSize: 12.5, color: "var(--text-muted)", marginTop: 1 }}>
-                Manage team members, roles, and permissions
-                {you ? <span> · signed in as <span style={{ color: "var(--text-secondary)" }}>{you}</span></span> : null}
+              <p style={{ fontSize: 12.5, color: "var(--text-muted)", marginTop: 2 }}>
+                Write custom roles, assign branches, and allot work modules
+                {you ? <span> · signed in as <strong style={{ color: "var(--text-secondary)", fontWeight: 600 }}>{you}</strong></span> : null}
               </p>
             </div>
           </div>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <ThemeSwitcher />
             <a href="/dashboard" className="btn-ghost" style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 7 }}>
               <ArrowLeft size={14} strokeWidth={2} /> Dashboard
             </a>
@@ -265,129 +289,191 @@ function AccessPageInner() {
           </div>
         </div>
 
-        {/* Role legend */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-secondary)" }}>
-            Available Roles & Permissions ({roles.length || 4})
+        {/* Add teammate */}
+        <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: "20px 22px", marginBottom: 24 }}>
+          <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between", color: "var(--text-primary)", flexWrap: "wrap", gap: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <UserPlus size={16} strokeWidth={2} style={{ color: "var(--accent-blue)" }} />
+              Add Teammate & Allot Work
+            </div>
           </div>
-          {!isBranchManager && (
-            <button
-              type="button"
-              onClick={() => setIsRoleModalOpen(true)}
-              className="btn-ghost"
-              style={{ fontSize: 12, height: 32, display: "inline-flex", alignItems: "center", gap: 6 }}
-            >
-              <SlidersHorizontal size={13} /> Manage Custom Roles
-            </button>
-          )}
-        </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12, marginBottom: 20 }}>
-          {(roles.length > 0 ? roles : [
-            { id: "admin", label: "Admin", desc: "Full access, including this page. Max 2 admins total.", color: "var(--accent-violet)", baseRole: "admin" as Role },
-            { id: "agent", label: "Loan Officer", desc: "Leads, loans, calls, WhatsApp, analytics — no settings", color: "var(--accent-cyan)", baseRole: "agent" as Role },
-            { id: "viewer", label: "Viewer", desc: "Same views as Loan Officer, strictly read-only", color: "var(--text-muted)", baseRole: "viewer" as Role },
-          ])
-            .filter(r => r.baseRole !== "branch_manager")
-            .map(r => {
-            const Icon = r.baseRole === "admin" ? Shield : r.baseRole === "viewer" ? Eye : UserCog
-            return (
-              <div key={r.id} style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: "14px 16px", display: "flex", gap: 12, alignItems: "flex-start" }}>
-                <span style={{ width: 30, height: 30, borderRadius: 8, background: `${r.color}1c`, border: `1px solid ${r.color}3d`, display: "inline-flex", alignItems: "center", justifyContent: "center", color: r.color, flexShrink: 0 }}>
-                  <Icon size={14} strokeWidth={2} />
-                </span>
-                <div>
-                  <div style={{ fontSize: 13.5, fontWeight: 600 }}>{r.label}</div>
-                  <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2, lineHeight: 1.45 }}>{r.desc}</div>
+          <form onSubmit={addEmail} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
+              gap: 14,
+              alignItems: "end"
+            }}>
+              {/* Full Name */}
+              <div>
+                <label style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", display: "block", marginBottom: 6 }}>
+                  Full Name
+                </label>
+                <div style={{ position: "relative" }}>
+                  <input
+                    type="text"
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    placeholder="Full Name (e.g. Ramesh Kumar)"
+                    style={{ width: "100%", height: 42, paddingRight: 38 }}
+                  />
+                  <div style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)" }}>
+                    <VoiceDictation
+                      onTranscript={(t: string) => setNewName((prev) => (prev ? `${prev} ${t}` : t))}
+                      size={14}
+                      style={{ width: 28, height: 28, border: "none", background: "transparent" }}
+                      title="Dictate name"
+                    />
+                  </div>
                 </div>
               </div>
-            )
-          })}
-        </div>
 
-        {/* Add teammate */}
-        <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: "18px 20px", marginBottom: 20 }}>
-          <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <UserPlus size={15} strokeWidth={2} style={{ color: "var(--text-secondary)" }} />
-              Add Teammate
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                type="button"
-                onClick={() => setIsRoleModalOpen(true)}
-                className="btn-ghost"
-                style={{ fontSize: 11.5, height: 28, padding: "0 10px", display: "inline-flex", alignItems: "center", gap: 5 }}
-                title="Add, edit, or delete options in the Role dropdown"
-              >
-                <Plus size={12} /> Add / Delete Role
-              </button>
-            </div>
-          </div>
-          <form onSubmit={addEmail} style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-            <div style={{ position: "relative", flex: "1 1 180px" }}>
-              <input
-                type="text"
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                placeholder="Full Name (e.g. Ramesh Kumar)"
-                style={{ width: "100%", height: 40, paddingRight: 36 }}
-              />
-              <div style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)" }}>
-                <VoiceDictation onTranscript={(t: string) => setNewName((prev) => (prev ? `${prev} ${t}` : t))} title="Dictate name" />
+              {/* Email Address */}
+              <div>
+                <label style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", display: "block", marginBottom: 6 }}>
+                  Email Address
+                </label>
+                <input
+                  type="email"
+                  required
+                  value={newEmail}
+                  onChange={(e) => setNewEmail(e.target.value)}
+                  placeholder="teammate@gmail.com"
+                  style={{ width: "100%", height: 42 }}
+                />
+              </div>
+
+              {/* Custom Role Name / Designation */}
+              <div style={{ gridColumn: "span 1" }}>
+                <label style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", display: "block", marginBottom: 6 }}>
+                  Role Name / Designation
+                </label>
+                <div style={{ position: "relative" }}>
+                  <input
+                    type="text"
+                    required
+                    value={newRoleTitle}
+                    onChange={(e) => setNewRoleTitle(e.target.value)}
+                    placeholder="Write custom role (e.g. Telecaller, Risk Analyst)"
+                    style={{ width: "100%", height: 42, paddingRight: 38 }}
+                  />
+                  <div style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)" }}>
+                    <VoiceDictation
+                      onTranscript={(t: string) => setNewRoleTitle((prev) => (prev ? `${prev} ${t}` : t))}
+                      size={14}
+                      style={{ width: 28, height: 28, border: "none", background: "transparent" }}
+                      title="Dictate role title"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Allotted Branch (if branches exist) */}
+              {branches.length > 0 && !isBranchManager && (
+                <div>
+                  <label style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", display: "block", marginBottom: 6 }}>
+                    Allotted Branch
+                  </label>
+                  <select
+                    value={newBranch}
+                    onChange={(e) => setNewBranch(e.target.value)}
+                    style={{ width: "100%", height: 42 }}
+                  >
+                    <option value="">All Branches (HQ)</option>
+                    {branches.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name} ({b.code})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Submit Button */}
+              <div>
+                <button
+                  type="submit"
+                  disabled={busy}
+                  className="btn-primary"
+                  style={{
+                    width: "100%",
+                    height: 42,
+                    padding: "0 22px",
+                    opacity: busy ? 0.6 : 1,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 8,
+                    fontSize: 13,
+                    fontWeight: 600,
+                  }}
+                >
+                  <UserPlus size={15} strokeWidth={2.2} /> Add Teammate
+                </button>
               </div>
             </div>
-            <input
-              type="email"
-              required
-              value={newEmail}
-              onChange={(e) => setNewEmail(e.target.value)}
-              placeholder="teammate@gmail.com"
-              style={{ flex: "1 1 220px", height: 40 }}
-            />
-            
-            {/* Role dropdown with + trigger */}
-            <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-              <select
-                value={selectedRoleId}
-                onChange={(e) => setSelectedRoleId(e.target.value)}
-                style={{ width: 175, height: 40 }}
-                title="Select role or job title"
-              >
-                {roles.filter(r => r.baseRole !== "branch_manager").length > 0 ? (
-                  roles
-                    .filter(r => r.baseRole !== "branch_manager")
-                    .map(r => (
-                      <option key={r.id} value={r.id}>
-                        {r.label}
-                      </option>
-                    ))
-                ) : (
-                  <>
-                    <option value="agent">Loan Officer</option>
-                    <option value="viewer">Viewer</option>
-                    <option value="admin">Admin</option>
-                  </>
-                )}
-              </select>
-              <button
-                type="button"
-                onClick={() => setIsRoleModalOpen(true)}
-                title="Add new role or delete existing roles"
-                className="btn-ghost"
-                style={{ height: 40, width: 36, padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
-              >
-                <Plus size={15} />
-              </button>
+
+            {/* Quick role suggestions chips */}
+            <div>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, fontWeight: 600 }}>
+                QUICK ROLE SUGGESTIONS (CLICK TO APPLY):
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {SUGGESTED_ROLES.map(title => (
+                  <button
+                    key={title}
+                    type="button"
+                    onClick={() => {
+                      setNewRoleTitle(title)
+                      const rDef = roles.find(r => r.label.toLowerCase() === title.toLowerCase())
+                      if (rDef) {
+                        setNewBaseRole(rDef.baseRole)
+                        if (rDef.defaultModules) setNewAllowedModules(rDef.defaultModules)
+                      } else if (title === "Admin") {
+                        setNewBaseRole("admin")
+                      } else if (title === "Branch Manager") {
+                        setNewBaseRole("branch_manager")
+                      } else {
+                        setNewBaseRole("agent")
+                      }
+                    }}
+                    style={{
+                      background: newRoleTitle.toLowerCase() === title.toLowerCase() ? "var(--accent-blue)22" : "var(--bg-secondary)",
+                      border: `1px solid ${newRoleTitle.toLowerCase() === title.toLowerCase() ? "var(--accent-blue)" : "var(--border)"}`,
+                      color: newRoleTitle.toLowerCase() === title.toLowerCase() ? "var(--accent-blue)" : "var(--text-secondary)",
+                      borderRadius: 6, padding: "4px 10px", fontSize: 11.5, fontWeight: 500, cursor: "pointer",
+                    }}
+                  >
+                    + {title}
+                  </button>
+                ))}
+              </div>
             </div>
 
-            <button type="submit" disabled={busy} className="btn-primary" style={{ height: 40, padding: "0 22px", opacity: busy ? 0.6 : 1 }}>
-              <UserPlus size={14} strokeWidth={2.2} /> Add +
-            </button>
+            {/* Granular Module Allotment Toggle for Add Form */}
+            <div style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 10, padding: "14px 16px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <div style={{ display: "inline-flex", alignItems: "center", gap: 6, fontWeight: 600, fontSize: 13, color: "var(--text-primary)" }}>
+                  <Layers size={15} style={{ color: "var(--accent-cyan)" }} />
+                  Allot Work Modules & Feature Permissions
+                </div>
+                {newAllowedModules !== null && (
+                  <span style={{ fontSize: 11, background: "rgba(56,189,248,0.15)", border: "1px solid rgba(56,189,248,0.3)", color: "var(--accent-cyan)", padding: "2px 8px", borderRadius: 10, fontWeight: 600 }}>
+                    {newAllowedModules.length} / {ALL_MODULES.length} Selected
+                  </span>
+                )}
+              </div>
+              <ModulePicker
+                selectedKeys={newAllowedModules}
+                onChange={(keys) => setNewAllowedModules(keys)}
+              />
+            </div>
+
+            <div style={{ fontSize: 11.5, color: "var(--text-muted)" }}>
+              Teammates can sign in via Google or Email OTP with their assigned role and module permissions.
+            </div>
           </form>
-          <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 10 }}>
-            Set teammate name, email, and choose their role. Click the + next to Role to add or customize job titles.
-          </div>
         </div>
 
         {/* Team list */}
@@ -413,59 +499,71 @@ function AccessPageInner() {
           {!loading && emails.map((e) => {
             const profile = profiles[e.email.toLowerCase()]
             const displayName = profile?.displayName || e.display_name
-            const customRole = roles.find(r => r.baseRole === e.role && (displayName?.toLowerCase().includes(r.label.toLowerCase()) || r.id === e.role))
+            const customRole = roles.find(r => r.id === e.role || r.label.toLowerCase() === (e.role || "").toLowerCase())
+            const moduleCount = e.allowed_modules ? e.allowed_modules.length : ALL_MODULES.length
             return (
-            <div key={e.email} style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 20px", borderBottom: "1px solid var(--border-light)" }}>
+            <div key={e.email} style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 20px", borderBottom: "1px solid var(--border-light)", flexWrap: "wrap" }}>
               {profile?.avatarUrl ? (
                 <img src={profile.avatarUrl} alt="" style={{ width: 36, height: 36, borderRadius: "50%", flexShrink: 0 }} />
               ) : (
                 <div style={{
-                  width: 36, height: 36, borderRadius: "50%", flexShrink: 0,
-                  background: "var(--gradient-brand)", display: "flex", alignItems: "center", justifyContent: "center",
-                  fontSize: 12, fontWeight: 700, color: "white",
+                  width: 36, height: 36, borderRadius: "50%", background: "var(--bg-secondary)",
+                  border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 13, fontWeight: 700, color: "var(--text-secondary)", flexShrink: 0
                 }}>
-                  {(displayName ? displayName.slice(0, 2) : e.email.slice(0, 2)).toUpperCase()}
+                  {(displayName || e.email).slice(0, 2).toUpperCase()}
                 </div>
               )}
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13.5, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {displayName || e.email}{e.email === you && <span style={{ color: "var(--text-muted)", fontWeight: 400 }}> (you)</span>}
+
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontWeight: 600, fontSize: 14, color: "var(--text-primary)" }}>
+                    {displayName || e.email.split("@")[0]}
+                  </span>
+                  {e.email === you && (
+                    <span style={{ fontSize: 10, background: "rgba(56,189,248,0.12)", color: "var(--accent-cyan)", border: "1px solid rgba(56,189,248,0.25)", padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>
+                      YOU
+                    </span>
+                  )}
                 </div>
-                <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {displayName ? e.email : `Added by ${e.added_by || "—"}`}
+                <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <span>{e.email}</span>
+                  {e.branch_name && (
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, color: "var(--accent-green)", fontWeight: 500 }}>
+                      <Building2 size={11} /> {e.branch_name} ({e.branch_code})
+                    </span>
+                  )}
+                  <span style={{ color: "var(--text-muted)" }}>
+                    {moduleCount} / {ALL_MODULES.length} modules allotted
+                  </span>
                 </div>
               </div>
 
-              <RoleBadge role={e.role} customRole={customRole} />
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <RoleBadge role={e.role} customRole={customRole} />
 
-              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                {/* Edit member button */}
                 <button
+                  type="button"
                   onClick={() => startEdit(e)}
-                  title="Edit name, role, or allotted branch"
-                  style={{
-                    background: "transparent", border: "1px solid var(--border)", borderRadius: 8,
-                    width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center",
-                    color: "var(--text-secondary)", cursor: "pointer", flexShrink: 0,
-                  }}
-                  onMouseEnter={ev => { ev.currentTarget.style.color = "var(--accent-violet)"; ev.currentTarget.style.borderColor = "var(--accent-violet)" }}
-                  onMouseLeave={ev => { ev.currentTarget.style.color = "var(--text-secondary)"; ev.currentTarget.style.borderColor = "var(--border)" }}
+                  className="btn-ghost"
+                  style={{ height: 32, padding: "0 10px", fontSize: 12, display: "inline-flex", alignItems: "center", gap: 5 }}
+                  title="Edit role & permissions"
                 >
-                  <Pencil size={13.5} strokeWidth={2} />
+                  <Pencil size={13} /> Edit
                 </button>
 
                 {confirmTarget === e.email ? (
-                  <div style={{ display: "flex", gap: 6 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     <button
                       onClick={() => removeEmail(e.email)}
                       disabled={busy}
-                      style={{ background: "rgba(251,86,112,0.14)", border: "1px solid rgba(251,86,112,0.4)", color: "var(--accent-red)", borderRadius: 8, padding: "6px 12px", fontSize: 12, fontWeight: 600 }}
+                      style={{ background: "var(--accent-red)", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
                     >
                       Confirm
                     </button>
                     <button
                       onClick={() => setConfirmTarget(null)}
-                      style={{ background: "transparent", border: "1px solid var(--border)", color: "var(--text-secondary)", borderRadius: 8, padding: "6px 12px", fontSize: 12 }}
+                      style={{ background: "transparent", border: "1px solid var(--border)", color: "var(--text-muted)", borderRadius: 6, padding: "4px 8px", fontSize: 12, cursor: "pointer" }}
                     >
                       Cancel
                     </button>
@@ -474,18 +572,14 @@ function AccessPageInner() {
                   <button
                     onClick={() => setConfirmTarget(e.email)}
                     disabled={busy || e.email === you}
-                    title={e.email === you ? "You cannot remove yourself" : "Remove access"}
-                    aria-label={`Remove ${e.email}`}
                     style={{
-                      background: "transparent", border: "1px solid var(--border)", borderRadius: 8,
-                      width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center",
-                      color: e.email === you ? "var(--border)" : "var(--text-muted)",
-                      cursor: e.email === you ? "not-allowed" : "pointer", flexShrink: 0,
+                      background: "transparent", border: "none", color: "var(--text-muted)",
+                      opacity: e.email === you ? 0.3 : 0.7, cursor: e.email === you ? "not-allowed" : "pointer",
+                      padding: 6, borderRadius: 6, display: "inline-flex", alignItems: "center"
                     }}
-                    onMouseEnter={ev => { if (e.email !== you) { ev.currentTarget.style.color = "var(--accent-red)"; ev.currentTarget.style.borderColor = "rgba(251,86,112,0.4)" } }}
-                    onMouseLeave={ev => { ev.currentTarget.style.color = e.email === you ? "var(--border)" : "var(--text-muted)"; ev.currentTarget.style.borderColor = "var(--border)" }}
+                    title={e.email === you ? "Cannot remove yourself" : "Remove team member"}
                   >
-                    <Trash2 size={13.5} strokeWidth={1.9} />
+                    <Trash2 size={14} />
                   </button>
                 )}
               </div>
@@ -497,16 +591,18 @@ function AccessPageInner() {
       {/* Edit Teammate Modal */}
       {editingMember && (
         <div style={{
-          position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", backdropFilter: "blur(4px)",
-          display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, padding: 16,
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)",
+          display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 20
         }}>
           <div style={{
-            background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16,
-            maxWidth: 480, width: "100%", padding: 24, boxShadow: "0 20px 40px rgba(0,0,0,0.4)",
+            background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14,
+            maxWidth: 600, width: "100%", maxHeight: "90vh", overflowY: "auto", padding: 24, boxShadow: "0 20px 50px rgba(0,0,0,0.4)"
           }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
-              <div style={{ fontSize: 16, fontWeight: 700 }}>Edit Teammate & Branch</div>
-              <button onClick={() => setEditingMember(null)} style={{ background: "transparent", border: "none", color: "var(--text-muted)", cursor: "pointer" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+              <div style={{ fontWeight: 700, fontSize: 16, color: "var(--text-primary)" }}>
+                Edit Teammate & Allot Work
+              </div>
+              <button onClick={() => setEditingMember(null)} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer" }}>
                 <X size={18} />
               </button>
             </div>
@@ -525,14 +621,14 @@ function AccessPageInner() {
 
               <div>
                 <label style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", display: "block", marginBottom: 6 }}>
-                  Custom Name / Job Title
+                  Full Name / Display Name
                 </label>
                 <div style={{ position: "relative" }}>
                   <input
                     type="text"
                     value={editName}
                     onChange={(e) => setEditName(e.target.value)}
-                    placeholder="e.g. Ramesh Kumar (Senior Loan Manager)"
+                    placeholder="e.g. Ramesh Kumar"
                     style={{ width: "100%", height: 38, paddingRight: 36 }}
                   />
                   <div style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)" }}>
@@ -542,49 +638,72 @@ function AccessPageInner() {
               </div>
 
               <div>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                  <label style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase" }}>
-                    Role & Permissions
-                  </label>
-                  {!isBranchManager && (
-                    <button
-                      type="button"
-                      onClick={() => setIsRoleModalOpen(true)}
-                      style={{ background: "none", border: "none", color: "var(--accent-cyan)", fontSize: 11, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 3 }}
-                    >
-                      <Plus size={11} /> Manage Roles
-                    </button>
-                  )}
+                <label style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", display: "block", marginBottom: 6 }}>
+                  Role Name / Designation
+                </label>
+                <div style={{ position: "relative" }}>
+                  <input
+                    type="text"
+                    required
+                    value={editRoleTitle}
+                    onChange={(e) => setEditRoleTitle(e.target.value)}
+                    placeholder="Write custom role (e.g. Telecaller, Risk Analyst)"
+                    style={{ width: "100%", height: 38, paddingRight: 36 }}
+                  />
+                  <div style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)" }}>
+                    <VoiceDictation onTranscript={(t: string) => setEditRoleTitle((prev) => (prev ? `${prev} ${t}` : t))} title="Dictate role title" />
+                  </div>
                 </div>
-                <select
-                  value={editRoleId}
-                  onChange={(e) => setEditRoleId(e.target.value)}
-                  style={{ width: "100%", height: 38 }}
-                >
-                  {roles.filter(r => !isBranchManager || (r.baseRole === "agent" || r.baseRole === "viewer")).length > 0 ? (
-                    roles
-                      .filter(r => !isBranchManager || (r.baseRole === "agent" || r.baseRole === "viewer"))
-                      .map(r => (
-                        <option key={r.id} value={r.id}>
-                          {r.label} ({r.baseRole})
-                        </option>
-                      ))
-                  ) : (
-                    <>
-                      <option value="agent">Loan Officer</option>
-                      <option value="viewer">Viewer</option>
-                      {!isBranchManager && (
-                        <>
-                          <option value="branch_manager">Branch Manager</option>
-                          <option value="admin">Admin</option>
-                        </>
-                      )}
-                    </>
-                  )}
-                </select>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 6 }}>
+                  {SUGGESTED_ROLES.map(title => (
+                    <button
+                      key={title}
+                      type="button"
+                      onClick={() => setEditRoleTitle(title)}
+                      style={{
+                        background: editRoleTitle.toLowerCase() === title.toLowerCase() ? "var(--accent-blue)22" : "var(--bg-secondary)",
+                        border: `1px solid ${editRoleTitle.toLowerCase() === title.toLowerCase() ? "var(--accent-blue)" : "var(--border)"}`,
+                        color: editRoleTitle.toLowerCase() === title.toLowerCase() ? "var(--accent-blue)" : "var(--text-secondary)",
+                        borderRadius: 5, padding: "2px 7px", fontSize: 11, fontWeight: 500, cursor: "pointer",
+                      }}
+                    >
+                      + {title}
+                    </button>
+                  ))}
+                </div>
               </div>
 
+              {/* Allotted Branch in Edit Modal */}
+              {branches.length > 0 && !isBranchManager && (
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", display: "block", marginBottom: 6 }}>
+                    Allotted Branch
+                  </label>
+                  <select
+                    value={editBranch}
+                    onChange={(e) => setEditBranch(e.target.value)}
+                    style={{ width: "100%", height: 38 }}
+                  >
+                    <option value="">All Branches (HQ)</option>
+                    {branches.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name} ({b.code})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
+              {/* Module Allotment Selector inside Edit Modal */}
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", display: "block", marginBottom: 6 }}>
+                  Allotted Work Modules & Features
+                </label>
+                <ModulePicker
+                  selectedKeys={editAllowedModules}
+                  onChange={(keys) => setEditAllowedModules(keys)}
+                />
+              </div>
 
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 10 }}>
                 <button
@@ -617,9 +736,6 @@ function AccessPageInner() {
         isBranchManager={isBranchManager}
         onRolesUpdated={(updated) => {
           setRoles(updated)
-          if (!updated.some(r => r.id === selectedRoleId)) {
-            setSelectedRoleId("agent")
-          }
         }}
       />
 
@@ -628,9 +744,7 @@ function AccessPageInner() {
         isOpen={isBranchModalOpen}
         onClose={() => setIsBranchModalOpen(false)}
         branches={branches}
-        onBranchesUpdated={() => {
-          load()
-        }}
+        onBranchesUpdated={() => load()}
       />
     </main>
   )

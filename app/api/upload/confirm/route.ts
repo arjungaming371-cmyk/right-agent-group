@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { makeCall as makeOutboundCall } from "@/lib/exotel"
-import { requireRole } from "@/lib/auth"
+import { requireModuleOrRole } from "@/lib/auth"
 import { sessionBranchId, checkQuota, recordUsage } from "@/lib/branches"
 import { checkCallCompliance } from "@/lib/compliance"
 
 // STEP 2: User explicitly confirms — THIS triggers the actual calls
 export async function POST(req: NextRequest) {
-  const session = await requireRole(req, ["admin", "branch_manager"])
+  const session = await requireModuleOrRole(req, "upload", ["admin", "branch_manager"])
+
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const branchId = sessionBranchId(session)
   const { uploadId, leadIds } = await req.json()

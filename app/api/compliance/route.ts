@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
-import { requireRole } from "@/lib/auth"
+import { requireModuleOrRole } from "@/lib/auth"
 import { logAudit } from "@/lib/audit"
 import { invalidateComplianceCache } from "@/lib/compliance"
 
@@ -8,10 +8,9 @@ export const dynamic = "force-dynamic"
 
 const VALID_DAYS = new Set(["sun", "mon", "tue", "wed", "thu", "fri", "sat"])
 
-// GET — current calling-window settings + DND list size. Admin-only, same
-// gating as /api/security (this is part of the same Security view).
+// GET — current calling-window settings + DND list size. Admin or users with security module access.
 export async function GET(req: NextRequest) {
-  const session = await requireRole(req, ["admin"])
+  const session = await requireModuleOrRole(req, "security", ["admin"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const [settingsRes, dndCountRes] = await Promise.all([
@@ -32,9 +31,10 @@ export async function GET(req: NextRequest) {
   })
 }
 
-// PATCH — update calling-window settings. Admin-only, audited.
+// PATCH — update calling-window settings. Admin or users with security module access, audited.
 export async function PATCH(req: NextRequest) {
-  const session = await requireRole(req, ["admin"])
+  const session = await requireModuleOrRole(req, "security", ["admin"])
+
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const body = await req.json().catch(() => ({}))

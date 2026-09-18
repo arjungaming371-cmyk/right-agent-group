@@ -4,7 +4,7 @@ import dynamic from "next/dynamic"
 import {
   Users, FileText, Phone, MessageCircle, Activity, ShieldCheck, UploadCloud,
   ScrollText, LogOut, Mic, BarChart3, UserCog, Search, Menu, X, BookOpen,
-  Building2, type LucideIcon,
+  Building2, Sparkles, type LucideIcon,
 } from "lucide-react"
 import { ToastProvider } from "../ui/toast"
 import CommandPalette from "../ui/command-palette"
@@ -31,6 +31,7 @@ import DeveloperLogsView from "./developer-logs-view"
 import CalendarView from "./calendar-view"
 import ProfileModal from "./profile-modal"
 import BranchesView from "./branches-view"
+import VoiceAssistant from "./voice-assistant"
 import { usePolling } from "@/lib/use-poll"
 
 export type ViewKey = "leads" | "loans" | "voice" | "whatsapp" | "comms" | "calendar" | "security" | "upload" | "script" | "knowledge" | "analytics" | "branches" | "dev-logs"
@@ -116,6 +117,7 @@ export default function DashboardShell() {
   const [counts, setCounts] = useState({ leads: 0, loans: 0, whatsapp: 0 })
   const [userEmail, setUserEmail] = useState("")
   const [role, setRole] = useState<Role>("viewer") // safest default until the real role loads
+  const [userAllowedModules, setUserAllowedModules] = useState<string[] | null>(null)
   const [sessionBranchId, setSessionBranchId] = useState<string | null>(null)
   const [allBranches, setAllBranches] = useState<{ id: string; name: string; code: string }[]>([])
   const [canSwitch, setCanSwitch] = useState(false)
@@ -125,17 +127,29 @@ export default function DashboardShell() {
   const [seedSearch, setSeedSearch] = useState<{ view: ViewKey; q: string } | null>(null)
   // Sidebar is a slide-in drawer below the md breakpoint — closed by default.
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const [voiceAssistantOpen, setVoiceAssistantOpen] = useState(false)
 
-  // Global Ctrl+K / Cmd+K opens the command palette.
+  // Global shortcuts: Ctrl+K for palette, Alt+V for Personal Voice Assistant
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault()
         setPaletteOpen(o => !o)
       }
+      if (e.altKey && e.key.toLowerCase() === "v") {
+        e.preventDefault()
+        setVoiceAssistantOpen(o => !o)
+      }
+    }
+    function onOpenVoice() {
+      setVoiceAssistantOpen(true)
     }
     window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
+    window.addEventListener("rag:open-voice-assistant", onOpenVoice)
+    return () => {
+      window.removeEventListener("keydown", onKey)
+      window.removeEventListener("rag:open-voice-assistant", onOpenVoice)
+    }
   }, [])
 
   async function loadCounts() {
@@ -154,6 +168,7 @@ export default function DashboardShell() {
     fetch("/api/auth/me").then(r => r.json()).then(d => {
       setUserEmail(d.email || "")
       if (d.role) setRole(d.role)
+      if (Array.isArray(d.allowedModules)) setUserAllowedModules(d.allowedModules)
       setSessionBranchId(d.branchId ?? null)
       setCanSwitch(!!d.canSwitchBranch)
       // Branch switcher options for the parent account.
@@ -209,21 +224,29 @@ export default function DashboardShell() {
   const badgeFor = (key: ViewKey) =>
     key === "leads" ? counts.leads : key === "loans" ? counts.loans : key === "whatsapp" ? counts.whatsapp : 0
 
-  // Full-access role sees every nav item regardless of each item's own list.
-  const canSee = (itemRoles: Role[]) => itemRoles.includes(role) || role === "developer"
+  // Full-access role sees every nav item unless specific allowedModules list is set.
+  const canSee = (key: ViewKey, itemRoles: Role[]) => {
+    if (userAllowedModules !== null) {
+      return userAllowedModules.includes(key)
+    }
+    return itemRoles.includes(role) || role === "developer"
+  }
 
-  const visibleSections = NAV_SECTIONS.map(s => ({ ...s, items: s.items.filter(i => canSee(i.roles)) })).filter(s => s.items.length > 0)
+  const visibleSections = NAV_SECTIONS.map(s => ({ ...s, items: s.items.filter(i => canSee(i.key, i.roles)) })).filter(s => s.items.length > 0)
 
   // If the current view isn't visible to this role (e.g. role loaded after
   // mount and it was "security"), fall back to something everyone can see.
   useEffect(() => {
-    const allowed = NAV_SECTIONS.some(s => s.items.some(i => i.key === view && canSee(i.roles)))
-    if (!allowed) setView("leads")
-  }, [role, view])
+    const allowed = NAV_SECTIONS.some(s => s.items.some(i => i.key === view && canSee(i.key, i.roles)))
+    if (!allowed) {
+      const firstAvailable = visibleSections[0]?.items[0]?.key || "leads"
+      setView(firstAvailable)
+    }
+  }, [role, view, userAllowedModules])
 
-  const { title, sub } = VIEW_TITLES[view]
+  const { title, sub } = VIEW_TITLES[view] || { title: "Dashboard", sub: "Right Agent Group" }
   const initials = userEmail ? userEmail.slice(0, 2).toUpperCase() : "RA"
-  const allowedViews = NAV_SECTIONS.flatMap(s => s.items.filter(i => canSee(i.roles)).map(i => i.key))
+  const allowedViews = NAV_SECTIONS.flatMap(s => s.items.filter(i => canSee(i.key, i.roles)).map(i => i.key))
 
   function navigateFromPalette(target: ViewKey, search?: string) {
     setView(target)
@@ -259,17 +282,18 @@ export default function DashboardShell() {
         style={{ transform: mobileNavOpen ? "translateX(0)" : "translateX(-100%)", transition: "transform 200ms ease-out" }}
       >
         {/* Brand */}
-        <div className="flex h-16 items-center gap-3 border-b border-[var(--border-light)] px-5">
-          <div
-            className="flex h-[34px] w-[34px] flex-shrink-0 items-center justify-center rounded-[10px] text-[15px] font-extrabold text-white"
-            style={{ background: "var(--gradient-brand)", boxShadow: "0 4px 16px -4px rgba(91,124,250,0.6), inset 0 1px 0 rgba(255,255,255,0.25)" }}
+        <div className="flex h-16 items-center justify-between border-b border-[var(--border-light)] px-4">
+          <button
+            onClick={() => { setView("leads"); setMobileNavOpen(false) }}
+            className="flex items-center gap-2.5 min-w-0 flex-1 text-left cursor-pointer hover:opacity-90 transition-opacity"
+            title="Right Agent Group — Operations Console"
           >
-            R
-          </div>
-          <div className="min-w-0 flex-1 leading-tight">
-            <div className="truncate text-[13.5px] font-bold tracking-tight text-[var(--text-primary)]">Right Agent Group</div>
-            <div className="text-[9.5px] font-semibold tracking-[0.18em] text-[var(--text-muted)]">OPERATIONS CONSOLE</div>
-          </div>
+            <img
+              src="/logo.png"
+              alt="Right Agent Group"
+              className="h-10 w-auto max-w-[195px] object-contain drop-shadow-[0_2px_8px_rgba(56,189,248,0.15)]"
+            />
+          </button>
           <button
             onClick={() => setMobileNavOpen(false)}
             aria-label="Close menu"
@@ -414,7 +438,23 @@ export default function DashboardShell() {
           <StatusPill icon={Mic} label="Voice Bot" />
           <StatusPill icon={MessageCircle} label="WhatsApp" />
 
-
+          {/* Personal Voice Assistant trigger button */}
+          <button
+            onClick={() => setVoiceAssistantOpen(true)}
+            title="Open Personal Voice Assistant (Alt+V)"
+            aria-label="Open Personal Voice Assistant"
+            className="flex h-9 items-center gap-2 rounded-[10px] px-3 text-[12.5px] font-semibold text-white transition-all hover:opacity-95 shadow-sm"
+            style={{
+              background: "linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)",
+              border: "1px solid rgba(139, 92, 246, 0.4)",
+              boxShadow: "0 0 14px rgba(99, 102, 241, 0.35)",
+            }}
+          >
+            <Sparkles size={14} className="animate-pulse text-yellow-300" />
+            <span className="font-semibold hidden sm:inline">Voice Assistant</span>
+            <span className="sm:hidden font-semibold">Voice</span>
+            <span className="hidden lg:inline text-[10px] bg-white/20 px-1.5 py-0.5 rounded font-mono font-normal">Alt V</span>
+          </button>
 
           {/* Global search — opens the command palette (also Ctrl+K) */}
           <button
@@ -441,15 +481,21 @@ export default function DashboardShell() {
           {view === "whatsapp" && <WhatsAppView role={role} />}
           {view === "comms"    && <CommLogView />}
           {view === "calendar" && <CalendarView role={role} />}
-          {view === "security" && role === "admin" && <SecurityView />}
-          {view === "upload"   && role === "admin" && <UploadView />}
-          {view === "script"   && role === "admin" && <ScriptView />}
-          {view === "branches" && (role === "admin" || role === "branch_manager") && <BranchesView role={role} branchId={sessionBranchId} />}
-          {view === "knowledge" && (role === "admin" || role === "agent" || role === "branch_manager") && <KnowledgeBaseView role={role} />}
+          {view === "security" && <SecurityView />}
+          {view === "upload"   && <UploadView />}
+          {view === "script"   && <ScriptView />}
+          {view === "branches" && <BranchesView role={role} branchId={sessionBranchId} />}
+          {view === "knowledge" && <KnowledgeBaseView role={role} />}
           {view === "dev-logs" && role === "developer" && <DeveloperLogsView userEmail={userEmail} />}
         </main>
       </div>
       <QuickChat role={role} userEmail={userEmail} />
+      <VoiceAssistant
+        isOpen={voiceAssistantOpen}
+        onClose={() => setVoiceAssistantOpen(false)}
+        userEmail={userEmail}
+        role={role}
+      />
       {showProfile && <ProfileModal email={userEmail} role={role} onClose={() => setShowProfile(false)} />}
       {/* Neutralizes the mobile slide-in transform at md+ so the sidebar is
           always visible on desktop regardless of mobileNavOpen state. */}

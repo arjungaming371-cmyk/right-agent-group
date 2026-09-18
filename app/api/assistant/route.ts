@@ -5,22 +5,58 @@ import { getSessionFromRequest } from "@/lib/auth"
 
 export const dynamic = "force-dynamic"
 
-const SYSTEM_PROMPT = `You are the Right Agent Group Internal Operations Assistant, built into the staff dashboard.
+const SYSTEM_PROMPT = `You are the Right Agent Group Executive Operations Commander & AI Assistant, built into the staff dashboard.
 
-You are NOT Priya and you are NOT on a phone call or WhatsApp chat with a customer. You are a private tool for Right Agent Group staff (admins and loan officers) with broad visibility into the whole business: leads, calls, loan applications, WhatsApp activity, Priya's call scripts, Knowledge Base entries, security settings, the audit log, upload/outbound campaigns, and the team roster.
+You are NOT Priya and you are NOT talking to a customer on a phone call. You are an internal executive AI co-pilot for Right Agent Group staff (admins, branch managers, and loan officers) with full command oversight across: leads, voice calls, loan applications, WhatsApp conversations, Priya's call scripts, Knowledge Base entries, security settings, audit logs, campaigns, and team members.
 
-You also get full-text SEARCH RESULTS relevant to the staff member's specific question (when present) — this covers ALL leads and loan applications on file, not just the recent handful in the snapshot.
+You also receive LIVE DATA SNAPSHOTS and full-text SEARCH RESULTS covering all records.
 
-CAPABILITIES:
-- Live business reporting & data insights across leads, calls, WhatsApp, and loans.
-- Script writing & optimization: When asked to write, tune, or improve Priya's call script (for Personal Loans, Business Loans, Home Loans, etc.), provide complete, professional, high-converting scripts directly in clean markdown with greeting, qualification, objection handling, and closing.
-- Knowledge Base guidance: When asked to draft facts, FAQs, or policies for the Knowledge Base, provide clear, accurate entries ready for staff to review.
-- Data search & analysis: Analyze uploaded files, inspect questions, and summarize pipeline health.
+==================================================
+ADMIN COMMAND & DASHBOARD CONTROL CAPABILITIES:
+==================================================
+You have direct capability to draft, generate, and propose actions to control the entire dashboard:
+1. SCRIPT WRITING & TUNING: Write, refine, and tune Priya's calling scripts (Universal Base, English, Hindi, Telugu) for Personal Loans, Business Loans, Home Loans, etc. Always provide complete, production-ready, objection-tested scripts.
+2. KNOWLEDGE BASE WRITING: Draft structured policies, loan product guidelines, document checklists, interest rate cards, and FAQs for the Knowledge Base.
+3. ADDING LEADS ("ADDING NEADS"): Create new leads directly from user commands or extracted from attached business cards, screenshots, messages, or files.
+4. LEAD & LOAN PIPELINE MANAGEMENT: Update lead statuses (qualified, contacted, callback, lost), adjust scores, add notes, or update loan application stages (approved, underwriting, rejected).
+5. DND & COMPLIANCE: Add phone numbers to DND suppression or remove them.
+6. SECURITY & SETTINGS: Propose toggling security controls.
+
+==================================================
+MANDATORY ADMIN APPROVAL ACTION PROTOCOL:
+==================================================
+CRITICAL SECURITY RULE: You CANNOT modify the database directly on your own. All dashboard changes require explicit ADMIN COMMAND APPROVAL.
+
+Whenever the user commands or requests ANY change, creation, or update to dashboard data (scripts, knowledge base, leads, loans, DND, security):
+1. Provide your complete, high-quality work in your message (e.g. the full script, the full knowledge base article, or the parsed lead summary).
+2. Explicitly notify the user: "⚠️ **Admin Approval Required**: Please review the proposed action below and click **Approve & Execute** to apply this change to the dashboard."
+3. At the VERY END of your response, append the machine-readable proposal block formatted EXACTLY as:
+
+\`\`\`action:proposal
+{
+  "type": "update_script" | "add_kb_entry" | "update_kb_entry" | "delete_kb_entry" | "add_lead" | "update_lead" | "update_loan" | "add_dnd" | "remove_dnd" | "toggle_security",
+  "title": "<Concise Action Title>",
+  "description": "<1-sentence summary of what this action modifies>",
+  "payload": { ... }
+}
+\`\`\`
+
+SUPPORTED ACTION TYPES & PAYLOAD SCHEMAS:
+- update_script: { "language": "base", "content": "<full script content>" }
+- add_kb_entry: { "title": "<title>", "content": "<content>", "category": "Loans" | "General" | "FAQ" | "Policies" }
+- update_kb_entry: { "id": "<id>", "title": "<title>", "content": "<content>", "category": "<category>" }
+- delete_kb_entry: { "id": "<id>", "title": "<title>" }
+- add_lead: { "name": "<name>", "phone": "<phone>", "product_interest": "personal" | "business" | "home", "loan_amount": <number>, "notes": "<notes>", "city": "<city>", "address": "<address>" }
+- update_lead: { "id": "<id>", "phone": "<phone>", "status": "new" | "contacted" | "qualified" | "callback" | "lost", "score": <number>, "notes": "<notes>", "product_interest": "<product>" }
+- update_loan: { "id": <number>, "status": "approved" | "underwriting" | "rejected" | "documents_pending", "notes": "<notes>" }
+- add_dnd: { "phone": "<phone>", "reason": "<reason>" }
+- remove_dnd: { "phone": "<phone>" }
+- toggle_security: { "key": "<key>", "enabled": true | false }
 
 RULES:
-- Answer using the LIVE DATA SNAPSHOT and SEARCH RESULTS provided below. Never guess or invent numbers or names.
-- Be concise, helpful, and thorough. Format responses with clean bullet points and headings.
-- Never pretend to be talking to a customer — you are assisting the business team.`
+- When the user asks a question without commanding a change, answer normally without the action proposal block.
+- Only output the action proposal block when an actionable dashboard change is intended.
+- Format all text in clean, professional markdown with headings and bullet points.`
 
 async function getStatsSnapshot(): Promise<string> {
   const [
@@ -182,32 +218,101 @@ async function getStatsSnapshot(): Promise<string> {
 
 async function searchDatabase(userMessage: string): Promise<string> {
   try {
+    const cleanMsg = userMessage.trim()
+    const digitsOnly = cleanMsg.replace(/\D/g, "")
+    const keywords = cleanMsg
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter(
+        (w) =>
+          w.length >= 3 &&
+          !["the", "and", "for", "with", "what", "who", "show", "tell", "find", "about", "details", "check", "status", "give", "list", "any", "loan", "lead"].includes(w)
+      )
+
+    // Primary: full-text search
     const [leadHits, loanHits] = await Promise.all([
       query(
         `SELECT name, phone, status, product_interest, address, ts_rank(search_vector, websearch_to_tsquery('english', $1)) AS rank
          FROM leads WHERE search_vector @@ websearch_to_tsquery('english', $1) ORDER BY rank DESC LIMIT 8`,
-        [userMessage]
+        [cleanMsg]
       ).catch(() => ({ rows: [] })),
       query(
         `SELECT customer_name, loan_type, loan_amount, status, city, ts_rank(search_vector, websearch_to_tsquery('english', $1)) AS rank
          FROM loan_applications WHERE search_vector @@ websearch_to_tsquery('english', $1) ORDER BY rank DESC LIMIT 8`,
-        [userMessage]
+        [cleanMsg]
       ).catch(() => ({ rows: [] })),
     ])
-    if (leadHits.rows.length === 0 && loanHits.rows.length === 0) return ""
+
+    const leadRows = [...leadHits.rows]
+    const loanRows = [...loanHits.rows]
+
+    // Secondary / Typo-tolerant Fallback: if few or no hits, match using pg_trgm word_similarity
+    if (leadRows.length < 3 || loanRows.length < 3) {
+      for (const kw of keywords.slice(0, 3)) {
+        if (leadRows.length < 8) {
+          const fuzzyLeads = await query(
+            `SELECT name, phone, status, product_interest, address, word_similarity($1, COALESCE(name, '')) AS sm
+             FROM leads
+             WHERE word_similarity($1, COALESCE(name, '')) > 0.28
+                OR word_similarity($1, COALESCE(address, '')) > 0.35
+                OR word_similarity($1, COALESCE(product_interest, '')) > 0.35
+             ORDER BY sm DESC LIMIT 5`,
+            [kw]
+          ).catch(() => ({ rows: [] }))
+          for (const row of fuzzyLeads.rows) {
+            if (!leadRows.some((r: any) => r.phone === row.phone)) {
+              leadRows.push(row)
+            }
+          }
+        }
+
+        if (loanRows.length < 8) {
+          const fuzzyLoans = await query(
+            `SELECT customer_name, loan_type, loan_amount, status, city, word_similarity($1, COALESCE(customer_name, '')) AS sm
+             FROM loan_applications
+             WHERE word_similarity($1, COALESCE(customer_name, '')) > 0.28
+                OR word_similarity($1, COALESCE(city, '')) > 0.35
+                OR word_similarity($1, COALESCE(loan_type, '')) > 0.35
+             ORDER BY sm DESC LIMIT 5`,
+            [kw]
+          ).catch(() => ({ rows: [] }))
+          for (const row of fuzzyLoans.rows) {
+            if (!loanRows.some((r: any) => r.customer_name === row.customer_name && r.loan_type === row.loan_type)) {
+              loanRows.push(row)
+            }
+          }
+        }
+      }
+
+      // Phone query if digits present (>= 5 digits)
+      if (digitsOnly.length >= 5) {
+        const phoneLeads = await query(
+          `SELECT name, phone, status, product_interest, address FROM leads WHERE phone ILIKE ('%' || $1 || '%') LIMIT 5`,
+          [digitsOnly]
+        ).catch(() => ({ rows: [] }))
+        for (const row of phoneLeads.rows) {
+          if (!leadRows.some((r: any) => r.phone === row.phone)) {
+            leadRows.push(row)
+          }
+        }
+      }
+    }
+
+    if (leadRows.length === 0 && loanRows.length === 0) return ""
 
     const parts: string[] = []
-    if (leadHits.rows.length) {
+    if (leadRows.length) {
       parts.push(
-        `Matching leads: ${leadHits.rows.map((r: any) => `${r.name || r.phone} (${r.status}${r.product_interest ? ", " + r.product_interest : ""}${r.address ? ", " + r.address : ""})`).join("; ")}`
+        `Matching leads: ${leadRows.map((r: any) => `${r.name || r.phone} (${r.status}${r.product_interest ? ", " + r.product_interest : ""}${r.address ? ", " + r.address : ""})`).join("; ")}`
       )
     }
-    if (loanHits.rows.length) {
+    if (loanRows.length) {
       parts.push(
-        `Matching loan applications: ${loanHits.rows.map((r: any) => `${r.customer_name} — ${r.loan_type || "?"} (${r.status}${r.city ? ", " + r.city : ""})`).join("; ")}`
+        `Matching loan applications: ${loanRows.map((r: any) => `${r.customer_name} — ${r.loan_type || "?"} (${r.status}${r.city ? ", " + r.city : ""})`).join("; ")}`
       )
     }
-    return `--- SEARCH RESULTS for this question (full-text search across ALL leads and loan applications) ---\n${parts.join("\n")}`
+    return `--- SEARCH RESULTS for this question (smart full-text & typo-tolerant fuzzy matching across ALL leads and loan applications) ---\n${parts.join("\n")}`
   } catch (e: any) {
     console.error("assistant search error:", e.message)
     return ""
@@ -225,7 +330,11 @@ export async function POST(req: NextRequest) {
 
   let userContent = message
   if (attachment && typeof attachment === "object" && attachment.name) {
-    userContent = `[Attached File: ${attachment.name} (${attachment.type || "file"})]\n${attachment.content ? `File Text Preview:\n${attachment.content.slice(0, 3000)}\n---\n` : ""}${message}`
+    if (attachment.type === "image") {
+      userContent = `[User Attached Image: "${attachment.name}"]\nStaff instructions: ${message}`
+    } else {
+      userContent = `[Attached Document: "${attachment.name}" (${attachment.type || "file"})]\n${attachment.content ? `Document Content Preview:\n${attachment.content.slice(0, 4000)}\n---\n` : ""}${message}`
+    }
   }
 
   // Verify the chat belongs to this user before persisting anything to it.

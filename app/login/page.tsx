@@ -44,19 +44,11 @@ export default async function LoginPage({
 
         {/* Brand */}
         <div className="relative flex items-center gap-3">
-          <div
-            className="flex h-10 w-10 items-center justify-center rounded-[11px] text-[17px] font-extrabold text-white"
-            style={{
-              background: "linear-gradient(135deg, #8b7cff 0%, #5b7cfa 45%, #38bdf8 100%)",
-              boxShadow: "0 6px 20px -4px rgba(91,124,250,0.6), inset 0 1px 0 rgba(255,255,255,0.25)",
-            }}
-          >
-            R
-          </div>
-          <div className="leading-tight">
-            <div className="text-[15px] font-bold tracking-tight text-white">Right Agent Group</div>
-            <div className="text-[9.5px] font-semibold tracking-[0.2em] text-[#64708c]">OPERATIONS CONSOLE</div>
-          </div>
+          <img
+            src="/logo.png"
+            alt="Right Agent Group"
+            className="h-12 w-auto object-contain drop-shadow-[0_4px_16px_rgba(56,189,248,0.2)]"
+          />
         </div>
 
         {/* Headline */}
@@ -117,16 +109,11 @@ export default async function LoginPage({
         <div className="w-full max-w-[400px]">
           {/* Mobile-only brand (left panel hidden) */}
           <div className="mb-10 flex items-center justify-center gap-3 lg:hidden">
-            <div
-              className="flex h-10 w-10 items-center justify-center rounded-[11px] text-[17px] font-extrabold text-white"
-              style={{ background: "linear-gradient(135deg, #8b7cff 0%, #5b7cfa 45%, #38bdf8 100%)" }}
-            >
-              R
-            </div>
-            <div className="leading-tight">
-              <div className="text-[15px] font-bold text-white">Right Agent Group</div>
-              <div className="text-[9.5px] font-semibold tracking-[0.2em] text-[#64708c]">OPERATIONS CONSOLE</div>
-            </div>
+            <img
+              src="/logo.png"
+              alt="Right Agent Group"
+              className="h-10 w-auto object-contain"
+            />
           </div>
 
           <div

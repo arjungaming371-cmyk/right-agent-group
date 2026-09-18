@@ -189,6 +189,69 @@ export async function POST(req: NextRequest) {
         })
       }
 
+      case "update_lead": {
+        const { id, phone, status, score, notes, product_interest, interested } = payload
+        if (!id && !phone) {
+          return NextResponse.json({ error: "Lead ID or phone number is required" }, { status: 400 })
+        }
+
+        const updates: Record<string, any> = { updated_at: new Date().toISOString() }
+        if (typeof status === "string") updates.status = status
+        if (typeof score === "number") updates.score = score
+        if (typeof notes === "string") updates.notes = notes
+        if (typeof product_interest === "string") updates.product_interest = product_interest
+        if (typeof interested === "string") updates.interested = interested
+
+        let result
+        if (id) {
+          result = await db.from("leads").update(updates).eq("id", id).select().single()
+        } else {
+          const norm = normalizePhone(phone)
+          result = await db.from("leads").update(updates).eq("phone", norm).select().single()
+        }
+
+        if (result.error) throw new Error(result.error.message)
+
+        logAudit("lead updated via ops assistant", session.email, { id: id || result.data?.id, updates })
+        return NextResponse.json({
+          success: true,
+          message: `Lead ${result.data?.name || id || phone} successfully updated.`,
+          details: result.data,
+        })
+      }
+
+      case "update_loan": {
+        const { id, status, notes } = payload
+        if (!id) return NextResponse.json({ error: "Loan application ID is required" }, { status: 400 })
+
+        const updates: Record<string, any> = { updated_at: new Date().toISOString() }
+        if (typeof status === "string") updates.status = status
+        if (typeof notes === "string") updates.notes = notes
+
+        const { data, error } = await db.from("loan_applications").update(updates).eq("id", id).select().single()
+        if (error) throw new Error(error.message)
+
+        logAudit("loan application updated via ops assistant", session.email, { id, status })
+        return NextResponse.json({
+          success: true,
+          message: `Loan application #${id} status updated to "${status}".`,
+          details: data,
+        })
+      }
+
+      case "remove_dnd": {
+        const { phone } = payload
+        if (!phone) return NextResponse.json({ error: "Phone number required" }, { status: 400 })
+        const normalized = normalizePhone(phone)
+
+        await query(`DELETE FROM dnd_suppression WHERE phone = $1`, [normalized])
+        logAudit("dnd removed via ops assistant", session.email, { phone: normalized })
+        return NextResponse.json({
+          success: true,
+          message: `Phone ${normalized} removed from DND suppression list.`,
+        })
+      }
+
       default:
         return NextResponse.json({ error: `Unknown action type: ${type}` }, { status: 400 })
     }

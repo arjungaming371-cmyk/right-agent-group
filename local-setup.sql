@@ -3,6 +3,7 @@
 --   psql -U postgres -d right_agent_group -f local-setup.sql
 
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+CREATE EXTENSION IF NOT EXISTS "pg_trgm";
 
 -- Leads (every person Priya has spoken to or will speak to)
 CREATE TABLE IF NOT EXISTS leads (
@@ -675,3 +676,89 @@ CREATE TRIGGER trg_branches_updated_at BEFORE UPDATE ON branches
 DROP TRIGGER IF EXISTS trg_organizations_updated_at ON organizations;
 CREATE TRIGGER trg_organizations_updated_at BEFORE UPDATE ON organizations
   FOR EACH ROW EXECUTE PROCEDURE moddatetime(updated_at);
+
+-- Loan application edit requests
+CREATE TABLE IF NOT EXISTS loan_application_edit_requests (
+  id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  loan_application_id  UUID NOT NULL REFERENCES loan_applications(id) ON DELETE CASCADE,
+  lead_id              UUID REFERENCES leads(id),
+  proposed_by          TEXT NOT NULL,
+  reason               TEXT,
+  previous_values      JSONB NOT NULL,
+  proposed_values      JSONB NOT NULL,
+  status               TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+  reviewed_by          TEXT,
+  reviewed_at          TIMESTAMPTZ,
+  created_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_loan_edit_requests_pending ON loan_application_edit_requests (status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_loan_edit_requests_app ON loan_application_edit_requests (loan_application_id, created_at DESC);
+ALTER TABLE loan_applications ADD COLUMN IF NOT EXISTS last_edited_at TIMESTAMPTZ;
+ALTER TABLE loan_applications ADD COLUMN IF NOT EXISTS tenure_months INTEGER;
+
+-- Two-factor login OTPs
+CREATE TABLE IF NOT EXISTS login_otps (
+  email      TEXT PRIMARY KEY,
+  code_hash  TEXT NOT NULL,
+  attempts   INT NOT NULL DEFAULT 0,
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Team profiles & display names
+CREATE TABLE IF NOT EXISTS team_profiles (
+  email              TEXT PRIMARY KEY,
+  display_name       TEXT,
+  avatar_url         TEXT,
+  phone              TEXT,
+  address            TEXT,
+  age                INTEGER,
+  profile_customized BOOLEAN NOT NULL DEFAULT false,
+  last_login_at      TIMESTAMPTZ,
+  created_at         TIMESTAMPTZ DEFAULT now()
+);
+ALTER TABLE allowed_emails ADD COLUMN IF NOT EXISTS display_name TEXT;
+
+-- Dynamic loan form configs
+CREATE TABLE IF NOT EXISTS form_configs (
+  id         TEXT PRIMARY KEY,
+  config     JSONB NOT NULL DEFAULT '{}',
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Universal and language-specific AI calling scripts
+CREATE TABLE IF NOT EXISTS ai_scripts (
+  id SERIAL PRIMARY KEY,
+  language TEXT NOT NULL UNIQUE,
+  content TEXT NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  updated_by TEXT DEFAULT 'admin'
+);
+
+-- Assistant chat history
+CREATE TABLE IF NOT EXISTS assistant_chats (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_email TEXT NOT NULL,
+  title TEXT DEFAULT 'New chat',
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_assistant_chats_user ON assistant_chats (user_email, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS assistant_messages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  chat_id UUID REFERENCES assistant_chats(id) ON DELETE CASCADE,
+  role TEXT NOT NULL,
+  content TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_assistant_messages_chat ON assistant_messages (chat_id, created_at ASC);
+
+-- Call instructions & callbacks
+ALTER TABLE voice_calls ADD COLUMN IF NOT EXISTS instructions TEXT;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS callback_at TIMESTAMPTZ;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS callback_note TEXT;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS pinned BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS pinned_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_leads_callback_at ON leads (callback_at) WHERE callback_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_leads_pinned ON leads (pinned, pinned_at DESC) WHERE pinned = true;

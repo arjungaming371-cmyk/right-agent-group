@@ -1,24 +1,20 @@
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
-import { requireRole } from "@/lib/auth"
+import { requireModuleOrRole } from "@/lib/auth"
 import { logAudit } from "@/lib/audit"
 
 export const dynamic = "force-dynamic"
 
-// GET — list recent DND/suppression entries. Admin-only.
+// GET — list recent DND/suppression entries.
 export async function GET(req: NextRequest) {
-  const session = await requireRole(req, ["admin"])
+  const session = await requireModuleOrRole(req, "security", ["admin"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const res = await query(`SELECT phone, reason, source, added_by, created_at FROM dnd_suppression ORDER BY created_at DESC LIMIT 500`)
   return NextResponse.json({ entries: res.rows })
 }
 
-// POST — add number(s). Body is either { phone, reason? } for one, or
-// { phones: string[], reason? } for a bulk paste (one per line, from the
-// dashboard's "paste a list" box — a CSV file-upload pipeline is overkill
-// for a flat list of numbers).
 export async function POST(req: NextRequest) {
-  const session = await requireRole(req, ["admin"])
+  const session = await requireModuleOrRole(req, "security", ["admin"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const body = await req.json().catch(() => ({}))
@@ -52,7 +48,8 @@ export async function POST(req: NextRequest) {
 
 // DELETE — remove a number from the suppression list (?phone=...).
 export async function DELETE(req: NextRequest) {
-  const session = await requireRole(req, ["admin"])
+  const session = await requireModuleOrRole(req, "security", ["admin"])
+
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const phone = new URL(req.url).searchParams.get("phone")
   if (!phone) return NextResponse.json({ error: "phone required" }, { status: 400 })

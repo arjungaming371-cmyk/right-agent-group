@@ -89,7 +89,12 @@ export default function ScriptView() {
     setLoading(false)
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    load()
+    const handler = () => load()
+    window.addEventListener("rag:refresh", handler)
+    return () => window.removeEventListener("rag:refresh", handler)
+  }, [])
 
   async function loadSuggestions() {
     setPtLoading(true)

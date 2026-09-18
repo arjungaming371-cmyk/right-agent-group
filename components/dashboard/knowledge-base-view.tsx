@@ -2,10 +2,11 @@
 
 type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
 import { useEffect, useRef, useState } from "react"
-import { BookOpen, Plus, Pencil, Trash2, X, Check, FileUp, FileText, Link2, RefreshCw } from "lucide-react"
+import { BookOpen, Plus, Pencil, Trash2, X, Check, FileUp, FileText, Link2, RefreshCw, Search } from "lucide-react"
 import { useToast } from "../ui/toast"
 import { Skeleton } from "../ui/skeleton"
 import VoiceDictation from "../ui/voice-dictation"
+import { smartFilter } from "@/lib/smart-search"
 
 type Entry = {
   id: string
@@ -40,6 +41,7 @@ export default function KnowledgeBaseView({ role }: { role: Role }) {
   const [form, setForm] = useState(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+  const [search, setSearch] = useState("")
 
   const csvInputRef = useRef<HTMLInputElement>(null)
   const pdfInputRef = useRef<HTMLInputElement>(null)
@@ -58,7 +60,12 @@ export default function KnowledgeBaseView({ role }: { role: Role }) {
     setLoading(false)
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    load()
+    const handler = () => load()
+    window.addEventListener("rag:refresh", handler)
+    return () => window.removeEventListener("rag:refresh", handler)
+  }, [])
 
   function openAdd() {
     setForm(EMPTY_FORM)
@@ -186,6 +193,7 @@ export default function KnowledgeBaseView({ role }: { role: Role }) {
   }
 
   const activeCount = entries.filter((e) => e.is_active).length
+  const filtered = smartFilter(entries, search, (e) => [e.title, e.content, e.category])
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -231,13 +239,32 @@ export default function KnowledgeBaseView({ role }: { role: Role }) {
         </div>
       )}
 
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ fontSize: 13, color: "var(--text-muted)" }}>{entries.length} entries · {activeCount} active</div>
-        {canEdit && (
-          <button onClick={openAdd} className="btn-primary" style={{ height: 34 }}>
-            <Plus size={15} strokeWidth={2.2} /> Add Entry
-          </button>
-        )}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+        <div style={{ position: "relative", flex: 1, minWidth: 260 }}>
+          <div style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)" }}>
+            <Search size={15} strokeWidth={2} />
+          </div>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Smart search (e.g. interest rates, documents, minimum loan)..."
+            style={{ width: "100%", padding: "8px 38px 8px 36px", height: 38, borderRadius: 8, fontSize: 13 }}
+          />
+          <div style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)" }}>
+            <VoiceDictation onTranscript={(t) => setSearch(t)} title="Dictate search query" />
+          </div>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
+            {search ? `${filtered.length} of ${entries.length} matches` : `${entries.length} entries · ${activeCount} active`}
+          </div>
+          {canEdit && (
+            <button onClick={openAdd} className="btn-primary" style={{ height: 38, padding: "0 16px" }}>
+              <Plus size={15} strokeWidth={2.2} /> Add Entry
+            </button>
+          )}
+        </div>
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -252,7 +279,12 @@ export default function KnowledgeBaseView({ role }: { role: Role }) {
             No entries yet. Add the questions customers ask most, or bulk-import a CSV/PDF/URL above.
           </div>
         )}
-        {entries.map((entry) => {
+        {!loading && entries.length > 0 && filtered.length === 0 && (
+          <div style={{ textAlign: "center", color: "var(--text-muted)", fontSize: 13, padding: 32, background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12 }}>
+            No knowledge base entries found matching "{search}".
+          </div>
+        )}
+        {filtered.map((entry) => {
           const badge = SOURCE_BADGE[entry.source_type] || SOURCE_BADGE.manual
           return (
             <div key={entry.id} style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: 18, opacity: entry.is_active ? 1 : 0.55 }}>

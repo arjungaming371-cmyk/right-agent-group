@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db, query } from "@/lib/db"
-import { requireRole } from "@/lib/auth"
+import { requireModuleOrRole } from "@/lib/auth"
 import { isMailConfigured } from "@/lib/mail"
 
 export const dynamic = "force-dynamic"
@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic"
 // never recorded or displayed anything.
 
 export async function GET(req: NextRequest) {
-  const session = await requireRole(req, ["admin"])
+  const session = await requireModuleOrRole(req, "security", ["admin"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const { data: settings } = await db.from("security_settings").select("key, enabled")
@@ -31,7 +31,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const session = await requireRole(req, ["admin"])
+  const session = await requireModuleOrRole(req, "security", ["admin"])
+
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const { key, enabled } = await req.json()
   if (typeof key !== "string" || typeof enabled !== "boolean") {

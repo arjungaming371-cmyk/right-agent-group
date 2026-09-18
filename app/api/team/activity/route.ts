@@ -7,7 +7,7 @@ import { requireRole } from "@/lib/auth"
 // own history; this is intentionally NOT the admin-only /api/security audit
 // log, which returns everyone's activity.
 export async function GET(req: NextRequest) {
-  const session = await requireRole(req, ["admin", "agent", "viewer", "developer"])
+  const session = await requireRole(req, ["admin", "agent", "viewer", "developer", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const result = await query(

@@ -13,9 +13,11 @@ export default function AboutPage() {
             Back to Login
           </Link>
 
-          <div style={{ width: 60, height: 60, borderRadius: 14, background: "var(--gradient-brand)", boxShadow: "0 8px 24px rgba(91,124,250,0.4)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 24px", fontSize: 28, fontWeight: 800, color: "white" }}>
-            R
-          </div>
+          <img
+            src="/logo.png"
+            alt="Right Agent Group"
+            style={{ height: 48, width: "auto", margin: "0 auto 24px", display: "block" }}
+          />
 
           <h1 style={{ fontSize: 40, fontWeight: 800, color: "#f1f5f9", marginBottom: 12, letterSpacing: "-0.02em" }}>
             Right Agent Group

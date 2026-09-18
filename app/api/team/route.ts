@@ -9,7 +9,7 @@ import { requireRole } from "@/lib/auth"
 // case, not a table row. Used by the profile modal (own + teammates) and
 // the /access team management page.
 export async function GET(req: NextRequest) {
-  const session = await requireRole(req, ["admin", "agent", "viewer", "developer"])
+  const session = await requireRole(req, ["admin", "agent", "viewer", "developer", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const adminEmail = (process.env.ADMIN_EMAIL || "").toLowerCase()

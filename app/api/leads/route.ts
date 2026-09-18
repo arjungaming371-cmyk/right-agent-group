@@ -72,7 +72,7 @@ export async function GET(req: NextRequest) {
     // not type the prefix or the zero padding.
     const codeClause = (await hasLeadCodeColumn()) ? ` OR lead_code ILIKE $${i}` : ""
     where.push(
-      `(name ILIKE $${i} OR phone ILIKE $${i}${codeClause} OR search_vector @@ websearch_to_tsquery('english', $${i + 1}))`
+      `(name ILIKE $${i} OR phone ILIKE $${i}${codeClause} OR search_vector @@ websearch_to_tsquery('english', $${i + 1}) OR word_similarity($${i + 1}, COALESCE(name, '')) > 0.28 OR word_similarity($${i + 1}, COALESCE(address, '')) > 0.28 OR word_similarity($${i + 1}, COALESCE(product_interest, '')) > 0.28)`
     )
     params.push(`%${search}%`, search)
     i += 2

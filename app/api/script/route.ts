@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { apiError } from "@/lib/api-error"
 import { query } from "@/lib/db"
 import { DEFAULT_SCRIPTS } from "@/lib/default-scripts"
-import { requireRole } from "@/lib/auth"
+import { requireModuleOrRole } from "@/lib/auth"
 import { logAudit } from "@/lib/audit"
 
 export const dynamic = "force-dynamic"
@@ -25,7 +25,9 @@ const DEFAULTS: Record<string, string> = DEFAULT_SCRIPTS
 // ONE SCRIPT MODE: Priya now runs on a single 'base' script for every
 // language — the per-language voice (Hinglish/Tenglish) is appended in
 // code (lib/llm.ts LANGUAGE_STYLES). The editor edits only the base row.
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const session = await requireModuleOrRole(req, "script", ["admin", "agent", "viewer", "branch_manager"])
+  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   try {
     await ensureTable()
     // Seed the base script if missing. Uses the pure base (no language
@@ -47,7 +49,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await requireRole(req, ["admin"])
+  const session = await requireModuleOrRole(req, "script", ["admin"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   try {
     await ensureTable()
@@ -76,7 +78,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const session = await requireRole(req, ["admin"])
+  const session = await requireModuleOrRole(req, "script", ["admin"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   try {
     const language = new URL(req.url).searchParams.get("language")
@@ -98,3 +100,4 @@ export async function DELETE(req: NextRequest) {
     return apiError(e)
   }
 }
+

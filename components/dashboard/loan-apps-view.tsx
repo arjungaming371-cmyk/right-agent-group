@@ -10,6 +10,7 @@ import { useToast } from "../ui/toast"
 import { calculateEMI, totalInterest, formatINR, BEST_RATES, detectLoanType } from "@/lib/finance"
 import LoanFormCustomizerModal from "./loan-form-customizer-modal"
 import VoiceDictation from "../ui/voice-dictation"
+import { smartFilter } from "@/lib/smart-search"
 
 function EmiEstimate({ loanAmount, loanType }: { loanAmount: number; loanType: string }) {
   const canonical = detectLoanType(loanType) || "Home Loan"
@@ -34,7 +35,7 @@ function EmiEstimate({ loanAmount, loanType }: { loanAmount: number; loanType: s
 type LoanApp = {
   id: string; customer_name: string; city: string; loan_type: string
   loan_amount: number; loan_tenure?: number; status: string; email: string; address: string; whatsapp_number: string
-  employment_type: string; monthly_income: number; pan_number?: string; form_data: any; submitted_at: string; created_at: string
+  employment_type: string; monthly_income: number; pan_number?: string; aadhaar_number?: string; company_name?: string; notes?: string; form_data: any; submitted_at: string; created_at: string
   last_edited_at?: string | null
 }
 
@@ -133,7 +134,18 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
 
   usePolling(() => { load(true); loadPendingEdits() }, 15000)
 
-  const filtered = apps.filter((a) => !search || a.customer_name?.toLowerCase().includes(search.toLowerCase()) || a.whatsapp_number?.includes(search))
+  const filtered = smartFilter(apps, search, (a) => [
+    a.customer_name,
+    a.whatsapp_number,
+    a.loan_type,
+    a.city,
+    a.status,
+    a.employment_type,
+    a.company_name,
+    a.pan_number,
+    a.aadhaar_number,
+    a.notes,
+  ])
   const selected = apps.find((a) => a.id === selectedId) || null
 
   async function markStatus(id: string, status: string) {

@@ -5,12 +5,14 @@ import { useEffect, useRef, useState, useMemo } from "react"
 import {
   Bot, Check, Copy, Download, ExternalLink, FastForward, FileAudio,
   Pause, Phone, PhoneIncoming, PhoneOutgoing, Play, Repeat, Rewind,
-  RotateCcw, Volume1, Volume2, VolumeX, X, Radio
+  RotateCcw, Volume1, Volume2, VolumeX, X, Radio, Search
 } from "lucide-react"
 import { formatDuration, timeAgo, formatDateTime } from "@/lib/utils"
 import { usePolling } from "@/lib/use-poll"
 import { useToast } from "../ui/toast"
 import { SkeletonList } from "../ui/skeleton"
+import VoiceDictation from "../ui/voice-dictation"
+import { smartFilter } from "@/lib/smart-search"
 
 type Call = {
   id: string; phone: string; direction: string; duration: number
@@ -48,6 +50,21 @@ export default function VoiceLogsView({ role }: { role: Role }) {
   const [leads, setLeads]   = useState<Lead[]>([])
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<Call | null>(null)
+  const [search, setSearch] = useState("")
+
+  const filteredCalls = useMemo(() => {
+    return smartFilter(calls, search, (c) => [
+      c.leads?.name,
+      c.phone,
+      c.leads?.phone,
+      c.outcome,
+      c.status,
+      c.sentiment,
+      c.direction,
+      c.language,
+      Array.isArray(c.transcript) ? c.transcript.map((t: any) => t.text || t.content || "").join(" ") : "",
+    ])
+  }, [calls, search])
 
   const [mode, setMode]               = useState<"lead" | "manual">("lead")
   const [selectedLeadId, setSelectedLeadId] = useState("")
@@ -355,11 +372,31 @@ export default function VoiceLogsView({ role }: { role: Role }) {
 
       {/* Call history */}
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12 }}>
-        <div style={{ padding: "20px 24px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ padding: "16px 24px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 14 }}>
           <div>
             <div style={{ fontWeight: 600, fontSize: 15 }}>Call History</div>
-            <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>Voice Bot — recorded and transcribed</div>
+            <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>
+              {search ? `${filteredCalls.length} of ${calls.length} calls matched` : "Voice Bot — recorded and transcribed"}
+            </div>
           </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, maxWidth: 360, minWidth: 220 }}>
+            <div style={{ position: "relative", width: "100%" }}>
+              <div style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)" }}>
+                <Search size={14} strokeWidth={2} />
+              </div>
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Smart search (name, phone, transcript, outcome)..."
+                style={{ width: "100%", padding: "7px 34px 7px 32px", height: 34, borderRadius: 8, fontSize: 12.5 }}
+              />
+              <div style={{ position: "absolute", right: 4, top: "50%", transform: "translateY(-50%)" }}>
+                <VoiceDictation onTranscript={(t) => setSearch(t)} title="Dictate call search" />
+              </div>
+            </div>
+          </div>
+
           <button onClick={() => load()} className="btn-ghost" style={{ height: 32, padding: "0 12px", fontSize: 12 }}>
             <RotateCcw size={12.5} strokeWidth={1.9} /> Refresh
           </button>
@@ -367,8 +404,13 @@ export default function VoiceLogsView({ role }: { role: Role }) {
 
         {loading && <SkeletonList rows={4} />}
         {!loading && calls.length === 0 && <div style={{ padding: 40, textAlign: "center", color: "var(--text-muted)" }}>No calls yet.</div>}
+        {!loading && calls.length > 0 && filteredCalls.length === 0 && (
+          <div style={{ padding: 36, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
+            No calls found matching "{search}".
+          </div>
+        )}
 
-        {calls.map(call => {
+        {filteredCalls.map(call => {
           const name    = call.leads?.name || call.phone || "Unknown"
           const num     = call.leads?.phone || call.phone || ""
           const time    = new Date(call.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })

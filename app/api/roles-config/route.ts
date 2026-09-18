@@ -11,7 +11,11 @@ type RoleDefinition = {
   color: string
   baseRole: "admin" | "agent" | "viewer" | "branch_manager"
   isDefault?: boolean
+  defaultModules?: string[]
 }
+
+const ALL_MODULES_LIST = ["analytics", "leads", "loans", "voice", "whatsapp", "comms", "security", "upload", "script", "knowledge"]
+const OPERATIONAL_MODULES = ["analytics", "leads", "loans", "voice", "whatsapp", "comms", "knowledge"]
 
 const DEFAULT_ROLES: RoleDefinition[] = [
   {
@@ -21,6 +25,7 @@ const DEFAULT_ROLES: RoleDefinition[] = [
     color: "var(--accent-violet)",
     baseRole: "admin",
     isDefault: true,
+    defaultModules: ALL_MODULES_LIST,
   },
   {
     id: "agent",
@@ -29,6 +34,7 @@ const DEFAULT_ROLES: RoleDefinition[] = [
     color: "var(--accent-cyan)",
     baseRole: "agent",
     isDefault: true,
+    defaultModules: OPERATIONAL_MODULES,
   },
   {
     id: "viewer",
@@ -37,6 +43,7 @@ const DEFAULT_ROLES: RoleDefinition[] = [
     color: "var(--text-muted)",
     baseRole: "viewer",
     isDefault: true,
+    defaultModules: OPERATIONAL_MODULES,
   },
   {
     id: "branch_manager",
@@ -45,6 +52,7 @@ const DEFAULT_ROLES: RoleDefinition[] = [
     color: "var(--accent-green)",
     baseRole: "branch_manager",
     isDefault: true,
+    defaultModules: OPERATIONAL_MODULES,
   },
   {
     id: "branch_admin",
@@ -53,6 +61,7 @@ const DEFAULT_ROLES: RoleDefinition[] = [
     color: "var(--accent-blue)",
     baseRole: "branch_manager",
     isDefault: true,
+    defaultModules: OPERATIONAL_MODULES,
   },
 ]
 
@@ -86,6 +95,7 @@ export async function POST(req: NextRequest) {
       color: String(r.color || "var(--accent-cyan)").trim(),
       baseRole: ["admin", "agent", "viewer", "branch_manager"].includes(r.baseRole) ? r.baseRole : "agent",
       isDefault: !!r.isDefault,
+      defaultModules: Array.isArray(r.defaultModules) ? r.defaultModules.map((m: any) => String(m)) : undefined,
     })).filter(r => r.id && r.label)
 
     await query(

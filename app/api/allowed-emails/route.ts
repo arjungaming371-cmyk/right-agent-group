@@ -5,7 +5,21 @@ import { requireRole, type Role } from "@/lib/auth"
 export const dynamic = "force-dynamic"
 
 const EMAIL_RE = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/
-const VALID_ROLES: Role[] = ["admin", "agent", "viewer", "developer", "branch_manager"]
+const VALID_BUILTIN_ROLES: Role[] = ["admin", "agent", "viewer", "developer", "branch_manager"]
+
+async function getBaseRole(roleId: string): Promise<Role> {
+  if (VALID_BUILTIN_ROLES.includes(roleId as Role)) {
+    return roleId as Role
+  }
+  try {
+    const res = await query(`SELECT config FROM form_configs WHERE id = 'custom_roles_config'`)
+    if (res.rowCount && res.rows[0]?.config?.roles) {
+      const found = res.rows[0].config.roles.find((r: any) => r.id === roleId)
+      if (found?.baseRole) return found.baseRole as Role
+    }
+  } catch {}
+  return "agent"
+}
 
 // Team access management is admin-only. Middleware already blocks
 // unauthenticated calls, but we verify the role again here — never trust a
@@ -18,8 +32,13 @@ export async function GET(req: NextRequest) {
   const isBM = session.role === "branch_manager"
   const branchFilter = isBM && session.branchId ? `AND ae.branch_id = '${session.branchId}'` : ""
 
+  try {
+    await query(`ALTER TABLE allowed_emails ADD COLUMN IF NOT EXISTS allowed_modules TEXT[] DEFAULT NULL;`)
+    await query(`ALTER TABLE allowed_emails DROP CONSTRAINT IF EXISTS allowed_emails_role_check;`)
+  } catch {}
+
   const r = await query(
-    `SELECT ae.email, ae.added_by, ae.role, ae.created_at, ae.branch_id, ae.display_name,
+    `SELECT ae.email, ae.added_by, ae.role, ae.created_at, ae.branch_id, ae.display_name, ae.allowed_modules,
             tp.display_name AS profile_name, tp.avatar_url,
             b.name AS branch_name, b.code AS branch_code
        FROM allowed_emails ae
@@ -51,11 +70,14 @@ export async function POST(req: NextRequest) {
   }
 
   const isBM = session.role === "branch_manager"
-  let role: Role = VALID_ROLES.includes(body?.role) ? body.role : "agent"
+  const roleInput = String(body?.role || "agent").trim()
+  const baseRole: Role = (body?.baseRole && VALID_BUILTIN_ROLES.includes(body.baseRole))
+    ? (body.baseRole as Role)
+    : await getBaseRole(roleInput)
 
   // Branch managers can only add agents or viewers to their own branch
   if (isBM) {
-    if (role !== "agent" && role !== "viewer") {
+    if (baseRole !== "agent" && baseRole !== "viewer") {
       return NextResponse.json({ error: "Branch managers can only add Loan Officers and Viewers to their branch." }, { status: 403 })
     }
     if (!session.branchId) {
@@ -72,14 +94,15 @@ export async function POST(req: NextRequest) {
     if (!b.rowCount) return NextResponse.json({ error: "unknown branch" }, { status: 400 })
     branchId = b.rows[0].id
   }
-  if (role === "branch_manager" && !branchId) {
+  if (baseRole === "branch_manager" && !branchId) {
     return NextResponse.json({ error: "branch_manager requires a branch" }, { status: 400 })
   }
 
+  let finalRole = roleInput
   const adminEmailEnv = (process.env.ADMIN_EMAIL || "").toLowerCase()
   if (email === adminEmailEnv) {
-    role = "admin"
-  } else if (role === "admin") {
+    finalRole = "admin"
+  } else if (baseRole === "admin") {
     const existingAdmins = await query(
       `SELECT COUNT(*)::int AS n FROM allowed_emails WHERE role = 'admin' AND lower(email) != $1`,
       [email]
@@ -90,7 +113,7 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       )
     }
-  } else if (role === "developer") {
+  } else if (baseRole === "developer") {
     const existingDevs = await query(
       `SELECT COUNT(*)::int AS n FROM allowed_emails WHERE role = 'developer' AND lower(email) != $1`,
       [email]
@@ -103,11 +126,15 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  const allowedModules = Array.isArray(body?.allowed_modules)
+    ? body.allowed_modules.map((m: any) => String(m))
+    : null
+
   await query(
-    `INSERT INTO allowed_emails (email, added_by, role, branch_id, display_name)
-     VALUES ($1, $2, $3, $4, $5)
-     ON CONFLICT (email) DO UPDATE SET role = $3, branch_id = $4, display_name = COALESCE(NULLIF($5, ''), allowed_emails.display_name)`,
-    [email, session.email, role, branchId, displayName || null]
+    `INSERT INTO allowed_emails (email, added_by, role, branch_id, display_name, allowed_modules)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT (email) DO UPDATE SET role = $3, branch_id = $4, display_name = COALESCE(NULLIF($5, ''), allowed_emails.display_name), allowed_modules = $6`,
+    [email, session.email, finalRole, branchId, displayName || null, allowedModules]
   )
 
   if (displayName) {
@@ -118,7 +145,35 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  return NextResponse.json({ ok: true, email, role, branch_id: branchId, displayName })
+  // Auto-register custom role definition if it's a new custom title
+  if (!VALID_BUILTIN_ROLES.includes(finalRole as Role)) {
+    try {
+      const id = finalRole.toLowerCase().replace(/[^a-z0-9]+/g, "_")
+      const cfRes = await query(`SELECT config FROM form_configs WHERE id = 'custom_roles_config'`)
+      let rolesList: any[] = []
+      if (cfRes.rowCount && cfRes.rows[0]?.config?.roles) {
+        rolesList = cfRes.rows[0].config.roles
+      }
+      if (!rolesList.some((r: any) => r.id === id || r.label.toLowerCase() === finalRole.toLowerCase())) {
+        rolesList.push({
+          id,
+          label: finalRole,
+          desc: `Custom ${baseRole.replace("_", " ")} role`,
+          color: "var(--accent-violet)",
+          baseRole,
+          isDefault: false,
+          defaultModules: allowedModules || ["analytics", "leads", "loans", "voice", "whatsapp", "comms", "knowledge"],
+        })
+        await query(
+          `INSERT INTO form_configs (id, config) VALUES ('custom_roles_config', $1)
+           ON CONFLICT (id) DO UPDATE SET config = $1, updated_at = now()`,
+          [JSON.stringify({ roles: rolesList })]
+        )
+      }
+    } catch {}
+  }
+
+  return NextResponse.json({ ok: true, email, role: finalRole, baseRole, branch_id: branchId, displayName, allowed_modules: allowedModules })
 }
 
 export async function PATCH(req: NextRequest) {
@@ -142,27 +197,38 @@ export async function PATCH(req: NextRequest) {
     if (!target.rowCount || target.rows[0].branch_id !== session.branchId) {
       return NextResponse.json({ error: "Teammate not found in your branch." }, { status: 404 })
     }
-    if (target.rows[0].role !== "agent" && target.rows[0].role !== "viewer") {
+    const targetBaseRole = await getBaseRole(target.rows[0].role)
+    if (targetBaseRole !== "agent" && targetBaseRole !== "viewer") {
       return NextResponse.json({ error: "Cannot modify this member." }, { status: 403 })
     }
-    if (body?.role && body.role !== "agent" && body.role !== "viewer") {
-      return NextResponse.json({ error: "Branch managers can only assign Loan Officer or Viewer roles." }, { status: 403 })
+    if (body?.role) {
+      const newBaseRole = (body?.baseRole && VALID_BUILTIN_ROLES.includes(body.baseRole)) ? body.baseRole : await getBaseRole(String(body.role))
+      if (newBaseRole !== "agent" && newBaseRole !== "viewer") {
+        return NextResponse.json({ error: "Branch managers can only assign Loan Officer or Viewer roles." }, { status: 403 })
+      }
     }
   }
 
-  const role: Role | undefined = VALID_ROLES.includes(body?.role) ? body.role : undefined
+  const roleInput = body?.role !== undefined ? String(body.role).trim() : undefined
+  const baseRole = body?.baseRole && VALID_BUILTIN_ROLES.includes(body.baseRole)
+    ? (body.baseRole as Role)
+    : (roleInput ? await getBaseRole(roleInput) : undefined)
+
   const branchId = !isBM && body?.branch_id !== undefined ? (body.branch_id ? String(body.branch_id) : null) : undefined
   const displayName = body?.displayName !== undefined ? String(body.displayName).trim() : undefined
+  const allowedModules = body?.allowed_modules !== undefined
+    ? (Array.isArray(body.allowed_modules) ? body.allowed_modules.map((m: any) => String(m)) : null)
+    : undefined
 
-  if (role === "branch_manager" && !branchId && !isBM) {
+  if (baseRole === "branch_manager" && !branchId && !isBM) {
     return NextResponse.json({ error: "branch_manager requires an allotted branch" }, { status: 400 })
   }
 
   const updates: string[] = []
   const values: any[] = [email]
 
-  if (role) {
-    values.push(role)
+  if (roleInput) {
+    values.push(roleInput)
     updates.push(`role = $${values.length}`)
   }
   if (branchId !== undefined) {
@@ -172,6 +238,10 @@ export async function PATCH(req: NextRequest) {
   if (displayName !== undefined) {
     values.push(displayName || null)
     updates.push(`display_name = $${values.length}`)
+  }
+  if (allowedModules !== undefined) {
+    values.push(allowedModules)
+    updates.push(`allowed_modules = $${values.length}`)
   }
 
   if (updates.length > 0) {

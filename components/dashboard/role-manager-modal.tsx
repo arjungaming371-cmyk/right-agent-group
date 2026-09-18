@@ -1,8 +1,9 @@
 "use client"
 
 import { useState } from "react"
-import { X, Plus, Trash2, Shield, UserCog, Eye, Building2, Palette } from "lucide-react"
+import { X, Plus, Trash2, Shield, UserCog, Eye, Building2, Palette, Layers, ChevronDown, ChevronUp } from "lucide-react"
 import { useToast } from "@/components/ui/toast"
+import { ModulePicker, ALL_MODULES } from "./module-picker"
 
 export type RoleDefinition = {
   id: string
@@ -11,6 +12,7 @@ export type RoleDefinition = {
   color: string
   baseRole: "admin" | "agent" | "viewer" | "branch_manager"
   isDefault?: boolean
+  defaultModules?: string[]
 }
 
 const COLOR_PALETTE = [
@@ -41,6 +43,9 @@ export function RoleManagerModal({
   const [newDesc, setNewDesc] = useState("")
   const [newBaseRole, setNewBaseRole] = useState<"admin" | "agent" | "viewer" | "branch_manager">("agent")
   const [newColor, setNewColor] = useState("var(--accent-cyan)")
+  const [newRoleModules, setNewRoleModules] = useState<string[] | null>(null)
+  const [showAddModulePicker, setShowAddModulePicker] = useState(false)
+  const [editingRoleId, setEditingRoleId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
   if (!isOpen) return null
@@ -92,6 +97,7 @@ export function RoleManagerModal({
       color: newColor,
       baseRole: newBaseRole,
       isDefault: false,
+      defaultModules: newRoleModules ? newRoleModules : ALL_MODULES.map(m => m.key),
     }
 
     const updated = [...roleList, newRole]
@@ -100,6 +106,13 @@ export function RoleManagerModal({
     setNewDesc("")
     setNewColor("var(--accent-cyan)")
     setNewBaseRole("agent")
+    setNewRoleModules(null)
+    setShowAddModulePicker(false)
+  }
+
+  async function handleUpdateRoleModules(id: string, modules: string[]) {
+    const updated = roleList.map(r => r.id === id ? { ...r, defaultModules: modules } : r)
+    await persistRoles(updated)
   }
 
   async function handleDeleteRole(id: string) {
@@ -175,6 +188,34 @@ export function RoleManagerModal({
               />
             </div>
 
+            {/* Allotted Modules Toggle for Role */}
+            <div style={{ marginBottom: 12 }}>
+              <button
+                type="button"
+                onClick={() => setShowAddModulePicker(!showAddModulePicker)}
+                style={{
+                  background: "transparent", border: "none", color: "var(--accent-cyan)",
+                  fontSize: 11.5, fontWeight: 600, cursor: "pointer", display: "inline-flex",
+                  alignItems: "center", gap: 5, padding: "2px 0",
+                }}
+              >
+                <Layers size={13} />
+                {showAddModulePicker ? "Hide Allotted Modules" : "Allot Specific Modules to this Role"}
+                <span style={{ fontSize: 10.5, background: "rgba(56,189,248,0.15)", padding: "1px 6px", borderRadius: 8 }}>
+                  {(newRoleModules?.length ?? ALL_MODULES.length)} / {ALL_MODULES.length} Modules
+                </span>
+              </button>
+
+              {showAddModulePicker && (
+                <div style={{ marginTop: 8 }}>
+                  <ModulePicker
+                    selectedKeys={newRoleModules}
+                    onChange={(keys) => setNewRoleModules(keys)}
+                  />
+                </div>
+              )}
+            </div>
+
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 12 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", marginRight: 4 }}>Badge Color:</span>
@@ -212,59 +253,84 @@ export function RoleManagerModal({
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {roleList.map(r => {
                 const Icon = getIcon(r.baseRole)
+                const isExpanded = editingRoleId === r.id
+                const modCount = r.defaultModules ? r.defaultModules.length : ALL_MODULES.length
                 return (
                   <div
                     key={r.id}
                     style={{
                       background: "var(--bg-secondary)", border: "1px solid var(--border)",
-                      borderRadius: 10, padding: "10px 14px", display: "flex", alignItems: "center",
-                      justifyContent: "space-between", gap: 12,
+                      borderRadius: 10, padding: "10px 14px", display: "flex", flexDirection: "column", gap: 10,
                     }}
                   >
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, flex: 1 }}>
-                      <span style={{
-                        width: 28, height: 28, borderRadius: 7, background: `${r.color}1c`,
-                        border: `1px solid ${r.color}3d`, display: "inline-flex", alignItems: "center",
-                        justifyContent: "center", color: r.color, flexShrink: 0,
-                      }}>
-                        <Icon size={14} />
-                      </span>
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-primary)" }}>{r.label}</span>
-                          <span style={{ fontSize: 11, padding: "1px 6px", borderRadius: 4, background: "rgba(255,255,255,0.06)", color: "var(--text-muted)" }}>
-                            Perm: {r.baseRole}
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, flex: 1 }}>
+                        <span style={{
+                          width: 28, height: 28, borderRadius: 7, background: `${r.color}1c`,
+                          border: `1px solid ${r.color}3d`, display: "inline-flex", alignItems: "center",
+                          justifyContent: "center", color: r.color, flexShrink: 0,
+                        }}>
+                          <Icon size={14} />
+                        </span>
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                            <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-primary)" }}>{r.label}</span>
+                            <span style={{ fontSize: 11, padding: "1px 6px", borderRadius: 4, background: "rgba(255,255,255,0.06)", color: "var(--text-muted)" }}>
+                              Perm: {r.baseRole}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setEditingRoleId(isExpanded ? null : r.id)}
+                              style={{
+                                background: "rgba(56,189,248,0.1)", border: "1px solid rgba(56,189,248,0.25)",
+                                borderRadius: 5, padding: "1px 7px", fontSize: 11, color: "var(--accent-cyan)",
+                                cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4,
+                              }}
+                            >
+                              <Layers size={11} /> {modCount === ALL_MODULES.length ? "All Modules Allotted" : `${modCount}/${ALL_MODULES.length} Modules`}
+                              {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                            </button>
+                          </div>
+                          <div style={{ fontSize: 11.5, color: "var(--text-muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", marginTop: 2 }}>
+                            {r.desc}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div>
+                        {r.isDefault ? (
+                          <span style={{ fontSize: 11, color: "var(--text-muted)", padding: "4px 8px", background: "rgba(255,255,255,0.04)", borderRadius: 6 }}>
+                            System Core
                           </span>
-                        </div>
-                        <div style={{ fontSize: 11.5, color: "var(--text-muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                          {r.desc}
-                        </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteRole(r.id)}
+                            disabled={saving}
+                            title={`Delete ${r.label}`}
+                            style={{
+                              background: "transparent", border: "1px solid var(--border)", borderRadius: 6,
+                              width: 30, height: 30, display: "inline-flex", alignItems: "center", justifyContent: "center",
+                              color: "var(--text-muted)", cursor: "pointer",
+                            }}
+                            onMouseEnter={ev => { ev.currentTarget.style.color = "var(--accent-red)"; ev.currentTarget.style.borderColor = "rgba(251,86,112,0.4)" }}
+                            onMouseLeave={ev => { ev.currentTarget.style.color = "var(--text-muted)"; ev.currentTarget.style.borderColor = "var(--border)" }}
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        )}
                       </div>
                     </div>
 
-                    <div>
-                      {r.isDefault ? (
-                        <span style={{ fontSize: 11, color: "var(--text-muted)", padding: "4px 8px", background: "rgba(255,255,255,0.04)", borderRadius: 6 }}>
-                          System Core
-                        </span>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteRole(r.id)}
-                          disabled={saving}
-                          title={`Delete ${r.label}`}
-                          style={{
-                            background: "transparent", border: "1px solid var(--border)", borderRadius: 6,
-                            width: 30, height: 30, display: "inline-flex", alignItems: "center", justifyContent: "center",
-                            color: "var(--text-muted)", cursor: "pointer",
-                          }}
-                          onMouseEnter={ev => { ev.currentTarget.style.color = "var(--accent-red)"; ev.currentTarget.style.borderColor = "rgba(251,86,112,0.4)" }}
-                          onMouseLeave={ev => { ev.currentTarget.style.color = "var(--text-muted)"; ev.currentTarget.style.borderColor = "var(--border)" }}
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      )}
-                    </div>
+                    {/* Expanded Module Allotment for Role */}
+                    {isExpanded && (
+                      <div style={{ borderTop: "1px dashed var(--border)", paddingTop: 10, marginTop: 4 }}>
+                        <ModulePicker
+                          selectedKeys={r.defaultModules ?? null}
+                          onChange={(keys) => handleUpdateRoleModules(r.id, keys)}
+                        />
+                      </div>
+                    )}
                   </div>
                 )
               })}

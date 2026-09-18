@@ -177,3 +177,36 @@ export async function requireRole(req: Request, roles: Role[]): Promise<Session 
   if (!roles.includes(session.role)) return null
   return session
 }
+
+/**
+ * Reads the session and checks if the user has access to a specific module key OR one of the allowed base roles.
+ * If allowed_modules is explicitly set for the user, it takes precedence over role defaults.
+ */
+export async function requireModuleOrRole(
+  req: Request,
+  moduleKey: string,
+  allowedRoles: Role[]
+): Promise<Session | null> {
+  const session = await getSessionFromRequest(req)
+  if (!session) return null
+  if (session.role === "developer") return session
+
+  try {
+    const { query } = await import("@/lib/db")
+    const res = await query(
+      `SELECT allowed_modules FROM allowed_emails WHERE lower(email) = $1 LIMIT 1`,
+      [session.email.toLowerCase()]
+    )
+    if (res.rows.length > 0 && res.rows[0].allowed_modules !== null && res.rows[0].allowed_modules !== undefined) {
+      const allowedModules: string[] = Array.isArray(res.rows[0].allowed_modules) ? res.rows[0].allowed_modules : []
+      if (allowedModules.includes(moduleKey)) return session
+      return null
+    }
+  } catch (err) {
+    console.error("requireModuleOrRole DB error:", err)
+  }
+
+  if (allowedRoles.includes(session.role)) return session
+  return null
+}
+

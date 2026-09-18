@@ -6,6 +6,7 @@ import { Search, Send, MessageCircle, ChevronLeft, CheckCircle2, Zap, Lock, Pin,
 import { useToast } from "../ui/toast"
 import { usePolling } from "@/lib/use-poll"
 import VoiceDictation from "../ui/voice-dictation"
+import { smartFilter } from "@/lib/smart-search"
 
 type Lead = {
   id: string; name: string; phone: string
@@ -320,12 +321,16 @@ export default function WhatsAppView({ role }: { role: Role }) {
     return new Date(dateStr).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
   }
 
-  const filtered = leads
-    .filter(l => tab === "all" || (l.unread ?? 0) > 0)
-    .filter(l =>
-      l.name?.toLowerCase().includes(search.toLowerCase()) ||
-      l.phone?.includes(search)
-    )
+  const tabFiltered = leads.filter(l => tab === "all" || (l.unread ?? 0) > 0)
+  const filtered = smartFilter(tabFiltered, search, (l) => [
+    l.name,
+    l.phone,
+    l.whatsapp_number,
+    l.last_message,
+    l.product_interest,
+    l.address,
+    l.notes,
+  ])
   const unreadCount = leads.filter(l => (l.unread ?? 0) > 0).length
 
   const knownIncome = selected?.facts?.monthly_income ? fmtMoney(selected.facts.monthly_income) : null

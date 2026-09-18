@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db, query } from "@/lib/db"
-import { requireRole } from "@/lib/auth"
+import { requireModuleOrRole } from "@/lib/auth"
 import { sessionBranchId } from "@/lib/branches"
 import { normalizePhone, phoneLast10, PHONE_MATCH_SQL } from "@/lib/phone"
 
 // STEP 1: Upload + PARSE ONLY — does NOT call anyone automatically.
 // Creates leads + queues them as "pending". Use /api/upload/confirm to trigger calls.
 export async function POST(req: NextRequest) {
-  const session = await requireRole(req, ["admin", "branch_manager"])
+  const session = await requireModuleOrRole(req, "upload", ["admin", "branch_manager"])
+
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   // Uploaded leads + the file record belong to the session's active branch.
   const branchId = sessionBranchId(session)

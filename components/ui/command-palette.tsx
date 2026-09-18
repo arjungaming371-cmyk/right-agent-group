@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { Search, Users, FileText, Phone, ArrowRight, CornerDownLeft } from "lucide-react"
 import type { ViewKey } from "../dashboard/shell"
 import VoiceDictation from "./voice-dictation"
+import { smartMatch } from "@/lib/smart-search"
 
 type Result = {
   id: string
@@ -35,6 +36,9 @@ const VIEW_ACTIONS: { key: ViewKey; label: string }[] = [
   { key: "security", label: "Security" },
   { key: "upload", label: "Upload & Data" },
   { key: "script", label: "Priya's Script" },
+  { key: "knowledge", label: "Knowledge Base" },
+  { key: "branches", label: "Branches & Staff AI" },
+  { key: "dev-logs", label: "Activity Logs" },
 ]
 
 export default function CommandPalette({ open, onClose, onNavigate, allowedViews }: Props) {
@@ -64,38 +68,49 @@ export default function CommandPalette({ open, onClose, onNavigate, allowedViews
   }, [open])
 
   const results = useMemo<Result[]>(() => {
-    const needle = q.trim().toLowerCase()
-    const out: Result[] = []
+    const needle = q.trim()
+    const out: { result: Result; score: number }[] = []
 
     for (const v of VIEW_ACTIONS) {
       if (!allowedViews.includes(v.key)) continue
-      if (needle && !v.label.toLowerCase().includes(needle)) continue
-      out.push({ id: `view-${v.key}`, group: "Views", title: v.label, sub: "Go to view", view: v.key, icon: ArrowRight })
+      const { matches, score } = smartMatch(needle, [v.label, v.key])
+      if (needle && !matches) continue
+      out.push({
+        result: { id: `view-${v.key}`, group: "Views", title: v.label, sub: "Go to view", view: v.key, icon: ArrowRight },
+        score: needle ? score + 0.1 : 1, // slight boost for navigation actions
+      })
     }
 
     if (needle) {
       for (const l of leads) {
-        const name = (l.name || "").toLowerCase()
-        const phone = (l.phone || "").toLowerCase()
-        if (!name.includes(needle) && !phone.includes(needle)) continue
-        out.push({ id: `lead-${l.id}`, group: "Leads", title: l.name || l.phone, sub: `${l.phone}${l.product_interest ? " · " + l.product_interest : ""}`, view: "leads", search: l.name || l.phone, icon: Users })
-        if (out.length > 40) break
+        const { matches, score } = smartMatch(needle, [l.name, l.phone, l.product_interest, l.address, l.lead_code])
+        if (!matches) continue
+        out.push({
+          result: { id: `lead-${l.id}`, group: "Leads", title: l.name || l.phone, sub: `${l.phone}${l.product_interest ? " · " + l.product_interest : ""}${l.lead_code ? " · " + l.lead_code : ""}`, view: "leads", search: l.name || l.phone, icon: Users },
+          score,
+        })
       }
       for (const a of loans) {
-        const name = (a.customer_name || "").toLowerCase()
-        if (!name.includes(needle)) continue
-        out.push({ id: `loan-${a.id}`, group: "Loan Applications", title: a.customer_name, sub: `${a.loan_type || "Loan"}${a.loan_amount ? " · ₹" + Number(a.loan_amount).toLocaleString("en-IN") : ""}`, view: "loans", search: a.customer_name, icon: FileText })
-        if (out.length > 50) break
+        const { matches, score } = smartMatch(needle, [a.customer_name, a.whatsapp_number, a.loan_type, a.city, a.pan, a.aadhaar])
+        if (!matches) continue
+        out.push({
+          result: { id: `loan-${a.id}`, group: "Loan Applications", title: a.customer_name, sub: `${a.loan_type || "Loan"}${a.loan_amount ? " · ₹" + Number(a.loan_amount).toLocaleString("en-IN") : ""}${a.city ? " · " + a.city : ""}`, view: "loans", search: a.customer_name, icon: FileText },
+          score,
+        })
       }
       for (const c of calls) {
-        const name = (c.leads?.name || "").toLowerCase()
-        const phone = (c.phone || "").toLowerCase()
-        if (!name.includes(needle) && !phone.includes(needle)) continue
-        out.push({ id: `call-${c.id}`, group: "Calls", title: c.leads?.name || c.phone, sub: `${c.direction || "call"} · ${c.outcome || c.status || ""}`, view: "voice", icon: Phone })
-        if (out.length > 60) break
+        const { matches, score } = smartMatch(needle, [c.leads?.name, c.phone, c.direction, c.outcome, c.status])
+        if (!matches) continue
+        out.push({
+          result: { id: `call-${c.id}`, group: "Calls", title: c.leads?.name || c.phone, sub: `${c.direction || "call"} · ${c.outcome || c.status || ""}`, view: "voice", icon: Phone },
+          score,
+        })
       }
     }
-    return out.slice(0, 24)
+
+    // Sort by best smart match score first
+    out.sort((a, b) => b.score - a.score)
+    return out.map(o => o.result).slice(0, 24)
   }, [q, leads, loans, calls, allowedViews])
 
   // Clamp the active row whenever results shrink.

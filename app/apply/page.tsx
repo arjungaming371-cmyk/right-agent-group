@@ -154,25 +154,12 @@ export default function ApplyPage() {
           className="flex items-center justify-between"
           style={{ maxWidth: 1180, margin: "0 auto", padding: "14px 20px" }}
         >
-          <Link href="/apply" style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div
-              style={{
-                width: 32,
-                height: 32,
-                borderRadius: 9,
-                background: "var(--gradient-brand)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontWeight: 800,
-                color: "#fff",
-                fontSize: 15,
-                boxShadow: "0 4px 14px -3px rgba(91,124,250,0.5)",
-              }}
-            >
-              R
-            </div>
-            <span style={{ fontWeight: 700, fontSize: 15, color: "var(--text-primary)" }}>Right Agent Group</span>
+          <Link href="/apply" style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none" }}>
+            <img
+              src="/logo.png"
+              alt="Right Agent Group"
+              style={{ height: 38, width: "auto", objectFit: "contain" }}
+            />
           </Link>
           <nav className="hidden md:flex" style={{ gap: 28 }}>
             {NAV_LINKS.map((l) => (

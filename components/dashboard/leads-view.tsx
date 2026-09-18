@@ -1,7 +1,7 @@
 "use client"
 
 type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
-import { useEffect, useState } from "react"
+import { useEffect, useState, useMemo } from "react"
 import { Users, Target, IndianRupee, BadgeCheck, Phone, MessageCircle, RotateCcw, Plus, Search, Link2, Check, Download, Brain, Pin } from "lucide-react"
 import { formatCurrency, timeAgo, formatDateTime } from "@/lib/utils"
 import { usePolling } from "@/lib/use-poll"
@@ -9,6 +9,7 @@ import { useToast } from "../ui/toast"
 import { Skeleton } from "../ui/skeleton"
 import LeadMemoryModal from "./lead-memory-modal"
 import VoiceDictation from "../ui/voice-dictation"
+import { smartFilter } from "@/lib/smart-search"
 
 import { PRODUCT_GROUPS, LOAN_TYPES } from "@/lib/products"
 
@@ -170,6 +171,18 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
 
   const [memoryLeadId, setMemoryLeadId] = useState<string | null>(null)
 
+  const displayLeads = useMemo(() => {
+    return smartFilter(leads, search, (l) => [
+      l.name,
+      l.phone,
+      l.whatsapp_number,
+      l.product_interest,
+      l.address,
+      l.lead_code,
+      l.status,
+    ])
+  }, [leads, search])
+
   async function load(silent = false) {
     if (!silent) setLoading(true)
     const params = new URLSearchParams()
@@ -219,6 +232,12 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
   useEffect(() => {
     load()
   }, [debouncedSearch, ageFilter, amountFilter, loanTypeFilter, interestedFilter])
+
+  useEffect(() => {
+    const handler = () => load(true)
+    window.addEventListener("rag:refresh", handler)
+    return () => window.removeEventListener("rag:refresh", handler)
+  }, [])
 
   // Background refresh — scores, statuses, form badges, and call counts
   // change from calls/WhatsApp/form submissions without any user action.
@@ -321,7 +340,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
             <div style={{ position: "relative", width: 230, display: "flex", alignItems: "center" }}>
               <Search size={13} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
               <input
-                placeholder="Search name, phone or code…"
+                placeholder="Smart search name, phone, code (typo-tolerant)…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 style={{ width: "100%", height: 34, fontSize: 12.5, paddingLeft: 30, paddingRight: 34 }}
@@ -369,7 +388,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
             ><RotateCcw size={14} strokeWidth={1.9} /></button>
             {/* Spacer */}
             <div style={{ flex: 1 }} />
-            <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{leads.length} shown</div>
+            <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{displayLeads.length} shown</div>
             <a href="/api/leads/export" className="btn-ghost" style={{ height: 34, textDecoration: "none" }} title="Export all leads as CSV">
               <Download size={14} strokeWidth={2} /> Export
             </a>
@@ -420,10 +439,10 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                 </td>
               </tr>
             )}
-            {!loading && !loadError && leads.length === 0 && (
+            {!loading && !loadError && displayLeads.length === 0 && (
               <tr><td colSpan={10} style={{ padding: 40, textAlign: "center", color: "var(--text-muted)" }}>No leads match these filters.</td></tr>
             )}
-            {leads.map((lead) => {
+            {displayLeads.map((lead) => {
               const ist = INTERESTED_STYLES[lead.interested] ?? INTERESTED_STYLES.unknown
               return (
                 <tr key={lead.id} style={{ borderBottom: "1px solid var(--border-light)" }}>

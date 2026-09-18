@@ -69,9 +69,21 @@ export async function GET(req: NextRequest) {
     if (!role) {
       const r = await query(`SELECT role, org_id, branch_id FROM allowed_emails WHERE lower(email) = $1 LIMIT 1`, [email])
       if (r.rowCount) {
-        role = (r.rows[0].role as Role) || "agent"
+        const rawRole = r.rows[0].role || "agent"
         orgId = r.rows[0].org_id || null
         branchId = r.rows[0].branch_id || null
+        if (["admin", "agent", "viewer", "developer", "branch_manager"].includes(rawRole)) {
+          role = rawRole as Role
+        } else {
+          try {
+            const cf = await query(`SELECT config FROM form_configs WHERE id = 'custom_roles_config'`)
+            if (cf.rowCount && cf.rows[0]?.config?.roles) {
+              const found = cf.rows[0].config.roles.find((cr: any) => cr.id === rawRole)
+              if (found?.baseRole) role = found.baseRole as Role
+            }
+          } catch {}
+          if (!role) role = "agent"
+        }
       }
     }
     if (!role) {
