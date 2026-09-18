@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
-import { getSessionFromRequest } from "@/lib/auth"
+import { requireModuleOrRole } from "@/lib/auth"
 import { sessionBranchId } from "@/lib/branches"
 import { toCsv } from "@/lib/csv"
 
@@ -15,7 +15,7 @@ const COLUMNS = [
 // can already see in the Leads table isn't a new privilege, just a format.
 // Branch-scoped sessions export ONLY their branch's leads.
 export async function GET(req: NextRequest) {
-  const session = await getSessionFromRequest(req)
+  const session = await requireModuleOrRole(req, "leads", ["admin", "agent", "viewer", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const branchId = sessionBranchId(session)
 

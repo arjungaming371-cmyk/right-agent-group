@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from "next/server"
 import { textToSpeech, ttsAudioMime } from "@/lib/tts"
 import type { Language } from "@/lib/llm"
+import { requireModuleOrRole } from "@/lib/auth"
 
 export const dynamic = "force-dynamic"
 
 export async function POST(req: NextRequest) {
+  const session = await requireModuleOrRole(req, "voice", ["admin", "agent", "viewer", "branch_manager"])
+  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+
   const { text, language } = await req.json()
   if (!text || typeof text !== "string") return NextResponse.json({ error: "text required" }, { status: 400 })
 

@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server"
 import { apiError } from "@/lib/api-error"
 import { db } from "@/lib/db"
-import { requireRole } from "@/lib/auth"
+import { requireModuleOrRole } from "@/lib/auth"
 import { sessionBranchId } from "@/lib/branches"
 import { logAudit } from "@/lib/audit"
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
-  const session = await requireRole(req, ["admin", "agent", "viewer", "branch_manager"])
+  const session = await requireModuleOrRole(req, "loans", ["admin", "agent", "viewer", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const branchId = sessionBranchId(session)
 
@@ -40,7 +40,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   // The customer-facing form (app/api/form/[token]) inserts directly, not
   // through here — this is the staff/dashboard creation path.
-  const session = await requireRole(req, ["admin", "agent", "branch_manager"])
+  const session = await requireModuleOrRole(req, "loans", ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const body = await req.json()
   body.branch_id = sessionBranchId(session)
@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const session = await requireRole(req, ["admin", "agent", "branch_manager"])
+  const session = await requireModuleOrRole(req, "loans", ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const { id, ...updates } = await req.json()
   const branchId = sessionBranchId(session)

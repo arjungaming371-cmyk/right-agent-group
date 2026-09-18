@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from "next/server"
 import { apiError } from "@/lib/api-error"
 import { isSecurityEnabled } from "@/lib/security"
+import { requireModuleOrRole } from "@/lib/auth"
 
 // Proxy Exotel recording audio through our server
 // This avoids the browser Basic Auth popup on protected recording URLs
 // when accessing recording URLs directly
 export async function GET(req: NextRequest) {
+  const session = await requireModuleOrRole(req, "voice", ["admin", "agent", "viewer", "branch_manager"])
+  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+
   const { searchParams } = new URL(req.url)
   const url = searchParams.get("url")
 

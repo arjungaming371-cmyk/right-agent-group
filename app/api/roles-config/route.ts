@@ -98,6 +98,14 @@ export async function POST(req: NextRequest) {
       defaultModules: Array.isArray(r.defaultModules) ? r.defaultModules.map((m: any) => String(m)) : undefined,
     })).filter(r => r.id && r.label)
 
+    if (session.role === "branch_manager") {
+      for (const r of cleanRoles) {
+        if (r.baseRole === "admin" || (r as any).baseRole === "developer") {
+          return NextResponse.json({ error: "Branch managers cannot create or edit Admin roles." }, { status: 403 })
+        }
+      }
+    }
+
     await query(
       `INSERT INTO form_configs (id, config, updated_at)
        VALUES ('custom_roles_config', $1, now())

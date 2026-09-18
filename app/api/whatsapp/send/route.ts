@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { sendWhatsAppText, branchWhatsAppCtx } from "@/lib/whatsapp"
-import { requireRole } from "@/lib/auth"
+import { requireModuleOrRole } from "@/lib/auth"
 import { sessionBranchId } from "@/lib/branches"
 
 export async function POST(req: NextRequest) {
-  const session = await requireRole(req, ["admin", "agent", "branch_manager"])
+  const session = await requireModuleOrRole(req, "whatsapp", ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const { to, message, leadId } = await req.json()
   if (!to || !message) return NextResponse.json({ error: "to and message required" }, { status: 400 })

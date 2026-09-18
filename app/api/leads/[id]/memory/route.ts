@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
-import { requireRole } from "@/lib/auth"
+import { requireModuleOrRole } from "@/lib/auth"
+import { sessionBranchId } from "@/lib/branches"
 import { logAudit } from "@/lib/audit"
 import { isValidUUID } from "@/lib/lead-brain"
 
@@ -8,11 +9,21 @@ const VALID_STAGES = [
   "new", "contacted", "interested", "docs_pending", "negotiating", "converted", "lost", "do_not_call",
 ]
 
-// GET — read-only, any logged-in role (middleware already requires a session;
-// this data is internal-staff-only but not mutation-sensitive like PATCH is).
+// GET — read-only, any logged-in role with leads module access.
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const session = await requireModuleOrRole(req, "leads", ["admin", "agent", "viewer", "branch_manager"])
+  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+
   const { id } = await params
   if (!isValidUUID(id)) return NextResponse.json({ error: "invalid lead id" }, { status: 400 })
+
+  const branchId = sessionBranchId(session)
+  if (branchId) {
+    const leadCheck = await query(`SELECT branch_id FROM leads WHERE id = $1 LIMIT 1`, [id])
+    if (leadCheck.rows.length === 0 || leadCheck.rows[0].branch_id !== branchId) {
+      return NextResponse.json({ error: "lead not found in your branch" }, { status: 404 })
+    }
+  }
 
   const [leadRes, memoryRes, timelineRes] = await Promise.all([
     query(`SELECT id, name, phone, address, whatsapp_number, product_interest FROM leads WHERE id = $1`, [id]),
@@ -48,11 +59,19 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 // AI control. Pass `facts: { someKey: null }` to explicitly clear a fact
 // (still locks it — AI won't refill it until unlocked).
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const session = await requireRole(req, ["admin", "agent", "branch_manager"])
+  const session = await requireModuleOrRole(req, "leads", ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const { id } = await params
   if (!isValidUUID(id)) return NextResponse.json({ error: "invalid lead id" }, { status: 400 })
+
+  const branchId = sessionBranchId(session)
+  if (branchId) {
+    const leadCheck = await query(`SELECT branch_id FROM leads WHERE id = $1 LIMIT 1`, [id])
+    if (leadCheck.rows.length === 0 || leadCheck.rows[0].branch_id !== branchId) {
+      return NextResponse.json({ error: "lead not found in your branch" }, { status: 404 })
+    }
+  }
 
   const body = await req.json().catch(() => ({}))
   const factEdits: Record<string, any> | undefined = body?.facts && typeof body.facts === "object" ? body.facts : undefined

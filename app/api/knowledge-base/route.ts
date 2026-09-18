@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from "next/server"
 import { apiError } from "@/lib/api-error"
 import { db } from "@/lib/db"
-import { requireRole } from "@/lib/auth"
+import { requireModuleOrRole } from "@/lib/auth"
 import { logAudit } from "@/lib/audit"
 
 export const dynamic = "force-dynamic"
 
-// GET — list all entries (any logged-in role, matches other content lists like /api/leads).
-export async function GET() {
+// GET — list all entries (any logged-in role with knowledge module access).
+export async function GET(req: NextRequest) {
+  const session = await requireModuleOrRole(req, "knowledge", ["admin", "agent", "viewer", "branch_manager"])
+  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const { data, error } = await db.from("knowledge_base").select("*").order("created_at", { ascending: false })
   if (error) return apiError(error)
   return NextResponse.json(data ?? [])
@@ -15,7 +17,7 @@ export async function GET() {
 
 // POST — create an entry. admin+agent, same tier as leads/loan_applications.
 export async function POST(req: NextRequest) {
-  const session = await requireRole(req, ["admin", "agent", "branch_manager"])
+  const session = await requireModuleOrRole(req, "knowledge", ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const body = await req.json().catch(() => ({}))
   const title = typeof body.title === "string" ? body.title.trim() : ""
@@ -36,7 +38,7 @@ export async function POST(req: NextRequest) {
 
 // PATCH — update an entry.
 export async function PATCH(req: NextRequest) {
-  const session = await requireRole(req, ["admin", "agent", "branch_manager"])
+  const session = await requireModuleOrRole(req, "knowledge", ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const body = await req.json().catch(() => ({}))
   const { id, ...rest } = body
@@ -56,7 +58,7 @@ export async function PATCH(req: NextRequest) {
 
 // DELETE — remove an entry (?id=...).
 export async function DELETE(req: NextRequest) {
-  const session = await requireRole(req, ["admin", "agent", "branch_manager"])
+  const session = await requireModuleOrRole(req, "knowledge", ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const id = new URL(req.url).searchParams.get("id")
   if (!id) return NextResponse.json({ error: "id required" }, { status: 400 })

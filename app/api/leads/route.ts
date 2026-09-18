@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { apiError } from "@/lib/api-error"
 import { db, query } from "@/lib/db"
-import { requireRole } from "@/lib/auth"
+import { requireModuleOrRole } from "@/lib/auth"
 import { sessionBranchId } from "@/lib/branches"
 import { logAudit } from "@/lib/audit"
 import { normalizePhone, phoneLast10, PHONE_MATCH_SQL } from "@/lib/phone"
@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
 
   // Multi-branch scoping: branch-bound sessions only ever see their own
   // branch's leads (NULL branch = HQ data stays admin-only).
-  const session = await requireRole(req, ["admin", "agent", "viewer", "branch_manager"])
+  const session = await requireModuleOrRole(req, "leads", ["admin", "agent", "viewer", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const branchId = sessionBranchId(session)
 
@@ -130,7 +130,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await requireRole(req, ["admin", "agent", "branch_manager"])
+  const session = await requireModuleOrRole(req, "leads", ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const body = await req.json()
   if (!body.phone) return NextResponse.json({ error: "phone required" }, { status: 400 })
@@ -166,7 +166,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const session = await requireRole(req, ["admin", "agent", "branch_manager"])
+  const session = await requireModuleOrRole(req, "leads", ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const { id, ...updates } = await req.json()
   delete updates.branch_id // branch moves are an admin action via /api/branches, not a lead edit
@@ -182,7 +182,7 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const session = await requireRole(req, ["admin", "agent", "branch_manager"])
+  const session = await requireModuleOrRole(req, "leads", ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const { searchParams } = new URL(req.url)
   const id = searchParams.get("id")

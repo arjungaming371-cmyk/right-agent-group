@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server"
 import { apiError } from "@/lib/api-error"
 import { query } from "@/lib/db"
-import { requireRole } from "@/lib/auth"
+import { requireModuleOrRole } from "@/lib/auth"
 import { sessionBranchId } from "@/lib/branches"
 
 export const dynamic = "force-dynamic"
 
 export async function GET(req: NextRequest) {
-  const session = await requireRole(req, ["admin", "agent", "viewer", "branch_manager"])
+  const session = await requireModuleOrRole(req, "analytics", ["admin", "agent", "viewer", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   // Branch-scoped users get their branch's numbers only — the analytics
   // view IS the branch P&L picture for decentralized operations.

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
-import { requireRole } from "@/lib/auth"
+import { requireModuleOrRole } from "@/lib/auth"
+import { sessionBranchId } from "@/lib/branches"
 import { logAudit } from "@/lib/audit"
 import { isValidUUID } from "@/lib/lead-brain"
 import { AI_EDITABLE_LOAN_FIELDS, type AiEditableLoanField } from "@/lib/llm"
@@ -11,7 +12,7 @@ import { AI_EDITABLE_LOAN_FIELDS, type AiEditableLoanField } from "@/lib/llm"
 // time (defense in depth — never trust a stored value as a safe SQL
 // identifier just because it passed validation once already).
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const session = await requireRole(req, ["admin", "agent", "branch_manager"])
+  const session = await requireModuleOrRole(req, "loans", ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const { id } = await params
@@ -26,6 +27,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const reqRes = await query(`SELECT * FROM loan_application_edit_requests WHERE id = $1`, [id])
   if (reqRes.rows.length === 0) return NextResponse.json({ error: "edit request not found" }, { status: 404 })
   const editRequest = reqRes.rows[0]
+
+  const branchId = sessionBranchId(session)
+  if (branchId) {
+    const loanCheck = await query(`SELECT branch_id FROM loan_applications WHERE id = $1 LIMIT 1`, [editRequest.loan_application_id])
+    if (loanCheck.rows.length === 0 || loanCheck.rows[0].branch_id !== branchId) {
+      return NextResponse.json({ error: "edit request not found in your branch" }, { status: 404 })
+    }
+  }
 
   if (editRequest.status !== "pending") {
     return NextResponse.json({ error: `already ${editRequest.status} — cannot review again` }, { status: 409 })

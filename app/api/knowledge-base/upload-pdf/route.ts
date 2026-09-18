@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
-import { requireRole } from "@/lib/auth"
+import { requireModuleOrRole } from "@/lib/auth"
 import { logAudit } from "@/lib/audit"
 import { extractPdfText, chunkText } from "@/lib/kb-ingest"
 
@@ -9,7 +9,7 @@ const MAX_PDF_BYTES = 15 * 1024 * 1024 // 15MB — plenty for a policy/rate-card
 // POST — extract text from a PDF and insert one knowledge_base row per
 // chunk (a whole document isn't one atomic fact — smaller chunks search better).
 export async function POST(req: NextRequest) {
-  const session = await requireRole(req, ["admin", "agent", "branch_manager"])
+  const session = await requireModuleOrRole(req, "knowledge", ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const formData = await req.formData().catch(() => null)

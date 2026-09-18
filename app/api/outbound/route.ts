@@ -2,13 +2,13 @@ import { NextRequest, NextResponse } from "next/server"
 import { apiError } from "@/lib/api-error"
 import { db } from "@/lib/db"
 import { makeCall } from "@/lib/exotel"
-import { requireRole } from "@/lib/auth"
+import { requireModuleOrRole } from "@/lib/auth"
 import { sessionBranchId, checkQuota, recordUsage } from "@/lib/branches"
 import { checkCallCompliance } from "@/lib/compliance"
 import { normalizePhone } from "@/lib/phone"
 
 export async function GET(req: NextRequest) {
-  const session = await requireRole(req, ["admin", "agent", "viewer", "branch_manager"])
+  const session = await requireModuleOrRole(req, "voice", ["admin", "agent", "viewer", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const branchId = sessionBranchId(session)
   let q = db.from("outbound_queue").select("*")
@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   // Both modes below either queue contacts for a real outbound call campaign
   // or trigger one immediately — same privilege level as /api/calls POST.
-  const session = await requireRole(req, ["admin", "agent", "branch_manager"])
+  const session = await requireModuleOrRole(req, "voice", ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const body = await req.json()
   // Multi-branch: everything queued/called here belongs to the session's

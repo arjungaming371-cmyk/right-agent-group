@@ -85,6 +85,22 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Verify existing target email to prevent cross-branch overwrites or privilege escalation
+  const existingTarget = await query(`SELECT role, branch_id FROM allowed_emails WHERE lower(email) = $1 LIMIT 1`, [email])
+  if (existingTarget.rowCount) {
+    const targetBranch = existingTarget.rows[0].branch_id
+    const targetRole = existingTarget.rows[0].role
+    const targetBaseRole = await getBaseRole(targetRole)
+    if (isBM) {
+      if (targetBranch && targetBranch !== session.branchId) {
+        return NextResponse.json({ error: "Cannot overwrite an account belonging to another branch." }, { status: 403 })
+      }
+      if (targetBaseRole === "admin" || targetBaseRole === "developer" || targetBaseRole === "branch_manager") {
+        return NextResponse.json({ error: "Cannot modify this account." }, { status: 403 })
+      }
+    }
+  }
+
   const displayName = String(body?.displayName || body?.display_name || "").trim()
 
   // Multi-branch binding

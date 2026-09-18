@@ -2,12 +2,12 @@ import { NextRequest, NextResponse } from "next/server"
 import { apiError } from "@/lib/api-error"
 import { db } from "@/lib/db"
 import { makeCall } from "@/lib/exotel"
-import { requireRole } from "@/lib/auth"
+import { requireModuleOrRole } from "@/lib/auth"
 import { sessionBranchId, checkQuota, recordUsage } from "@/lib/branches"
 import { checkCallCompliance } from "@/lib/compliance"
 
 export async function GET(req: NextRequest) {
-  const session = await requireRole(req, ["admin", "agent", "viewer", "branch_manager"])
+  const session = await requireModuleOrRole(req, "voice", ["admin", "agent", "viewer", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   // Branch-scoped users only see their branch's calls (admin sees all).
   const branchId = sessionBranchId(session)
@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await requireRole(req, ["admin", "agent", "branch_manager"])
+  const session = await requireModuleOrRole(req, "voice", ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const { leadId, phone, language, instructions } = await req.json()
   if (!phone) return NextResponse.json({ error: "phone required" }, { status: 400 })

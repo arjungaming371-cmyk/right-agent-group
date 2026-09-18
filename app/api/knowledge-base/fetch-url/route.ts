@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
-import { requireRole } from "@/lib/auth"
+import { requireModuleOrRole } from "@/lib/auth"
 import { logAudit } from "@/lib/audit"
 import { fetchAndExtractUrl } from "@/lib/kb-ingest"
 
@@ -9,7 +9,7 @@ import { fetchAndExtractUrl } from "@/lib/kb-ingest"
 // dashboard's "Refresh" button) updates the existing entry in place
 // instead of creating a duplicate.
 export async function POST(req: NextRequest) {
-  const session = await requireRole(req, ["admin", "agent", "branch_manager"])
+  const session = await requireModuleOrRole(req, "knowledge", ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const body = await req.json().catch(() => ({}))

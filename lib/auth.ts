@@ -169,9 +169,68 @@ export async function getSessionFromRequest(req: Request): Promise<Session | nul
   return verifySessionToken(match ? decodeURIComponent(match[1]) : null)
 }
 
+export type LiveSession = Session & { allowedModules?: string[] | null }
+
+/**
+ * Re-validates session against DB in real-time.
+ * If user is deleted from allowed_emails, returns null (revokes session instantly).
+ * Hydrates live role, branchId, and allowed_modules from DB.
+ */
+export async function getLiveSession(req: Request): Promise<LiveSession | null> {
+  const session = await getSessionFromRequest(req)
+  if (!session) return null
+
+  const adminEmail = (process.env.ADMIN_EMAIL || "").toLowerCase()
+  const isSystemAdmin = adminEmail !== "" && session.email.toLowerCase() === adminEmail
+
+  if (isSystemAdmin) {
+    return { ...session, allowedModules: null }
+  }
+
+  try {
+    const { query } = await import("@/lib/db")
+    const r = await query(
+      `SELECT role, org_id, branch_id, allowed_modules FROM allowed_emails WHERE lower(email) = $1 LIMIT 1`,
+      [session.email.toLowerCase()]
+    )
+    if (r.rowCount === 0) {
+      // User was removed from allowed_emails — invalidate session immediately
+      return null
+    }
+    const dbRow = r.rows[0]
+    session.branchId = dbRow.branch_id ?? session.branchId
+    session.orgId = dbRow.org_id ?? session.orgId
+
+    let liveRole: Role | null = null
+    const rawRole = dbRow.role || "agent"
+    if (["admin", "agent", "viewer", "developer", "branch_manager"].includes(rawRole)) {
+      liveRole = rawRole as Role
+    } else {
+      try {
+        const cf = await query(`SELECT config FROM form_configs WHERE id = 'custom_roles_config'`)
+        if (cf.rowCount && cf.rows[0]?.config?.roles) {
+          const found = cf.rows[0].config.roles.find((cr: any) => cr.id === rawRole)
+          if (found?.baseRole) liveRole = found.baseRole as Role
+        }
+      } catch {}
+      if (!liveRole) liveRole = "agent"
+    }
+    session.role = liveRole
+
+    const allowedModules = dbRow.allowed_modules !== null && dbRow.allowed_modules !== undefined
+      ? (Array.isArray(dbRow.allowed_modules) ? dbRow.allowed_modules : [])
+      : null
+
+    return { ...session, allowedModules }
+  } catch (err) {
+    console.error("getLiveSession DB verification error:", err)
+    return session
+  }
+}
+
 /** Reads the session and checks it has one of the allowed roles. Returns null if either check fails. */
 export async function requireRole(req: Request, roles: Role[]): Promise<Session | null> {
-  const session = await getSessionFromRequest(req)
+  const session = await getLiveSession(req)
   if (!session) return null
   if (session.role === "developer") return session
   if (!roles.includes(session.role)) return null
@@ -187,23 +246,13 @@ export async function requireModuleOrRole(
   moduleKey: string,
   allowedRoles: Role[]
 ): Promise<Session | null> {
-  const session = await getSessionFromRequest(req)
+  const session = await getLiveSession(req)
   if (!session) return null
   if (session.role === "developer") return session
 
-  try {
-    const { query } = await import("@/lib/db")
-    const res = await query(
-      `SELECT allowed_modules FROM allowed_emails WHERE lower(email) = $1 LIMIT 1`,
-      [session.email.toLowerCase()]
-    )
-    if (res.rows.length > 0 && res.rows[0].allowed_modules !== null && res.rows[0].allowed_modules !== undefined) {
-      const allowedModules: string[] = Array.isArray(res.rows[0].allowed_modules) ? res.rows[0].allowed_modules : []
-      if (allowedModules.includes(moduleKey)) return session
-      return null
-    }
-  } catch (err) {
-    console.error("requireModuleOrRole DB error:", err)
+  if (session.allowedModules !== null && session.allowedModules !== undefined) {
+    if (session.allowedModules.includes(moduleKey)) return session
+    return null
   }
 
   if (allowedRoles.includes(session.role)) return session

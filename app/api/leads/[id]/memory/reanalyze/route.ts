@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
-import { requireRole } from "@/lib/auth"
+import { requireModuleOrRole } from "@/lib/auth"
+import { sessionBranchId } from "@/lib/branches"
 import { logAudit } from "@/lib/audit"
 import { analyzeLeadTranscript } from "@/lib/llm"
 import { isValidUUID, mergeFacts } from "@/lib/lead-brain"
@@ -11,14 +12,18 @@ import { isValidUUID, mergeFacts } from "@/lib/lead-brain"
 // real (awaited) Groq call here is fine — the live call/WhatsApp path
 // never hits this route.
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const session = await requireRole(req, ["admin", "agent", "branch_manager"])
+  const session = await requireModuleOrRole(req, "leads", ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const { id } = await params
   if (!isValidUUID(id)) return NextResponse.json({ error: "invalid lead id" }, { status: 400 })
 
-  const leadRes = await query(`SELECT id FROM leads WHERE id = $1`, [id])
+  const branchId = sessionBranchId(session)
+  const leadRes = await query(`SELECT id, branch_id FROM leads WHERE id = $1`, [id])
   if (leadRes.rows.length === 0) return NextResponse.json({ error: "lead not found" }, { status: 404 })
+  if (branchId && leadRes.rows[0].branch_id !== branchId) {
+    return NextResponse.json({ error: "lead not found in your branch" }, { status: 404 })
+  }
 
   const [callsRes, waRes, memRes] = await Promise.all([
     query(`SELECT created_at, transcript FROM voice_calls WHERE lead_id = $1 AND transcript IS NOT NULL ORDER BY created_at ASC`, [id]),

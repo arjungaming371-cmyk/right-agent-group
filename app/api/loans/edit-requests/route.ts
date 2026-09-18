@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
-import { requireRole } from "@/lib/auth"
+import { requireModuleOrRole } from "@/lib/auth"
+import { sessionBranchId } from "@/lib/branches"
 
 // GET — list edit requests, newest first. Defaults to pending only (what the
 // dashboard's approval queue needs); ?status=all|approved|rejected for the
 // history view on a given application.
 export async function GET(req: NextRequest) {
-  const session = await requireRole(req, ["admin", "agent", "branch_manager"])
+  const session = await requireModuleOrRole(req, "loans", ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
+  const branchId = sessionBranchId(session)
   const { searchParams } = new URL(req.url)
   const status = searchParams.get("status") || "pending"
   const applicationId = searchParams.get("applicationId")
@@ -17,6 +19,11 @@ export async function GET(req: NextRequest) {
   const params: any[] = []
   let i = 1
 
+  if (branchId) {
+    where.push(`la.branch_id = $${i}`)
+    params.push(branchId)
+    i++
+  }
   if (status !== "all") {
     where.push(`er.status = $${i}`)
     params.push(status)
