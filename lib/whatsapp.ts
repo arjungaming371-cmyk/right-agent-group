@@ -47,8 +47,8 @@ export async function branchWhatsAppCtx(branchId: string | null | undefined): Pr
 
 /** Per-send credentials: the branch's WABA when it has one, else the env default. */
 function credsFor(branch?: BranchWhatsAppCtx): { token: string; phoneId: string; configured: boolean } {
-  const token = branch?.whatsappToken || TOKEN
-  const phoneId = branch?.whatsappPhoneNumberId || PHONE_ID
+  const token = branch?.whatsappToken || process.env.WHATSAPP_TOKEN || TOKEN
+  const phoneId = branch?.whatsappPhoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID || PHONE_ID
   return { token, phoneId, configured: !!(token && phoneId) }
 }
 

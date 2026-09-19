@@ -365,15 +365,29 @@ function llmEndpoint(): string {
 }
 
 function llmHeaders(): Record<string, string> {
-  return LLM_PROVIDER === "sarvam" ? SARVAM_HEADERS : GROQ_HEADERS
+  const groqKey = process.env.GROQ_API_KEY || GROQ_API_KEY
+  const sarvamKey = process.env.SARVAM_API_KEY || SARVAM_API_KEY
+  if (LLM_PROVIDER === "sarvam") {
+    return {
+      "Content-Type": "application/json",
+      "api-subscription-key": sarvamKey,
+      Authorization: `Bearer ${sarvamKey}`,
+    }
+  }
+  return {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${groqKey}`,
+  }
 }
 
 function assertLlmConfigured(): void {
+  const groqKey = process.env.GROQ_API_KEY || GROQ_API_KEY
+  const sarvamKey = process.env.SARVAM_API_KEY || SARVAM_API_KEY
   if (LLM_PROVIDER === "sarvam") {
-    if (!SARVAM_API_KEY) throw new Error("LLM_PROVIDER=sarvam but SARVAM_API_KEY is not set — the AI brain cannot run without it")
+    if (!sarvamKey) throw new Error("LLM_PROVIDER=sarvam but SARVAM_API_KEY is not set — the AI brain cannot run without it")
     return
   }
-  if (!GROQ_API_KEY) throw new Error("GROQ_API_KEY is not set — the AI brain cannot run without it")
+  if (!groqKey) throw new Error("GROQ_API_KEY is not set — the AI brain cannot run without it")
 }
 
 // Back-compat alias — used by call sites that predate the provider switch.
@@ -388,6 +402,10 @@ async function groqChatRequest(messages: ChatMessage[], opts: CompletionOpts, si
   })
   if (!res.ok) throw new Error(`${LLM_PROVIDER} HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`)
   const data = await res.json()
+  const tokens = data?.usage?.total_tokens
+  if (tokens) {
+    import("./system-keys").then(m => m.recordTokenUsage(LLM_PROVIDER, tokens)).catch(() => {})
+  }
   return data?.choices?.[0]?.message?.content || ""
 }
 

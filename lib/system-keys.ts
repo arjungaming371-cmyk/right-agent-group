@@ -23,6 +23,22 @@ export const ALL_SYSTEM_KEYS = [
 
 export type SystemKeyName = typeof ALL_SYSTEM_KEYS[number]
 
+export async function initSystemKeys(): Promise<void> {
+  try {
+    const res = await query(`SELECT key_name, key_value FROM system_api_keys`)
+    for (const row of res.rows) {
+      if (row.key_value) {
+        _keyCache[row.key_name] = row.key_value
+        process.env[row.key_name] = row.key_value
+      }
+    }
+    _cacheTime = Date.now()
+  } catch {}
+}
+
+// Pre-hydrate on startup
+initSystemKeys().catch(() => {})
+
 /**
  * Load system key from database, falling back to process.env.
  */
@@ -71,6 +87,7 @@ export async function setSystemKeys(keys: Record<string, string>, userEmail: str
     )
 
     _keyCache[keyName] = keyValue.trim()
+    process.env[keyName] = keyValue.trim()
   }
 
   // Log audit

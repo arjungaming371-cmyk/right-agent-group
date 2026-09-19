@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getSessionFromRequest } from "@/lib/auth"
+import { getLiveSession } from "@/lib/auth"
 import { query } from "@/lib/db"
 
 export const dynamic = "force-dynamic"
 
 export async function GET(req: NextRequest) {
-  const session = await getSessionFromRequest(req)
+  const session = await getLiveSession(req)
   if (!session) return NextResponse.json({ email: null, role: null }, { status: 401 })
 
   let allowedModules: string[] | null = null

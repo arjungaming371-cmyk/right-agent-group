@@ -39,8 +39,8 @@ export async function branchInstagramCtx(branchId: string | null | undefined): P
 }
 
 function credsFor(branch?: BranchInstagramCtx): { token: string; accountId: string; configured: boolean } {
-  const token = branch?.instagramToken || TOKEN
-  const accountId = branch?.instagramAccountId || ACCOUNT_ID
+  const token = branch?.instagramToken || process.env.INSTAGRAM_ACCESS_TOKEN || TOKEN
+  const accountId = branch?.instagramAccountId || process.env.INSTAGRAM_ACCOUNT_ID || ACCOUNT_ID
   return { token, accountId, configured: !!(token && accountId) }
 }
 
