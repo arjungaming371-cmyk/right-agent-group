@@ -19,6 +19,7 @@ export const ALL_MODULES: ModuleOption[] = [
   // Engagement
   { key: "voice", label: "Voice Logs", section: "Engagement", description: "Voice call recordings, transcripts, & durations" },
   { key: "whatsapp", label: "WhatsApp Chat", section: "Engagement", description: "Live customer chat & automated messages" },
+  { key: "instagram", label: "Instagram Chat", section: "Engagement", description: "Direct messages & post comment auto-replies" },
   { key: "comms", label: "Communication Log", section: "Engagement", description: "Combined automated activity log" },
 
   // System

@@ -4,7 +4,7 @@ import dynamic from "next/dynamic"
 import {
   Users, FileText, Phone, MessageCircle, Activity, ShieldCheck, UploadCloud,
   ScrollText, LogOut, Mic, BarChart3, UserCog, Search, Menu, X, BookOpen,
-  Building2, Sparkles, type LucideIcon,
+  Building2, Sparkles, Instagram, type LucideIcon,
 } from "lucide-react"
 import { ToastProvider } from "../ui/toast"
 import CommandPalette from "../ui/command-palette"
@@ -12,6 +12,7 @@ import LeadsView    from "./leads-view"
 import LoanAppsView from "./loan-apps-view"
 import VoiceLogsView from "./voice-logs-view"
 import WhatsAppView  from "./whatsapp-view"
+import InstagramView from "./instagram-view"
 import CommLogView   from "./comm-log-view"
 import SecurityView  from "./security-view"
 import UploadView    from "./upload-view"
@@ -34,7 +35,7 @@ import BranchesView from "./branches-view"
 import VoiceAssistant from "./voice-assistant"
 import { usePolling } from "@/lib/use-poll"
 
-export type ViewKey = "leads" | "loans" | "voice" | "whatsapp" | "comms" | "calendar" | "security" | "upload" | "script" | "knowledge" | "analytics" | "branches" | "dev-logs"
+export type ViewKey = "leads" | "loans" | "voice" | "whatsapp" | "instagram" | "comms" | "calendar" | "security" | "upload" | "script" | "knowledge" | "analytics" | "branches" | "dev-logs"
 export type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
 
 const ROLE_LABEL: Record<Role, string> = { admin: "Administrator", agent: "Loan Officer", viewer: "Viewer", developer: "Administrator", branch_manager: "Branch Manager" }
@@ -58,6 +59,7 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { key: "voice",    label: "Voice Logs",        icon: Phone,          roles: ["admin", "agent", "viewer", "branch_manager"] },
       { key: "whatsapp", label: "WhatsApp Chat",     icon: MessageCircle,  roles: ["admin", "agent", "viewer", "branch_manager"] },
+      { key: "instagram",label: "Instagram Chat",    icon: Instagram,      roles: ["admin", "agent", "viewer", "branch_manager"] },
       { key: "comms",    label: "Communication Log", icon: Activity,       roles: ["admin", "agent", "viewer", "branch_manager"] },
     ],
   },
@@ -84,6 +86,7 @@ const VIEW_TITLES: Record<ViewKey, { title: string; sub: string }> = {
   loans:    { title: "Loan Applications",  sub: "Incoming home & business loan enquiries" },
   voice:    { title: "Voice Logs",         sub: "Voice bot call activity and outcomes" },
   whatsapp: { title: "WhatsApp Chat",      sub: "Live customer conversations" },
+  instagram:{ title: "Instagram Chat",     sub: "Direct messages and post comment auto-replies" },
   comms:    { title: "Communication Log",  sub: "Automated calls and WhatsApp activity" },
   calendar: { title: "Calendar",           sub: "Upcoming calls and follow-up callbacks" },
   security: { title: "Security",           sub: "Access control and audit policy" },
@@ -476,6 +479,7 @@ export default function DashboardShell() {
           {view === "loans"    && <LoanAppsView role={role} initialSearch={seedSearch?.view === "loans" ? seedSearch.q : undefined} />}
           {view === "voice"    && <VoiceLogsView role={role} />}
           {view === "whatsapp" && <WhatsAppView role={role} />}
+          {view === "instagram" && <InstagramView initialSearch={seedSearch?.view === "instagram" ? seedSearch.q : undefined} />}
           {view === "comms"    && <CommLogView />}
           {view === "calendar" && <CalendarView role={role} />}
           {view === "security" && <SecurityView />}
