@@ -161,6 +161,7 @@ function AccessPageInner() {
 
     setBusy(true)
     try {
+      const finalModules = newAllowedModules === null ? ALL_MODULES.map(m => m.key) : newAllowedModules
       const res = await fetch("/api/allowed-emails", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -170,7 +171,7 @@ function AccessPageInner() {
           role: roleTitle,
           baseRole: baseRole,
           branch_id: baseRole === "branch_manager" ? newBranch : newBranch || undefined,
-          allowed_modules: newAllowedModules,
+          allowed_modules: finalModules,
         }),
       })
       const data = await res.json()
@@ -195,7 +196,7 @@ function AccessPageInner() {
     setEditName(profile?.displayName || member.display_name || "")
     setEditRoleTitle(member.role || "Loan Officer")
     setEditBranch(member.branch_id || "")
-    setEditAllowedModules(member.allowed_modules ?? null)
+    setEditAllowedModules(member.allowed_modules ?? ALL_MODULES.map(m => m.key))
   }
 
   async function saveEdit(e: React.FormEvent) {
@@ -208,6 +209,7 @@ function AccessPageInner() {
     const baseRole: Role = lowerRole === "admin" ? "admin" : lowerRole.includes("branch manager") ? "branch_manager" : "agent"
 
     try {
+      const finalModules = editAllowedModules === null ? ALL_MODULES.map(m => m.key) : editAllowedModules
       const res = await fetch("/api/allowed-emails", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -217,7 +219,7 @@ function AccessPageInner() {
           role: roleTitle,
           baseRole: baseRole,
           branch_id: editBranch || null,
-          allowed_modules: editAllowedModules,
+          allowed_modules: finalModules,
         }),
       })
       const data = await res.json()

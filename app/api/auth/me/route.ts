@@ -9,16 +9,21 @@ export async function GET(req: NextRequest) {
   if (!session) return NextResponse.json({ email: null, role: null }, { status: 401 })
 
   let allowedModules: string[] | null = null
+  let roleTitle: string = session.role
   try {
-    const res = await query(`SELECT allowed_modules FROM allowed_emails WHERE lower(email) = $1 LIMIT 1`, [session.email.toLowerCase()])
-    if (res.rows.length > 0 && Array.isArray(res.rows[0].allowed_modules)) {
-      allowedModules = res.rows[0].allowed_modules
+    const res = await query(`SELECT role, allowed_modules FROM allowed_emails WHERE lower(email) = $1 LIMIT 1`, [session.email.toLowerCase()])
+    if (res.rows.length > 0) {
+      if (res.rows[0].role) roleTitle = res.rows[0].role
+      if (Array.isArray(res.rows[0].allowed_modules)) {
+        allowedModules = res.rows[0].allowed_modules
+      }
     }
   } catch {}
 
   return NextResponse.json({
     email: session.email,
     role: session.role,
+    roleTitle,
     orgId: session.orgId ?? null,
     branchId: session.branchId ?? null,
     allowedModules,

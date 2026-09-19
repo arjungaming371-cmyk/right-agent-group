@@ -42,9 +42,8 @@ const ROLE_LABEL: Record<Role, string> = { admin: "Administrator", agent: "Loan 
 type NavItem = { key: ViewKey; label: string; icon: LucideIcon; roles: Role[] }
 type NavSection = { title: string; items: NavItem[] }
 
-// roles: who sees this nav item. Agents/Viewers get the day-to-day working
-// views; Security/Upload/Script are admin-only (real system configuration,
-// not something a teammate should be able to touch or even see).
+// roles: who sees this nav item. Module allotment filtering (userAllowedModules)
+// governs granular permissions; NAV_SECTIONS roles list the default allowed base roles.
 const NAV_SECTIONS: NavSection[] = [
   {
     title: "Overview",
@@ -60,19 +59,15 @@ const NAV_SECTIONS: NavSection[] = [
       { key: "voice",    label: "Voice Logs",        icon: Phone,          roles: ["admin", "agent", "viewer", "branch_manager"] },
       { key: "whatsapp", label: "WhatsApp Chat",     icon: MessageCircle,  roles: ["admin", "agent", "viewer", "branch_manager"] },
       { key: "comms",    label: "Communication Log", icon: Activity,       roles: ["admin", "agent", "viewer", "branch_manager"] },
-      // Calendar view intentionally not linked from the nav (hidden from the
-      // UI per request) — the feature/component/API routes stay fully
-      // intact, "calendar" just isn't in this list so nothing navigates
-      // there. See components/dashboard/calendar-view.tsx.
     ],
   },
   {
     title: "System",
     items: [
-      { key: "security", label: "Security",       icon: ShieldCheck,  roles: ["admin"] },
-      { key: "upload",   label: "Upload & Data",  icon: UploadCloud,  roles: ["admin"] },
-      { key: "script",   label: "Priya's Script", icon: ScrollText,   roles: ["admin"] },
-      { key: "knowledge",label: "Knowledge Base", icon: BookOpen,     roles: ["admin", "agent"] },
+      { key: "security", label: "Security",       icon: ShieldCheck,  roles: ["admin", "agent", "viewer", "branch_manager"] },
+      { key: "upload",   label: "Upload & Data",  icon: UploadCloud,  roles: ["admin", "agent", "viewer", "branch_manager"] },
+      { key: "script",   label: "Priya's Script", icon: ScrollText,   roles: ["admin", "agent", "viewer", "branch_manager"] },
+      { key: "knowledge",label: "Knowledge Base", icon: BookOpen,     roles: ["admin", "agent", "viewer", "branch_manager"] },
     ],
   },
   {
@@ -117,6 +112,7 @@ export default function DashboardShell() {
   const [counts, setCounts] = useState({ leads: 0, loans: 0, whatsapp: 0 })
   const [userEmail, setUserEmail] = useState("")
   const [role, setRole] = useState<Role>("viewer") // safest default until the real role loads
+  const [roleTitle, setRoleTitle] = useState("")
   const [userAllowedModules, setUserAllowedModules] = useState<string[] | null>(null)
   const [sessionBranchId, setSessionBranchId] = useState<string | null>(null)
   const [allBranches, setAllBranches] = useState<{ id: string; name: string; code: string }[]>([])
@@ -168,6 +164,7 @@ export default function DashboardShell() {
     fetch("/api/auth/me").then(r => r.json()).then(d => {
       setUserEmail(d.email || "")
       if (d.role) setRole(d.role)
+      if (d.roleTitle) setRoleTitle(d.roleTitle)
       if (Array.isArray(d.allowedModules)) setUserAllowedModules(d.allowedModules)
       setSessionBranchId(d.branchId ?? null)
       setCanSwitch(!!d.canSwitchBranch)
@@ -207,7 +204,7 @@ export default function DashboardShell() {
       const res = await fetch("/api/system/status")
       if (!res.ok) { setSystemOk(false); return }
       const d = await res.json()
-      setSystemOk(!!(d?.whatsapp?.running && d?.llm?.running && d?.db?.running && d?.website?.running))
+      setSystemOk(!!(d?.llm?.running && d?.db?.running && d?.website?.running))
     } catch {
       setSystemOk(false)
     }
@@ -404,7 +401,7 @@ export default function DashboardShell() {
               {initials}
             </div>
             <div className="min-w-0 flex-1 leading-tight">
-              <div className="text-[12.5px] font-semibold text-[var(--text-primary)]">{ROLE_LABEL[role]}</div>
+              <div className="text-[12.5px] font-semibold text-[var(--text-primary)]">{roleTitle || ROLE_LABEL[role] || role}</div>
               <div className="truncate text-[10.5px] text-[var(--text-muted)]">{userEmail || "…"}</div>
             </div>
           </button>
