@@ -25,7 +25,7 @@ async function getBaseRole(roleId: string): Promise<Role> {
 // unauthenticated calls, but we verify the role again here — never trust a
 // single layer for an access-control endpoint.
 export async function GET(req: NextRequest) {
-  const session = await requireRole(req, ["admin", "branch_manager"])
+  const session = await requireRole(req, ["admin", "developer"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   // Admin sees all branches; branch_manager sees only teammates in their own branch.
@@ -55,7 +55,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await requireRole(req, ["admin", "branch_manager"])
+  const session = await requireRole(req, ["admin", "developer"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   let body: any
@@ -193,7 +193,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const session = await requireRole(req, ["admin", "branch_manager"])
+  const session = await requireRole(req, ["admin", "developer"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   let body: any
@@ -279,7 +279,7 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const session = await requireRole(req, ["admin", "branch_manager"])
+  const session = await requireRole(req, ["admin", "developer"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const email = String(new URL(req.url).searchParams.get("email") || "").trim().toLowerCase()

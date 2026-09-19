@@ -23,7 +23,6 @@ export const ALL_MODULES: ModuleOption[] = [
   { key: "comms", label: "Communication Log", section: "Engagement", description: "Combined automated activity log" },
 
   // System
-  { key: "security", label: "Security", section: "System", description: "Access logs & security policies" },
   { key: "upload", label: "Upload & Data", section: "System", description: "Bulk CSV contact uploads & file data" },
   { key: "script", label: "Priya's Script", section: "System", description: "AI system prompts & call scripts" },
   { key: "knowledge", label: "Knowledge Base", section: "System", description: "Contextual facts repository" },

@@ -44,10 +44,24 @@ function timeAgo(dateStr: string) {
   return `${Math.floor(hrs / 24)}d ago`
 }
 
-export default function SecurityView() {
+type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
+
+export default function SecurityView({ role = "admin" }: { role?: Role }) {
   const toast = useToast()
   const [settings, setSettings] = useState<Setting[]>([])
   const [logs, setLogs] = useState<AuditLog[]>([])
+
+  if (role !== "admin" && role !== "developer") {
+    return (
+      <div style={{ padding: 40, background: "var(--bg-secondary)", borderRadius: 12, border: "1px solid var(--border)", textAlign: "center", color: "var(--accent-red)" }}>
+        <ShieldCheck size={40} style={{ margin: "0 auto 12px", opacity: 0.7 }} />
+        <div style={{ fontSize: 17, fontWeight: 700, color: "var(--text-primary)" }}>Access Denied</div>
+        <div style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 6 }}>
+          Security settings and System API Keys can only be accessed by Administrators.
+        </div>
+      </div>
+    )
+  }
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState<string | null>(null)
 

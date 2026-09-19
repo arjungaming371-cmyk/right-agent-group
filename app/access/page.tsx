@@ -103,12 +103,21 @@ function AccessPageInner() {
 
   const load = useCallback(async () => {
     try {
+      const meRes = await fetch("/api/auth/me").catch(() => null)
+      if (meRes && meRes.ok) {
+        const meData = await meRes.json()
+        if (meData.role !== "admin" && meData.role !== "developer") {
+          router.replace("/dashboard")
+          return
+        }
+      }
+
       const [emailRes, rolesRes] = await Promise.all([
         fetch("/api/allowed-emails"),
         fetch("/api/roles-config").catch(() => null),
       ])
 
-      if (emailRes.status === 401) {
+      if (emailRes.status === 401 || emailRes.status === 403) {
         router.replace("/dashboard")
         return
       }

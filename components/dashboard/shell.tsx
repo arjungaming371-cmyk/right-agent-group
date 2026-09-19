@@ -66,7 +66,7 @@ const NAV_SECTIONS: NavSection[] = [
   {
     title: "System",
     items: [
-      { key: "security", label: "Security",       icon: ShieldCheck,  roles: ["admin", "agent", "viewer", "branch_manager"] },
+      { key: "security", label: "Security",       icon: ShieldCheck,  roles: ["admin", "developer"] },
       { key: "upload",   label: "Upload & Data",  icon: UploadCloud,  roles: ["admin", "agent", "viewer", "branch_manager"] },
       { key: "script",   label: "Priya's Script", icon: ScrollText,   roles: ["admin", "agent", "viewer", "branch_manager"] },
       { key: "knowledge",label: "Knowledge Base", icon: BookOpen,     roles: ["admin", "agent", "viewer", "branch_manager"] },
@@ -482,7 +482,7 @@ export default function DashboardShell() {
           {view === "instagram" && <InstagramView initialSearch={seedSearch?.view === "instagram" ? seedSearch.q : undefined} />}
           {view === "comms"    && <CommLogView />}
           {view === "calendar" && <CalendarView role={role} />}
-          {view === "security" && <SecurityView />}
+          {view === "security" && <SecurityView role={role} />}
           {view === "upload"   && <UploadView />}
           {view === "script"   && <ScriptView />}
           {view === "branches" && <BranchesView role={role} branchId={sessionBranchId} />}
