@@ -2,6 +2,7 @@
 // the code paths that ENFORCE them. Cached for 30s per server instance so
 // hot paths (login, recording proxy) don't pay a DB round-trip every hit.
 
+import crypto from "crypto"
 import { query } from "./db"
 
 export type SecurityFlag =
@@ -46,4 +47,18 @@ export function ipAllowed(clientIp: string): boolean {
   // Local/dev addresses always pass — enforcement targets the public tunnel.
   if (clientIp === "127.0.0.1" || clientIp === "::1" || clientIp === "unknown") return true
   return entries.some((e) => (e.endsWith(".") ? clientIp.startsWith(e) : clientIp === e))
+}
+
+/**
+ * Constant-time string equality for secret comparisons (service API keys,
+ * webhook verify tokens). A plain === leaks the secret byte-by-byte through
+ * timing; for low-value internal keys the risk is theoretical, but the fix
+ * is one function — so every secret compare goes through this.
+ * Length-mismatch fast path is safe: lengths are public, contents are not.
+ */
+export function safeEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a || "")
+  const bb = Buffer.from(b || "")
+  if (ab.length !== bb.length) return false
+  return crypto.timingSafeEqual(ab, bb)
 }

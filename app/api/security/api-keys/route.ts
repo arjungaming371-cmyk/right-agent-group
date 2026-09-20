@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/api-error"
 import { NextRequest, NextResponse } from "next/server"
 import { getSystemKeysStatus, setSystemKeys, getTokenUsageStats } from "@/lib/system-keys"
 import { requireRole } from "@/lib/auth"
@@ -11,7 +12,7 @@ export async function GET(req: NextRequest) {
     const usage = await getTokenUsageStats()
     return NextResponse.json({ status, usage })
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+    return apiError(e)
   }
 }
 
@@ -29,6 +30,6 @@ export async function POST(req: NextRequest) {
     const updatedStatus = await getSystemKeysStatus()
     return NextResponse.json({ ok: true, status: updatedStatus })
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+    return apiError(e)
   }
 }

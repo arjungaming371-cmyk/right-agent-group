@@ -70,6 +70,21 @@ function ipAllowed(clientIp: string): boolean {
   return entries.some((e) => (e.endsWith(".") ? clientIp.startsWith(e) : clientIp === e))
 }
 
+/**
+ * SECURITY (2026-09 fix): pick the client IP from TRUSTED proxy headers.
+ * nginx sets X-Real-IP to the actual socket address; with
+ * $proxy_add_x_forwarded_for the FIRST X-Forwarded-For entry is whatever the
+ * CLIENT typed (spoofable — an attacker sent "X-Forwarded-For: 1.2.3.4" and
+ * passed a previously-allowlisted IP check). Fall back to the LAST XFF entry,
+ * which is the address our own trusted proxy appended.
+ */
+function trustedClientIp(req: NextRequest): string {
+  const realIp = (req.headers.get("x-real-ip") || "").trim()
+  if (realIp) return realIp
+  const xff = (req.headers.get("x-forwarded-for") || "").split(",").map((s) => s.trim()).filter(Boolean)
+  return xff.length ? xff[xff.length - 1] : ""
+}
+
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
 
@@ -83,8 +98,7 @@ export async function middleware(req: NextRequest) {
   // Console (session-protected) surface only — webhooks and the customer
   // form above are never IP-restricted.
   if (await ipAllowlistEnabled(req.nextUrl.origin)) {
-    const clientIp = (req.headers.get("x-forwarded-for") || "").split(",")[0].trim()
-    if (!ipAllowed(clientIp)) {
+    if (!ipAllowed(trustedClientIp(req))) {
       return new NextResponse("Access restricted to approved network ranges.", { status: 403 })
     }
   }

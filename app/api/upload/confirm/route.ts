@@ -25,7 +25,11 @@ export async function POST(req: NextRequest) {
 
   for (const leadId of leadIds) {
     try {
-      const { data: lead } = await db.from("leads").select("*").eq("id", leadId).single()
+      // 2026-09 fix (cross-branch IDOR): branch-bound staff can only trigger
+      // calls for leads INSIDE their branch — the old fetch matched any id.
+      let leadQuery = db.from("leads").select("*").eq("id", leadId)
+      if (branchId) leadQuery = leadQuery.eq("branch_id", branchId)
+      const { data: lead } = await leadQuery.maybeSingle()
       if (!lead || !lead.phone) { failed++; continue }
 
       // Same compliance gate app/api/outbound/process/route.ts already
@@ -63,7 +67,9 @@ export async function POST(req: NextRequest) {
   }
 
   if (uploadId) {
-    await db.from("uploaded_files").update({ status: "done", processed: called }).eq("id", uploadId)
+    let upQuery = db.from("uploaded_files").update({ status: "done", processed: called }).eq("id", uploadId)
+    if (branchId) upQuery = upQuery.eq("branch_id", branchId)
+    await upQuery
   }
 
   return NextResponse.json({ ok: true, called, failed, skipped })

@@ -18,5 +18,9 @@ export function phoneLast10(raw: string): string {
   return String(raw || "").replace(/\D/g, "").slice(-10)
 }
 
-/** SQL fragment matching a leads.phone column against a $N last-10 param. */
-export const PHONE_MATCH_SQL = `regexp_replace(phone, '\\D', '', 'g') LIKE '%' || $1`
+/** SQL fragment matching a leads.phone column against a $N last-10 param.
+ *  SECURITY: exact last-10 equality. The old `LIKE '%' || $1` form matched
+ *  EVERY row when $1 was '' (unparseable phone → phoneLast10 → ''), which let
+ *  one malformed POST overwrite an arbitrary lead. NULLIF($1,'') makes the
+ *  empty parameter match nothing. */
+export const PHONE_MATCH_SQL = `right(regexp_replace(phone, '\\D', '', 'g'), 10) = NULLIF($1, '')`

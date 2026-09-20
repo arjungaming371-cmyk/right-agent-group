@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/api-error"
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
 import { requireRole } from "@/lib/auth"
@@ -56,7 +57,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     if (!employee) return NextResponse.json({ error: "not found" }, { status: 404 })
     return NextResponse.json(employee)
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+    return apiError(e)
   }
 }
 
@@ -70,6 +71,6 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
     await query(`UPDATE ai_employees SET is_active = false, updated_at = now() WHERE id = $1`, [id])
     return NextResponse.json({ ok: true })
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+    return apiError(e)
   }
 }

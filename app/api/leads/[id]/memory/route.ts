@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { query } from "@/lib/db"
+import pool, { query } from "@/lib/db"
 import { requireModuleOrRole } from "@/lib/auth"
 import { sessionBranchId } from "@/lib/branches"
 import { logAudit } from "@/lib/audit"
@@ -83,32 +83,52 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({ error: `invalid stage — must be one of: ${VALID_STAGES.join(", ")}` }, { status: 400 })
   }
 
-  const existingRes = await query(
-    `SELECT facts, locked_facts, summary, sentiment, sentiment_history, stage FROM lead_memory WHERE lead_id = $1`,
-    [id]
-  )
-  const existing = existingRes.rows[0] || { facts: {}, locked_facts: [], summary: "", sentiment: "neutral", sentiment_history: [], stage: "new" }
+  // 2026-09 fix (lost updates): this is a read-merge-write against the same
+  // row the background Lead Brain pipeline writes (lib/lead-brain.ts
+  // applyAnalysis). Without the per-lead advisory lock, a human edit landing
+  // between the pipeline's read and write got silently overwritten (and vice
+  // versa). hashtext($1) with the bare leadId matches the pipeline's key.
+  const client = await pool.connect()
+  let nextMemory: any
+  try {
+    await client.query("BEGIN")
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [id])
 
-  const nextFacts = { ...existing.facts }
-  const lockedSet = new Set<string>(existing.locked_facts || [])
-  if (factEdits) {
-    for (const [key, value] of Object.entries(factEdits)) {
-      nextFacts[key] = value
-      lockedSet.add(key)
+    const existingRes = await client.query(
+      `SELECT facts, locked_facts, summary, sentiment, sentiment_history, stage FROM lead_memory WHERE lead_id = $1`,
+      [id]
+    )
+    const existing = existingRes.rows[0] || { facts: {}, locked_facts: [], summary: "", sentiment: "neutral", sentiment_history: [], stage: "new" }
+
+    const nextFacts = { ...existing.facts }
+    const lockedSet = new Set<string>(existing.locked_facts || [])
+    if (factEdits) {
+      for (const [key, value] of Object.entries(factEdits)) {
+        nextFacts[key] = value
+        lockedSet.add(key)
+      }
     }
+    for (const key of unlockKeys) lockedSet.delete(key)
+
+    const nextSummary = summary !== undefined ? summary : existing.summary
+    const nextStage = stage !== undefined ? stage : existing.stage
+
+    await client.query(
+      `INSERT INTO lead_memory (lead_id, facts, locked_facts, summary, stage, updated_at)
+       VALUES ($1, $2::jsonb, $3, $4, $5, now())
+       ON CONFLICT (lead_id) DO UPDATE SET
+         facts = $2::jsonb, locked_facts = $3, summary = $4, stage = $5, updated_at = now()`,
+      [id, JSON.stringify(nextFacts), Array.from(lockedSet), nextSummary, nextStage]
+    )
+
+    await client.query("COMMIT")
+    nextMemory = { facts: nextFacts, locked_facts: Array.from(lockedSet), summary: nextSummary, stage: nextStage }
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {})
+    client.release()
+    throw e
   }
-  for (const key of unlockKeys) lockedSet.delete(key)
-
-  const nextSummary = summary !== undefined ? summary : existing.summary
-  const nextStage = stage !== undefined ? stage : existing.stage
-
-  await query(
-    `INSERT INTO lead_memory (lead_id, facts, locked_facts, summary, stage, updated_at)
-     VALUES ($1, $2::jsonb, $3, $4, $5, now())
-     ON CONFLICT (lead_id) DO UPDATE SET
-       facts = $2::jsonb, locked_facts = $3, summary = $4, stage = $5, updated_at = now()`,
-    [id, JSON.stringify(nextFacts), Array.from(lockedSet), nextSummary, nextStage]
-  )
+  client.release()
 
   logAudit("lead memory manually edited", session.email, {
     leadId: id,

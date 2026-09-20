@@ -85,11 +85,23 @@ export function chunkText(text: string, chunkSize = 1500): string[] {
 // fragile (nested tags, entities), so this uses cheerio for a real DOM
 // parse instead — strips script/style/nav/footer, keeps the rest.
 //
-// SSRF guard (2026-09 security pass): the URL comes from a logged-in user,
-// and the server this runs on often holds credentials / metadata endpoints
-// (169.254.169.254, localhost services, RFC1918 ranges). Block those before
-// any request goes out, and cap how much of the response we read.
+// SSRF guard (2026-09 security pass, hardened 2026-09-20): the URL comes
+// from a logged-in user, and the server this runs on often holds
+// credentials / metadata endpoints (169.254.169.254, localhost services,
+// RFC1918 ranges). Blocks:
+//   * literal private hostnames and dotted-quad private IPv4
+//   * NUMERIC-FORM IPv4 that the old dotted-regex missed — 2130706433,
+//     0x7f000001, 0177.0.0.1 are all 127.0.0.1 to the OS
+//   * hostnames whose DNS resolves to a private address (any record)
+//   * REDIRECT targets — redirects are followed MANUALLY so every hop is
+//     re-validated (redirect: "follow" would happily hop to 127.0.0.1)
+// Residual risk (documented): classic DNS-rebinding between our lookup and
+// fetch's own resolution is still theoretically possible; deploy-side
+// egress filtering is the complete control.
 // ---------------------------------------------------------------------------
+import { promises as dnsPromises } from "dns"
+import { isIP } from "net"
+
 const BLOCKED_HOSTNAMES = new Set([
   "localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]",
   "metadata.google.internal", "instance-data", "169.254.169.254",
@@ -113,6 +125,51 @@ function isPrivateIp(host: string): boolean {
     h.startsWith("fea") || h.startsWith("feb") || h.startsWith("fc") || h.startsWith("fd")
 }
 
+/** Canonicalize ANY IPv4 spelling (decimal/hex/octal, whole or per-octet)
+ *  to a dotted quad; null when the host is not an IPv4 literal. */
+function normalizeIPv4(host: string): string | null {
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return host
+  let n: number | null = null
+  if (/^\d+$/.test(host)) n = Number(host)
+  else if (/^0x[0-9a-f]+$/i.test(host)) n = parseInt(host.slice(2), 16)
+  if (n !== null && Number.isFinite(n) && n >= 0 && n <= 0xffffffff) {
+    return [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join(".")
+  }
+  const parts = host.split(".")
+  if (parts.length === 4 && parts.every((p) => /^(0[xX][0-9a-fA-F]+|0[0-7]*|\d+)$/.test(p))) {
+    const nums = parts.map((p) =>
+      /^0[xX]/.test(p) ? parseInt(p.slice(2), 16)
+      : p.length > 1 && p.startsWith("0") ? parseInt(p, 8)
+      : parseInt(p, 10)
+    )
+    if (nums.every((x) => Number.isFinite(x) && x >= 0 && x <= 255)) return nums.join(".")
+  }
+  return null
+}
+
+const BLOCKED_MSG = "That URL is not allowed — internal/private network addresses are blocked"
+
+async function assertPublicHost(host: string): Promise<void> {
+  const h = host.toLowerCase()
+  if (BLOCKED_HOSTNAMES.has(h) || h.endsWith(".localhost") || h.endsWith(".local") || h.endsWith(".internal")) {
+    throw new Error(BLOCKED_MSG)
+  }
+  const v4 = normalizeIPv4(h)
+  if (v4 && isPrivateIp(v4)) throw new Error(BLOCKED_MSG)
+  if (v4 || isIP(h)) return // literal IP — already judged above
+  // Hostname: resolve and refuse if ANY record points inside the network.
+  try {
+    const addrs = await dnsPromises.lookup(h, { all: true })
+    for (const a of addrs) {
+      if (isPrivateIp(a.address)) throw new Error(BLOCKED_MSG)
+    }
+    if (addrs.length === 0) throw new Error("Could not resolve that URL's host")
+  } catch (e: any) {
+    if (e?.message === BLOCKED_MSG || String(e?.message || "").includes("Could not resolve")) throw e
+    throw new Error("Could not resolve that URL's host")
+  }
+}
+
 export async function fetchAndExtractUrl(url: string): Promise<{ title: string; content: string }> {
   let parsed: URL
   try {
@@ -123,16 +180,40 @@ export async function fetchAndExtractUrl(url: string): Promise<{ title: string; 
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw new Error("Only http(s) URLs are supported")
   }
-  const host = parsed.hostname.toLowerCase()
-  if (BLOCKED_HOSTNAMES.has(host) || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal") || isPrivateIp(host)) {
-    throw new Error("That URL is not allowed — internal/private network addresses are blocked")
-  }
 
-  const res = await fetch(url, {
-    headers: { "User-Agent": "Mozilla/5.0 (compatible; RightAgentGroupBot/1.0)" },
-    signal: AbortSignal.timeout(15000),
-    redirect: "follow",
-  })
+  // Follow redirects MANUALLY so every hop gets the full SSRF check —
+  // redirect:"follow" would let a public URL 302 into 127.0.0.1.
+  let currentUrl = parsed
+  const headers = { "User-Agent": "Mozilla/5.0 (compatible; RightAgentGroupBot/1.0)" }
+  let res: Response | null = null
+
+  for (let hop = 0; hop < 5; hop++) {
+    await assertPublicHost(currentUrl.hostname)
+    const hopRes = await fetch(currentUrl, {
+      headers,
+      signal: AbortSignal.timeout(15000),
+      redirect: "manual",
+    })
+    if (hopRes.status >= 300 && hopRes.status < 400) {
+      const loc = hopRes.headers.get("location")
+      try { await hopRes.body?.cancel() } catch { /* stream already closed */ }
+      if (!loc) throw new Error(`Fetch failed: HTTP ${hopRes.status}`)
+      let next: URL
+      try {
+        next = new URL(loc, currentUrl)
+      } catch {
+        throw new Error("Invalid redirect target")
+      }
+      if (next.protocol !== "http:" && next.protocol !== "https:") {
+        throw new Error("Only http(s) URLs are supported")
+      }
+      currentUrl = next
+      continue
+    }
+    res = hopRes
+    break
+  }
+  if (!res) throw new Error("Too many redirects")
   if (!res.ok) throw new Error(`Fetch failed: HTTP ${res.status}`)
 
   // Read the body with a hard byte cap — a hostile/huge page must not be
@@ -158,7 +239,7 @@ export async function fetchAndExtractUrl(url: string): Promise<{ title: string; 
 
   const $ = cheerio.load(html)
   $("script, style, nav, footer, header, noscript, svg, iframe").remove()
-  const title = $("title").first().text().trim() || url
+  const title = $("title").first().text().trim() || currentUrl.href
   const bodyText = $("body").text().replace(/\s+/g, " ").trim()
   if (!bodyText) throw new Error("No readable text content found on that page")
 

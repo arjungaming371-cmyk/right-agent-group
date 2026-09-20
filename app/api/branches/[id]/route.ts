@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/api-error"
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
 import { requireRole } from "@/lib/auth"
@@ -103,7 +104,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     logAudit("branch updated", session!.email, { branch: branch!.code, fields: sets.map((s) => s.split(" ")[0]) })
     return NextResponse.json(safeBranch(res.rows[0] as BranchRow))
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+    return apiError(e)
   }
 }
 
@@ -118,6 +119,6 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
     logAudit("branch deleted", session!.email, { branch: branch!.code })
     return NextResponse.json({ ok: true })
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+    return apiError(e)
   }
 }

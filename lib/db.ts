@@ -134,6 +134,14 @@ class UpdateBuilder implements PromiseLike<{ data: any; error: any }> {
     }))
   }
 
+  /** Like single(), but 0 matching rows is data:null with NO error. */
+  maybeSingle() {
+    return this.exec().then((r) => ({
+      data: Array.isArray(r.data) ? r.data[0] ?? null : r.data,
+      error: r.error,
+    }))
+  }
+
   private async exec(): Promise<{ data: any; error: any }> {
     try {
       const cols = Object.keys(this.values).map(assertSafeIdentifier)
@@ -308,6 +316,14 @@ class SelectBuilder implements PromiseLike<{ data: any; error: any; count?: numb
   single() {
     this.wantSingle = true
     return this.exec()
+  }
+
+  /** Like single(), but 0 matching rows is data:null with NO error. */
+  maybeSingle() {
+    return this.exec().then((r) => ({
+      data: Array.isArray(r.data) ? r.data[0] ?? null : r.data,
+      error: r.error?.message === "No rows found" ? null : r.error,
+    }))
   }
 
   private buildWhere(prefix = ""): { clause: string; params: any[] } {

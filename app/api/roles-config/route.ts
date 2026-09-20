@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/api-error"
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
 import { requireRole } from "@/lib/auth"
@@ -76,7 +77,10 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await requireRole(req, ["admin", "branch_manager"])
+  // 2026-09 fix (privilege escalation): custom_roles_config is GLOBAL — the
+  // old ["admin", "branch_manager"] gate let any branch manager rewrite the
+  // role catalog for the whole organization. Only admins may edit it.
+  const session = await requireRole(req, ["admin"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   try {
@@ -115,6 +119,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true, roles: cleanRoles })
   } catch (e: any) {
-    return NextResponse.json({ error: e.message || "Failed to save roles" }, { status: 500 })
+    return apiError(e)
   }
 }

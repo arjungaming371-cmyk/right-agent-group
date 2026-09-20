@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { apiError } from "@/lib/api-error"
-import { db, query } from "@/lib/db"
+import pool, { db, query } from "@/lib/db"
 import { rateLimit, clientIp } from "@/lib/rate-limit"
 import { sendApplicationConfirmation, isMailConfigured } from "@/lib/mail"
 import { createNotification } from "@/lib/notifications"
@@ -67,59 +67,81 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   if (!customer_name) return NextResponse.json({ error: "customer_name required" }, { status: 400 })
 
   try {
-    // ATOMIC claim: only ONE request can flip used_at from NULL.
-    // A second concurrent submit gets rowCount 0 and is rejected.
-    const claim = await query(
-      `UPDATE form_links SET used_at = now() WHERE token = $1 AND used_at IS NULL RETURNING token`,
-      [token]
-    )
-    if (claim.rowCount === 0) {
-      return NextResponse.json({ error: "This application link has already been used." }, { status: 410 })
-    }
-
-    const { data: app, error } = await db
-      .from("loan_applications")
-      .insert({
-        lead_id: link.lead_id,
-        customer_name,
-        city,
-        loan_type: loan_type || "Home",
-        loan_amount: loan_amount ? Number(loan_amount) : null,
-        loan_tenure: loan_tenure ? Number(loan_tenure) : null,
-        email,
-        address,
-        whatsapp_number,
-        employment_type,
-        monthly_income: monthly_income ? Number(monthly_income) : null,
-        pan_number: pan_number ? String(pan_number).toUpperCase() : null,
-        form_data: JSON.stringify(rest),
-        submitted_at: new Date().toISOString(),
-        status: "pending",
-      })
-      .select()
-      .single()
-
-    if (error) {
-      // Insert failed — release the token so the customer can retry.
-      await query(`UPDATE form_links SET used_at = NULL WHERE token = $1`, [token]).catch(() => {})
-      return apiError(error)
-    }
-
-    if (link.lead_id) {
-      // Backfill what the application told us onto the lead itself, so the
-      // Leads table (VALUE, ADDRESS, LOAN TYPE columns) reflects the
-      // submitted application instead of showing "—" forever.
-      const backfill: Record<string, any> = {
-        form_completed: true,
-        status: "qualified",
-        updated_at: new Date().toISOString(),
+    // 2026-09 fix: the whole claim → application-insert → lead-backfill is
+    // now ONE transaction. Previously the token claim was atomic, but a crash
+    // between the claim and the application insert burned the one-time link
+    // (used_at set, application lost) and the customer needed a re-send.
+    // Inside the transaction, any failure rolls the claim back too.
+    const client = await pool.connect()
+    let app: any
+    try {
+      await client.query("BEGIN")
+      const claim = await client.query(
+        `UPDATE form_links SET used_at = now() WHERE token = $1 AND used_at IS NULL RETURNING token`,
+        [token]
+      )
+      if (claim.rowCount === 0) {
+        await client.query("ROLLBACK").catch(() => {})
+        return NextResponse.json({ error: "This application link has already been used." }, { status: 410 })
       }
-      if (loan_amount && Number(loan_amount) > 0) backfill.loan_amount = Number(loan_amount)
-      if (address) backfill.address = address
-      else if (city) backfill.address = city
-      if (whatsapp_number) backfill.whatsapp_number = whatsapp_number
-      if (loan_type) backfill.product_interest = /loan|insurance|card/i.test(loan_type) ? loan_type : `${loan_type} Loan`
-      await db.from("leads").update(backfill).eq("id", link.lead_id)
+
+      const insertRes = await client.query(
+        `INSERT INTO loan_applications
+           (lead_id, customer_name, city, loan_type, loan_amount, loan_tenure, email,
+            address, whatsapp_number, employment_type, monthly_income, pan_number,
+            form_data, submitted_at, status)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,now(),$14)
+         RETURNING *`,
+        [
+          link.lead_id,
+          customer_name,
+          city,
+          loan_type || "Home",
+          loan_amount ? Number(loan_amount) : null,
+          loan_tenure ? Number(loan_tenure) : null,
+          email,
+          address,
+          whatsapp_number,
+          employment_type,
+          monthly_income ? Number(monthly_income) : null,
+          pan_number ? String(pan_number).toUpperCase() : null,
+          JSON.stringify(rest),
+          "pending",
+        ]
+      )
+      app = insertRes.rows[0]
+
+      if (link.lead_id) {
+        // Backfill what the application told us onto the lead itself, so the
+        // Leads table (VALUE, ADDRESS, LOAN TYPE columns) reflects the
+        // submitted application instead of showing "—" forever.
+        await client.query(
+          `UPDATE leads SET
+             form_completed = true,
+             status = 'qualified',
+             updated_at = now(),
+             loan_amount = COALESCE($2, loan_amount),
+             address = COALESCE(NULLIF($3, ''), NULLIF($4, ''), address),
+             whatsapp_number = COALESCE($5, whatsapp_number),
+             product_interest = COALESCE($6, product_interest)
+           WHERE id = $1`,
+          [
+            link.lead_id,
+            loan_amount && Number(loan_amount) > 0 ? Number(loan_amount) : null,
+            address || "",
+            city || "",
+            whatsapp_number || null,
+            loan_type ? (/loan|insurance|card/i.test(loan_type) ? loan_type : `${loan_type} Loan`) : null,
+          ]
+        )
+      }
+
+      await client.query("COMMIT")
+    } catch (txnError) {
+      await client.query("ROLLBACK").catch(() => {})
+      throw txnError
+    } finally {
+      client.release()
     }
 
     createNotification({

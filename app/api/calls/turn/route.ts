@@ -4,6 +4,7 @@ import { startCall, handleTurn, handleTurnStream, correctLastSpokenReply } from 
 import { detectLanguage, type Language } from "@/lib/llm"
 import { PHONE_MATCH_SQL } from "@/lib/phone"
 import { resolveBranchByCallerId, recordUsage, getBranchVoice } from "@/lib/branches"
+import { safeEqual } from "@/lib/security"
 
 export const dynamic = "force-dynamic"
 
@@ -55,8 +56,9 @@ function resolveSpokenLanguage(speech: string, current: Language): Language {
 }
 
 export async function POST(req: NextRequest) {
-  const key = req.headers.get("x-api-key")
-  if (!key || key !== (process.env.WHATSAPP_SERVICE_KEY || "")) {
+  const key = req.headers.get("x-api-key") || ""
+  const expected = process.env.WHATSAPP_SERVICE_KEY || ""
+  if (!expected || !safeEqual(key, expected)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   }
 

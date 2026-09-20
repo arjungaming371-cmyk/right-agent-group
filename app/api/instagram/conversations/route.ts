@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/api-error"
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
 import { requireModuleOrRole } from "@/lib/auth"
@@ -41,6 +42,11 @@ export async function GET(req: NextRequest) {
 
     sql += ` ORDER BY m.ig_user_id, m.created_at DESC `
 
+    // PERF (2026-09): bounded list — polled every 5s by the dashboard; without
+    // a LIMIT both the DISTINCT ON scan and the per-group COUNT grow forever.
+    params.push(200)
+    sql += ` LIMIT $${params.length}`
+
     const res = await query(sql, params)
 
     // Sort by last_time DESC for final response
@@ -49,6 +55,6 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(conversations)
   } catch (e: any) {
     console.error("Failed to fetch Instagram conversations:", e.message)
-    return NextResponse.json({ error: e.message }, { status: 500 })
+    return apiError(e)
   }
 }

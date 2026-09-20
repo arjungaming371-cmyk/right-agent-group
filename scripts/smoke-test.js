@@ -25,14 +25,16 @@ const REQUIRED = {
   // dashboard. It comes from migrations/2026-07-31_lead_code.sql — listing it
   // here is what makes this test fail loudly if that migration was skipped,
   // instead of the column quietly going missing at runtime.
-  leads: ["id","name","phone","address","whatsapp_number","email","product_interest","loan_amount","notes","form_completed","status","interested","score","language","source","call_count","last_called_at","created_at","updated_at","lead_code","pinned","pinned_at","callback_at","callback_note","loan_tenure"],
+  leads: ["id","name","phone","address","whatsapp_number","email","product_interest","loan_amount","notes","form_completed","status","interested","score","language","source","call_count","last_called_at","created_at","updated_at","lead_code","pinned","pinned_at","callback_at","callback_note","loan_tenure","branch_id","phone_key","instagram_handle"],
   voice_calls: ["id","twilio_call_sid","lead_id","phone","direction","status","language","duration","outcome","sentiment","ai_summary","transcript","recording_url","followup_sent","instructions","created_at","updated_at"],
   loan_applications: ["id","lead_id","full_name","customer_name","phone","city","email","whatsapp_number","address","loan_type","loan_amount","monthly_income","employment_type","pan_number","form_data","status","submitted_at","last_edited_at","loan_tenure"],
   form_links: ["token","lead_id","used_at","created_at"],
-  whatsapp_messages: ["id","lead_id","wa_message_id","phone_number","direction","content","status","created_at"],
+  whatsapp_messages: ["id","lead_id","wa_message_id","phone_number","direction","content","status","created_at","branch_id"],
   ai_conversations: ["id","lead_id","role","content","language","created_at"],
   comm_logs: ["id","lead_id","type","summary","outcome","created_at"],
-  outbound_queue: ["id","lead_id","name","phone","language","product_interest","notes","status","call_sid","scheduled_at","called_at","created_at"],
+  // branch_id is the multi-tenant column every leads/loans/outbound query
+  // filters on — a DB missing it breaks scoping silently, so it's REQUIRED.
+  outbound_queue: ["id","lead_id","name","phone","language","product_interest","notes","status","call_sid","scheduled_at","called_at","created_at","branch_id","claimed_at"],
   uploaded_files: ["id","filename","file_path","type","row_count","processed","status","uploaded_by","created_at"],
   security_settings: ["key","enabled","updated_at"],
   audit_logs: ["id","action","performed_by","metadata","created_at"],
@@ -49,6 +51,12 @@ const REQUIRED = {
   compliance_settings: ["key","value","updated_at"],
   lead_memory: ["lead_id","facts","locked_facts","summary","sentiment","stage","last_analysis_at","updated_at"],
   knowledge_base: ["id","title","content","category","is_active","created_at","updated_at","source_type"],
+  // 2026-09-20: tables/columns that previously existed ONLY as migrations —
+  // fresh `db:setup` installs were missing them and the features silently
+  // broke at runtime (Instagram view, API-keys admin, module allotment).
+  system_api_keys: ["key_name","key_value","updated_by","updated_at"],
+  api_usage_logs: ["id","provider","tokens_used","created_at"],
+  instagram_messages: ["id","lead_id","ig_user_id","ig_username","direction","type","content","status","ig_message_id","comment_id","media_id","branch_id","created_at"],
 }
 
 async function main() {

@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/api-error"
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
 import { requireModuleOrRole } from "@/lib/auth"
@@ -21,6 +22,6 @@ export async function GET(req: NextRequest) {
     const res = await query(sql, params)
     return NextResponse.json({ count: res.rows[0]?.count || 0 })
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+    return apiError(e)
   }
 }

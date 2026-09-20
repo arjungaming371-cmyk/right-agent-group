@@ -15,6 +15,8 @@ import { extractPdfText } from "@/lib/kb-ingest"
 import { transcribeAudio } from "@/lib/stt"
 import { currentDateTimeInstruction } from "@/lib/compliance"
 import { rateLimit, clientIp } from "@/lib/rate-limit"
+import { safeEqual } from "@/lib/security"
+import { PHONE_MATCH_SQL } from "@/lib/phone"
 
 export const dynamic = "force-dynamic"
 
@@ -36,7 +38,7 @@ export async function GET(req: NextRequest) {
   const mode = searchParams.get("hub.mode")
   const token = searchParams.get("hub.verify_token")
   const challenge = searchParams.get("hub.challenge")
-  if (mode === "subscribe" && token && token === (process.env.WHATSAPP_VERIFY_TOKEN || "")) {
+  if (mode === "subscribe" && token && safeEqual(token, process.env.WHATSAPP_VERIFY_TOKEN || "")) {
     return new Response(challenge || "", { status: 200 })
   }
   return NextResponse.json({ error: "verification failed" }, { status: 403 })
@@ -186,7 +188,7 @@ async function handleInbound(msg: any, profileName: string | null, waBranch: Bra
     await client.query("BEGIN")
     await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [last10])
     const found = await client.query(
-      `SELECT * FROM leads WHERE regexp_replace(phone, '\\D', '', 'g') LIKE '%' || $1 LIMIT 1`,
+      `SELECT * FROM leads WHERE ${PHONE_MATCH_SQL} LIMIT 1`,
       [last10]
     )
     if (found.rows.length > 0) {
@@ -219,18 +221,30 @@ async function handleInbound(msg: any, profileName: string | null, waBranch: Bra
   }
   client.release()
 
-  // ---- 2. ALWAYS save the inbound message first ----
-  await query(
-    `INSERT INTO whatsapp_messages (lead_id, wa_message_id, phone_number, direction, content, status, branch_id)
-     VALUES ($1, $2, $3, 'inbound', $4, 'received', $5)`,
-    [lead.id, waMessageId, `+${from}`, text, waBranch?.id || null]
-  ).catch(() =>
-    query(
-      `INSERT INTO whatsapp_messages (lead_id, wa_message_id, direction, content, status)
-       VALUES ($1, $2, 'inbound', $3, 'received')`,
-      [lead.id, waMessageId, text]
+  // ---- 2. ALWAYS save the inbound message first (race-safe) ----
+  // 2026-09 fix: the old `.catch()` fallback re-inserted the message WITHOUT
+  // wa_message_id on a unique violation — which (a) defeated dedupe entirely
+  // (the next Meta retry reprocessed the message: double AI reply, double
+  // WhatsApp send to the customer) and (b) dropped branch attribution.
+  // ON CONFLICT DO NOTHING + RETURNING makes the claim atomic: when a
+  // concurrent retry already inserted this wa_message_id, rowCount is 0 and
+  // THIS invocation returns before burning an AI reply.
+  if (waMessageId) {
+    const ins = await query(
+      `INSERT INTO whatsapp_messages (lead_id, wa_message_id, phone_number, direction, content, status, branch_id)
+       VALUES ($1, $2, $3, 'inbound', $4, 'received', $5)
+       ON CONFLICT DO NOTHING
+       RETURNING id`,
+      [lead.id, waMessageId, `+${from}`, text, waBranch?.id || null]
     )
-  )
+    if ((ins.rowCount || 0) === 0) return // lost the race — the winning retry handles the reply
+  } else {
+    await query(
+      `INSERT INTO whatsapp_messages (lead_id, phone_number, direction, content, status, branch_id)
+       VALUES ($1, $2, 'inbound', $3, 'received', $4)`,
+      [lead.id, `+${from}`, text, waBranch?.id || null]
+    ).catch(() => {})
+  }
 
   if (isNewContact) {
     createNotification({

@@ -278,10 +278,29 @@ export async function scanIdleWhatsAppConversations(): Promise<{ scanned: number
        AND (mem.last_analysis_at IS NULL OR mem.last_analysis_at < lm_.last_msg_at)
      LIMIT 10`
   )
+  // 2026-09 fix (overlapping scans): the 5-minute cron tick can start a new
+  // scan while the previous one is still grinding through its 10 LLM
+  // pipelines — both then analyzed the same leads (duplicate AI work, double
+  // memory writes). A per-lead advisory lock (SAME key the analysis itself
+  // uses, hashtext(leadId)) makes the loser skip; lock+unlock happen on one
+  // dedicated pool connection because advisory locks are session-scoped.
+  let scanned = 0
   for (const row of res.rows) {
-    await runPostWhatsAppAnalysis(row.lead_id).catch((e) => console.error("scanIdleWhatsAppConversations item error:", e.message))
+    const client = await pool.connect()
+    try {
+      const lock = await client.query(`SELECT pg_try_advisory_lock(hashtext($1)) AS ok`, [row.lead_id])
+      if (!lock.rows[0]?.ok) continue // another scan/analysis owns this lead
+      try {
+        await runPostWhatsAppAnalysis(row.lead_id).catch((e) => console.error("scanIdleWhatsAppConversations item error:", e.message))
+        scanned++
+      } finally {
+        await client.query(`SELECT pg_advisory_unlock(hashtext($1))`, [row.lead_id]).catch(() => {})
+      }
+    } finally {
+      client.release()
+    }
   }
-  return { scanned: res.rows.length }
+  return { scanned }
 }
 
 // ---------------------------------------------------------------------------

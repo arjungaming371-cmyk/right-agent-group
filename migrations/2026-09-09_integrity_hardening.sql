@@ -18,11 +18,14 @@
 --     audit_logs) and an automatic leads.updated_at trigger.
 
 -- ---- 1. WhatsApp message dedupe (race-proof) ----
+-- NOTE: id is BIGINT (BIGSERIAL) on whatsapp_messages. An earlier revision
+-- used (MAX(id::text))::uuid which both compared ids lexicographically AND
+-- always failed the uuid cast, aborting this migration on live databases.
 UPDATE whatsapp_messages
 SET wa_message_id = NULL
 WHERE wa_message_id IS NOT NULL
   AND id NOT IN (
-    SELECT (MAX(id::text))::uuid FROM whatsapp_messages WHERE wa_message_id IS NOT NULL GROUP BY wa_message_id
+    SELECT MAX(id) FROM whatsapp_messages WHERE wa_message_id IS NOT NULL GROUP BY wa_message_id
   );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_wa_messages_wa_message_id
   ON whatsapp_messages (wa_message_id) WHERE wa_message_id IS NOT NULL;

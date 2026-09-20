@@ -14,16 +14,44 @@ export async function POST(req: NextRequest) {
   // The dialer only ever works the session's own branch queue (null = HQ = all).
   const branchId = sessionBranchId(session)
 
-  let pendingQuery = db.from("outbound_queue").select("*").eq("status", "pending")
-  if (branchId) pendingQuery = pendingQuery.eq("branch_id", branchId)
-  const { data: pending } = await pendingQuery.limit(Math.min(limit, 50)) // max 50 at once for safety
+  // RACE FIX (2026-09): the old SELECT-pending → dial → mark-called pattern
+  // let two concurrent triggers (manual click + cron, or a double-click) read
+  // the same 'pending' rows and dial REAL customers twice. Rows are now
+  // claimed atomically with FOR UPDATE SKIP LOCKED — each row can only ever
+  // be claimed by one worker. Rows left 'dialing' by a crashed worker are
+  // reclaimed after 15 minutes.
+  await query(
+    `UPDATE outbound_queue SET status = 'pending', claimed_at = NULL
+      WHERE status = 'dialing' AND claimed_at IS NOT NULL
+        AND claimed_at < now() - interval '15 minutes'`
+  )
+  const claimed = await query(
+    `UPDATE outbound_queue SET status = 'dialing', claimed_at = now()
+      WHERE id IN (
+        SELECT id FROM outbound_queue
+         WHERE status = 'pending' ${branchId ? "AND branch_id = $1" : ""}
+         ORDER BY id
+         LIMIT $${branchId ? 2 : 1}
+         FOR UPDATE SKIP LOCKED
+      )
+      RETURNING *`,
+    branchId ? [branchId, Math.min(limit, 50)] : [Math.min(limit, 50)]
+  )
+  const pending: any[] = claimed.rows
 
-  if (!pending || pending.length === 0) {
+  if (pending.length === 0) {
     return NextResponse.json({ called: 0, failed: 0, total: 0 })
   }
   // Per-branch monthly cap still applies to the unattended dialer.
   const quota = await checkQuota(branchId, "call")
   if (!quota.ok) {
+    // Release THIS run's claimed rows back to the queue so the next run picks
+    // them up immediately instead of waiting out the 15-minute stale window.
+    await query(
+      `UPDATE outbound_queue SET status = 'pending', claimed_at = NULL
+        WHERE id = ANY($1::uuid[])`,
+      [pending.map((r: any) => r.id)]
+    )
     return NextResponse.json({ error: quota.reason }, { status: 403 })
   }
 

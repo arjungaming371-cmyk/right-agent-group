@@ -23,11 +23,23 @@ export const ALL_SYSTEM_KEYS = [
 
 export type SystemKeyName = typeof ALL_SYSTEM_KEYS[number]
 
+const ALLOWED_KEY_NAMES = new Set<string>(ALL_SYSTEM_KEYS as readonly string[])
+
+/**
+ * SECURITY: only provider credentials may live in system_api_keys. Rows with
+ * any other name (e.g. AUTH_SECRET, ADMIN_EMAIL, SESSION_*.) must never be
+ * hydrated into process.env — otherwise anyone who can write a key row can
+ * overwrite server secrets and forge sessions.
+ */
+function isAllowedKeyName(keyName: string): boolean {
+  return ALLOWED_KEY_NAMES.has(keyName)
+}
+
 export async function initSystemKeys(): Promise<void> {
   try {
     const res = await query(`SELECT key_name, key_value FROM system_api_keys`)
     for (const row of res.rows) {
-      if (row.key_value) {
+      if (row.key_value && isAllowedKeyName(row.key_name)) {
         _keyCache[row.key_name] = row.key_value
         process.env[row.key_name] = row.key_value
       }
@@ -49,7 +61,7 @@ export async function getSystemKey(keyName: string): Promise<string> {
       const res = await query(`SELECT key_name, key_value FROM system_api_keys`)
       const freshCache: Record<string, string> = {}
       for (const row of res.rows) {
-        if (row.key_value) {
+        if (row.key_value && isAllowedKeyName(row.key_name)) {
           freshCache[row.key_name] = row.key_value
         }
       }
@@ -76,6 +88,13 @@ export async function setSystemKeys(keys: Record<string, string>, userEmail: str
   for (const [keyName, keyValue] of Object.entries(keys)) {
     if (!keyValue.trim()) continue
 
+    // SECURITY: hard allow-list. Rejecting (not ignoring) prevents silently
+    // swallowing typos and blocks any attempt to persist server-secret names
+    // like AUTH_SECRET / ADMIN_EMAIL into the database.
+    if (!isAllowedKeyName(keyName)) {
+      throw new Error(`Unknown or protected system key: ${keyName}`)
+    }
+
     await query(
       `INSERT INTO system_api_keys (key_name, key_value, updated_by, updated_at)
        VALUES ($1, $2, $3, now())
@@ -90,14 +109,11 @@ export async function setSystemKeys(keys: Record<string, string>, userEmail: str
     process.env[keyName] = keyValue.trim()
   }
 
-  // Log audit
+  // Log audit — developer_logs columns are (email, action, status)
   await query(
-    `INSERT INTO developer_logs (level, category, message, meta)
-     VALUES ('info', 'security', $1, $2)`,
-    [
-      `API keys updated by ${userEmail}`,
-      JSON.stringify({ keys: Object.keys(keys), userEmail }),
-    ]
+    `INSERT INTO developer_logs (email, action, status)
+     VALUES ($1, $2, 'info')`,
+    [userEmail, `API keys updated: ${Object.keys(keys).join(", ")}`]
   ).catch(() => {})
 }
 

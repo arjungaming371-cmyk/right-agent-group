@@ -39,8 +39,13 @@ export function rateLimit(key: string, limit = 20, windowMs = 60_000): boolean {
   return true
 }
 
-/** Extract the client IP from a Next.js request (works behind Cloudflare/nginx). */
+/** Extract the client IP from a Next.js request (works behind Cloudflare/nginx).
+ *  SECURITY: for X-Forwarded-For, take the LAST entry — nginx appends the real
+ *  socket address to whatever the client sent, so the FIRST entry is
+ *  attacker-controlled (spoofing it evaded per-IP rate-limit buckets). */
 export function clientIp(req: Request): string {
-  const h = (name: string) => (req.headers.get(name) || "").split(",")[0].trim()
-  return h("cf-connecting-ip") || h("x-real-ip") || h("x-forwarded-for") || "unknown"
+  const xff = (req.headers.get("x-forwarded-for") || "").split(",").map((s) => s.trim()).filter(Boolean)
+  const lastXff = xff.length ? xff[xff.length - 1] : ""
+  const first = (name: string) => (req.headers.get(name) || "").trim()
+  return first("cf-connecting-ip") || first("x-real-ip") || lastXff || "unknown"
 }

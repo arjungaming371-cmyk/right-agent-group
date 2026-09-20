@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/api-error"
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
 import { requireRole } from "@/lib/auth"
@@ -26,7 +27,7 @@ export async function GET(req: NextRequest) {
     const branches = (await query(`SELECT id, name, code FROM branches ORDER BY name`)).rows
     return NextResponse.json({ employees, assignments, branches })
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+    return apiError(e)
   }
 }
 
@@ -57,6 +58,6 @@ export async function POST(req: NextRequest) {
     )
     return NextResponse.json(res.rows[0], { status: 201 })
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+    return apiError(e)
   }
 }

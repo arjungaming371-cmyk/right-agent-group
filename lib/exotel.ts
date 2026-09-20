@@ -103,12 +103,22 @@ export async function makeExotelCall(
   // is rejected with "Invalid 'StatusCallbackEvents' specified". When omitted,
   // Exotel accepts the request and sends the terminal status callback by
   // default, which is exactly what /api/calls/status needs.
+  //
+  // 2026-09 fix: /api/calls/status is FAIL-CLOSED once EXOTEL_WEBHOOK_KEY is
+  // set, so the callback URL registered here MUST carry the same ?key= secret
+  // — otherwise every outbound call's terminal status, recording URL and
+  // WhatsApp follow-up are silently dropped. Read at call time (not module
+  // load) because system keys can be hydrated into process.env at runtime.
+  const webhookKey = (process.env.EXOTEL_WEBHOOK_KEY || "").trim()
+  const statusCallback = webhookKey
+    ? `${appUrl}/api/calls/status?key=${encodeURIComponent(webhookKey)}`
+    : `${appUrl}/api/calls/status`
   const params = new URLSearchParams({
     From: to,
     CallerId: creds.callerId,
     Url: `https://my.exotel.com/${creds.sid}/exoml/start_voice/${creds.flowAppId}`,
     Record: "true", // Exotel records the call → RecordingUrl arrives in the status callback → dashboard player
-    StatusCallback: `${appUrl}/api/calls/status`,
+    StatusCallback: statusCallback,
     StatusCallbackContentType: "application/json",
   })
 

@@ -51,8 +51,13 @@ export async function POST(req: NextRequest) {
 
       try {
         // Dedupe on last-10 digits — re-uploading a CSV (or a contact that
-        // already called in) must not create a second lead row.
-        const existing = await query(`SELECT id FROM leads WHERE ${PHONE_MATCH_SQL} LIMIT 1`, [phoneLast10(phone)])
+        // already called in) must not create a second lead row. Branch-scoped
+        // (2026-09 IDOR fix): a branch upload must not adopt (and re-queue
+        // calls to) a lead owned by HQ or another branch.
+        const existing = await query(
+          `SELECT id FROM leads WHERE ${PHONE_MATCH_SQL} AND ($2::uuid IS NULL OR branch_id = $2) LIMIT 1`,
+          [phoneLast10(phone), branchId]
+        )
         let lead = existing.rows[0] || null
         if (!lead) {
           const created = await db.from("leads").insert({

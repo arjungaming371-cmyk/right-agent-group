@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/api-error"
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
 import { requireModuleOrRole } from "@/lib/auth"
@@ -45,6 +46,6 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(res.rows)
   } catch (e: any) {
     console.error("Failed to fetch Instagram messages:", e.message)
-    return NextResponse.json({ error: e.message }, { status: 500 })
+    return apiError(e)
   }
 }

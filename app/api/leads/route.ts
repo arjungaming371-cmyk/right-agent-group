@@ -92,6 +92,11 @@ export async function GET(req: NextRequest) {
   if (amount === "high") where.push(`loan_amount >= 1000000`)
   if (amount === "low") where.push(`loan_amount < 1000000 AND loan_amount IS NOT NULL`)
 
+  // PERF (2026-09): this endpoint is polled every 15s by the dashboard. An
+  // unbounded SELECT with two LATERALs got slower linearly with lead count;
+  // cap it (client can ask for more via ?limit=, hard-capped at 5000).
+  const limit = Math.min(Math.max(parseInt(searchParams.get("limit") || "1000", 10) || 1000, 1), 5000)
+
   const whereClause = where.length ? `WHERE ${where.join(" AND ")}` : ""
   try {
     // Latest form link per lead rides along so the dashboard can show
@@ -120,7 +125,8 @@ export async function GET(req: NextRequest) {
        ORDER BY
          leads.pinned DESC,
          leads.pinned_at DESC NULLS LAST,
-         GREATEST(leads.created_at, COALESCE(leads.last_called_at, leads.created_at), COALESCE(wa.last_wa_at, leads.created_at)) DESC`,
+         GREATEST(leads.created_at, COALESCE(leads.last_called_at, leads.created_at), COALESCE(wa.last_wa_at, leads.created_at)) DESC
+       LIMIT ${limit}`,
       params
     )
     return NextResponse.json(res.rows)
@@ -137,28 +143,49 @@ export async function POST(req: NextRequest) {
   // Store every phone the same way (+91XXXXXXXXXX) so calls/WhatsApp/manual
   // entries for the same person always land on the same lead.
   body.phone = normalizePhone(body.phone)
+  if (!phoneLast10(body.phone)) return NextResponse.json({ error: "valid phone required" }, { status: 400 })
   // New leads belong to the session's active branch (null = HQ scope).
-  body.branch_id = sessionBranchId(session)
+  const branchId = sessionBranchId(session)
+
+  // 2026-09 fix (mass assignment): the old code spread the RAW request body
+  // into the insert/update, letting a crafted payload write ANY leads column
+  // (score, lead_code, created_at, pinned, search_vector…). Only these
+  // fields are writable here:
+  const WRITABLE = new Set([
+    "name", "phone", "whatsapp_number", "email", "language", "product_interest",
+    "loan_amount", "notes", "address", "source", "status", "instagram_handle",
+  ])
+  const payload: Record<string, unknown> = { branch_id: branchId }
+  for (const [k, v] of Object.entries(body)) {
+    if (WRITABLE.has(k)) payload[k] = v
+  }
 
   // Dedupe: one lead per phone number, matched on the last 10 digits so
-  // format differences never create a duplicate row.
+  // format differences never create a duplicate row. 2026-09 fix: the match
+  // is BRANCH-SCOPED for branch-bound sessions — the old global match let a
+  // branch user "update" (and thereby capture) a lead owned by another
+  // branch or HQ. PHONE_MATCH_SQL is also safe against empty/parse-failed
+  // numbers (matches nothing instead of everything).
   try {
-    const existing = await query(`SELECT id FROM leads WHERE ${PHONE_MATCH_SQL}`, [phoneLast10(body.phone)])
+    const existing = await query(
+      `SELECT id FROM leads WHERE ${PHONE_MATCH_SQL} AND ($2::uuid IS NULL OR branch_id = $2)`,
+      [phoneLast10(String(payload.phone)), branchId]
+    )
     if (existing.rows.length > 0) {
       const id = existing.rows[0].id
       // On dedupe-update, do NOT move the lead between branches — the lead
       // belongs to the branch that first captured it. A branch user updating
       // an HQ-owned lead must not silently pull it into their branch.
-      const { branch_id: _keepOriginalBranch, ...editable } = body
+      const { branch_id: _keepOriginalBranch, ...editable } = payload
       const { data, error } = await db.from("leads").update({ ...editable, updated_at: new Date().toISOString() }).eq("id", id).select().single()
       if (error) return apiError(error)
-      logAudit("lead updated (via dedupe)", session.email, { leadId: id, phone: body.phone })
+      logAudit("lead updated (via dedupe)", session.email, { leadId: id, phone: payload.phone })
       return NextResponse.json(data)
     }
 
-    const { data, error } = await db.from("leads").insert(body).select().single()
+    const { data, error } = await db.from("leads").insert(payload).select().single()
     if (error) return apiError(error)
-    logAudit("lead created", session.email, { leadId: data?.id, name: body.name, phone: body.phone })
+    logAudit("lead created", session.email, { leadId: data?.id, name: payload.name, phone: payload.phone })
     return NextResponse.json(data)
   } catch (e: any) {
     return apiError(e)
@@ -168,8 +195,18 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   const session = await requireModuleOrRole(req, "leads", ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
-  const { id, ...updates } = await req.json()
-  delete updates.branch_id // branch moves are an admin action via /api/branches, not a lead edit
+  const { id, ...raw } = await req.json()
+  // Branch moves are an admin action via /api/branches, not a lead edit;
+  // server-managed columns are not client-writable (mass-assignment fix).
+  const PROTECTED = new Set([
+    "id", "branch_id", "lead_code", "created_at", "updated_at", "score",
+    "search_vector", "phone_key", "last_called_at",
+  ])
+  const updates: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(raw)) {
+    if (!PROTECTED.has(k)) updates[k] = v
+  }
+  if (typeof updates.phone === "string") updates.phone = normalizePhone(updates.phone)
   // Branch-scoped users may only update leads inside their branch.
   const branchId = sessionBranchId(session)
   let leadQuery = db.from("leads").update({ ...updates, updated_at: new Date().toISOString() })

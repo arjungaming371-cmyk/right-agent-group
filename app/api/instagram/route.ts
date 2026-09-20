@@ -13,6 +13,7 @@ import { searchKnowledgeBase } from "@/lib/knowledge-base"
 import { buildEmiInstruction, buildRateInstruction, detectLoanType } from "@/lib/finance"
 import { currentDateTimeInstruction } from "@/lib/compliance"
 import { rateLimit, clientIp } from "@/lib/rate-limit"
+import { safeEqual } from "@/lib/security"
 
 export const dynamic = "force-dynamic"
 
@@ -27,7 +28,7 @@ export async function GET(req: NextRequest) {
   const token = searchParams.get("hub.verify_token")
   const challenge = searchParams.get("hub.challenge")
 
-  if (mode === "subscribe" && token && token === (process.env.INSTAGRAM_VERIFY_TOKEN || process.env.WHATSAPP_VERIFY_TOKEN || "")) {
+  if (mode === "subscribe" && token && safeEqual(token, process.env.INSTAGRAM_VERIFY_TOKEN || process.env.WHATSAPP_VERIFY_TOKEN || "")) {
     return new Response(challenge || "", { status: 200 })
   }
   return NextResponse.json({ error: "verification failed" }, { status: 403 })
@@ -126,12 +127,25 @@ async function handleInboundDM(messaging: any) {
     }
   }
 
-  // Record Inbound DM
-  await query(
-    `INSERT INTO instagram_messages (lead_id, ig_user_id, direction, type, content, status, ig_message_id)
-     VALUES ($1, $2, 'inbound', 'dm', $3, 'delivered', $4)`,
-    [leadId, senderId, text, messageId || null]
-  )
+  // Record Inbound DM — race-safe: ON CONFLICT DO NOTHING returns no row when
+  // a concurrent Meta retry already inserted this mid, so only ONE retry runs
+  // the (paid) AI reply below. The SELECT above stays as the cheap fast path.
+  if (messageId) {
+    const ins = await query(
+      `INSERT INTO instagram_messages (lead_id, ig_user_id, direction, type, content, status, ig_message_id)
+       VALUES ($1, $2, 'inbound', 'dm', $3, 'delivered', $4)
+       ON CONFLICT DO NOTHING
+       RETURNING id`,
+      [leadId, senderId, text, messageId]
+    )
+    if ((ins.rowCount || 0) === 0) return // lost the race — already processed
+  } else {
+    await query(
+      `INSERT INTO instagram_messages (lead_id, ig_user_id, direction, type, content, status, ig_message_id)
+       VALUES ($1, $2, 'inbound', 'dm', $3, 'delivered', NULL)`,
+      [leadId, senderId, text]
+    )
+  }
 
   // Record Comm Log
   if (leadId) {
@@ -219,11 +233,12 @@ async function handleInboundComment(val: any) {
   const dup = await query(`SELECT 1 FROM instagram_messages WHERE comment_id = $1 LIMIT 1`, [commentId])
   if (dup.rows.length > 0) return
 
-  // Find or Create Lead
+  // Find or Create Lead — exact handle match first; the old username
+  // ILIKE '%…%' substring match bound e.g. @john2 to @john's lead.
   let leadId: string | null = null
   const existingLead = await query(
-    `SELECT id FROM leads WHERE instagram_handle ILIKE $1 OR notes ILIKE $2 LIMIT 1`,
-    [`%${username}%`, `%${senderId}%`]
+    `SELECT id FROM leads WHERE instagram_handle = $1 OR (instagram_handle IS NULL AND notes ILIKE $2) LIMIT 1`,
+    [username, `%${senderId}%`]
   )
 
   if (existingLead.rows.length > 0) {
@@ -239,12 +254,18 @@ async function handleInboundComment(val: any) {
     }
   }
 
-  // Save Inbound Comment Record
-  await query(
+  // Save Inbound Comment Record — race-safe: the SELECT above is only the
+  // fast path; uq_ig_messages_comment_id (migration 2026-09-20) closes the
+  // concurrent-retry window. No row returned ⇒ another retry already owns
+  // this comment ⇒ return without burning an AI reply on a PUBLIC post.
+  const saved = await query(
     `INSERT INTO instagram_messages (lead_id, ig_user_id, ig_username, direction, type, content, status, comment_id, media_id)
-     VALUES ($1, $2, $3, 'inbound', 'comment', $4, 'delivered', $5, $6)`,
+     VALUES ($1, $2, $3, 'inbound', 'comment', $4, 'delivered', $5, $6)
+     ON CONFLICT DO NOTHING
+     RETURNING id`,
     [leadId, senderId, username, text, commentId, mediaId || null]
   )
+  if ((saved.rowCount || 0) === 0) return
 
   // Trigger Priya AI Response (Public Reply + Private DM Reply)
   try {
@@ -270,7 +291,8 @@ Provide a short public reply (under 40 words) acknowledging their comment and of
       if (pubSent.ok) {
         await query(
           `INSERT INTO instagram_messages (lead_id, ig_user_id, ig_username, direction, type, content, status, comment_id)
-           VALUES ($1, $2, $3, 'outbound', 'comment', $4, 'sent', $5)`,
+           VALUES ($1, $2, $3, 'outbound', 'comment', $4, 'sent', $5)
+           ON CONFLICT DO NOTHING`,
           [leadId, senderId, username, publicAiReply, pubSent.replyId || commentId]
         )
       }

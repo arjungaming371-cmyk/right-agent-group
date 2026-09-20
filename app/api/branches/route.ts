@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/api-error"
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
 import { requireRole } from "@/lib/auth"
@@ -57,7 +58,7 @@ export async function GET(req: NextRequest) {
       : await query(`SELECT * FROM branches ORDER BY name`)
     return NextResponse.json((res.rows as BranchRow[]).map(safeBranch))
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+    return apiError(e)
   }
 }
 
@@ -107,6 +108,6 @@ export async function POST(req: NextRequest) {
     if (e.message?.includes("branches_code_key") || e.message?.includes("duplicate key")) {
       return NextResponse.json({ error: "A branch with that code already exists" }, { status: 409 })
     }
-    return NextResponse.json({ error: e.message }, { status: 500 })
+    return apiError(e)
   }
 }

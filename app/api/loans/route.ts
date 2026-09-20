@@ -30,9 +30,11 @@ export async function GET(req: NextRequest) {
   // NOTE: loan_applications has submitted_at, NOT created_at — ordering by the
   // nonexistent column made this whole query 500 while the count query above
   // succeeded, so the sidebar badge said "1" while the list showed empty.
+  // PERF (2026-09): bounded list — this endpoint is polled every 15s.
+  const limit = Math.min(Math.max(parseInt(searchParams.get("limit") || "1000", 10) || 1000, 1), 5000)
   let listQuery = db.from("loan_applications").select("*")
   if (branchId) listQuery = listQuery.eq("branch_id", branchId)
-  const { data, error } = await listQuery.order("submitted_at", { ascending: false })
+  const { data, error } = await listQuery.order("submitted_at", { ascending: false }).limit(limit)
   if (error) return apiError(error)
   return NextResponse.json(data)
 }
@@ -53,7 +55,15 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   const session = await requireModuleOrRole(req, "loans", ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
-  const { id, ...updates } = await req.json()
+  const { id, ...raw } = await req.json()
+  // 2026-09 fix (mass assignment): server-managed columns are not writable
+  // from the client — the old spread let a crafted PATCH set branch_id or
+  // submitted_at (moving applications between branches / backdating them).
+  const PROTECTED = new Set(["id", "branch_id", "submitted_at", "created_at"])
+  const updates: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(raw)) {
+    if (!PROTECTED.has(k)) updates[k] = v
+  }
   const branchId = sessionBranchId(session)
   let upQuery = db.from("loan_applications").update(updates)
   if (branchId) upQuery = upQuery.eq("branch_id", branchId)
