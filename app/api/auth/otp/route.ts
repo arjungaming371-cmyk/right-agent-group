@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
-import { createSessionToken, verifyOtpPendingToken, SESSION_COOKIE, sessionCookieOptions } from "@/lib/auth"
+import { createSessionToken, verifyOtpPendingToken, isSafeNextPath, SESSION_COOKIE, sessionCookieOptions } from "@/lib/auth"
 import { createNotification } from "@/lib/notifications"
 import { rateLimit, clientIp } from "@/lib/rate-limit"
-import { createHash } from "crypto"
+import { createHash, timingSafeEqual } from "crypto"
 
 export const dynamic = "force-dynamic"
+
+// Same-site relative path guard — also rejects backslash forms ("/\\evil.com")
+// which browsers normalize to protocol-relative redirects. (Shared via lib/auth.)
 
 // Step 2 of an admin sign-in when Two-Factor Authentication is enabled:
 // the OAuth callback stored a signed pending token in the otp_pending
@@ -24,17 +27,28 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Enter the 6-digit code from your email" }, { status: 400 })
   }
 
-  const row = (await query(`SELECT code_hash, attempts, expires_at FROM login_otps WHERE email = $1`, [pending.email])).rows[0]
-  if (!row || new Date(row.expires_at) < new Date()) {
-    return NextResponse.json({ error: "Code expired — please sign in again" }, { status: 410 })
-  }
-  if (row.attempts >= 5) {
+  // FIX (2026-09-20): the old flow raced — concurrent guesses all read
+  // `attempts` before any increment landed, stretching the 5-attempt cap.
+  // Atomically claim one attempt; if the row is gone/expired/exhausted the
+  // UPDATE matches nothing. Also compare hashes constant-time.
+  const spent = await query(
+    `UPDATE login_otps SET attempts = attempts + 1
+     WHERE email = $1 AND expires_at > now() AND attempts < 5
+     RETURNING code_hash`,
+    [pending.email]
+  )
+  const row = spent.rows[0]
+  if (!row) {
+    const still = (await query(`SELECT 1 FROM login_otps WHERE email = $1`, [pending.email])).rows[0]
+    if (!still) return NextResponse.json({ error: "Code expired — please sign in again" }, { status: 410 })
     return NextResponse.json({ error: "Too many wrong codes — please sign in again" }, { status: 410 })
   }
 
   const codeHash = createHash("sha256").update(code.trim()).digest("hex")
-  if (codeHash !== row.code_hash) {
-    await query(`UPDATE login_otps SET attempts = attempts + 1 WHERE email = $1`, [pending.email]).catch(() => {})
+  const a = Buffer.from(codeHash)
+  const b = Buffer.from(String(row.code_hash || ""))
+  const ok = a.length === b.length && timingSafeEqual(a, b)
+  if (!ok) {
     return NextResponse.json({ error: "Wrong code — check your email and try again" }, { status: 401 })
   }
 
@@ -53,7 +67,10 @@ export async function POST(req: NextRequest) {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || ""
   // Carry the branch scope decided at OAuth time into the real session.
   const token = await createSessionToken(pending.email, pending.role, { orgId: pending.orgId, branchId: pending.branchId })
-  const res = NextResponse.json({ ok: true, next: pending.next || "/" })
+  // Open-redirect hardening: only same-site relative paths that don't start
+  // with "/"+"/" or "/"+"\\" survive to the client.
+  const nextPath = isSafeNextPath(pending.next) ? pending.next! : "/"
+  const res = NextResponse.json({ ok: true, next: nextPath })
   res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions(appUrl.startsWith("https")))
   res.cookies.delete("otp_pending")
   return res

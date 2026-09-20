@@ -15,8 +15,6 @@ import { extractPdfText } from "@/lib/kb-ingest"
 import { transcribeAudio } from "@/lib/stt"
 import { currentDateTimeInstruction } from "@/lib/compliance"
 import { rateLimit, clientIp } from "@/lib/rate-limit"
-import { safeEqual } from "@/lib/security"
-import { PHONE_MATCH_SQL } from "@/lib/phone"
 
 export const dynamic = "force-dynamic"
 
@@ -36,9 +34,12 @@ export const dynamic = "force-dynamic"
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const mode = searchParams.get("hub.mode")
-  const token = searchParams.get("hub.verify_token")
+  const token = searchParams.get("hub.verify_token") || ""
   const challenge = searchParams.get("hub.challenge")
-  if (mode === "subscribe" && token && safeEqual(token, process.env.WHATSAPP_VERIFY_TOKEN || "")) {
+  // FIX (2026-09-20): constant-time compare, matching the rest of the auth pass.
+  const a = Buffer.from(token)
+  const b = Buffer.from(process.env.WHATSAPP_VERIFY_TOKEN || "")
+  if (mode === "subscribe" && a.length === b.length && a.length > 0 && crypto.timingSafeEqual(a, b)) {
     return new Response(challenge || "", { status: 200 })
   }
   return NextResponse.json({ error: "verification failed" }, { status: 403 })
@@ -111,9 +112,17 @@ export async function POST(req: NextRequest) {
         }
 
         // -- Inbound customer messages --
+        // FIX (2026-09-20): one poison message used to abort the WHOLE batch —
+        // a duplicate delivery as message #1 of a multi-message payload
+        // swallowed messages #2..n permanently (Meta got a 200 and never
+        // retried). Isolate each message in its own try/catch.
         const profileName: string | null = value.contacts?.[0]?.profile?.name || null
         for (const msg of value.messages || []) {
-          await handleInbound(msg, profileName, waBranch)
+          try {
+            await handleInbound(msg, profileName, waBranch)
+          } catch (e: any) {
+            console.error(`inbound message ${msg?.id || "(no id)"} failed — continuing with the rest of the batch:`, e.message)
+          }
         }
       }
     }
@@ -168,17 +177,45 @@ async function resolveInboundText(msg: any, branch: BranchWhatsAppCtx = null): P
 async function handleInbound(msg: any, profileName: string | null, waBranch: BranchWhatsAppCtx = null) {
   const from = String(msg?.from || "").replace(/\D/g, "")
   const waMessageId = msg?.id ? String(msg.id) : null
-  const text = await resolveInboundText(msg, waBranch)
-  if (!from || !text) return
+  if (!from) return
 
-  // ---- Dedupe: Meta retries webhooks; process each message exactly once ----
+  // ---- FIX (2026-09-20): ATOMIC, FIRST-THING dedupe ----
+  // Two problems in the old order:
+  //   1. The dedupe check ran AFTER media download / PDF extraction / STT —
+  //      every Meta retry of a media message re-paid the full download +
+  //      transcribe cost only to be discarded at the check.
+  //   2. Dedupe was check-then-insert (SELECT then INSERT later) — two
+  //      concurrent deliveries both passed the SELECT and both ran the full
+  //      AI-reply pipeline (double sends). Claiming the row atomically via
+  //      INSERT ... ON CONFLICT DO NOTHING (backed by the partial UNIQUE index
+  //      on wa_message_id) makes exactly one delivery win the pipeline.
   if (waMessageId) {
-    const dup = await query(`SELECT 1 FROM whatsapp_messages WHERE wa_message_id = $1 LIMIT 1`, [waMessageId])
-    if (dup.rows.length > 0) return
+    let claim: { rowCount: number | null }
+    try {
+      claim = await query(
+        `INSERT INTO whatsapp_messages (wa_message_id, phone_number, direction, content, status, branch_id)
+         VALUES ($1, $2, 'inbound', '', 'received', $3)
+         ON CONFLICT (wa_message_id) WHERE wa_message_id IS NOT NULL DO NOTHING`,
+        [waMessageId, `+${from}`, waBranch?.id || null]
+      )
+    } catch (e: any) {
+      if (e?.code !== "42703") throw e // 42703 = undefined column (pre-multi-branch DB) → retry without branch_id
+      claim = await query(
+        `INSERT INTO whatsapp_messages (wa_message_id, phone_number, direction, content, status)
+         VALUES ($1, $2, 'inbound', '', 'received')
+         ON CONFLICT (wa_message_id) WHERE wa_message_id IS NOT NULL DO NOTHING`,
+        [waMessageId, `+${from}`]
+      )
+    }
+    if (claim.rowCount === 0) return // already processed — stop before any media work
   }
 
+  const text = await resolveInboundText(msg, waBranch)
+  if (!text) return
+
   const last10 = from.slice(-10)
-  console.log(`📩 WhatsApp inbound from ${from}: "${text.slice(0, 50)}"`)
+  // FIX (2026-09-20): no customer phone/message content in stdout logs.
+  console.log(`📩 WhatsApp inbound msg=${waMessageId || "(no id)"} from=***${from.slice(-4)} (${text.length} chars, branch=${waBranch?.id || "default"})`)
 
   // ---- 1. Find-or-create lead (race-safe via advisory lock) ----
   let lead: any = null
@@ -187,10 +224,25 @@ async function handleInbound(msg: any, profileName: string | null, waBranch: Bra
   try {
     await client.query("BEGIN")
     await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [last10])
-    const found = await client.query(
-      `SELECT * FROM leads WHERE ${PHONE_MATCH_SQL} LIMIT 1`,
-      [last10]
-    )
+    // FIX (2026-09-20): use the indexed phone_key (exact last-10) first — the
+    // old regexp/LIKE predicate seq-scans leads on EVERY inbound message.
+    // Graceful fallback for DBs that haven't run the 2026-09-09 migration.
+    let found: { rows: any[] }
+    try {
+      found = await client.query(
+        `SELECT * FROM leads WHERE phone_key = $1
+         UNION ALL
+         SELECT * FROM (SELECT * FROM leads WHERE regexp_replace(phone, '\\D', '', 'g') LIKE '%' || $1 LIMIT 1) fallback
+         LIMIT 1`,
+        [last10]
+      )
+    } catch (e: any) {
+      if (e?.code !== "42703") throw e
+      found = await client.query(
+        `SELECT * FROM leads WHERE regexp_replace(phone, '\\D', '', 'g') LIKE '%' || $1 LIMIT 1`,
+        [last10]
+      )
+    }
     if (found.rows.length > 0) {
       lead = found.rows[0]
       // Lead may have been created from a phone call (whatsapp_number never
@@ -221,29 +273,28 @@ async function handleInbound(msg: any, profileName: string | null, waBranch: Bra
   }
   client.release()
 
-  // ---- 2. ALWAYS save the inbound message first (race-safe) ----
-  // 2026-09 fix: the old `.catch()` fallback re-inserted the message WITHOUT
-  // wa_message_id on a unique violation — which (a) defeated dedupe entirely
-  // (the next Meta retry reprocessed the message: double AI reply, double
-  // WhatsApp send to the customer) and (b) dropped branch attribution.
-  // ON CONFLICT DO NOTHING + RETURNING makes the claim atomic: when a
-  // concurrent retry already inserted this wa_message_id, rowCount is 0 and
-  // THIS invocation returns before burning an AI reply.
+  // ---- 2. Fill in the message row claimed above (or insert fresh) ----
+  // The claim already inserted the dedupe row; update it with the real
+  // content/lead. If the claim was skipped (no wa_message_id) this INSERTs.
   if (waMessageId) {
-    const ins = await query(
-      `INSERT INTO whatsapp_messages (lead_id, wa_message_id, phone_number, direction, content, status, branch_id)
-       VALUES ($1, $2, $3, 'inbound', $4, 'received', $5)
-       ON CONFLICT DO NOTHING
-       RETURNING id`,
-      [lead.id, waMessageId, `+${from}`, text, waBranch?.id || null]
+    await query(
+      `UPDATE whatsapp_messages SET lead_id = $1, content = $2, branch_id = $3
+       WHERE wa_message_id = $4 AND direction = 'inbound'`,
+      [lead.id, text, waBranch?.id || null, waMessageId]
+    ).catch(() =>
+      query(
+        `INSERT INTO whatsapp_messages (lead_id, wa_message_id, direction, content, status)
+         VALUES ($1, $2, 'inbound', $3, 'received')
+         ON CONFLICT (wa_message_id) WHERE wa_message_id IS NOT NULL DO NOTHING`,
+        [lead.id, waMessageId, text]
+      )
     )
-    if ((ins.rowCount || 0) === 0) return // lost the race — the winning retry handles the reply
   } else {
     await query(
-      `INSERT INTO whatsapp_messages (lead_id, phone_number, direction, content, status, branch_id)
-       VALUES ($1, $2, 'inbound', $3, 'received', $4)`,
-      [lead.id, `+${from}`, text, waBranch?.id || null]
-    ).catch(() => {})
+      `INSERT INTO whatsapp_messages (lead_id, wa_message_id, phone_number, direction, content, status, branch_id)
+       VALUES ($1, $2, $3, 'inbound', $4, 'received', $5)`,
+      [lead.id, waMessageId, `+${from}`, text, waBranch?.id || null]
+    )
   }
 
   if (isNewContact) {

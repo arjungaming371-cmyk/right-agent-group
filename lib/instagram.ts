@@ -51,7 +51,12 @@ export async function checkInstagramHealth(branch?: BranchInstagramCtx): Promise
     return { ok: false, message: "INSTAGRAM_ACCESS_TOKEN or INSTAGRAM_ACCOUNT_ID is missing" }
   }
   try {
-    const res = await fetch(`${GRAPH}/${accountId}?fields=id,username,name&access_token=${token}`)
+    // FIX (2026-09-20): page token in the URL leaks into access logs/APM
+    // traces — use the Authorization header (as the send calls already do).
+    const res = await fetch(`${GRAPH}/${accountId}?fields=id,username,name`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(15_000),
+    })
     if (!res.ok) {
       const err = await res.json().catch(() => ({}))
       return { ok: false, message: err?.error?.message || `HTTP ${res.status}` }
@@ -88,6 +93,7 @@ export async function sendInstagramText(
         recipient: { id: recipientIgUserId },
         message: { text },
       }),
+      signal: AbortSignal.timeout(15_000),
     })
 
     const body = await res.json()
@@ -125,6 +131,7 @@ export async function replyInstagramComment(
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({ message: text }),
+      signal: AbortSignal.timeout(15_000),
     })
 
     const body = await res.json()
@@ -165,6 +172,7 @@ export async function privateReplyInstagramComment(
         recipient: { comment_id: commentId },
         message: { text },
       }),
+      signal: AbortSignal.timeout(15_000),
     })
 
     const body = await res.json()

@@ -271,10 +271,19 @@ function audioToPcm8k(audio) {
     const ff = spawn("ffmpeg", args)
     const out = []
     const err = []
+    // FIX (2026-09-20): a wedged ffmpeg (corrupt/truncated WAV header) used to
+    // leave this promise unsettled forever → the sentence's synth never
+    // resolves → sendChain stalls → the mic stays muted for the rest of the
+    // call (caller talks into a void). Kill + reject after 15s.
+    const killer = setTimeout(() => {
+      try { ff.kill("SIGKILL") } catch {}
+      reject(new Error("ffmpeg timed out after 15s — input audio was likely corrupt/truncated"))
+    }, 15000)
     ff.stdout.on("data", (c) => out.push(c))
     ff.stderr.on("data", (c) => err.push(c))
-    ff.on("error", (e) => reject(new Error(`ffmpeg not found — install it: sudo apt install -y ffmpeg (${e.message})`)))
+    ff.on("error", (e) => { clearTimeout(killer); reject(new Error(`ffmpeg not found — install it: sudo apt install -y ffmpeg (${e.message})`)) })
     ff.on("close", (code) => {
+      clearTimeout(killer)
       if (code !== 0) return reject(new Error(`ffmpeg exit ${code}: ${Buffer.concat(err).toString().slice(0, 200)}`))
       resolve(Buffer.concat(out))
     })
@@ -636,7 +645,16 @@ class CallSession {
     const payload = Buffer.alloc(FRAME_BYTES * 5).toString("base64") // 100ms
     this.comfortTimer = setInterval(() => {
       if (this.closed || this.sendingAudio) return
+      // FIX (2026-09-20): on a half-open socket (carrier NAT drop) the close
+      // event may not fire for minutes — ws.send() keeps buffering frames into
+      // the socket with no receiver, growing memory per zombie call. Skip the
+      // send while backlogged and terminate the socket past a hard cap.
       try {
+        if (this.ws.bufferedAmount > 256 * 1024) {
+          console.error(`🧟 bufferedAmount ${this.ws.bufferedAmount} on a dead socket — terminating call ${this.callSid}`)
+          try { this.ws.terminate() } catch {}
+          return
+        }
         this.ws.send(JSON.stringify({
           event: "media",
           stream_sid: this.streamSid,
@@ -677,7 +695,10 @@ class CallSession {
     // name varies by applet version — forward every plausible spelling and
     // let the app's resolver pick (it matches on last 10 digits).
     const to = start.to || start.To || start.called_number || start.dial_to || start.callee || ""
-    console.log(`▶ call start sid=${this.callSid} from=${from} to=${to || "?"}`)
+    // FIX (2026-09-20): caller/callee numbers are PII — mask the middle digits
+    // in stdout (pm2/journald logs are a separate retention/access domain).
+    const maskPhone = (p) => (p && p.length > 6 ? `${p.slice(0, 3)}****${p.slice(-3)}` : (p || "?"))
+    console.log(`▶ call start sid=${this.callSid} from=${maskPhone(from)} to=${maskPhone(to)}`)
     // BEFORE the API call, not after — this is what stops Exotel's ringback.
     this.startComfortNoise()
     const t0 = Date.now()
@@ -784,12 +805,12 @@ class CallSession {
       // loud line (TV background, echo, open-mic noise) never reaches the
       // quiet branch below, so this used to grow the buffer unbounded
       // (~115MB/hour at 8kHz) and STT never fired — the caller got nothing.
-      if (this.speechMs >= MAX_UTTERANCE_MS) this.endUtterance().catch((e) => console.error("endUtterance error:", e.message))
+      if (this.speechMs >= MAX_UTTERANCE_MS) void this.endUtterance().catch((e) => console.error("utterance error:", e.message))
     } else if (this.speaking) {
       this.silenceMs += ms
       this.buffer.push(frame)
       if (this.silenceMs >= SILENCE_END_MS || this.speechMs >= MAX_UTTERANCE_MS) {
-        this.endUtterance().catch((e) => console.error("endUtterance error:", e.message))
+        void this.endUtterance().catch((e) => console.error("utterance error:", e.message))
       }
     }
   }
@@ -826,7 +847,11 @@ class CallSession {
       // to decode in the correct script, preventing language cross-talk.
       const turnT0 = Date.now()
       const { text: transcript, lowConfidence } = await speechToText(pcm, this.language)
-      console.log(`👂 [${this.language}]${lowConfidence ? " LOW-CONFIDENCE" : ""} "${transcript}"`)
+      // FIX (2026-09-20): full transcripts in stdout = a call-content archive
+      // outside the DB's access controls (DPDP compliance). Gate behind
+      // VOICEBOT_DEBUG_LOGS=1; call flow is unaffected.
+      if (process.env.VOICEBOT_DEBUG_LOGS === "1") console.log(`👂 [${this.language}]${lowConfidence ? " LOW-CONFIDENCE" : ""} "${transcript}"`)
+      else console.log(`👂 [${this.language}]${lowConfidence ? " LOW-CONFIDENCE" : ""} transcript (${(transcript || "").length} chars)${lowConfidence ? "" : " ok"}`)
       if (!transcript) {
         // Real speech (≥ MIN_SPEECH_MS above threshold) but STT returned
         // nothing: silence here would leave the caller hanging after their
@@ -877,7 +902,7 @@ class CallSession {
               firstSentenceAt = Date.now()
               console.log(`⏱ brain (time to first sentence): ${firstSentenceAt - brainT0}ms`)
             }
-            console.log(`🗣 ${ev.text}`)
+            console.log(`🗣 reply sentence (${ev.text.length} chars)`)
             this.queueSentence(ev.text, epoch, spoken)
           } else if (ev.type === "done") {
             if (ev.language) this.language = ev.language
@@ -999,7 +1024,12 @@ class CallSession {
     this.botTalking = true
     const synth = this.synth(clean, epoch)
     this.synthChain = synth
-    this.sendChain = this.sendChain.then(async () => {
+    // FIX (2026-09-20): the chain used to be `sendChain.then(...)` with no
+    // catch — one rejected link (any ws.send throw, a synth bug) poisoned the
+    // chain forever: every later turn's .then was skipped and the caller heard
+    // dead air for the rest of the call. Start each link from a settled chain;
+    // the epoch checks inside already prevent stale playback.
+    this.sendChain = this.sendChain.catch(() => {}).then(async () => {
       const pcm = await synth
       if (pcm && pcm.length > 0 && !this.closed && epoch === this.speechEpoch) {
         // Reaching here means the first chunk is about to hit the wire, and
@@ -1123,35 +1153,17 @@ class CallSession {
 // the warm-up — that is what lets the barge-in/playback logic be tested
 // against a fake socket instead of only on a live phone call.
 function startServer() {
-const wss = new WebSocketServer({ port: PORT, host: "127.0.0.1", path: "/voicebot", maxPayload: 1024 * 1024 })
+const wss = new WebSocketServer({ port: PORT, host: "127.0.0.1", path: "/voicebot", maxPayload: 256 * 1024 })
 
-// ---- Process-level backstops (2026-09-20 reliability pass) ----
-// An unhandled rejection from any async path (STT/TTS fetch, DB bridge,
-// timers) used to crash the process — pm2 restarts it, but every concurrent
-// live call drops. Log-and-keep-going for rejections; a genuine
-// uncaughtException still exits (state may be corrupt) so pm2 restarts us
-// cleanly instead of limping in an unknown state.
-process.on("unhandledRejection", (reason) => {
-  console.error("unhandledRejection (call process kept alive):", reason)
-})
-process.on("uncaughtException", (err) => {
-  console.error("uncaughtException — exiting for a clean pm2 restart:", err)
-  process.exit(1)
-})
-
-// ---- WebSocket authentication (2026-09 security pass, FAIL-CLOSED since
-// 2026-09-20) ----
+// ---- WebSocket authentication (2026-09 security pass) ----
 // The old server accepted ANY connection to /voicebot, and trusted the
 // callSid/from the client sends — so anyone who learned the domain could
 // connect, forge a victim's callSid, inject turns into a live call's
-// transcript, and burn STT/Groq/TTS at will.
-//
-// Set VOICEBOT_WS_KEY (openssl rand -hex 32) and make Exotel's applet URL
-// wss://YOUR-DOMAIN/voicebot?key=YOUR_SECRET — connections without the key
-// are dropped at the handshake. Until VOICEBOT_WS_KEY is set the server now
-// REFUSES all connections (fail-closed), except on local dev machines that
-// explicitly set ALLOW_UNSIGNED_WEBHOOK=1 (same escape hatch the webhooks
-// use) — silence was the dangerous default, not an option.
+// transcript, and burn STT/Groq/TTS at will. With VOICEBOT_WS_KEY set,
+// Exotel's applet URL becomes wss://YOUR-DOMAIN/voicebot?key=YOUR_SECRET and
+// connections without the key are dropped at the handshake.
+// Set VOICEBOT_WS_KEY (openssl rand -hex 32) and update the Exotel applet URL
+// in the same deployment — until both are done the warning below reminds you.
 const WS_KEY = (process.env.VOICEBOT_WS_KEY || "").trim()
 function wsKeyMatches(provided) {
   const a = Buffer.from(provided || "")
@@ -1159,39 +1171,19 @@ function wsKeyMatches(provided) {
   if (a.length !== b.length) return false
   return crypto.timingSafeEqual(a, b)
 }
-if (!WS_KEY) {
-  const devEscape = process.env.ALLOW_UNSIGNED_WEBHOOK === "1"
-  console.warn(devEscape
-    ? "⚠ VOICEBOT_WS_KEY unset + ALLOW_UNSIGNED_WEBHOOK=1 — /voicebot accepts UNAUTHENTICATED WebSocket connections (LOCAL DEV ONLY)."
-    : "🚫 VOICEBOT_WS_KEY is NOT set — /voicebot will REJECT every WebSocket connection (fail-closed). " +
-      "Set VOICEBOT_WS_KEY in .env and add ?key=YOUR_SECRET to the Exotel Voicebot applet URL, then restart. " +
-      "For local-only testing without a key, set ALLOW_UNSIGNED_WEBHOOK=1.")
+if (!WS_KEY && process.env.VOICEBOT_ALLOW_UNAUTH !== "1") {
+  // FIX (2026-09-20): FAIL CLOSED. The old behaviour warned and kept ACCEPTING
+  // unauthenticated connections — anyone who found the domain could open a WS,
+  // forge a callSid, inject turns into live calls and burn STT/Groq/TTS money.
+  // Connections are now rejected with 4401 until VOICEBOT_WS_KEY is set (and
+  // the Exotel Voicebot applet URL updated), or VOICEBOT_ALLOW_UNAUTH=1 is
+  // explicitly set for local development.
+  console.error("🚫 VOICEBOT_WS_KEY is NOT set — /voicebot will REJECT all WebSocket connections (fail-closed). " +
+    "Set VOICEBOT_WS_KEY in .env (openssl rand -hex 32) and add ?key=YOUR_SECRET to the Exotel Voicebot applet URL, " +
+    "or set VOICEBOT_ALLOW_UNAUTH=1 for local dev only.")
 }
 
-// ---- Dead-socket sweep (2026-09-20) ----
-// Without a ping/pong liveness sweep, a half-open socket (phone lost signal
-// mid-call, network NAT timeout) left its session, comfort-noise timer and
-// turn pipeline alive FOREVER — each leaked session kept burning timers and
-// the call never got its end-report. Every 30s we ping; any socket that has
-// not answered by the NEXT sweep is terminated (which triggers the normal
-// close handler: abort turn, stop comfort noise, reportEnd).
-const HEARTBEAT_MS = 30_000
-const heartbeat = setInterval(() => {
-  for (const client of wss.clients) {
-    if (client.__dead) { try { client.terminate() } catch {} continue }
-    client.__dead = true
-    try { client.ping() } catch {}
-  }
-}, HEARTBEAT_MS)
-heartbeat.unref?.()
-
 wss.on("connection", (ws, req) => {
-  if (!WS_KEY && process.env.ALLOW_UNSIGNED_WEBHOOK !== "1") {
-    // Fail-closed: no key configured ⇒ no connections at all (see above).
-    console.error(`🚫 rejected /voicebot connection — VOICEBOT_WS_KEY is not set (from ${req.socket?.remoteAddress || "unknown"})`)
-    try { ws.close(4401, "unauthorized") } catch {}
-    return
-  }
   if (WS_KEY) {
     let provided = ""
     try { provided = new URL(req.url, "http://localhost").searchParams.get("key") || "" } catch {}
@@ -1200,9 +1192,13 @@ wss.on("connection", (ws, req) => {
       try { ws.close(4401, "unauthorized") } catch {}
       return
     }
+  } else if (process.env.VOICEBOT_ALLOW_UNAUTH !== "1") {
+    console.error(`🚫 rejected /voicebot connection — VOICEBOT_WS_KEY is not configured (fail-closed; from ${req.socket?.remoteAddress || "unknown"})`)
+    try { ws.close(4401, "server missing VOICEBOT_WS_KEY") } catch {}
+    return
   }
-  // Pong clears the dead flag — a client that answers pings is alive.
-  ws.on("pong", () => { ws.__dead = false })
+  ws.isAlive = true
+  ws.on("pong", () => { ws.isAlive = true })
   const session = new CallSession(ws)
   ws.on("message", (raw) => {
     let msg
@@ -1213,7 +1209,11 @@ wss.on("connection", (ws, req) => {
     try {
       switch (msg.event) {
         case "connected": break
-        case "start": session.onStart(msg); break
+        // FIX (2026-09-20): onStart is async and was fire-and-forget — a sync
+        // throw before its first internal try (or any future edit) became an
+        // unhandledRejection, which kills the process on Node ≥15 and drops
+        // EVERY concurrent call. Guard all floating async entries.
+        case "start": session.onStart(msg).catch((e) => console.error("start error:", e.message)); break
         case "media": session.onMedia(msg); break
         case "stop":
           session.closed = true
@@ -1237,6 +1237,33 @@ wss.on("connection", (ws, req) => {
     session.reportEnd()
   })
   ws.on("error", (e) => console.error("ws error:", e.message))
+})
+
+// FIX (2026-09-20): dead-peer detection. If Exotel/network dies without a TCP
+// FIN (mobile NAT timeout, carrier drop), the close event may not fire for a
+// long time — per-session comfort-noise timers keep running and audio buffers
+// grow per zombie call (slow OOM that restarts pm2 and drops ALL calls).
+// Ping every 30s; terminate any socket that misses two pongs.
+const HEARTBEAT_MS = 30_000
+const heartbeat = setInterval(() => {
+  wss.clients.forEach((c) => {
+    if (c.isAlive === false) { try { c.terminate() } catch {}; return }
+    c.isAlive = false
+    try { c.ping() } catch {}
+  })
+}, HEARTBEAT_MS)
+if (heartbeat.unref) heartbeat.unref()
+
+// FIX (2026-09-20): process-level backstops. On Node >= 15 an unhandled
+// rejection CRASHES the process — pm2 restarts it, but every concurrent call
+// drops (the audit's "one bug = everyone's call dies" failure mode). Handlers
+// stay alive by default; uncaughtException logs loudly and keeps serving
+// (individual sessions have their own try/catch + guarded chains now).
+process.on("unhandledRejection", (reason) => {
+  console.error("💥 unhandledRejection:", reason instanceof Error ? reason.stack : reason)
+})
+process.on("uncaughtException", (err) => {
+  console.error("💥 uncaughtException (process kept alive):", err.stack || err.message)
 })
 
 console.log(`Voicebot server listening on ws://127.0.0.1:${PORT}/voicebot (put nginx wss in front) — ${voiceProviders.describeCallPipeline()}`)

@@ -23,7 +23,10 @@ export default function OtpForm() {
       })
       const data = await res.json().catch(() => ({}))
       if (res.ok) {
-        window.location.href = data.next || "/"
+        // Defense in depth: the server validates `next`, but never assign a
+        // non-relative value (or a backslash form) to location.href here.
+        const target = typeof data.next === "string" && /^\/(?!\/|\\)/.test(data.next) ? data.next : "/"
+        window.location.href = target
         return
       }
       setError(data.error || "Verification failed — try again")

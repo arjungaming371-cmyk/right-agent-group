@@ -1,7 +1,7 @@
-import { apiError } from "@/lib/api-error"
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
-import { requireRole } from "@/lib/auth"
+import { getSessionFromRequest, requireRole } from "@/lib/auth"
+import { apiError } from "@/lib/api-error"
 
 export const dynamic = "force-dynamic"
 
@@ -66,7 +66,10 @@ const DEFAULT_ROLES: RoleDefinition[] = [
   },
 ]
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  // FIX (2026-09-20): GET had no in-route auth (middleware-only) — POST does.
+  const session = await getSessionFromRequest(req)
+  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   try {
     const res = await query(`SELECT config FROM form_configs WHERE id = 'custom_roles_config'`)
     if (res.rowCount && res.rows[0]?.config?.roles) {
@@ -77,10 +80,11 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  // 2026-09 fix (privilege escalation): custom_roles_config is GLOBAL — the
-  // old ["admin", "branch_manager"] gate let any branch manager rewrite the
-  // role catalog for the whole organization. Only admins may edit it.
-  const session = await requireRole(req, ["admin"])
+  // FIX (2026-09-20): this config is ORG-GLOBAL (one custom_roles_config row
+  // for every branch). A branch manager rewriting it changes role definitions
+  // and module access for ALL branches — a privilege-escalation surface.
+  // Only admin/developer, the same roles that manage teammates org-wide.
+  const session = await requireRole(req, ["admin", "developer"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   try {

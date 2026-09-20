@@ -15,8 +15,16 @@ function loadEnv() {
     process.exit(1)
   }
   for (const line of fs.readFileSync(envPath, "utf8").split(/\r?\n/)) {
-    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*(?:#.*)?$/)
-    if (m && !(m[1] in process.env)) process.env[m[1]] = m[2]
+    // FIX (2026-09-20): match dotenv semantics — strip only a SPACED comment
+    // (" #..."), keep '#' inside unquoted values (PG_PASSWORD=abc#123 used to
+    // silently truncate), and unwrap surrounding quotes.
+    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/)
+    if (!m || m[1] in process.env) continue
+    let v = m[2]
+    const commentIdx = v.search(/\s#/)
+    if (commentIdx !== -1) v = v.slice(0, commentIdx).trim()
+    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1)
+    process.env[m[1]] = v
   }
 }
 

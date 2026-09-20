@@ -8,20 +8,22 @@ import { sessionBranchId } from "@/lib/branches"
 // for a different purpose); the calendar just needs a small, date-scoped
 // shape for whatever month is currently visible.
 export async function GET(req: NextRequest) {
-  // 2026-09 fix: branch_manager was missing from this read (branch staff saw
-  // an empty calendar) and the query had NO branch filter (cross-branch IDOR
-  // — any agent could read every branch's callbacks).
+  // FIX (2026-09-20): two bugs — branch_manager was missing from the role
+  // list (branch managers got a broken calendar), and the query had NO
+  // branch filter (branch users saw EVERY branch's customer names + phones).
   const session = await requireRole(req, ["admin", "agent", "viewer", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+  const branchId = sessionBranchId(session)
 
   const { searchParams } = new URL(req.url)
   const from = searchParams.get("from")
   const to = searchParams.get("to")
+  // FIX (2026-09-20): validate the window params — garbage dates silently
+  // produced an empty (or wildly unscoped) calendar result.
   if (!from || !to || !/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
     return NextResponse.json({ error: "from and to (YYYY-MM-DD) are required" }, { status: 400 })
   }
 
-  const branchId = sessionBranchId(session)
   const result = await query(
     `SELECT id, name, phone, callback_at, callback_note, product_interest
      FROM leads

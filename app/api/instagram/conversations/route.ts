@@ -40,7 +40,12 @@ export async function GET(req: NextRequest) {
       params.push(branchId)
     }
 
-    sql += ` ORDER BY m.ig_user_id, m.created_at DESC `
+    // FIX (2026-09-20): unbounded result set + correlated unread subquery per
+    // row — cap at the 100 most recent conversations (mirrors the WhatsApp view).
+    sql = `
+      SELECT * FROM (
+        ${sql} ORDER BY m.ig_user_id, m.created_at DESC
+      ) conv ORDER BY conv.last_time DESC LIMIT 100`
 
     // PERF (2026-09): bounded list — polled every 5s by the dashboard; without
     // a LIMIT both the DISTINCT ON scan and the per-group COUNT grow forever.
@@ -49,10 +54,7 @@ export async function GET(req: NextRequest) {
 
     const res = await query(sql, params)
 
-    // Sort by last_time DESC for final response
-    const conversations = res.rows.sort((a, b) => new Date(b.last_time).getTime() - new Date(a.last_time).getTime())
-
-    return NextResponse.json(conversations)
+    return NextResponse.json(res.rows)
   } catch (e: any) {
     console.error("Failed to fetch Instagram conversations:", e.message)
     return apiError(e)

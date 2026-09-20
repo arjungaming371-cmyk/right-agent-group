@@ -32,6 +32,7 @@ const PUBLIC_PREFIXES = [
 // the Meta webhook are public.
 const PUBLIC_EXACT = [
   "/api/whatsapp", "/api/calls/turn", "/api/calls/status", "/api/calls/passthru", "/api/digest",
+  "/api/instagram", // Meta Instagram webhook — HMAC-verified inside (was missing: the middleware 401'd Meta before the route could verify anything, killing the whole IG channel)
   "/api/system/status", // coarse booleans only — no error details (see route)
   "/api/security/flags", // one boolean, read back by this middleware itself
   "/api/branding", // white-label public branding (public-safe fields only)
@@ -49,10 +50,15 @@ const PUBLIC_EXACT = [
 let _ipFlagCache = false
 let _ipFlagAt = 0
 
-async function ipAllowlistEnabled(origin: string): Promise<boolean> {
+// SECURITY (2026-09-20): never derive the self-fetch base URL from the request
+// (req.nextUrl.origin comes from the attacker-controlled Host header — an
+// attacker sending `Host: evil.com` made the middleware read the allowlist
+// flag from THEIR server). Pin it to the configured app URL, or loopback.
+async function ipAllowlistEnabled(): Promise<boolean> {
   if (Date.now() - _ipFlagAt < 30_000) return _ipFlagCache
+  const base = (process.env.NEXT_PUBLIC_APP_URL || `http://127.0.0.1:${process.env.PORT || 3000}`).replace(/\/$/, "")
   try {
-    const res = await fetch(`${origin}/api/security/flags`, { cache: "no-store" })
+    const res = await fetch(`${base}/api/security/flags`, { cache: "no-store" })
     if (res.ok) {
       _ipFlagCache = !!(await res.json())?.ip_allowlist
       _ipFlagAt = Date.now()
@@ -66,38 +72,41 @@ async function ipAllowlistEnabled(origin: string): Promise<boolean> {
 function ipAllowed(clientIp: string): boolean {
   const entries = (process.env.IP_ALLOWLIST || "").split(",").map((s) => s.trim()).filter(Boolean)
   if (entries.length === 0) return true
-  if (clientIp === "127.0.0.1" || clientIp === "::1" || clientIp === "") return true
+  if (clientIp === "127.0.0.1" || clientIp === "::1") return true
+  // Empty/unresolvable IP = no trusted proxy header present → fail closed.
   return entries.some((e) => (e.endsWith(".") ? clientIp.startsWith(e) : clientIp === e))
 }
 
 /**
- * SECURITY (2026-09 fix): pick the client IP from TRUSTED proxy headers.
- * nginx sets X-Real-IP to the actual socket address; with
- * $proxy_add_x_forwarded_for the FIRST X-Forwarded-For entry is whatever the
- * CLIENT typed (spoofable — an attacker sent "X-Forwarded-For: 1.2.3.4" and
- * passed a previously-allowlisted IP check). Fall back to the LAST XFF entry,
- * which is the address our own trusted proxy appended.
+ * SECURITY (2026-09-20): the old code read the FIRST x-forwarded-for entry,
+ * which is client-controlled (nginx APPENDS the real address, so a client
+ * sending "X-Forwarded-For: 127.0.0.1" bypassed the whole allowlist).
+ * Trust order: x-real-ip (overwritten by our nginx) → LAST xff entry (the
+ * one our own proxy appended) → "unknown" (fail-closed: not on any list).
  */
 function trustedClientIp(req: NextRequest): string {
-  const realIp = (req.headers.get("x-real-ip") || "").trim()
-  if (realIp) return realIp
+  const real = (req.headers.get("x-real-ip") || "").trim()
+  if (real) return real
   const xff = (req.headers.get("x-forwarded-for") || "").split(",").map((s) => s.trim()).filter(Boolean)
-  return xff.length ? xff[xff.length - 1] : ""
+  if (xff.length > 0) return xff[xff.length - 1]
+  return "unknown"
 }
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
 
-  if (
-    PUBLIC_EXACT.includes(pathname) ||
-    PUBLIC_PREFIXES.some((p) => pathname === p.replace(/\/$/, "") || pathname.startsWith(p))
-  ) {
+  // Exact public routes; prefix routes must match at a path boundary
+  // ("/apply" no longer lets "/applyanything" through).
+  const isPublicPrefix = PUBLIC_PREFIXES.some(
+    (p) => pathname === p.replace(/\/$/, "") || pathname.startsWith(p.endsWith("/") ? p : p + "/")
+  )
+  if (PUBLIC_EXACT.includes(pathname) || isPublicPrefix) {
     return NextResponse.next()
   }
 
   // Console (session-protected) surface only — webhooks and the customer
   // form above are never IP-restricted.
-  if (await ipAllowlistEnabled(req.nextUrl.origin)) {
+  if (await ipAllowlistEnabled()) {
     if (!ipAllowed(trustedClientIp(req))) {
       return new NextResponse("Access restricted to approved network ranges.", { status: 403 })
     }

@@ -44,8 +44,10 @@ export function ipAllowed(clientIp: string): boolean {
   if (!raw) return true
   const entries = raw.split(",").map((s) => s.trim()).filter(Boolean)
   if (entries.length === 0) return true
-  // Local/dev addresses always pass — enforcement targets the public tunnel.
-  if (clientIp === "127.0.0.1" || clientIp === "::1" || clientIp === "unknown") return true
+  // Local/dev loopback always passes — enforcement targets the public tunnel.
+  // SECURITY (2026-09-20): "unknown" (spoofable via forged headers / missing
+  // proxy headers) no longer bypasses the allowlist — fail closed instead.
+  if (clientIp === "127.0.0.1" || clientIp === "::1") return true
   return entries.some((e) => (e.endsWith(".") ? clientIp.startsWith(e) : clientIp === e))
 }
 

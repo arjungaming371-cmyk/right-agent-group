@@ -305,10 +305,11 @@ export async function scanIdleWhatsAppConversations(): Promise<{ scanned: number
 
 // ---------------------------------------------------------------------------
 // Safety gate — checked by every outbound-calling code path (app/api/calls,
-// app/api/outbound, app/api/outbound/process) before dialing. Fails OPEN on
-// a DB error: this is a bolt-on safety check on top of the core calling
-// feature, and a transient query failure here must never silently disable
-// outbound calling for the whole app. Errors are logged loudly instead.
+// app/api/outbound, app/api/outbound/process) before dialing.
+// FIX (2026-09-20): FAIL CLOSED. A DB error used to return false ("not DNC")
+// and let the call proceed to a lead that explicitly asked never to be called
+// — a TRAI-penalizable event. Suppressed dials during a DB blip are the
+// correct trade-off; checkCallCompliance now handles the same way.
 // ---------------------------------------------------------------------------
 export async function isDoNotCall(opts: { leadId?: string | null; phone?: string | null }): Promise<boolean> {
   try {
@@ -325,8 +326,8 @@ export async function isDoNotCall(opts: { leadId?: string | null; phone?: string
     }
     return false
   } catch (e: any) {
-    console.error("isDoNotCall check error (failing open — call proceeds):", e.message)
-    return false
+    console.error("isDoNotCall check error (failing CLOSED — lead treated as DNC):", e.message)
+    return true
   }
 }
 

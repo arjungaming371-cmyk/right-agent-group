@@ -66,6 +66,6 @@ export async function POST(req: NextRequest) {
     }
     return NextResponse.json({ callSid: call.sid, status: call.status })
   } catch (e: unknown) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 })
+    return apiError(e)
   }
 }

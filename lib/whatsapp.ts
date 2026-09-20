@@ -66,7 +66,8 @@ function defaultBranding(): string {
 // would strand an active conversation.
 // Self-contained query (not lib/compliance.ts's isDndSuppressed) to avoid a
 // lib import cycle via lead-brain; same table, same last-10-digits match.
-async function dndGate(number: string): Promise<{ ok: false; error: string } | null> {
+// Exported (2026-09-20): /api/whatsapp/send now gates manual agent sends too.
+export async function dndGate(number: string): Promise<{ ok: false; error: string } | null> {
   const digits = (number || "").replace(/\D/g, "").slice(-10)
   if (digits.length !== 10) return null // nothing reliable to match — don't block
   let suppressed: boolean

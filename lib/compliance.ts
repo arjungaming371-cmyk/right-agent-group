@@ -139,6 +139,11 @@ export type ComplianceResult = { allowed: boolean; reason?: string; code?: Compl
  * skipped without string-matching the message.
  */
 export async function checkCallCompliance(opts: { leadId?: string | null; phone: string }): Promise<ComplianceResult> {
+  // FIX (2026-09-20): FAIL CLOSED. The outer catch used to return allowed:true
+  // — any upstream throw (isDoNotCall DB error, getSettings error) silently
+  // disabled the ENTIRE regulatory gate and dialed do-not-call leads outside
+  // the TRAI window. A skipped dial during a DB blip is far cheaper than the
+  // penalizable event the gate exists to prevent.
   try {
     if (await isDoNotCall({ leadId: opts.leadId, phone: opts.phone })) {
       return { allowed: false, code: "do_not_call", reason: "This lead is marked Do Not Call." }
@@ -156,7 +161,7 @@ export async function checkCallCompliance(opts: { leadId?: string | null; phone:
     }
     return { allowed: true }
   } catch (e: any) {
-    console.error("checkCallCompliance error (failing open — call proceeds):", e.message)
-    return { allowed: true }
+    console.error("checkCallCompliance error (failing CLOSED — call suppressed):", e.message)
+    return { allowed: false, code: "dnd_suppressed", reason: "Compliance check unavailable — call suppressed (fail-closed)." }
   }
 }

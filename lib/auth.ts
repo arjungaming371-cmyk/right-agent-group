@@ -23,6 +23,17 @@ export function canSwitchBranch(role: Role): boolean {
   return role === "admin" || role === "developer"
 }
 
+/**
+ * Same-site relative redirect guard for OAuth `next` params (2026-09-20).
+ * Rejects absolute URLs, protocol-relative "//evil.com", AND backslash forms
+ * ("/\evil.com") — WHATWG URL parsing treats "\" as "/" for special schemes,
+ * so the old startsWith("/")+!startsWith("//") check let a victim be bounced
+ * off-site after a fully authenticated sign-in.
+ */
+export function isSafeNextPath(p: string | null | undefined): p is string {
+  return typeof p === "string" && /^\/(?!\/|\\)/.test(p)
+}
+
 function getSecret(): string {
   const s = process.env.AUTH_SECRET
   if (!s || s.length < 32) {
@@ -54,7 +65,22 @@ async function hmacKey(): Promise<CryptoKey> {
   ])
 }
 
-export type Session = { email: string; role: Role; exp: number; orgId?: string | null; branchId?: string | null }
+export type Session = { email: string; role: Role; exp: number; orgId?: string | null; branchId?: string | null; epoch?: number }
+
+/**
+ * Reads the user's session_epoch (bumped by /api/auth/logout to revoke every
+ * outstanding cookie for that user). Tokens older than the current epoch are
+ * rejected in getLiveSession. Defaults to 0 when the row/DB is unavailable.
+ */
+async function currentSessionEpoch(email: string): Promise<number> {
+  try {
+    const { query } = await import("@/lib/db")
+    const r = await query(`SELECT session_epoch FROM allowed_emails WHERE lower(email) = $1 LIMIT 1`, [email.toLowerCase()])
+    return Number(r.rows[0]?.session_epoch ?? 0)
+  } catch {
+    return 0
+  }
+}
 
 export async function createSessionToken(
   email: string,
@@ -66,6 +92,7 @@ export async function createSessionToken(
     role,
     orgId: scope?.orgId ?? null,
     branchId: scope?.branchId ?? null,
+    epoch: await currentSessionEpoch(email),
     exp: Math.floor(Date.now() / 1000) + SESSION_DAYS * 86400,
   }
   const payloadB64 = toBase64Url(enc.encode(JSON.stringify(payload)))
@@ -89,6 +116,11 @@ export async function verifySessionToken(token: string | undefined | null): Prom
     const payload = JSON.parse(new TextDecoder().decode(fromBase64Url(payloadB64))) as Session
     if (!payload?.email || typeof payload.exp !== "number") return null
     if (payload.exp < Math.floor(Date.now() / 1000)) return null
+    // SECURITY (2026-09-20): an otp_pending token (2FA step) is signed with the
+    // same key and carries email/role/exp — without this check, copying its
+    // value into the session cookie yields a full 7-day admin session and
+    // bypasses 2FA entirely. OTP-pending tokens are NEVER valid sessions.
+    if ((payload as { kind?: string }).kind === "otp") return null
     // Sessions signed before the role field existed: treat as agent, the
     // least-privileged non-viewer role, rather than silently trusting admin.
     if (payload.role !== "admin" && payload.role !== "agent" && payload.role !== "viewer" && payload.role !== "developer" && payload.role !== "branch_manager") payload.role = "agent"
@@ -198,6 +230,10 @@ export async function getLiveSession(req: Request): Promise<LiveSession | null> 
       return null
     }
     const dbRow = r.rows[0]
+    // Revocation (2026-09-20): a logout bumps session_epoch — any cookie minted
+    // before that (stolen or otherwise) is now invalid, cutting the previous
+    // "stolen cookie is good for 7 days, nothing can invalidate it" window.
+    if (Number(dbRow.session_epoch ?? 0) > (session.epoch ?? 0)) return null
     session.branchId = dbRow.branch_id ?? session.branchId
     session.orgId = dbRow.org_id ?? session.orgId
 
@@ -223,8 +259,12 @@ export async function getLiveSession(req: Request): Promise<LiveSession | null> 
 
     return { ...session, allowedModules }
   } catch (err) {
+    // SECURITY (2026-09-20): FAIL CLOSED. The whole point of getLiveSession is
+    // real-time revocation — returning the stale signed cookie on a DB error
+    // lets removed/demoted users keep full access for the rest of the session
+    // during any DB incident. Data routes will return 401 until the DB is back.
     console.error("getLiveSession DB verification error:", err)
-    return session
+    return null
   }
 }
 

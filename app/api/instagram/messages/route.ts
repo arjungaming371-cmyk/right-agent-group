@@ -40,7 +40,13 @@ export async function GET(req: NextRequest) {
       sql += ` AND m.branch_id = $${params.length}`
     }
 
-    sql += ` ORDER BY m.created_at ASC`
+    // FIX (2026-09-20): no LIMIT — a busy thread (or an attacker DMing
+    // repeatedly) grew the poll response without bound. Last 200, oldest-first
+    // (subquery so ASC ordering + LIMIT compose correctly).
+    sql = `
+      SELECT * FROM (
+        ${sql} ORDER BY m.created_at DESC LIMIT 200
+      ) recent ORDER BY created_at ASC`
 
     const res = await query(sql, params)
     return NextResponse.json(res.rows)

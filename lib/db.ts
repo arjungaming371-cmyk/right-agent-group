@@ -13,6 +13,13 @@ const pool = new Pool({
   // ~10 are ever in use at a time, so this has real headroom.
   max: 25,
   idleTimeoutMillis: 30000,
+  // FIX (2026-09-20): both were unset → pg waits FOREVER. Under a burst,
+  // requests queued indefinitely on pool.connect() (API routes hung, browser
+  // polls piled up, the voicebot's 20s /api/calls/turn timeout expired and
+  // callers heard the fallback line), and a single stuck query pinned a
+  // connection permanently. Fail fast instead of hanging.
+  connectionTimeoutMillis: 5000,
+  statement_timeout: 15000,
 })
 
 pool.on("error", (err) => console.error("Unexpected PostgreSQL error:", err))

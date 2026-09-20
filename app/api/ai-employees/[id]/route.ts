@@ -1,6 +1,6 @@
 import { apiError } from "@/lib/api-error"
 import { NextRequest, NextResponse } from "next/server"
-import { query } from "@/lib/db"
+import pool, { query } from "@/lib/db"
 import { requireRole } from "@/lib/auth"
 
 export const dynamic = "force-dynamic"
@@ -42,14 +42,30 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     }
 
     // Replace branch assignments when provided.
+    // FIX (2026-09-20): the delete + per-row inserts ran WITHOUT a transaction
+    // — a mid-loop failure (one bad UUID / FK error) committed the delete and
+    // left the employee with ZERO or partial assignments (calls then fall back
+    // to the default voice/script). One atomic statement + transaction.
     if (Array.isArray(body?.branchIds)) {
-      await query(`DELETE FROM branch_ai_employees WHERE employee_id = $1`, [id])
-      for (const branchId of body.branchIds.slice(0, 100)) {
-        if (typeof branchId !== "string") continue
-        await query(
-          `INSERT INTO branch_ai_employees (branch_id, employee_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-          [branchId, id]
-        )
+      const validBranchIds = body.branchIds.filter((b: any) => typeof b === "string" && b).slice(0, 100)
+      const client = await pool.connect()
+      try {
+        await client.query("BEGIN")
+        await client.query(`DELETE FROM branch_ai_employees WHERE employee_id = $1`, [id])
+        if (validBranchIds.length > 0) {
+          await client.query(
+            `INSERT INTO branch_ai_employees (branch_id, employee_id)
+             SELECT b, $2 FROM unnest($1::uuid[]) AS b
+             ON CONFLICT DO NOTHING`,
+            [validBranchIds, id]
+          )
+        }
+        await client.query("COMMIT")
+      } catch (e) {
+        await client.query("ROLLBACK").catch(() => {})
+        throw e
+      } finally {
+        client.release()
       }
     }
 
