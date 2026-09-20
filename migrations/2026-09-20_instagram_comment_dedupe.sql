@@ -15,8 +15,12 @@ UPDATE instagram_messages
 SET comment_id = NULL
 WHERE comment_id IS NOT NULL
   AND id NOT IN (
-    SELECT MAX(id) FROM instagram_messages WHERE comment_id IS NOT NULL GROUP BY comment_id
+    SELECT DISTINCT ON (comment_id) id
+    FROM instagram_messages
+    WHERE comment_id IS NOT NULL
+    ORDER BY comment_id, created_at DESC
   );
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_ig_messages_comment_id
   ON instagram_messages (comment_id) WHERE comment_id IS NOT NULL;
+
