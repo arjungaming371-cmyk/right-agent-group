@@ -45,11 +45,9 @@ export async function GET(req: NextRequest) {
     sql = `
       SELECT * FROM (
         ${sql} ORDER BY m.ig_user_id, m.created_at DESC
-      ) conv ORDER BY conv.last_time DESC LIMIT 100`
+      ) conv ORDER BY conv.last_time DESC`
 
-    // PERF (2026-09): bounded list — polled every 5s by the dashboard; without
-    // a LIMIT both the DISTINCT ON scan and the per-group COUNT grow forever.
-    params.push(200)
+    params.push(100)
     sql += ` LIMIT $${params.length}`
 
     const res = await query(sql, params)
