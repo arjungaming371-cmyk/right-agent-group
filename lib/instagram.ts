@@ -13,6 +13,10 @@ const GRAPH = "https://graph.facebook.com/v21.0"
 const TOKEN = process.env.INSTAGRAM_ACCESS_TOKEN || ""
 const ACCOUNT_ID = process.env.INSTAGRAM_ACCOUNT_ID || ""
 
+function graphBase(token: string) {
+  return token.startsWith("IG") ? "https://graph.instagram.com/v21.0" : "https://graph.facebook.com/v21.0"
+}
+
 export type BranchInstagramCtx = {
   id: string
   instagramToken?: string | null
@@ -51,7 +55,9 @@ export async function checkInstagramHealth(branch?: BranchInstagramCtx): Promise
     return { ok: false, message: "INSTAGRAM_ACCESS_TOKEN or INSTAGRAM_ACCOUNT_ID is missing" }
   }
   try {
-    const res = await fetch(`${GRAPH}/${accountId}?fields=id,username,name&access_token=${token}`)
+    const base = graphBase(token)
+    const target = (token.startsWith("IG") && !accountId) ? "me" : accountId
+    const res = await fetch(`${base}/${target}?fields=id,username,name&access_token=${token}`)
     if (!res.ok) {
       const err = await res.json().catch(() => ({}))
       return { ok: false, message: err?.error?.message || `HTTP ${res.status}` }
@@ -78,7 +84,7 @@ export async function sendInstagramText(
   }
 
   try {
-    const res = await fetch(`${GRAPH}/${accountId}/messages`, {
+    const res = await fetch(`${graphBase(token)}/${accountId}/messages`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -118,7 +124,7 @@ export async function replyInstagramComment(
   }
 
   try {
-    const res = await fetch(`${GRAPH}/${commentId}/replies`, {
+    const res = await fetch(`${graphBase(token)}/${commentId}/replies`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -155,7 +161,7 @@ export async function privateReplyInstagramComment(
   }
 
   try {
-    const res = await fetch(`${GRAPH}/${accountId}/messages`, {
+    const res = await fetch(`${graphBase(token)}/${accountId}/messages`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
