@@ -11,6 +11,7 @@
     "test:voicebot": "node scripts/voicebot-selftest.js",
     "test:providers": "node scripts/voice-providers-test.js",
     "test:transcript": "node scripts/transcript-correction-test.js",
+    "test:instagram": "node scripts/test-instagram.js",
     "bench:turn": "node scripts/turn-latency-bench.js"
   },
   "dependencies": {

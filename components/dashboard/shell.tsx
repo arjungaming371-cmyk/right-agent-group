@@ -490,7 +490,7 @@ export default function DashboardShell() {
           {view === "dev-logs" && role === "developer" && <DeveloperLogsView userEmail={userEmail} />}
         </main>
       </div>
-      <QuickChat role={role} userEmail={userEmail} />
+      {/* Floating QuickChat removed */}
       <VoiceAssistant
         isOpen={voiceAssistantOpen}
         onClose={() => setVoiceAssistantOpen(false)}

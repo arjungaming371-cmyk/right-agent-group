@@ -378,13 +378,14 @@ export async function sendMissedCallFollowUp(to: string, name: string, branch?: 
 }
 
 /** Health check for the dashboard — verifies the token and number are live with Meta. */
-export async function checkWhatsAppHealth(): Promise<{ ok: boolean; message: string }> {
-  if (!(TOKEN && PHONE_ID)) {
-    return { ok: false, message: "Not configured — set WHATSAPP_TOKEN and WHATSAPP_PHONE_NUMBER_ID in .env" }
+export async function checkWhatsAppHealth(branch?: BranchWhatsAppCtx): Promise<{ ok: boolean; message: string }> {
+  const { token, phoneId, configured } = credsFor(branch)
+  if (!configured) {
+    return { ok: false, message: "Not configured — set WHATSAPP_TOKEN and WHATSAPP_PHONE_NUMBER_ID" }
   }
   try {
-    const res = await fetch(`${GRAPH}/${PHONE_ID}?fields=display_phone_number,verified_name,quality_rating`, {
-      headers: { Authorization: `Bearer ${TOKEN}` },
+    const res = await fetch(`${GRAPH}/${phoneId}?fields=display_phone_number,verified_name,quality_rating`, {
+      headers: { Authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(5000),
     })
     const data: any = await res.json().catch(() => ({}))

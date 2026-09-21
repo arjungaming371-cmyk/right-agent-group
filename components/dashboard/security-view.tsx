@@ -4,7 +4,6 @@ import { ShieldCheck, AlertTriangle, RotateCcw, FileLock2, PhoneOff, Clock, X, P
 import { SkeletonList } from "../ui/skeleton"
 import { useToast } from "../ui/toast"
 import { formatDateTime } from "@/lib/utils"
-import ApiKeysManager from "./api-keys-manager"
 
 type Setting = { key: string; enabled: boolean }
 type AuditLog = { id: string; action: string; performed_by: string; created_at: string }
@@ -198,9 +197,6 @@ export default function SecurityView({ role = "admin" }: { role?: Role }) {
     <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-[1fr_320px] md:gap-5">
       {/* Left */}
       <div style={{ display:"flex",flexDirection:"column",gap:16 }}>
-        {/* API Keys & Live Token Usage Manager */}
-        <ApiKeysManager />
-
         {/* Access Controls */}
         <div style={{ background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:12 }}>
           <div style={{ padding:"18px 24px",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center" }}>

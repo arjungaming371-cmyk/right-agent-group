@@ -31,7 +31,7 @@ const PUBLIC_PREFIXES = [
 // MUST require a login session. Only the two telephony webhooks below and
 // the Meta webhook are public.
 const PUBLIC_EXACT = [
-  "/api/whatsapp", "/api/calls/turn", "/api/calls/status", "/api/calls/passthru", "/api/digest",
+  "/api/whatsapp", "/api/instagram", "/api/calls/turn", "/api/calls/status", "/api/calls/passthru", "/api/digest",
   "/api/system/status", // coarse booleans only — no error details (see route)
   "/api/security/flags", // one boolean, read back by this middleware itself
   "/api/branding", // white-label public branding (public-safe fields only)
