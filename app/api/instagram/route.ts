@@ -61,12 +61,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "webhook not configured" }, { status: 503 })
   }
 
-  if (appSecret) {
+  if (appSecret && process.env.ALLOW_UNSIGNED_WEBHOOK !== "1") {
     const sig = req.headers.get("x-hub-signature-256") || ""
     const expected = "sha256=" + crypto.createHmac("sha256", appSecret).update(raw).digest("hex")
     const a = Buffer.from(sig)
     const b = Buffer.from(expected)
     if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+      console.warn("⚠️ Instagram webhook signature mismatch")
       return NextResponse.json({ error: "bad signature" }, { status: 401 })
     }
   }
