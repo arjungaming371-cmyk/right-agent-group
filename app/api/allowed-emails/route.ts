@@ -21,21 +21,14 @@ async function getBaseRole(roleId: string): Promise<Role> {
   return "agent"
 }
 
-// Team access management is admin-only. Middleware already blocks
-// unauthenticated calls, but we verify the role again here — never trust a
-// single layer for an access-control endpoint.
+// Team access management. Admin/developer manage everyone; branch managers
+// can see and manage teammates inside their own branch.
 export async function GET(req: NextRequest) {
-  const session = await requireRole(req, ["admin", "developer"])
+  const session = await requireRole(req, ["admin", "developer", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   // Admin sees all branches; branch_manager sees only teammates in their own branch.
   const isBM = session.role === "branch_manager"
-  const branchFilter = isBM && session.branchId ? `AND ae.branch_id = '${session.branchId}'` : ""
-
-  try {
-    await query(`ALTER TABLE allowed_emails ADD COLUMN IF NOT EXISTS allowed_modules TEXT[] DEFAULT NULL;`)
-    await query(`ALTER TABLE allowed_emails DROP CONSTRAINT IF EXISTS allowed_emails_role_check;`)
-  } catch {}
 
   const r = await query(
     `SELECT ae.email, ae.added_by, ae.role, ae.created_at, ae.branch_id, ae.display_name, ae.allowed_modules,
@@ -44,9 +37,10 @@ export async function GET(req: NextRequest) {
        FROM allowed_emails ae
        LEFT JOIN branches b ON b.id = ae.branch_id
        LEFT JOIN team_profiles tp ON lower(tp.email) = lower(ae.email)
-      WHERE ae.role != 'developer' ${branchFilter} ORDER BY ae.created_at DESC`
+      WHERE ae.role != 'developer' AND ($1::uuid IS NULL OR ae.branch_id = $1) ORDER BY ae.created_at DESC`,
+    [isBM ? session.branchId || null : null]
   )
-  
+
   const branches = isBM && session.branchId
     ? await query(`SELECT id, name, code FROM branches WHERE id = $1 ORDER BY name`, [session.branchId])
     : await query(`SELECT id, name, code FROM branches ORDER BY name`)
@@ -55,7 +49,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await requireRole(req, ["admin", "developer"])
+  const session = await requireRole(req, ["admin", "developer", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   let body: any
@@ -193,7 +187,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const session = await requireRole(req, ["admin", "developer"])
+  const session = await requireRole(req, ["admin", "developer", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   let body: any
@@ -279,7 +273,7 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const session = await requireRole(req, ["admin", "developer"])
+  const session = await requireRole(req, ["admin", "developer", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const email = String(new URL(req.url).searchParams.get("email") || "").trim().toLowerCase()

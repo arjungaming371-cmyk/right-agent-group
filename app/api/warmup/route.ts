@@ -13,7 +13,12 @@ export async function POST(req: NextRequest) {
   const start = Date.now()
   const health = await checkLLMHealth()
   const ms = Date.now() - start
-  if (!health.ok) return NextResponse.json({ ok: false, error: health.message })
+  // FIX (2026-09-20): public endpoint — return booleans only; the raw provider
+  // health message (may include HTTP/config details) stays in server logs.
+  if (!health.ok) {
+    console.error("warmup: LLM health check failed:", health.message)
+    return NextResponse.json({ ok: false })
+  }
   return NextResponse.json({ ok: true, warmupMs: ms })
 }
 

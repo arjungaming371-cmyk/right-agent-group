@@ -141,11 +141,11 @@ export async function getSystemKeysStatus(): Promise<
 
     let preview = "Not configured"
     if (configured) {
-      if (val.length <= 8) {
-        preview = "••••" + val.slice(-2)
-      } else {
-        preview = val.slice(0, 4) + "••••••••" + val.slice(-4)
-      }
+      // FIX (2026-09-20): the preview used to leak the first 4 chars — for
+      // known provider prefixes (gsk_, EAA, sk-…) that is a meaningful
+      // fraction of the secret, and API responses get cached by browsers and
+      // proxies. Last 2 chars only.
+      preview = "••••" + val.slice(-2)
     }
 
     result[name] = { configured, preview, source }

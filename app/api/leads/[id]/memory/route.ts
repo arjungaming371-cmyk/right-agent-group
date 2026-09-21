@@ -83,13 +83,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({ error: `invalid stage — must be one of: ${VALID_STAGES.join(", ")}` }, { status: 400 })
   }
 
-  // 2026-09 fix (lost updates): this is a read-merge-write against the same
-  // row the background Lead Brain pipeline writes (lib/lead-brain.ts
-  // applyAnalysis). Without the per-lead advisory lock, a human edit landing
-  // between the pipeline's read and write got silently overwritten (and vice
-  // versa). hashtext($1) with the bare leadId matches the pipeline's key.
+  // FIX (2026-09-20): read-modify-write ran with no lock — a manual edit
+  // racing the background Lead Brain analysis (which takes
+  // pg_advisory_xact_lock(hashtext(lead_id)) for the same purpose) silently
+  // lost one side's facts/locked_facts. Same advisory lock, so human edits
+  // and AI analyses now serialize per lead.
   const client = await pool.connect()
-  let nextMemory: any
   try {
     await client.query("BEGIN")
     await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [id])
@@ -120,15 +119,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
          facts = $2::jsonb, locked_facts = $3, summary = $4, stage = $5, updated_at = now()`,
       [id, JSON.stringify(nextFacts), Array.from(lockedSet), nextSummary, nextStage]
     )
-
     await client.query("COMMIT")
-    nextMemory = { facts: nextFacts, locked_facts: Array.from(lockedSet), summary: nextSummary, stage: nextStage }
-  } catch (e) {
+  } catch (e: any) {
     await client.query("ROLLBACK").catch(() => {})
-    client.release()
     throw e
+  } finally {
+    client.release()
   }
-  client.release()
 
   logAudit("lead memory manually edited", session.email, {
     leadId: id,

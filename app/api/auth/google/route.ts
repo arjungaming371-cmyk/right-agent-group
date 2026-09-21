@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { isSafeNextPath } from "@/lib/auth"
 
 export const dynamic = "force-dynamic"
 
@@ -13,8 +14,9 @@ export async function GET(req: NextRequest) {
 
   const state = crypto.randomUUID()
   const nextPath = req.nextUrl.searchParams.get("next") || "/"
-  // Only allow same-site relative redirects — never absolute URLs.
-  const safeNext = nextPath.startsWith("/") && !nextPath.startsWith("//") ? nextPath : "/"
+  // Only allow same-site relative redirects — never absolute URLs, and also
+  // reject "/\\evil.com" (browsers normalize "\\" to "/" for special schemes).
+  const safeNext = isSafeNextPath(nextPath) ? nextPath : "/"
 
   const params = new URLSearchParams({
     client_id: clientId,

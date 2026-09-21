@@ -13,7 +13,6 @@ import { searchKnowledgeBase } from "@/lib/knowledge-base"
 import { buildEmiInstruction, buildRateInstruction, detectLoanType } from "@/lib/finance"
 import { currentDateTimeInstruction } from "@/lib/compliance"
 import { rateLimit, clientIp } from "@/lib/rate-limit"
-import { safeEqual } from "@/lib/security"
 
 export const dynamic = "force-dynamic"
 
@@ -21,14 +20,29 @@ export const dynamic = "force-dynamic"
 //
 // GET  → Meta verification handshake (hub.challenge echo)
 // POST → Inbound Instagram DMs + Post Comments + Delivery receipts
+//
+// 2026-09-20 hardening:
+//  - Lead matching is EXACT (leads.ig_user_id column, or legacy exact
+//    notes/handle equality). The old `notes ILIKE '%<id>%'` substring match
+//    let an attacker pick a username that is a SUBSTRING of a real lead's
+//    handle/notes and hijack that lead's thread — leaking the victim's PII
+//    (name, phone, loan details) into a conversation with the attacker via
+//    buildLeadBrief.
+//  - DM dedupe is atomic (INSERT ... ON CONFLICT) instead of
+//    check-then-insert, and comments get a partial UNIQUE index.
+//  - Branch is resolved from the webhook entry id (branches.instagram_account_id)
+//    and stamped on every row — inbound IG rows used to get branch_id NULL,
+//    so branch users saw zero inbound IG conversations.
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const mode = searchParams.get("hub.mode")
-  const token = searchParams.get("hub.verify_token")
+  const token = searchParams.get("hub.verify_token") || ""
   const challenge = searchParams.get("hub.challenge")
-
-  if (mode === "subscribe" && token && safeEqual(token, process.env.INSTAGRAM_VERIFY_TOKEN || process.env.WHATSAPP_VERIFY_TOKEN || "")) {
+  // FIX (2026-09-20): constant-time compare.
+  const a = Buffer.from(token)
+  const b = Buffer.from(process.env.INSTAGRAM_VERIFY_TOKEN || process.env.WHATSAPP_VERIFY_TOKEN || "")
+  if (mode === "subscribe" && a.length === b.length && a.length > 0 && crypto.timingSafeEqual(a, b)) {
     return new Response(challenge || "", { status: 200 })
   }
   return NextResponse.json({ error: "verification failed" }, { status: 403 })
@@ -66,17 +80,40 @@ export async function POST(req: NextRequest) {
 
   try {
     for (const entry of body?.entry || []) {
-      // 1. Handle Inbound Direct Messages (DMs)
+      // Branch routing (2026-09-20): entry.id is the WBA / IG professional
+      // account id the event arrived on. A branch whose instagram_account_id
+      // matches claims the conversation (mirrors WhatsApp's phone_number_id
+      // routing). Unmatched → null = company default.
+      let branchId: string | null = null
+      try {
+        if (entry?.id) {
+          const b = await query(`SELECT id FROM branches WHERE instagram_account_id = $1 LIMIT 1`, [String(entry.id)])
+          branchId = b.rows[0]?.id || null
+        }
+      } catch (e: any) {
+        if (e?.code !== "42703") throw e // column not added yet → stay on default branch
+      }
+
+      // 1. Handle Inbound Direct Messages (DMs) — one poison event must not
+      //    drop its siblings (same fix as the WhatsApp webhook).
       for (const msg of entry?.messaging || []) {
         if (msg.message && !msg.message.is_echo) {
-          await handleInboundDM(msg)
+          try {
+            await handleInboundDM(msg, branchId)
+          } catch (e: any) {
+            console.error(`inbound IG DM failed (continuing): ${e.message}`)
+          }
         }
       }
 
       // 2. Handle Inbound Post Comments
       for (const change of entry?.changes || []) {
         if (change.field === "comments" && change.value) {
-          await handleInboundComment(change.value)
+          try {
+            await handleInboundComment(change.value, branchId)
+          } catch (e: any) {
+            console.error(`inbound IG comment failed (continuing): ${e.message}`)
+          }
         }
       }
     }
@@ -89,61 +126,92 @@ export async function POST(req: NextRequest) {
 }
 
 /**
+ * Exact-match the lead for an IG identity. NEVER substring-match free text:
+ * a commenter's username is attacker-chosen, and "%123%" matches any notes
+ * containing those digits (phone numbers, amounts) — cross-lead PII leak.
+ * Falls back to the legacy EXACT markers written by older versions.
+ */
+async function findLeadByIgIdentity(senderId: string, username: string | null): Promise<{ id: string; phone: string | null } | null> {
+  const r = await query(
+    `SELECT id, phone FROM leads
+     WHERE ig_user_id = $1
+        OR notes = $2
+        OR ($3::text IS NOT NULL AND lower(instagram_handle) = lower($3))
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [senderId, `Instagram User ID: ${senderId}`, username]
+  ).catch(async (e: any) => {
+    if (e?.code !== "42703") throw e // leads.ig_user_id not added yet → legacy columns only
+    return query(
+      `SELECT id, phone FROM leads
+       WHERE notes = $1
+          OR ($2::text IS NOT NULL AND lower(instagram_handle) = lower($2))
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [`Instagram User ID: ${senderId}`, username]
+    )
+  })
+  return r.rows[0] || null
+}
+
+/**
  * Process Inbound Instagram Direct Message (DM).
  */
-async function handleInboundDM(messaging: any) {
+async function handleInboundDM(messaging: any, branchId: string | null = null) {
   const senderId = messaging.sender?.id
   const text = messaging.message?.text || ""
   const messageId = messaging.message?.mid
 
   if (!senderId || !text) return
 
-  // Deduplicate
+  // FIX (2026-09-20): atomic claim — concurrent Meta retries can no longer
+  // both pass a SELECT and both run the AI pipeline (duplicate DMs).
+  let claimed = false
   if (messageId) {
-    const dup = await query(`SELECT 1 FROM instagram_messages WHERE ig_message_id = $1 LIMIT 1`, [messageId])
-    if (dup.rows.length > 0) return
+    const claim = await query(
+      `INSERT INTO instagram_messages (ig_user_id, direction, type, content, status, ig_message_id, branch_id)
+       VALUES ($1, 'inbound', 'dm', '', 'delivered', $2, $3)
+       ON CONFLICT (ig_message_id) DO NOTHING`,
+      [senderId, messageId, branchId]
+    )
+    claimed = (claim.rowCount || 0) > 0
+    if (!claimed) return // duplicate delivery
   }
 
-  // Find or Create Lead
-  let leadId: string | null = null
-  let phone = `IG_${senderId.slice(-8)}`
-
-  const existingLead = await query(
-    `SELECT id, name, phone, notes FROM leads WHERE notes ILIKE $1 OR instagram_handle ILIKE $1 LIMIT 1`,
-    [`%${senderId}%`]
-  )
-
-  if (existingLead.rows.length > 0) {
-    leadId = existingLead.rows[0].id
-    phone = existingLead.rows[0].phone
-  } else {
-    // Create auto lead
+  // Find or Create Lead — EXACT identity match only.
+  const existing = await findLeadByIgIdentity(senderId, null)
+  let leadId: string | null = existing?.id || null
+  if (!leadId) {
+    // FIX (2026-09-20): stop fabricating `IG_12345678` phone numbers — they
+    // collided in phone_key (two IG users sharing the last-8 digits broke
+    // inserts) and polluted analytics. Phone stays NULL for IG-only leads;
+    // the IG identity lives in ig_user_id / notes.
     const newLead = await query(
-      `INSERT INTO leads (name, phone, source, status, notes) VALUES ($1, $2, 'Instagram DM', 'New', $3) RETURNING id`,
-      [`IG User (${senderId.slice(-4)})`, phone, `Instagram User ID: ${senderId}`]
-    )
-    if (newLead.rows.length > 0) {
-      leadId = newLead.rows[0].id
-    }
+      `INSERT INTO leads (name, phone, source, status, notes, ig_user_id)
+       VALUES ($1, NULL, 'Instagram DM', 'new', $2, $3) RETURNING id`,
+      [`IG User (${senderId.slice(-4)})`, `Instagram User ID: ${senderId}`, senderId]
+    ).catch(async (e: any) => {
+      if (e?.code !== "42703") throw e
+      return query(
+        `INSERT INTO leads (name, phone, source, status, notes)
+         VALUES ($1, NULL, 'Instagram DM', 'new', $2) RETURNING id`,
+        [`IG User (${senderId.slice(-4)})`, `Instagram User ID: ${senderId}`]
+      )
+    })
+    leadId = newLead.rows[0]?.id || null
   }
 
-  // Record Inbound DM — race-safe: ON CONFLICT DO NOTHING returns no row when
-  // a concurrent Meta retry already inserted this mid, so only ONE retry runs
-  // the (paid) AI reply below. The SELECT above stays as the cheap fast path.
+  // Fill in the claimed row (or insert fresh when no message id exists).
   if (messageId) {
-    const ins = await query(
-      `INSERT INTO instagram_messages (lead_id, ig_user_id, direction, type, content, status, ig_message_id)
-       VALUES ($1, $2, 'inbound', 'dm', $3, 'delivered', $4)
-       ON CONFLICT DO NOTHING
-       RETURNING id`,
-      [leadId, senderId, text, messageId]
+    await query(
+      `UPDATE instagram_messages SET lead_id = $1, content = $2 WHERE ig_message_id = $3 AND direction = 'inbound'`,
+      [leadId, text, messageId]
     )
-    if ((ins.rowCount || 0) === 0) return // lost the race — already processed
   } else {
     await query(
-      `INSERT INTO instagram_messages (lead_id, ig_user_id, direction, type, content, status, ig_message_id)
-       VALUES ($1, $2, 'inbound', 'dm', $3, 'delivered', NULL)`,
-      [leadId, senderId, text]
+      `INSERT INTO instagram_messages (lead_id, ig_user_id, direction, type, content, status, branch_id)
+       VALUES ($1, $2, 'inbound', 'dm', $3, 'delivered', $4)`,
+      [leadId, senderId, text, branchId]
     )
   }
 
@@ -198,9 +266,9 @@ Instructions:
       if (sent.ok) {
         // Record outbound DM
         await query(
-          `INSERT INTO instagram_messages (lead_id, ig_user_id, direction, type, content, status, ig_message_id)
-           VALUES ($1, $2, 'outbound', 'dm', $3, 'sent', $4)`,
-          [leadId, senderId, aiReply, sent.messageId || null]
+          `INSERT INTO instagram_messages (lead_id, ig_user_id, direction, type, content, status, ig_message_id, branch_id)
+           VALUES ($1, $2, 'outbound', 'dm', $3, 'sent', $4, $5)`,
+          [leadId, senderId, aiReply, sent.messageId || null, branchId]
         )
 
         if (leadId) {
@@ -219,7 +287,7 @@ Instructions:
 /**
  * Process Inbound Instagram Post Comment.
  */
-async function handleInboundComment(val: any) {
+async function handleInboundComment(val: any, branchId: string | null = null) {
   const commentId = val.id
   const text = val.text || ""
   const fromUser = val.from || {}
@@ -229,43 +297,55 @@ async function handleInboundComment(val: any) {
 
   if (!commentId || !text || !senderId) return
 
-  // Deduplicate
-  const dup = await query(`SELECT 1 FROM instagram_messages WHERE comment_id = $1 LIMIT 1`, [commentId])
-  if (dup.rows.length > 0) return
-
-  // Find or Create Lead — exact handle match first; the old username
-  // ILIKE '%…%' substring match bound e.g. @john2 to @john's lead.
-  let leadId: string | null = null
-  const existingLead = await query(
-    `SELECT id FROM leads WHERE instagram_handle = $1 OR (instagram_handle IS NULL AND notes ILIKE $2) LIMIT 1`,
-    [username, `%${senderId}%`]
-  )
-
-  if (existingLead.rows.length > 0) {
-    leadId = existingLead.rows[0].id
-  } else {
-    const phone = `IG_${senderId.slice(-8)}`
-    const newLead = await query(
-      `INSERT INTO leads (name, phone, source, status, notes, instagram_handle) VALUES ($1, $2, 'Instagram Comment', 'New', $3, $4) RETURNING id`,
-      [`@${username}`, phone, `Instagram User ID: ${senderId}`, username]
+  // FIX (2026-09-20): comments had NO dedupe constraint at all — two
+  // concurrent webhook retries double-processed and double-replied publicly.
+  // Claim atomically; the partial UNIQUE index comes from migration
+  // 2026-09-20_security_hardening.sql (graceful fallback for old DBs).
+  let claimed = false
+  try {
+    const claim = await query(
+      `INSERT INTO instagram_messages (ig_user_id, ig_username, direction, type, content, status, comment_id, media_id, branch_id)
+       VALUES ($1, $2, 'inbound', 'comment', '', 'delivered', $3, $4, $5)
+       ON CONFLICT (comment_id) WHERE comment_id IS NOT NULL DO NOTHING`,
+      [senderId, username, commentId, mediaId || null, branchId]
     )
-    if (newLead.rows.length > 0) {
-      leadId = newLead.rows[0].id
+    claimed = (claim.rowCount || 0) > 0
+  } catch (e: any) {
+    if (e?.code === "42703") {
+      const dup = await query(`SELECT 1 FROM instagram_messages WHERE comment_id = $1 LIMIT 1`, [commentId])
+      claimed = dup.rows.length === 0
+    } else if (e?.code === "23505") {
+      claimed = false // unique violation on a legacy full-index install
+    } else {
+      throw e
     }
   }
+  if (!claimed) return
 
-  // Save Inbound Comment Record — race-safe: the SELECT above is only the
-  // fast path; uq_ig_messages_comment_id (migration 2026-09-20) closes the
-  // concurrent-retry window. No row returned ⇒ another retry already owns
-  // this comment ⇒ return without burning an AI reply on a PUBLIC post.
-  const saved = await query(
-    `INSERT INTO instagram_messages (lead_id, ig_user_id, ig_username, direction, type, content, status, comment_id, media_id)
-     VALUES ($1, $2, $3, 'inbound', 'comment', $4, 'delivered', $5, $6)
-     ON CONFLICT DO NOTHING
-     RETURNING id`,
-    [leadId, senderId, username, text, commentId, mediaId || null]
+  // Find or Create Lead — EXACT handle/identity match (never substring).
+  const existing = await findLeadByIgIdentity(senderId, username)
+  let leadId: string | null = existing?.id || null
+  if (!leadId) {
+    const newLead = await query(
+      `INSERT INTO leads (name, phone, source, status, notes, instagram_handle, ig_user_id)
+       VALUES ($1, NULL, 'Instagram Comment', 'new', $2, $3, $4) RETURNING id`,
+      [`@${username}`, `Instagram User ID: ${senderId}`, username, senderId]
+    ).catch(async (e: any) => {
+      if (e?.code !== "42703") throw e
+      return query(
+        `INSERT INTO leads (name, phone, source, status, notes, instagram_handle)
+         VALUES ($1, NULL, 'Instagram Comment', 'new', $2, $3) RETURNING id`,
+        [`@${username}`, `Instagram User ID: ${senderId}`, username]
+      )
+    })
+    leadId = newLead.rows[0]?.id || null
+  }
+
+  // Fill in the claimed comment row.
+  await query(
+    `UPDATE instagram_messages SET lead_id = $1, content = $2 WHERE comment_id = $3 AND direction = 'inbound'`,
+    [leadId, text, commentId]
   )
-  if ((saved.rowCount || 0) === 0) return
 
   // Trigger Priya AI Response (Public Reply + Private DM Reply)
   try {
@@ -290,10 +370,9 @@ Provide a short public reply (under 40 words) acknowledging their comment and of
       const pubSent = await replyInstagramComment(commentId, publicAiReply)
       if (pubSent.ok) {
         await query(
-          `INSERT INTO instagram_messages (lead_id, ig_user_id, ig_username, direction, type, content, status, comment_id)
-           VALUES ($1, $2, $3, 'outbound', 'comment', $4, 'sent', $5)
-           ON CONFLICT DO NOTHING`,
-          [leadId, senderId, username, publicAiReply, pubSent.replyId || commentId]
+          `INSERT INTO instagram_messages (lead_id, ig_user_id, ig_username, direction, type, content, status, comment_id, branch_id)
+           VALUES ($1, $2, $3, 'outbound', 'comment', $4, 'sent', $5, $6)`,
+          [leadId, senderId, username, publicAiReply, pubSent.replyId || commentId, branchId]
         )
       }
 
@@ -302,9 +381,9 @@ Provide a short public reply (under 40 words) acknowledging their comment and of
       const privSent = await privateReplyInstagramComment(commentId, privateDmText)
       if (privSent.ok) {
         await query(
-          `INSERT INTO instagram_messages (lead_id, ig_user_id, ig_username, direction, type, content, status, ig_message_id)
-           VALUES ($1, $2, $3, 'outbound', 'dm', $4, 'sent', $5)`,
-          [leadId, senderId, username, privateDmText, privSent.messageId || null]
+          `INSERT INTO instagram_messages (lead_id, ig_user_id, ig_username, direction, type, content, status, ig_message_id, branch_id)
+           VALUES ($1, $2, $3, 'outbound', 'dm', $4, 'sent', $5, $6)`,
+          [leadId, senderId, username, privateDmText, privSent.messageId || null, branchId]
         )
       }
     }

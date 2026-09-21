@@ -2,12 +2,17 @@ import { NextRequest, NextResponse } from "next/server"
 import { apiError } from "@/lib/api-error"
 import { db, query } from "@/lib/db"
 import { sendApplicationLink, branchWhatsAppCtx } from "@/lib/whatsapp"
-import { requireRole } from "@/lib/auth"
+import { requireModuleOrRole } from "@/lib/auth"
 import { sessionBranchId } from "@/lib/branches"
 import { randomUUID } from "crypto"
 
 export async function POST(req: NextRequest) {
-  const session = await requireRole(req, ["admin", "agent", "branch_manager"])
+  // FIX (2026-09-20): requireRole let users WITHOUT the leads module through,
+  // and the lead was fetched with no branch predicate — a branch-A agent
+  // could mint a valid one-time form token for any branch-B lead and read
+  // its PII via GET /api/form/[token] (name/phone/address) or send it to
+  // their own number. Enforce module + branch ownership.
+  const session = await requireModuleOrRole(req, "leads", ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const { leadId, phone, loanType } = await req.json()
@@ -16,30 +21,30 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    // Get lead details — 2026-09 fix (cross-branch IDOR): branch-bound staff
-    // can only generate/send form links for leads INSIDE their branch.
-    const branchId = sessionBranchId(session)
-    let leadQuery = db.from("leads").select("*").eq("id", leadId)
-    if (branchId) leadQuery = leadQuery.eq("branch_id", branchId)
-    const { data: lead } = await leadQuery.maybeSingle()
-    if (!lead) return NextResponse.json({ error: "Lead not found in your branch" }, { status: 404 })
+    // Get lead details
+    const { data: lead } = await db.from("leads").select("*").eq("id", leadId).single()
+    if (!lead) return NextResponse.json({ error: "Lead not found" }, { status: 404 })
+    const scope = sessionBranchId(session)
+    if (scope && lead.branch_id !== scope) {
+      return NextResponse.json({ error: "Lead not found" }, { status: 404 }) // don't confirm existence cross-branch
+    }
 
-    // 2026-09 fix (arbitrary-number send): the WhatsApp target used to come
-    // from the REQUEST body, so a compromised session could point a form
-    // link (one-time application URL) at ANY phone number. The lead's own
-    // number is the only legitimate destination.
-    const target = lead.whatsapp_number || lead.phone
-    if (!target) return NextResponse.json({ error: "lead has no phone number" }, { status: 400 })
-
-    // Create secure form token
+    // Create secure form token (14-day TTL — FIX 2026-09-20: tokens used to
+    // be valid FOREVER, serving lead PII to anyone who obtained the link).
     const token = randomUUID()
-    await query(`INSERT INTO form_links (token, lead_id) VALUES ($1, $2)`, [token, leadId])
+    await query(
+      `INSERT INTO form_links (token, lead_id, expires_at) VALUES ($1, $2, now() + interval '14 days')`,
+      [token, leadId]
+    ).catch(async (e: any) => {
+      if (e?.code !== "42703") throw e // pre-migration DB → fall back (no TTL)
+      await query(`INSERT INTO form_links (token, lead_id) VALUES ($1, $2)`, [token, leadId])
+    })
 
     // Send WhatsApp message with form link — from the LEAD's branch WABA
     // number when it has one, so the message lands on the number the
     // customer associates with that branch.
     const waBranch = await branchWhatsAppCtx(lead.branch_id)
-    const result = await sendApplicationLink(target, lead.name || "there", token, waBranch)
+    const result = await sendApplicationLink(phone, lead.name || "there", token, waBranch)
 
     if (!result.ok) {
       // Still save the token even if WA send fails — admin can share manually
@@ -56,8 +61,11 @@ export async function POST(req: NextRequest) {
       lead_id: leadId,
       type: "whatsapp",
       summary: result.ok
-        ? `Loan application form link sent via WhatsApp to ${target}`
-        : `Form link generated (WhatsApp not configured — share manually): /form/${token}`,
+        ? `Loan application form link sent via WhatsApp to ${phone}`
+        // FIX (2026-09-20): never write the live one-time token into the
+        // dashboard-visible comm log (a viewer could consume the link before
+        // the customer does). Point staff to the resend button instead.
+        : `Form link generated (WhatsApp not configured — resend from this lead's page).`,
       outcome: result.ok ? "sent" : "pending",
     })
 

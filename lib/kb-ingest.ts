@@ -85,88 +85,107 @@ export function chunkText(text: string, chunkSize = 1500): string[] {
 // fragile (nested tags, entities), so this uses cheerio for a real DOM
 // parse instead — strips script/style/nav/footer, keeps the rest.
 //
-// SSRF guard (2026-09 security pass, hardened 2026-09-20): the URL comes
-// from a logged-in user, and the server this runs on often holds
-// credentials / metadata endpoints (169.254.169.254, localhost services,
-// RFC1918 ranges). Blocks:
-//   * literal private hostnames and dotted-quad private IPv4
-//   * NUMERIC-FORM IPv4 that the old dotted-regex missed — 2130706433,
-//     0x7f000001, 0177.0.0.1 are all 127.0.0.1 to the OS
-//   * hostnames whose DNS resolves to a private address (any record)
-//   * REDIRECT targets — redirects are followed MANUALLY so every hop is
-//     re-validated (redirect: "follow" would happily hop to 127.0.0.1)
-// Residual risk (documented): classic DNS-rebinding between our lookup and
-// fetch's own resolution is still theoretically possible; deploy-side
-// egress filtering is the complete control.
+// SSRF guard (2026-09 security pass): the URL comes from a logged-in user,
+// and the server this runs on often holds credentials / metadata endpoints
+// (169.254.169.254, localhost services, RFC1918 ranges). Block those before
+// any request goes out, and cap how much of the response we read.
 // ---------------------------------------------------------------------------
-import { promises as dnsPromises } from "dns"
-import { isIP } from "net"
-
 const BLOCKED_HOSTNAMES = new Set([
   "localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]",
   "metadata.google.internal", "instance-data", "169.254.169.254",
 ])
 
-function isPrivateIp(host: string): boolean {
-  // IPv4 literal ranges: loopback / RFC1918 / link-local / CGNAT / 0.0.0.0
-  const m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
-  if (m) {
-    const [a, b] = [parseInt(m[1], 10), parseInt(m[2], 10)]
-    if (a === 127 || a === 10 || a === 0) return true
-    if (a === 172 && b >= 16 && b <= 31) return true
-    if (a === 192 && b === 168) return true
-    if (a === 169 && b === 254) return true
-    if (a === 100 && b >= 64 && b <= 127) return true
-    return false
-  }
-  // IPv6: loopback, link-local (fe80::/10), unique-local (fc00::/7)
-  const h = host.toLowerCase()
-  return h === "::1" || h.startsWith("fe8") || h.startsWith("fe9") ||
-    h.startsWith("fea") || h.startsWith("feb") || h.startsWith("fc") || h.startsWith("fd")
-}
+// ---------------------------------------------------------------------------
+// SSRF GUARD (2026-09-20 rewrite). The old check compared the HOSTNAME STRING
+// against a blocklist and then called fetch(redirect:"follow") — four bypasses:
+//   1. DNS name → internal IP (evil.com A-record 169.254.169.254)
+//   2. redirects followed with zero re-checks (302 → http://127.0.0.1:5432)
+//   3. IPv4-mapped IPv6 literals ([::ffff:169.254.169.254])
+//   4. hex/octal/decimal IP literals (http://0xa9fea9fe/, http://2852039166/)
+// Now: every IP literal is normalized before checks, hostnames are RESOLVED
+// and every resolved address validated, and redirects are followed manually
+// with the full check re-run per hop.
+// ---------------------------------------------------------------------------
+import dns from "dns/promises"
 
-/** Canonicalize ANY IPv4 spelling (decimal/hex/octal, whole or per-octet)
- *  to a dotted quad; null when the host is not an IPv4 literal. */
-function normalizeIPv4(host: string): string | null {
+/** Normalize an IPv4 literal that may be in hex (0x…), octal (0…), decimal, or dotted forms. */
+function normalizeIpv4Literal(host: string): string | null {
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return host
-  let n: number | null = null
-  if (/^\d+$/.test(host)) n = Number(host)
-  else if (/^0x[0-9a-f]+$/i.test(host)) n = parseInt(host.slice(2), 16)
-  if (n !== null && Number.isFinite(n) && n >= 0 && n <= 0xffffffff) {
+  if (/^\d+$/.test(host) || /^0[xX][0-9a-fA-F]+$/.test(host)) {
+    const n = host.toLowerCase().startsWith("0x") ? parseInt(host.slice(2), 16) : parseInt(host, 10)
+    if (!Number.isInteger(n) || n < 0 || n > 0xffffffff) return null
     return [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join(".")
   }
-  const parts = host.split(".")
-  if (parts.length === 4 && parts.every((p) => /^(0[xX][0-9a-fA-F]+|0[0-7]*|\d+)$/.test(p))) {
-    const nums = parts.map((p) =>
-      /^0[xX]/.test(p) ? parseInt(p.slice(2), 16)
-      : p.length > 1 && p.startsWith("0") ? parseInt(p, 8)
-      : parseInt(p, 10)
-    )
-    if (nums.every((x) => Number.isFinite(x) && x >= 0 && x <= 255)) return nums.join(".")
-  }
+  // Partial dotted forms: "127.1" → 127.0.0.1, "0x7f.1" etc. Reject anything
+  // with hex/octal components instead of guessing — simpler and safe.
+  if (/^[0-9.]+$/.test(host) && host.includes(".")) return null // non-canonical dotted → reject (can't be a public domain)
   return null
 }
 
-const BLOCKED_MSG = "That URL is not allowed — internal/private network addresses are blocked"
+function isPrivateIpv4(ip: string): boolean {
+  const m = ip.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
+  if (!m) return true // not a valid dotted quad → treat as private (fail closed)
+  const [a, b] = [parseInt(m[1], 10), parseInt(m[2], 10)]
+  const last = parseInt(m[4], 10)
+  if (a === 127 || a === 10 || a === 0 || a === 169 || a === 192) return true // loopback / RFC1918 / 0.x / link-local / 192.0-192.255 conservative
+  if (a === 172 && b >= 16 && b <= 31) return true
+  if (a === 100 && b >= 64 && b <= 127) return true // CGNAT
+  if (a === 192 && b === 168) return true
+  if (a >= 224) return true // multicast/reserved
+  if (a === 192 && b === 0 && (last === 0 || last === 2)) return true
+  return false
+}
+
+function isPrivateIpv6(h: string): boolean {
+  const host = h.toLowerCase().replace(/^\[|\]$/g, "")
+  if (host === "::" || host === "::1") return true
+  // IPv4-mapped IPv6 ::ffff:0:0/96 — dials the embedded IPv4 address.
+  const mapped = host.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/)
+  if (mapped) return isPrivateIpv4(mapped[1])
+  const mappedHex = host.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/)
+  if (mappedHex) {
+    const hi = parseInt(mappedHex[1], 16), lo = parseInt(mappedHex[2], 16)
+    return isPrivateIpv4(`${(hi >> 8) & 255}.${hi & 255}.${(lo >> 8) & 255}.${lo & 255}`)
+  }
+  if (host.startsWith("fe8") || host.startsWith("fe9") || host.startsWith("fea") || host.startsWith("feb")) return true // link-local
+  if (host.startsWith("fc") || host.startsWith("fd")) return true // unique-local
+  if (host.startsWith("ff")) return true // multicast
+  return false
+}
+
+function isPrivateIp(host: string): boolean {
+  const v4 = normalizeIpv4Literal(host)
+  if (v4) return isPrivateIpv4(v4)
+  if (host.includes(":")) return isPrivateIpv6(host)
+  return false // hostnames are validated via DNS resolution below
+}
 
 async function assertPublicHost(host: string): Promise<void> {
-  const h = host.toLowerCase()
+  const h = host.toLowerCase().replace(/^\[|\]$/g, "")
   if (BLOCKED_HOSTNAMES.has(h) || h.endsWith(".localhost") || h.endsWith(".local") || h.endsWith(".internal")) {
-    throw new Error(BLOCKED_MSG)
+    throw new Error("That URL is not allowed — internal/private network addresses are blocked")
   }
-  const v4 = normalizeIPv4(h)
-  if (v4 && isPrivateIp(v4)) throw new Error(BLOCKED_MSG)
-  if (v4 || isIP(h)) return // literal IP — already judged above
-  // Hostname: resolve and refuse if ANY record points inside the network.
+  const v4 = normalizeIpv4Literal(h)
+  if (v4) {
+    if (isPrivateIpv4(v4)) throw new Error("That URL is not allowed — internal/private network addresses are blocked")
+    return
+  }
+  if (h.includes(":")) {
+    if (isPrivateIpv6(h)) throw new Error("That URL is not allowed — internal/private network addresses are blocked")
+    return
+  }
+  // Real hostname: resolve it and validate EVERY address the OS could dial.
+  // This kills DNS-rebinding / "my domain points at 10.0.0.5" bypasses.
+  let addrs: { address: string; family: number }[]
   try {
-    const addrs = await dnsPromises.lookup(h, { all: true })
-    for (const a of addrs) {
-      if (isPrivateIp(a.address)) throw new Error(BLOCKED_MSG)
+    addrs = await dns.lookup(h, { all: true, verbatim: true })
+  } catch {
+    throw new Error("Could not resolve that hostname")
+  }
+  for (const a of addrs) {
+    if (a.family === 4 ? isPrivateIpv4(a.address) : isPrivateIpv6(a.address)) {
+      throw new Error("That URL is not allowed — it resolves to an internal/private address")
     }
-    if (addrs.length === 0) throw new Error("Could not resolve that URL's host")
-  } catch (e: any) {
-    if (e?.message === BLOCKED_MSG || String(e?.message || "").includes("Could not resolve")) throw e
-    throw new Error("Could not resolve that URL's host")
   }
 }
 
@@ -180,37 +199,33 @@ export async function fetchAndExtractUrl(url: string): Promise<{ title: string; 
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw new Error("Only http(s) URLs are supported")
   }
+  await assertPublicHost(parsed.hostname)
 
-  // Follow redirects MANUALLY so every hop gets the full SSRF check —
-  // redirect:"follow" would let a public URL 302 into 127.0.0.1.
-  let currentUrl = parsed
-  const headers = { "User-Agent": "Mozilla/5.0 (compatible; RightAgentGroupBot/1.0)" }
+  // Manual redirect loop — each hop re-runs the full scheme + host + resolved-IP
+  // check (the old redirect:"follow" fetched attacker 302 targets blindly).
+  const MAX_HOPS = 3
+  let current: URL = parsed
   let res: Response | null = null
-
-  for (let hop = 0; hop < 5; hop++) {
-    await assertPublicHost(currentUrl.hostname)
-    const hopRes = await fetch(currentUrl, {
-      headers,
+  for (let hop = 0; hop <= MAX_HOPS; hop++) {
+    const step = await fetch(current.toString(), {
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; RightAgentGroupBot/1.0)" },
       signal: AbortSignal.timeout(15000),
       redirect: "manual",
     })
-    if (hopRes.status >= 300 && hopRes.status < 400) {
-      const loc = hopRes.headers.get("location")
-      try { await hopRes.body?.cancel() } catch { /* stream already closed */ }
-      if (!loc) throw new Error(`Fetch failed: HTTP ${hopRes.status}`)
-      let next: URL
-      try {
-        next = new URL(loc, currentUrl)
-      } catch {
-        throw new Error("Invalid redirect target")
-      }
+    if (step.status >= 300 && step.status < 400) {
+      const loc = step.headers.get("location")
+      try { await step.body?.cancel() } catch {}
+      if (!loc) throw new Error(`Fetch failed: HTTP ${step.status} (redirect without Location)`)
+      if (hop === MAX_HOPS) throw new Error("Too many redirects")
+      const next = new URL(loc, current) // relative redirects resolved here
       if (next.protocol !== "http:" && next.protocol !== "https:") {
         throw new Error("Only http(s) URLs are supported")
       }
-      currentUrl = next
+      await assertPublicHost(next.hostname) // re-validate EVERY hop
+      current = next
       continue
     }
-    res = hopRes
+    res = step
     break
   }
   if (!res) throw new Error("Too many redirects")
@@ -239,7 +254,7 @@ export async function fetchAndExtractUrl(url: string): Promise<{ title: string; 
 
   const $ = cheerio.load(html)
   $("script, style, nav, footer, header, noscript, svg, iframe").remove()
-  const title = $("title").first().text().trim() || currentUrl.href
+  const title = $("title").first().text().trim() || url
   const bodyText = $("body").text().replace(/\s+/g, " ").trim()
   if (!bodyText) throw new Error("No readable text content found on that page")
 

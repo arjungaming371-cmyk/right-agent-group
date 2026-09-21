@@ -12,6 +12,16 @@ export async function POST(req: NextRequest) {
   if (!message) return NextResponse.json({ error: "message required" }, { status: 400 })
 
   const branchId = sessionBranchId(session)
+
+  // FIX (2026-09-20): verify the lead belongs to the caller's branch before
+  // writing records onto it (cross-branch write, same as the WhatsApp path).
+  if (leadId && branchId) {
+    const owner = await db.from("leads").select("branch_id").eq("id", leadId).single()
+    if (!owner.data || owner.data.branch_id !== branchId) {
+      return NextResponse.json({ error: "Lead not found in your branch" }, { status: 404 })
+    }
+  }
+
   const igBranch = await branchInstagramCtx(branchId)
 
   let result: { ok: boolean; messageId?: string; replyId?: string; error?: string }

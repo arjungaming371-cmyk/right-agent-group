@@ -18,9 +18,13 @@
 --     audit_logs) and an automatic leads.updated_at trigger.
 
 -- ---- 1. WhatsApp message dedupe (race-proof) ----
--- NOTE: id is BIGINT (BIGSERIAL) on whatsapp_messages. An earlier revision
--- used (MAX(id::text))::uuid which both compared ids lexicographically AND
--- always failed the uuid cast, aborting this migration on live databases.
+-- FIX (2026-09-20): this UPDATE used `SELECT (MAX(id::text))::uuid …`. The
+-- id column is BIGSERIAL, so MAX(id::text) returns a plain digit string and
+-- casting it to uuid raised `invalid input syntax for type uuid` on EVERY
+-- database that had any wa_message_id rows — run-migrations fail-fast then
+-- stopped the whole chain here, so every later migration (multi-branch,
+-- module allotment, instagram, system keys) never applied. Compare the
+-- bigint ids directly instead.
 UPDATE whatsapp_messages
 SET wa_message_id = NULL
 WHERE wa_message_id IS NOT NULL

@@ -22,10 +22,23 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   const link = linkRes.rows[0]
   if (!link) return NextResponse.json({ error: "Invalid or expired link" }, { status: 404 })
 
+  // FIX (2026-09-20): expired links no longer resolve (TTL added 2026-09-20;
+  // pre-migration DBs have no expires_at column → treated as never-expiring).
+  if (link.expires_at && new Date(link.expires_at) < new Date()) {
+    return NextResponse.json({ error: "Invalid or expired link" }, { status: 410 })
+  }
+
   const { data: lead } = await db.from("leads").select("*").eq("id", link.lead_id).single()
+  // FIX (2026-09-20): a CONSUMED link used to keep serving the lead's
+  // name/phone/address forever — anyone who later obtained the link (shared
+  // device, forwarded WhatsApp chat) could read the PII at any time in the
+  // future. After consumption only the validity flags are returned.
+  if (link.used_at) {
+    return NextResponse.json({ valid: false, used: true, lead: null })
+  }
   return NextResponse.json({
     valid: true,
-    used: !!link.used_at,
+    used: false,
     lead: lead ? { name: lead.name, phone: lead.phone, address: lead.address, product_interest: lead.product_interest } : null,
   })
 }
@@ -48,6 +61,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
     return NextResponse.json({ error: "This application link has already been used." }, { status: 410 })
   }
 
+  // FIX (2026-09-20): expired links can no longer be submitted.
+  if (link.expires_at && new Date(link.expires_at) < new Date()) {
+    return NextResponse.json({ error: "This application link has expired." }, { status: 410 })
+  }
+
   const body = await req.json()
   const {
     customer_name,
@@ -66,12 +84,34 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
 
   if (!customer_name) return NextResponse.json({ error: "customer_name required" }, { status: 400 })
 
+  // FIX (2026-09-20): server-side caps. The old endpoint persisted an
+  // UNVALIDATED, UNBOUNDED body — a 10 MB `customer_name` or a huge `rest`
+  // blob was stored verbatim (storage-DoS once combined with any rate-limit
+  // bypass), and PAN was accepted in any format.
+  const capStr = (v: any, n: number) => (typeof v === "string" ? v.slice(0, n) : v ?? null)
+  const PAN_RE = /^[A-Z]{5}[0-9]{4}[A-Z]$/
+  const pan = pan_number ? String(pan_number).trim().toUpperCase() : ""
+  if (pan && !PAN_RE.test(pan)) {
+    return NextResponse.json({ error: "PAN must look like ABCDE1234F (5 letters, 4 digits, 1 letter)." }, { status: 400 })
+  }
+  const SAFE_REST_KEYS = new Set([
+    "occupation", "company_name", "cibil_score", "existing_emi", "down_payment",
+    "property_value", "pincode", "state", "dob", "gender", "marital_status",
+  ])
+  const restData: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(rest || {})) {
+    if (SAFE_REST_KEYS.has(k) && (typeof v === "string" || typeof v === "number")) {
+      restData[k] = typeof v === "string" ? v.slice(0, 300) : v
+    }
+  }
+  const formData = JSON.stringify(restData).slice(0, 16_000)
+
   try {
-    // 2026-09 fix: the whole claim → application-insert → lead-backfill is
-    // now ONE transaction. Previously the token claim was atomic, but a crash
-    // between the claim and the application insert burned the one-time link
-    // (used_at set, application lost) and the customer needed a re-send.
-    // Inside the transaction, any failure rolls the claim back too.
+    // ATOMIC claim + insert + backfill in ONE transaction (merged 2026-09-20):
+    // only ONE request can flip used_at from NULL, and a crash between the
+    // claim and the application insert now rolls the claim back (the one-time
+    // link is no longer burned with nothing submitted). A second concurrent
+    // submit gets rowCount 0 and is rejected.
     const client = await pool.connect()
     let app: any
     try {
@@ -94,18 +134,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
          RETURNING *`,
         [
           link.lead_id,
-          customer_name,
-          city,
-          loan_type || "Home",
+          capStr(customer_name, 200),
+          capStr(city, 120),
+          capStr(loan_type, 80) || "Home",
           loan_amount ? Number(loan_amount) : null,
           loan_tenure ? Number(loan_tenure) : null,
-          email,
-          address,
-          whatsapp_number,
-          employment_type,
+          capStr(email, 200),
+          capStr(address, 500),
+          capStr(whatsapp_number, 20),
+          capStr(employment_type, 80),
           monthly_income ? Number(monthly_income) : null,
-          pan_number ? String(pan_number).toUpperCase() : null,
-          JSON.stringify(rest),
+          pan || null,
+          formData,
           "pending",
         ]
       )
@@ -115,31 +155,39 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
         // Backfill what the application told us onto the lead itself, so the
         // Leads table (VALUE, ADDRESS, LOAN TYPE columns) reflects the
         // submitted application instead of showing "—" forever.
+        const backfill: Record<string, any> = {
+          form_completed: true,
+          status: "qualified",
+          updated_at: new Date().toISOString(),
+        }
+        if (loan_amount && Number(loan_amount) > 0) backfill.loan_amount = Number(loan_amount)
+        if (address) backfill.address = address
+        else if (city) backfill.address = city
+        if (whatsapp_number) backfill.whatsapp_number = whatsapp_number
+        if (loan_type) backfill.product_interest = /loan|insurance|card/i.test(loan_type) ? loan_type : `${loan_type} Loan`
         await client.query(
-          `UPDATE leads SET
-             form_completed = true,
-             status = 'qualified',
-             updated_at = now(),
-             loan_amount = COALESCE($2, loan_amount),
-             address = COALESCE(NULLIF($3, ''), NULLIF($4, ''), address),
-             whatsapp_number = COALESCE($5, whatsapp_number),
-             product_interest = COALESCE($6, product_interest)
+          `UPDATE leads SET form_completed = $2, status = $3, updated_at = $4,
+             loan_amount = COALESCE($5, loan_amount),
+             address = COALESCE($6, address),
+             whatsapp_number = COALESCE($7, whatsapp_number),
+             product_interest = COALESCE($8, product_interest)
            WHERE id = $1`,
           [
             link.lead_id,
-            loan_amount && Number(loan_amount) > 0 ? Number(loan_amount) : null,
-            address || "",
-            city || "",
-            whatsapp_number || null,
-            loan_type ? (/loan|insurance|card/i.test(loan_type) ? loan_type : `${loan_type} Loan`) : null,
+            backfill.form_completed,
+            backfill.status,
+            backfill.updated_at,
+            backfill.loan_amount ?? null,
+            backfill.address ?? null,
+            backfill.whatsapp_number ?? null,
+            backfill.product_interest ?? null,
           ]
         )
       }
-
       await client.query("COMMIT")
-    } catch (txnError) {
+    } catch (e: any) {
       await client.query("ROLLBACK").catch(() => {})
-      throw txnError
+      throw e
     } finally {
       client.release()
     }

@@ -40,7 +40,25 @@ async function runDigest(period: "daily" | "weekly") {
 // runs the same background structured-memory extraction that calls get.
 // Cheap no-op tick when nothing's idle (the scan-idle query itself finds 0
 // rows), so a 5-minute interval is safe to leave running always.
+let leadBrainScanRunning = false
 async function runLeadBrainScan() {
+  // FIX (2026-09-20): if one scan takes longer than the 5-minute interval
+  // (large idle backlog, slow Groq), overlapping scans processed the same
+  // threads twice — duplicate analysis calls, duplicate tokens. Skip the tick
+  // while the previous one is still running instead of overlapping.
+  if (leadBrainScanRunning) {
+    console.warn("[scheduler] lead brain scan still running — skipping this tick")
+    return
+  }
+  leadBrainScanRunning = true
+  try {
+    await runLeadBrainScanInner()
+  } finally {
+    leadBrainScanRunning = false
+  }
+}
+
+async function runLeadBrainScanInner() {
   const appUrl = process.env.APP_INTERNAL_URL || "http://127.0.0.1:3000"
   const apiKey = process.env.WHATSAPP_SERVICE_KEY
   if (!apiKey) return // same silent-skip as digest when unconfigured — never crash the scheduler

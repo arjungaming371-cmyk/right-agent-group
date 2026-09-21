@@ -14,44 +14,48 @@ export async function POST(req: NextRequest) {
   // The dialer only ever works the session's own branch queue (null = HQ = all).
   const branchId = sessionBranchId(session)
 
-  // RACE FIX (2026-09): the old SELECT-pending → dial → mark-called pattern
-  // let two concurrent triggers (manual click + cron, or a double-click) read
-  // the same 'pending' rows and dial REAL customers twice. Rows are now
-  // claimed atomically with FOR UPDATE SKIP LOCKED — each row can only ever
-  // be claimed by one worker. Rows left 'dialing' by a crashed worker are
-  // reclaimed after 15 minutes.
-  await query(
-    `UPDATE outbound_queue SET status = 'pending', claimed_at = NULL
-      WHERE status = 'dialing' AND claimed_at IS NOT NULL
-        AND claimed_at < now() - interval '15 minutes'`
-  )
-  const claimed = await query(
+  // FIX (2026-09-20): ATOMIC CLAIM. The old flow was SELECT pending rows →
+  // dial → mark 'called'. Two operators (or a double-click / two tabs / the
+  // 4s dashboard poller) could run this route simultaneously and BOTH read
+  // the same batch — every queued customer got two simultaneous sales calls.
+  // Claim rows atomically first (FOR UPDATE SKIP LOCKED); only claimed rows
+  // are dialed. Also re-claims rows stuck in 'dialing' for >10 min (crashed
+  // run), so a crash can no longer permanently orphan queue entries.
+  const claim = await query(
     `UPDATE outbound_queue SET status = 'dialing', claimed_at = now()
-      WHERE id IN (
-        SELECT id FROM outbound_queue
-         WHERE status = 'pending' ${branchId ? "AND branch_id = $1" : ""}
-         ORDER BY id
-         LIMIT $${branchId ? 2 : 1}
+     WHERE id IN (
+       SELECT id FROM outbound_queue
+       WHERE (status = 'pending' OR (status = 'dialing' AND claimed_at IS NOT NULL AND claimed_at < now() - interval '10 minutes'))
+         AND ($1::uuid IS NULL OR branch_id = $1)
+       ORDER BY scheduled_at ASC
+       LIMIT $2
+       FOR UPDATE SKIP LOCKED
+     )
+     RETURNING *`,
+    [branchId, Math.min(limit, 50)]
+  ).catch(async (e: any) => {
+    if (e?.code !== "42703") throw e // claimed_at column not added yet → claim without reaper support
+    return query(
+      `UPDATE outbound_queue SET status = 'dialing'
+       WHERE id IN (
+         SELECT id FROM outbound_queue
+         WHERE status = 'pending' AND ($1::uuid IS NULL OR branch_id = $1)
+         ORDER BY scheduled_at ASC
+         LIMIT $2
          FOR UPDATE SKIP LOCKED
-      )
-      RETURNING *`,
-    branchId ? [branchId, Math.min(limit, 50)] : [Math.min(limit, 50)]
-  )
-  const pending: any[] = claimed.rows
+       )
+       RETURNING *`,
+      [branchId, Math.min(limit, 50)]
+    )
+  })
+  const pending = claim.rows
 
-  if (pending.length === 0) {
+  if (!pending || pending.length === 0) {
     return NextResponse.json({ called: 0, failed: 0, total: 0 })
   }
   // Per-branch monthly cap still applies to the unattended dialer.
   const quota = await checkQuota(branchId, "call")
   if (!quota.ok) {
-    // Release THIS run's claimed rows back to the queue so the next run picks
-    // them up immediately instead of waiting out the 15-minute stale window.
-    await query(
-      `UPDATE outbound_queue SET status = 'pending', claimed_at = NULL
-        WHERE id = ANY($1::uuid[])`,
-      [pending.map((r: any) => r.id)]
-    )
     return NextResponse.json({ error: quota.reason }, { status: 403 })
   }
 

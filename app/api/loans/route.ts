@@ -36,7 +36,18 @@ export async function GET(req: NextRequest) {
   if (branchId) listQuery = listQuery.eq("branch_id", branchId)
   const { data, error } = await listQuery.order("submitted_at", { ascending: false }).limit(limit)
   if (error) return apiError(error)
-  return NextResponse.json(data)
+  // FIX (2026-09-20): PAN is a regulated financial identifier — the list
+  // response shipped it in full to every reader on every poll. Mask it here
+  // (the single-application detail view still returns the real value).
+  const masked = (data || []).map((row: any) => ({
+    ...row,
+    pan_number: typeof row.pan_number === "string" && row.pan_number.length >= 10
+      ? `${row.pan_number.slice(0, 2)}${"X".repeat(row.pan_number.length - 4)}${row.pan_number.slice(-2)}`
+      : row.pan_number
+      ? "XXXXX"
+      : null,
+  }))
+  return NextResponse.json(masked)
 }
 
 export async function POST(req: NextRequest) {

@@ -104,12 +104,16 @@ export async function makeExotelCall(
   // Exotel accepts the request and sends the terminal status callback by
   // default, which is exactly what /api/calls/status needs.
   //
-  // 2026-09 fix: /api/calls/status is FAIL-CLOSED once EXOTEL_WEBHOOK_KEY is
-  // set, so the callback URL registered here MUST carry the same ?key= secret
-  // — otherwise every outbound call's terminal status, recording URL and
-  // WhatsApp follow-up are silently dropped. Read at call time (not module
-  // load) because system keys can be hydrated into process.env at runtime.
+  // SECURITY FIX (2026-09-20): /api/calls/status now FAILS CLOSED without a
+  // valid ?key= — but this programmatic StatusCallback used to omit it, so the
+  // moment EXOTEL_WEBHOOK_KEY was configured, every outbound call's status
+  // callback was silently rejected (statuses/recording/follow-ups never ran)
+  // and the only "fix" operators found was ALLOW_UNSIGNED_WEBHOOK=1, which
+  // reopens the forged-webhook hole. Bake the key into every per-call callback.
   const webhookKey = (process.env.EXOTEL_WEBHOOK_KEY || "").trim()
+  if (!webhookKey && process.env.ALLOW_UNSIGNED_WEBHOOK !== "1") {
+    throw new Error("EXOTEL_WEBHOOK_KEY is not set — outbound call status callbacks would be rejected by /api/calls/status. Set EXOTEL_WEBHOOK_KEY in .env (or ALLOW_UNSIGNED_WEBHOOK=1 for local dev).")
+  }
   const statusCallback = webhookKey
     ? `${appUrl}/api/calls/status?key=${encodeURIComponent(webhookKey)}`
     : `${appUrl}/api/calls/status`

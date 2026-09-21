@@ -57,7 +57,10 @@ export async function checkInstagramHealth(branch?: BranchInstagramCtx): Promise
   try {
     const base = graphBase(token)
     const target = (token.startsWith("IG") && !accountId) ? "me" : accountId
-    const res = await fetch(`${base}/${target}?fields=id,username,name&access_token=${token}`)
+    const res = await fetch(`${base}/${target}?fields=id,username,name`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(15_000),
+    })
     if (!res.ok) {
       const err = await res.json().catch(() => ({}))
       return { ok: false, message: err?.error?.message || `HTTP ${res.status}` }
@@ -94,6 +97,7 @@ export async function sendInstagramText(
         recipient: { id: recipientIgUserId },
         message: { text },
       }),
+      signal: AbortSignal.timeout(15_000),
     })
 
     const body = await res.json()
@@ -131,6 +135,7 @@ export async function replyInstagramComment(
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({ message: text }),
+      signal: AbortSignal.timeout(15_000),
     })
 
     const body = await res.json()
@@ -171,6 +176,7 @@ export async function privateReplyInstagramComment(
         recipient: { comment_id: commentId },
         message: { text },
       }),
+      signal: AbortSignal.timeout(15_000),
     })
 
     const body = await res.json()

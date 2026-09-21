@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
-import { createSessionToken, getSessionFromRequest, SESSION_COOKIE, sessionCookieOptions } from "@/lib/auth"
+import { createSessionToken, getLiveSession, SESSION_COOKIE, sessionCookieOptions } from "@/lib/auth"
 import { getBranch } from "@/lib/branches"
 import { logAudit } from "@/lib/audit"
 
@@ -17,7 +17,10 @@ export const dynamic = "force-dynamic"
 // a branch manager cannot escalate into another branch by forging a request.
 
 export async function POST(req: NextRequest) {
-  const session = await getSessionFromRequest(req)
+  // FIX (2026-09-20): live revalidation. This re-mints session cookies, so it
+  // must check the DB (removed/demoted users must not be able to refresh an
+  // admin-role cookie for up to 7 days) — was getSessionFromRequest.
+  const session = await getLiveSession(req)
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   if (session.role !== "admin" && session.role !== "developer") {
     return NextResponse.json({ error: "forbidden — only the parent account can switch branches" }, { status: 403 })

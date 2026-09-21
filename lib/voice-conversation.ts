@@ -180,16 +180,21 @@ export async function startCall(
   let name: string | undefined
   let isRepeatCall = false
   if (leadId) {
+    // FIX (2026-09-20): the read and the fire-and-forget increment could
+    // interleave with a duplicate `start` webhook (double count). One
+    // atomic statement increments AND returns the pre/post state.
     try {
-      const res = await query(`SELECT name, call_count FROM leads WHERE id = $1`, [leadId])
+      const res = await query(
+        `UPDATE leads SET call_count = call_count + 1, last_called_at = now()
+         WHERE id = $1
+         RETURNING name, call_count, (call_count = 1) AS first_call`,
+        [leadId]
+      )
       name = res.rows[0]?.name
-      isRepeatCall = (res.rows[0]?.call_count || 0) > 0
+      isRepeatCall = !res.rows[0]?.first_call
     } catch (e: any) {
-      console.error("greeting name lookup error:", e.message)
+      console.error("greeting name/call_count update error:", e.message)
     }
-    query(`UPDATE leads SET call_count = call_count + 1, last_called_at = now() WHERE id = $1`, [leadId]).catch((e) =>
-      console.error("call_count update error:", e)
-    )
   }
   if (callSid) {
     // NOTE: no `direction` here on purpose — the row already exists by this point
@@ -235,7 +240,11 @@ async function getHistory(callSid: string): Promise<{ role: "user" | "model"; co
     if (!data?.transcript) return []
     const transcript = typeof data.transcript === "string" ? JSON.parse(data.transcript) : data.transcript
     if (!Array.isArray(transcript)) return []
+    // FIX (2026-09-20): re-parsed + returned in full on EVERY turn — cap the
+    // working set (the reply path only ever uses the last 12 messages, and
+    // extraction now takes 12 too).
     return transcript
+      .slice(-40)
       .map((t: any) => ({ role: t.role === "ai" ? ("model" as const) : ("user" as const), content: t.text ?? "" }))
       .filter((m: any) => m.content)
   } catch {
@@ -437,6 +446,22 @@ async function buildTurnInstructions(
  * call. The caller-phone header both grounds the extractor for "same number"
  * answers AND lets mightBeComplete() pass without spoken digits.
  */
+/**
+ * Cheap client-side pre-check mirroring mightBeComplete: lets the caller hear
+ * the closing sentence immediately while completeLeadIfReady's extraction LLM
+ * + WhatsApp round-trips run in the background of the same turn.
+ */
+function mightBeCompleteQuick(
+  messages: { role: "user" | "model"; content: string }[],
+  reply: string
+): boolean {
+  const transcriptText =
+    [...messages, { role: "model" as const, content: reply }]
+      .map((m) => `${m.role === "model" ? "Priya" : "Customer"}: ${m.content}`)
+      .join("\n")
+  return mightBeComplete(transcriptText)
+}
+
 async function completeLeadIfReady(opts: {
   leadId: string
   callSid: string | null
@@ -446,7 +471,12 @@ async function completeLeadIfReady(opts: {
   branchId?: string | null
 }): Promise<boolean> {
   const { leadId, callSid, callerPhone, messages, reply, branchId } = opts
-  const allTurns = [...messages, { role: "model" as const, content: reply }]
+  // FIX (2026-09-20): extraction used to receive the ENTIRE transcript (the
+  // main reply is capped at 12 messages, but this LLM call fired on any
+  // potentially-complete turn with everything ever said) — growing token
+  // cost + per-turn CPU on the hot path. Name/number surface late in calls
+  // anyway; the last 12 turns are what matters.
+  const allTurns = [...messages.slice(-12), { role: "model" as const, content: reply }]
   const transcriptText =
     (callerPhone ? `(The customer is calling from: ${callerPhone}. Use this as their whatsapp_number ONLY if they EXPLICITLY said WhatsApp is on this same number — if they never mentioned their WhatsApp number, leave whatsapp_number null.)\n` : "") +
     allTurns.map((m) => `${m.role === "model" ? "Priya" : "Customer"}: ${m.content}`).join("\n")
@@ -747,9 +777,15 @@ export async function handleTurnStream(
   await updateTranscriptAsync(callSid, speech, reply)
   maybeProposeLoanEdit(leadId, "priya_voice", speech)
 
+  // FIX (2026-09-20): the closing sentence used to be spoken only AFTER
+  // completeLeadIfReady finished — and it runs a second LLM call + a branch
+  // WhatsApp round-trip (0.5-15s of dead air) while the caller waits. Speak
+  // first, complete after; completion only decides the hangup now.
+  if (mightBeCompleteQuick(messages, reply)) {
+    onSentence(CLOSING[language])
+  }
   const completed = await completeLeadIfReady({ leadId, callSid, callerPhone, messages, reply, branchId })
   if (completed) {
-    onSentence(CLOSING[language])
     return { hangup: true }
   }
 

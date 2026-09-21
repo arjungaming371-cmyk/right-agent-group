@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
     let lastLogin: string | null = null
     try {
       const { rows: loginRows } = await query(
-        `SELECT created_at FROM audit_logs WHERE performed_by = $1 AND action ILIKE '%login%' OR action ILIKE '%2FA%' ORDER BY created_at DESC LIMIT 1`,
+        `SELECT created_at FROM audit_logs WHERE performed_by = $1 AND (action ILIKE '%login%' OR action ILIKE '%2FA%') ORDER BY created_at DESC LIMIT 1`,
         [session.email]
       )
       if (loginRows.length > 0) {

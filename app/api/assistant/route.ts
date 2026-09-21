@@ -58,7 +58,17 @@ RULES:
 - Only output the action proposal block when an actionable dashboard change is intended.
 - Format all text in clean, professional markdown with headings and bullet points.`
 
+// FIX (2026-09-20): this fired 21 parallel queries on EVERY assistant message
+// (one user could occupy ~half the 25-connection pool; two concurrent users
+// starved the live-call path that shares the pool). An ops summary is fine
+// with 45s staleness.
+let _snapshotCache: { text: string; at: number } | null = null
+const SNAPSHOT_TTL_MS = 45_000
+
 async function getStatsSnapshot(): Promise<string> {
+  if (_snapshotCache && Date.now() - _snapshotCache.at < SNAPSHOT_TTL_MS) {
+    return _snapshotCache.text
+  }
   const [
     leadStatusBreakdown,
     leadsToday,
@@ -201,7 +211,7 @@ async function getStatsSnapshot(): Promise<string> {
     teamRoster.rows.map((r: any) => `${r.email} (${r.role})`).join(", ") || "no teammates added yet (only the admin email)"
   )
 
-  return [
+  const snapshot = [
     "LIVE DATA SNAPSHOT (as of right now):",
     leadsSection,
     loansSection,
@@ -214,6 +224,8 @@ async function getStatsSnapshot(): Promise<string> {
     opsSection,
     teamSection,
   ].join("\n\n")
+  _snapshotCache = { text: snapshot, at: Date.now() }
+  return snapshot
 }
 
 async function searchDatabase(userMessage: string): Promise<string> {
@@ -247,55 +259,67 @@ async function searchDatabase(userMessage: string): Promise<string> {
     const leadRows = [...leadHits.rows]
     const loanRows = [...loanHits.rows]
 
-    // Secondary / Typo-tolerant Fallback: if few or no hits, match using pg_trgm word_similarity
+    // Secondary / Typo-tolerant Fallback: if few or no hits, match using pg_trgm word_similarity.
+    // FIX (2026-09-20): these unindexed trigram scans used to run SEQUENTIALLY
+    // (up to 3 keywords x 2 tables) — one assistant message could stack several
+    // full scans while the live-call path waited on the same pool. All fallback
+    // queries now run concurrently (Promise.all), total row caps unchanged.
     if (leadRows.length < 3 || loanRows.length < 3) {
-      for (const kw of keywords.slice(0, 3)) {
-        if (leadRows.length < 8) {
-          const fuzzyLeads = await query(
-            `SELECT name, phone, status, product_interest, address, word_similarity($1, COALESCE(name, '')) AS sm
-             FROM leads
-             WHERE word_similarity($1, COALESCE(name, '')) > 0.28
-                OR word_similarity($1, COALESCE(address, '')) > 0.35
-                OR word_similarity($1, COALESCE(product_interest, '')) > 0.35
-             ORDER BY sm DESC LIMIT 5`,
-            [kw]
-          ).catch(() => ({ rows: [] }))
-          for (const row of fuzzyLeads.rows) {
-            if (!leadRows.some((r: any) => r.phone === row.phone)) {
-              leadRows.push(row)
-            }
-          }
-        }
+      const kws = keywords.slice(0, 3)
+      const needLeads = leadRows.length < 8
+      const needLoans = loanRows.length < 8
 
-        if (loanRows.length < 8) {
-          const fuzzyLoans = await query(
-            `SELECT customer_name, loan_type, loan_amount, status, city, word_similarity($1, COALESCE(customer_name, '')) AS sm
-             FROM loan_applications
-             WHERE word_similarity($1, COALESCE(customer_name, '')) > 0.28
-                OR word_similarity($1, COALESCE(city, '')) > 0.35
-                OR word_similarity($1, COALESCE(loan_type, '')) > 0.35
-             ORDER BY sm DESC LIMIT 5`,
-            [kw]
-          ).catch(() => ({ rows: [] }))
-          for (const row of fuzzyLoans.rows) {
-            if (!loanRows.some((r: any) => r.customer_name === row.customer_name && r.loan_type === row.loan_type)) {
-              loanRows.push(row)
-            }
-          }
+      const [fuzzyLeadSets, fuzzyLoanSets, phoneLeads] = await Promise.all([
+        needLeads
+          ? Promise.all(
+              kws.map((kw) =>
+                query(
+                  `SELECT name, phone, status, product_interest, address, word_similarity($1, COALESCE(name, '')) AS sm
+                   FROM leads
+                   WHERE word_similarity($1, COALESCE(name, '')) > 0.28
+                      OR word_similarity($1, COALESCE(address, '')) > 0.35
+                      OR word_similarity($1, COALESCE(product_interest, '')) > 0.35
+                   ORDER BY sm DESC LIMIT 5`,
+                  [kw]
+                ).catch(() => ({ rows: [] }))
+              )
+            )
+          : Promise.resolve([]),
+        needLoans
+          ? Promise.all(
+              kws.map((kw) =>
+                query(
+                  `SELECT customer_name, loan_type, loan_amount, status, city, word_similarity($1, COALESCE(customer_name, '')) AS sm
+                   FROM loan_applications
+                   WHERE word_similarity($1, COALESCE(customer_name, '')) > 0.28
+                      OR word_similarity($1, COALESCE(city, '')) > 0.35
+                      OR word_similarity($1, COALESCE(loan_type, '')) > 0.35
+                   ORDER BY sm DESC LIMIT 5`,
+                  [kw]
+                ).catch(() => ({ rows: [] }))
+              )
+            )
+          : Promise.resolve([]),
+        digitsOnly.length >= 5
+          ? query(
+              `SELECT name, phone, status, product_interest, address FROM leads WHERE phone ILIKE ('%' || $1 || '%') LIMIT 5`,
+              [digitsOnly]
+            ).catch(() => ({ rows: [] }))
+          : Promise.resolve({ rows: [] }),
+      ])
+
+      for (const res of fuzzyLeadSets) {
+        for (const row of res.rows) {
+          if (!leadRows.some((r: any) => r.phone === row.phone)) leadRows.push(row)
         }
       }
-
-      // Phone query if digits present (>= 5 digits)
-      if (digitsOnly.length >= 5) {
-        const phoneLeads = await query(
-          `SELECT name, phone, status, product_interest, address FROM leads WHERE phone ILIKE ('%' || $1 || '%') LIMIT 5`,
-          [digitsOnly]
-        ).catch(() => ({ rows: [] }))
-        for (const row of phoneLeads.rows) {
-          if (!leadRows.some((r: any) => r.phone === row.phone)) {
-            leadRows.push(row)
-          }
+      for (const res of fuzzyLoanSets) {
+        for (const row of res.rows) {
+          if (!loanRows.some((r: any) => r.customer_name === row.customer_name && r.loan_type === row.loan_type)) loanRows.push(row)
         }
+      }
+      for (const row of phoneLeads.rows) {
+        if (!leadRows.some((r: any) => r.phone === row.phone)) leadRows.push(row)
       }
     }
 

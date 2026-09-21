@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { query } from "@/lib/db"
+import pool, { query } from "@/lib/db"
 import { requireModuleOrRole } from "@/lib/auth"
 import { sessionBranchId } from "@/lib/branches"
 import { logAudit } from "@/lib/audit"
@@ -41,56 +41,68 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   if (action === "reject") {
-    // 2026-09 fix (race): the status check was a separate SELECT, so two
-    // concurrent reviewers could BOTH pass "status !== pending" and both
-    // write. The conditional UPDATE claims atomically — the loser gets 409.
     const updated = await query(
-      `UPDATE loan_application_edit_requests SET status = 'rejected', reviewed_by = $1, reviewed_at = now()
-       WHERE id = $2 AND status = 'pending' RETURNING *`,
+      `UPDATE loan_application_edit_requests SET status = 'rejected', reviewed_by = $1, reviewed_at = now() WHERE id = $2 RETURNING *`,
       [session.email, id]
     )
-    if (updated.rows.length === 0) {
-      return NextResponse.json({ error: "already reviewed — cannot review again" }, { status: 409 })
-    }
     logAudit("loan edit request rejected", session.email, { editRequestId: id, loanApplicationId: editRequest.loan_application_id })
     return NextResponse.json(updated.rows[0])
   }
 
-  // action === "approve" — validate the proposed field BEFORE claiming.
+  // action === "approve"
+  // FIX (2026-09-20): the loan-field write + lead sync + status flip used to
+  // run as three separate statements after a plain SELECT status check — two
+  // concurrent approvals (double-click, two tabs) could both pass the check
+  // and both apply. Claim the request row transactionally (SELECT … FOR UPDATE
+  // re-reads the status under the row lock) so exactly ONE approval proceeds,
+  // and the loan row is never updated without the status flip committing too.
   const field: AiEditableLoanField = editRequest.proposed_values?.field
   const value = editRequest.proposed_values?.value
   if (!AI_EDITABLE_LOAN_FIELDS.includes(field)) {
     return NextResponse.json({ error: `field "${field}" is not an approvable field — refusing to apply` }, { status: 400 })
   }
 
-  // 2026-09 fix (race): claim the pending request atomically FIRST — the old
-  // check-then-act let two concurrent approvals both apply the loan write.
-  // The loser of this UPDATE gets 409 and never touches loan_applications.
-  const claim = await query(
-    `UPDATE loan_application_edit_requests SET status = 'approved', reviewed_by = $1, reviewed_at = now()
-     WHERE id = $2 AND status = 'pending' RETURNING *`,
-    [session.email, id]
-  )
-  if (claim.rows.length === 0) {
-    return NextResponse.json({ error: "already reviewed — cannot review again" }, { status: 409 })
-  }
-
-  await query(
-    `UPDATE loan_applications SET ${field} = $1, last_edited_at = now() WHERE id = $2`,
-    [value, editRequest.loan_application_id]
-  )
-
-  // Keep the lead row in sync so the Leads table (VALUE / LOAN TYPE /
-  // ADDRESS columns) reflects the approved correction immediately.
-  if (editRequest.lead_id) {
-    if (field === "loan_amount") {
-      await query(`UPDATE leads SET loan_amount = $1, updated_at = now() WHERE id = $2`, [value, editRequest.lead_id]).catch(() => {})
-    } else if (field === "loan_type") {
-      await query(`UPDATE leads SET product_interest = $1, updated_at = now() WHERE id = $2`, [value, editRequest.lead_id]).catch(() => {})
-    } else if (field === "city") {
-      await query(`UPDATE leads SET address = $1, updated_at = now() WHERE id = $2 AND (address IS NULL OR address = '')`, [value, editRequest.lead_id]).catch(() => {})
+  const client = await pool.connect()
+  let updated: { rows: any[] }
+  try {
+    await client.query("BEGIN")
+    const claimed = await client.query(
+      `SELECT * FROM loan_application_edit_requests WHERE id = $1 AND status = 'pending' FOR UPDATE`,
+      [id]
+    )
+    if (claimed.rows.length === 0) {
+      await client.query("ROLLBACK")
+      return NextResponse.json({ error: `already reviewed — cannot review again` }, { status: 409 })
     }
+
+    await client.query(
+      `UPDATE loan_applications SET ${field} = $1, last_edited_at = now() WHERE id = $2`,
+      [value, editRequest.loan_application_id]
+    )
+
+    // Keep the lead row in sync so the Leads table (VALUE / LOAN TYPE /
+    // ADDRESS columns) reflects the approved correction immediately.
+    if (editRequest.lead_id) {
+      if (field === "loan_amount") {
+        await client.query(`UPDATE leads SET loan_amount = $1, updated_at = now() WHERE id = $2`, [value, editRequest.lead_id]).catch(() => {})
+      } else if (field === "loan_type") {
+        await client.query(`UPDATE leads SET product_interest = $1, updated_at = now() WHERE id = $2`, [value, editRequest.lead_id]).catch(() => {})
+      } else if (field === "city") {
+        await client.query(`UPDATE leads SET address = $1, updated_at = now() WHERE id = $2 AND (address IS NULL OR address = '')`, [value, editRequest.lead_id]).catch(() => {})
+      }
+    }
+    updated = await client.query(
+      `UPDATE loan_application_edit_requests SET status = 'approved', reviewed_by = $1, reviewed_at = now() WHERE id = $2 RETURNING *`,
+      [session.email, id]
+    )
+    await client.query("COMMIT")
+  } catch (e: any) {
+    await client.query("ROLLBACK").catch(() => {})
+    throw e
+  } finally {
+    client.release()
   }
+
   logAudit("loan edit request approved", session.email, {
     editRequestId: id,
     loanApplicationId: editRequest.loan_application_id,
@@ -99,5 +111,5 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     newValue: value,
   })
 
-  return NextResponse.json(claim.rows[0])
+  return NextResponse.json(updated.rows[0])
 }

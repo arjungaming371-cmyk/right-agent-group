@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
-import { createSessionToken, createOtpPendingToken, SESSION_COOKIE, sessionCookieOptions, type Role } from "@/lib/auth"
+import { createSessionToken, createOtpPendingToken, isSafeNextPath, SESSION_COOKIE, sessionCookieOptions, type Role } from "@/lib/auth"
 import { createNotification } from "@/lib/notifications"
 import { isSecurityEnabled } from "@/lib/security"
 import { isMailConfigured, sendMail } from "@/lib/mail"
@@ -27,6 +27,14 @@ export async function GET(req: NextRequest) {
 
   const fail = (reason: string) =>
     NextResponse.redirect(`${appUrl}/login?error=${encodeURIComponent(reason)}`)
+
+  // Open-redirect hardening (2026-09-20): when NEXT_PUBLIC_APP_URL is unset,
+  // appUrl is "" and NextResponse.redirect("/\\evil.com") emits a RELATIVE
+  // Location that browsers resolve as protocol-relative → off-site redirect.
+  // Fail closed instead of emitting relative redirects.
+  if (!appUrl || !/^https?:\/\//.test(appUrl)) {
+    return NextResponse.json({ error: "NEXT_PUBLIC_APP_URL is not configured — login disabled" }, { status: 500 })
+  }
 
   if (!clientId || !clientSecret) return fail("Google login not configured on server")
   if (!code || !state || !cookieState || state !== cookieState) return fail("Invalid login state. Please try again.")
@@ -113,7 +121,8 @@ export async function GET(req: NextRequest) {
     ).catch((e) => console.error("team_profiles upsert error:", e.message))
     logAudit("signed in", email, {})
 
-    const safeNext = nextPath.startsWith("/") && !nextPath.startsWith("//") ? nextPath : "/"
+    // Reject backslash + protocol-relative forms (see isSafeNextPath).
+    const safeNext = isSafeNextPath(nextPath) ? nextPath : "/"
 
     // ---- TWO-FACTOR AUTH (Access Controls toggle) ----
     // Admin sign-ins get an emailed 6-digit code before the session cookie
@@ -142,11 +151,16 @@ export async function GET(req: NextRequest) {
         res.cookies.delete("oauth_next")
         return res
       }
-      console.warn("2FA is enabled but SMTP is not configured — admin sign-in proceeding without a code")
+      console.warn("2FA is enabled but SMTP is not configured")
+      // FIX (2026-09-20): FAIL CLOSED. The old code issued a full admin
+      // session with no second factor when SMTP was down/broken — a security
+      // control the admin believes is enforced silently stopped being enforced
+      // (the audit row was the only trace). Refuse the sign-in instead.
       query(
-        `INSERT INTO audit_logs (action, performed_by, metadata) VALUES ('2FA skipped — SMTP not configured', $1, '{"source":"login"}')`,
+        `INSERT INTO audit_logs (action, performed_by, metadata) VALUES ('2FA blocked — SMTP not configured', $1, '{"source":"login"}')`,
         [email]
       ).catch(() => {})
+      return fail("2FA is enabled but the mail system is unavailable. Contact the administrator.")
     }
 
     // The full-access role's sign-ins never appear here — this notification

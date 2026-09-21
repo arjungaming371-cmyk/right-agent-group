@@ -34,6 +34,11 @@ export async function GET(req: NextRequest) {
       headers: {
         Authorization: `Basic ${Buffer.from(`${EXO_KEY}:${EXO_TOKEN}`).toString("base64")}`,
       },
+      // FIX (2026-09-20): an exotel.com 302 used to be followed blindly — a
+      // recording URL that redirected to an internal address would be fetched
+      // and proxied back (SSRF via redirect). Fail on redirects instead.
+      redirect: "error",
+      signal: AbortSignal.timeout(30_000),
     })
 
     if (!res.ok) {

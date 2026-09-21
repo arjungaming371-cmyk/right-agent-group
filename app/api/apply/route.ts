@@ -30,6 +30,12 @@ export async function POST(req: NextRequest) {
   }
   const phone = normalizePhone(phoneRaw)
   if (!phone) return NextResponse.json({ error: "invalid phone" }, { status: 400 })
+  // FIX (2026-09-20): normalizePhone returns junk like "+12345" for random
+  // digit runs — that junk became a lead's dedupe identity. This app is
+  // India-only (+91); require the full 12-digit form.
+  if (!/^\+91\d{10}$/.test(phone)) {
+    return NextResponse.json({ error: "Enter a valid 10-digit Indian mobile number" }, { status: 400 })
+  }
 
   const email = body.email ? String(body.email).trim() : null
   const company = body.company ? String(body.company).trim() : null
@@ -53,17 +59,33 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const existing = await query(`SELECT id FROM leads WHERE ${PHONE_MATCH_SQL}`, [phoneLast10(phone)])
+    const existing = await query(
+      `SELECT id, name, email, notes, status, source FROM leads WHERE ${PHONE_MATCH_SQL} LIMIT 1`,
+      [phoneLast10(phone)]
+    )
     if (existing.rows.length > 0) {
-      const id = existing.rows[0].id
+      const lead = existing.rows[0]
+      // FIX (2026-09-20): the public form used to WHOLESALE-OVERWRITE an
+      // existing lead on the same phone — anyone who knew a customer's number
+      // could wipe the agent's accumulated notes, overwrite name/email, and
+      // reset a qualified lead back to "new" (kicking it out of the funnel).
+      // The public path now only APPENDS a note and fills empty fields.
+      const appendedNotes = [lead.notes, record.notes].filter(Boolean).join("\n---\n")
       const { data, error } = await db
         .from("leads")
-        .update({ ...record, updated_at: new Date().toISOString() })
-        .eq("id", id)
+        .update({
+          name: lead.name || record.name, // fill only when empty
+          email: lead.email || record.email,
+          product_interest: record.product_interest,
+          notes: appendedNotes.slice(0, 4000),
+          updated_at: new Date().toISOString(),
+          // status/source/assigned fields are NEVER touched by the public path
+        })
+        .eq("id", lead.id)
         .select()
         .single()
       if (error) return apiError(error)
-      logAudit("website application received (existing lead)", "public", { leadId: id, phone })
+      logAudit("website application received (existing lead, notes appended)", "public", { leadId: lead.id, phone })
       return NextResponse.json({ ok: true, id: data?.id })
     }
 

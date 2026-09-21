@@ -172,6 +172,27 @@ export async function generateAndSendDigest(days: number): Promise<{ ok: boolean
   </div>
 </div>`
 
+  // FIX (2026-09-20): idempotency. The digest can be triggered twice for the
+  // same period — the in-app scheduler fires at 08:00 AND the Windows
+  // Task Scheduler job (DIGEST.ps1) fires at 08:00 on the on-prem deployment,
+  // plus /api/digest/send lets a user click "send now". Claim the period key
+  // atomically first so the admin gets ONE email per period. Legacy DBs
+  // without the digest_sent_log table (pre-migration) keep the old behaviour.
+  const periodKind = days >= 7 ? "weekly" : "daily"
+  const now = new Date()
+  const periodKey = `${periodKind}-${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`
+  try {
+    const claim = await query(
+      `INSERT INTO digest_sent_log (period_key, recipient) VALUES ($1, $2) ON CONFLICT (period_key) DO NOTHING`,
+      [periodKey, to]
+    )
+    if ((claim.rowCount || 0) === 0) {
+      return { ok: false, error: `digest for ${periodKey} was already sent`, stats }
+    }
+  } catch (e: any) {
+    if (e?.code !== "42703") throw e // table missing → legacy behaviour
+  }
+
   const result = await sendMail({ to, subject: `${stats.periodLabel} Digest — ${stats.totalCalls} calls, ${stats.qualifiedLeads} qualified`, html })
   return { ok: result.ok, error: result.error, stats }
 }

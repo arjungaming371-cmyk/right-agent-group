@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
-import { db, query } from "@/lib/db"
-import { sendWhatsAppText, branchWhatsAppCtx } from "@/lib/whatsapp"
+import { db } from "@/lib/db"
+import { sendWhatsAppText, branchWhatsAppCtx, dndGate } from "@/lib/whatsapp"
 import { requireModuleOrRole } from "@/lib/auth"
 import { sessionBranchId } from "@/lib/branches"
 
@@ -11,14 +11,24 @@ export async function POST(req: NextRequest) {
   if (!to || !message) return NextResponse.json({ error: "to and message required" }, { status: 400 })
   const branchId = sessionBranchId(session)
 
-  // 2026-09 fix (cross-branch IDOR): when a leadId is attached, branch-bound
-  // staff may only log against leads in THEIR branch — otherwise comm logs
-  // and WA threads could be pinned onto another branch's lead.
+  // FIX (2026-09-20): branch-bound staff could write messages onto ANY
+  // branch's lead by supplying its leadId (cross-tenant contamination).
+  // Verify ownership before touching the lead's records.
   if (leadId && branchId) {
-    const own = await query(`SELECT 1 FROM leads WHERE id = $1 AND branch_id = $2 LIMIT 1`, [leadId, branchId])
-    if ((own.rowCount || 0) === 0) {
-      return NextResponse.json({ error: "lead not found in your branch" }, { status: 404 })
+    const owner = await db.from("leads").select("branch_id").eq("id", leadId).single()
+    if (!owner.data || owner.data.branch_id !== branchId) {
+      return NextResponse.json({ error: "Lead not found in your branch" }, { status: 404 })
     }
+  }
+
+  // FIX (2026-09-20): manual business-initiated sends bypassed the
+  // DND/opt-out gate — the ONLY ungated WhatsApp send path left. Replying to
+  // a customer who said "stop messaging me" is exactly the TRAI-penalizable
+  // contact the compliance module exists to prevent. (Inbound-triggered
+  // auto-replies inside the 24h service window remain exempt by design.)
+  const gate = await dndGate(to)
+  if (gate && !gate.ok) {
+    return NextResponse.json({ error: "DND_SUPPRESSED", message: gate.error }, { status: 403 })
   }
 
   // Branch-bound staff reply from their BRANCH's WABA number (falls back to
