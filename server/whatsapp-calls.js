@@ -281,6 +281,13 @@ async function createCallAnswer(offerSdp) {
   const sendTrack = new MediaStreamTrack({ kind: "audio" })
   const sender = pc.addTrack(sendTrack)
 
+  // werift fires onTrack synchronously INSIDE setRemoteDescription the moment
+  // the remote offer is sendonly/sendrecv. Subscribe BEFORE that call or the
+  // remote track is missed forever — the caller's voice would never reach
+  // STT. (Browsers re-fire per-stream later; werift does not.)
+  let remoteTrack = null
+  pc.onTrack.subscribe((track) => { remoteTrack = track })
+
   await pc.setRemoteDescription({ type: "offer", sdp: offerSdp })
 
   const answer = await pc.createAnswer()
@@ -301,6 +308,7 @@ async function createCallAnswer(offerSdp) {
     answerSdp: filterSdpForWhatsApp(pc.localDescription?.sdp || answer.sdp),
     payloadType: pt,
     ssrc,
+    remoteTrack,
   }
 }
 
@@ -354,7 +362,7 @@ class WhatsAppCallSession {
   }
 
   /** Take over the negotiated peer connection and go live. */
-  attach({ pc, sendTrack, sender, answerSdp, payloadType, ssrc }) {
+  attach({ pc, sendTrack, sender, answerSdp, payloadType, ssrc, remoteTrack }) {
     this.pc = pc
     this.sendTrack = sendTrack
     this.sender = sender
@@ -381,9 +389,15 @@ class WhatsAppCallSession {
       if (state === "closed" || state === "failed") this.end(state)
     })
 
-    // Inbound audio: the REMOTE track arrives via onTrack.
-    pc.onTrack.subscribe((remoteTrack) => {
-      remoteTrack.onReceiveRtp.subscribe((rtp) => {
+    // Inbound audio: the REMOTE track. werift fires onTrack during
+    // setRemoteDescription — createCallAnswer already captured it (see
+    // remoteTrack there); bind it directly. The pc.onTrack subscribe below
+    // is a guarded fallback for any late-firing implementation.
+    let inboundBound = false
+    const bindInbound = (track) => {
+      if (inboundBound || !track) return
+      inboundBound = true
+      track.onReceiveRtp.subscribe((rtp) => {
         try {
           if (this.closed || !rtp?.payload?.length) return
           // 1 opus frame per RTP packet (Meta sends 20 ms ptime).
@@ -393,7 +407,9 @@ class WhatsAppCallSession {
           console.error("wa rtp in error:", e.message)
         }
       })
-    })
+    }
+    if (remoteTrack) bindInbound(remoteTrack)
+    pc.onTrack.subscribe(bindInbound)
 
     this.startPacer()
     // Safety net: if media never connects (firewall, bad ICE), the session
