@@ -95,10 +95,12 @@ async function runPromptTunerScan() {
   }
 }
 
-// Instagram Comment Scanner: guarantees comments get automated replies even if
-// Meta webhook delivery is delayed, filtered by Standard Access, or waiting on
-// tester acceptance. Deduplicated atomically by comment_id in the DB.
+// Instagram Comment Scanner: guarantees comments get automated replies across
+// ALL posts (current and upcoming), even if Meta webhook delivery is delayed
+// or filtered. Uses comments_count tracking to only query posts with new activity.
 let igCommentScanRunning = false
+const lastCommentCounts = new Map<string, number>()
+
 async function runInstagramCommentScan() {
   if (igCommentScanRunning) return
   igCommentScanRunning = true
@@ -112,7 +114,8 @@ async function runInstagramCommentScan() {
     const base = isIgLogin ? "https://graph.instagram.com/v21.0" : "https://graph.facebook.com/v21.0"
     const target = isIgLogin ? "me" : accountId
 
-    const mediaRes = await fetch(`${base}/${target}/media?fields=id,comments_count&limit=5&access_token=${token}`, {
+    // Scan up to 50 posts (covers all existing media and any new/upcoming posts)
+    const mediaRes = await fetch(`${base}/${target}/media?fields=id,comments_count&limit=50&access_token=${token}`, {
       signal: AbortSignal.timeout(10_000),
     }).catch(() => null)
     if (!mediaRes || !mediaRes.ok) return
@@ -120,8 +123,15 @@ async function runInstagramCommentScan() {
     const mediaList = mediaData?.data || []
 
     for (const m of mediaList) {
-      if (!m.id || !m.comments_count || m.comments_count <= 0) continue
-      const commRes = await fetch(`${base}/${m.id}/comments?fields=id,text,username,from,timestamp&limit=10&access_token=${token}`, {
+      if (!m.id) continue
+      const currentCount = Number(m.comments_count || 0)
+      if (currentCount <= 0) continue
+
+      // Only inspect comments if comment count changed (saves API calls & rate limits)
+      const lastCount = lastCommentCounts.get(m.id)
+      if (lastCount !== undefined && lastCount === currentCount) continue
+
+      const commRes = await fetch(`${base}/${m.id}/comments?fields=id,text,username,from,timestamp&limit=25&access_token=${token}`, {
         signal: AbortSignal.timeout(10_000),
       }).catch(() => null)
       if (!commRes || !commRes.ok) continue
@@ -159,6 +169,9 @@ async function runInstagramCommentScan() {
           }),
         }).catch(() => null)
       }
+
+      // Record updated count for this post
+      lastCommentCounts.set(m.id, currentCount)
     }
   } catch (e: any) {
     // Fail-safe — never crash scheduler
