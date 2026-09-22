@@ -87,7 +87,12 @@ export async function sendInstagramText(
   }
 
   try {
-    const res = await fetch(`${graphBase(token)}/${accountId}/messages`, {
+    // FIX (2026-09-22): Instagram-Login tokens (graph.instagram.com) may run
+    // without INSTAGRAM_ACCOUNT_ID — the API accepts "me" there. Without this
+    // fallback such setups were treated as configured (token set) but every
+    // send hit "/undefined/messages" and failed.
+    const target = accountId || (token.startsWith("IG") ? "me" : accountId)
+    const res = await fetch(`${graphBase(token)}/${target}/messages`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -166,7 +171,9 @@ export async function privateReplyInstagramComment(
   }
 
   try {
-    const res = await fetch(`${graphBase(token)}/${accountId}/messages`, {
+    // Same "me" fallback as sendInstagramText for IG-Login-only setups.
+    const target = accountId || (token.startsWith("IG") ? "me" : accountId)
+    const res = await fetch(`${graphBase(token)}/${target}/messages`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

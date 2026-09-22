@@ -96,12 +96,15 @@ export async function POST(req: NextRequest) {
       // thread the credentials through every send.
       let branchId: string | null = null
       let igBranch: BranchInstagramCtx = null
+      // entry.id is the IG professional / WBA account this event arrived on —
+      // also used below to recognise the account's OWN comments (loop guard).
+      const entryId = entry?.id ? String(entry.id) : null
       try {
-        if (entry?.id) {
+        if (entryId) {
           const b = await query(
             `SELECT id, instagram_token, instagram_account_id, brand_name
                FROM branches WHERE instagram_account_id = $1 LIMIT 1`,
-            [String(entry.id)]
+            [entryId]
           )
           const row = b.rows[0]
           branchId = row?.id || null
@@ -129,7 +132,7 @@ export async function POST(req: NextRequest) {
       for (const change of entry?.changes || []) {
         if (change.field === "comments" && change.value) {
           try {
-            await handleInboundComment(change.value, igBranch)
+            await handleInboundComment(change.value, igBranch, entryId)
           } catch (e: any) {
             console.error(`inbound IG comment failed (continuing): ${e.message}`)
           }
@@ -356,7 +359,7 @@ Instructions:
  * `igBranch` carries the branch's own IG credentials when the comment arrived
  * on a branch-owned account — replies MUST go out from the same account.
  */
-async function handleInboundComment(val: any, igBranch: BranchInstagramCtx = null) {
+async function handleInboundComment(val: any, igBranch: BranchInstagramCtx = null, entryId: string | null = null) {
   const branchId = igBranch?.id || null
   const commentId = val.id
   const text = val.text || ""
@@ -366,6 +369,20 @@ async function handleInboundComment(val: any, igBranch: BranchInstagramCtx = nul
   const mediaId = val.media?.id
 
   if (!commentId || !text || !senderId) return
+
+  // FIX (2026-09-22): NEVER react to the account's OWN comments. Priya's
+  // public reply is itself a new comment on the same post, and Meta delivers
+  // it right back on this webhook — without this guard she replies to her
+  // own replies in an endless chain on every post. The DM path is already
+  // protected by the is_echo check; comments had no equivalent.
+  const selfIds = new Set<string>()
+  if (entryId) selfIds.add(entryId)
+  if (igBranch?.instagramAccountId) selfIds.add(String(igBranch.instagramAccountId))
+  if (process.env.INSTAGRAM_ACCOUNT_ID) selfIds.add(String(process.env.INSTAGRAM_ACCOUNT_ID))
+  if (selfIds.has(String(senderId))) {
+    console.info(`[Instagram] Skipping own/agent comment ${commentId} — no self-reply loop`)
+    return
+  }
 
   // FIX (2026-09-20): comments had NO dedupe constraint at all — two
   // concurrent webhook retries double-processed and double-replied publicly.
