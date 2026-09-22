@@ -18,7 +18,7 @@ type Call = {
   id: string; phone: string; direction: string; duration: number
   status: string; sentiment: string; outcome: string; transcript: any[]
   recording_url: string; language: string; created_at: string
-  leads?: { name: string; phone: string }
+  leads?: { name: string; phone: string; source?: string | null }
 }
 type Lead = { id: string; name: string; phone: string }
 
@@ -434,7 +434,13 @@ export default function VoiceLogsView({ role }: { role: Role }) {
                 {call.direction === "inbound" ? <PhoneIncoming size={16} strokeWidth={1.9} /> : <PhoneOutgoing size={16} strokeWidth={1.9} />}
               </div>
               <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 600, fontSize: 14 }}>{name}</div>
+                <div style={{ fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", gap: 8 }}>
+                  {name}
+                  {/* WhatsApp voice calls land in the same funnel — tag them */}
+                  {call.leads?.source === "whatsapp_call" && (
+                    <span style={{ fontSize: 10, fontWeight: 600, padding: "1px 7px", borderRadius: 5, background: "rgba(0,168,132,0.14)", color: "var(--accent-green, #22c55e)" }}>WhatsApp</span>
+                  )}
+                </div>
                 <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{num} · {dateStr}, {time}</div>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>

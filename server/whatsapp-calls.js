@@ -1,0 +1,819 @@
+// Right Agent Group — WhatsApp Business Calling voice bridge.
+//
+// Meta's WhatsApp Business Calling API (Cloud API) delivers a customer's
+// WhatsApp voice call as a WEBRTC offer inside the webhook ("calls" field,
+// event "connect"). The Next.js webhook forwards that offer to this server;
+// we answer it with werift (pure-JS WebRTC — no native WebRTC deps), and the
+// audio then flows directly between Meta's media server and this process:
+//
+//   caller (WhatsApp app) ⇄ Meta SFU ⇄ [WERIFT/SRTP] ⇄ this file
+//
+// Pipeline — deliberately the SAME brain as the Exotel voicebot:
+//
+//   opus RTP in (48 kHz) → decode → silence-based endpointing (same state
+//   machine as voicebot-server's CallSession) → Sarvam Saaras STT
+//     → Next.js /api/calls/turn  (Groq/Sarvam LLM = Priya, DB, Lead Brain)
+//     → Cartesia Sonic TTS (24 kHz WAV) → upsample → opus RTP out (48 kHz)
+//
+// STT stays Sarvam, the LLM stays Groq (via the app's turn API) and TTS
+// defaults to CARTESIA for WhatsApp calls (VOICEBOT_WA_TTS_PROVIDER=cartesia,
+// the default). Sarvam TTS remains the automatic fallback when no Cartesia
+// key is configured, so a call never dies for lack of a TTS provider.
+//
+// WhatsApp calls are IP-to-IP wideband audio with the WhatsApp client's own
+// echo cancellation, so — unlike the 8 kHz Exotel line — barge-in is safe to
+// default ON here, and no telephony filter chain (band-pass/compressor) is
+// applied: the caller hears studio-quality audio straight from Cartesia.
+//
+// Signalling flow (incoming call):
+//   1. Meta webhook → Next.js /api/whatsapp (field "calls", event "connect",
+//      session.sdp = offer)
+//   2. Next.js POSTs the offer here → createCallAnswer() returns our SDP answer
+//   3. Next.js calls Graph API  POST /{phone_number_id}/calls
+//      action=pre_accept (with the answer) then action=accept (same answer)
+//   4. ICE/DTLS/SRTP connect; the pacer starts streaming; Priya greets.
+//
+// Run by voicebot-server.js (HTTP on 127.0.0.1:VOICEBOT_HTTP_PORT, default
+// 3003, auth = WHATSAPP_SERVICE_KEY). Outbound (business-initiated) WhatsApp
+// calls need Meta's call-permission template flow and are NOT implemented
+// here — inbound is the free path and this business's actual use case.
+//
+// Dependencies (server/package.json): werift, @discordjs/opus.
+
+require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") })
+
+const { spawn } = require("child_process")
+const {
+  RTCPeerConnection,
+  MediaStreamTrack,
+  RtpPacket,
+  RtpHeader,
+} = require("werift")
+const { OpusEncoder } = require("@discordjs/opus")
+const voiceProviders = require("./voice-providers")
+
+// ---------- Configuration ----------
+
+const APP_URL = process.env.APP_INTERNAL_URL || process.env.NEXT_PUBLIC_APP_URL || "http://127.0.0.1:3000"
+const API_KEY = process.env.WHATSAPP_SERVICE_KEY || ""
+
+// Wideband end to end — opus on the WebRTC leg, 16 kHz WAV for Saaras STT.
+const WA_RATE = 48000            // opus / WebRTC clock rate
+const WA_FRAME_SAMPLES = 960     // 20 ms
+const WA_FRAME_BYTES = WA_FRAME_SAMPLES * 2
+const STT_RATE = parseInt(process.env.VOICEBOT_WA_STT_SAMPLE_RATE || "16000")
+const DSR = WA_RATE / STT_RATE   // decimation factor (3 at 16 kHz)
+
+// Endpointing — same numbers as the Exotel path (they were tuned live).
+const ENERGY_THRESHOLD = parseInt(process.env.VOICEBOT_WA_ENERGY_THRESHOLD || "300")
+const SILENCE_END_MS = 600
+const MIN_SPEECH_MS = 250
+const MAX_UTTERANCE_MS = 15000
+
+// Barge-in defaults ON for WhatsApp: the client does its own echo
+// cancellation on IP audio, so sustained loud input while Priya talks is a
+// real interruption, not line echo (the Exotel path needs a manual echo
+// probe before enabling this — see voicebot-server.js).
+const BARGE_IN = (process.env.VOICEBOT_WA_BARGE_IN || "1").trim() === "1"
+const BARGE_MIN_MS = parseInt(process.env.VOICEBOT_WA_BARGE_MIN_MS || "300")
+
+// TTS: WhatsApp calls default to Cartesia (as requested). "sarvam" flips the
+// whole channel back; a missing Cartesia key falls back to Sarvam per call.
+const WA_TTS_PROVIDER = (process.env.VOICEBOT_WA_TTS_PROVIDER || "cartesia").toLowerCase()
+
+// STUN only — this process runs on a public-IP server (AWS), Meta's SFU is
+// publicly reachable; a TURN relay is never needed for this topology.
+const ICE_SERVERS = (process.env.VOICEBOT_WA_ICE_SERVERS ||
+  "stun:stun.l.google.com:19302")
+  .split(",").map((s) => s.trim()).filter(Boolean).map((urls) => ({ urls }))
+
+// Fixed lines (mirrored from voicebot-server.js — kept local so this module
+// stays dependency-free from it; voicebot-server owns the Exotel path).
+const CLARIFY_PHRASE = {
+  english: "Sorry, I didn't quite catch that — could you say that again?",
+  telugu: "Sorry అండి, నాకు సరిగా వినిపించలేదు. మళ్ళీ ఒకసారి చెప్పగలరా?",
+  hindi: "Sorry, मुझे थोड़ा clear सुनाई नहीं दिया। क्या आप दोबारा बोल सकते हैं?",
+}
+const FALLBACK_PHRASE = {
+  english: "Sorry, one moment please — I'm checking on something.",
+  telugu: "క్షమించండి, ఒక నిమిషం. నేను చెక్ చేస్తున్నాను.",
+  hindi: "क्षमा कीजिए, एक पल रुकिए — मैं जाँच रही हूँ।",
+}
+const START_FALLBACK_PHRASE = {
+  english: "Hello! This is Priya from Right Agent Group.",
+  telugu: "నమస్కారం! నేను రైట్ ఏజెంట్ గ్రూప్ నుంచి మాట్లాడుతున్నాను.",
+  hindi: "नमस्ते! मैं राइट एजेंट ग्रुप से बोल रही हूँ।",
+}
+
+const TURN_TIMEOUT_MS = parseInt(process.env.VOICEBOT_TURN_TIMEOUT_MS || "20000")
+const TURN_STREAM_TIMEOUT_MS = parseInt(process.env.VOICEBOT_TURN_STREAM_TIMEOUT_MS || "90000")
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+const maskPhone = (p) => (p && String(p).length > 6 ? `${String(p).slice(0, 3)}****${String(p).slice(-3)}` : (p || "?"))
+
+// WhatsApp call ids can be long; the app keys everything off callSid.
+const callSidFor = (callId) => `wacall-${callId}`
+
+// ---------- Turn API (same bridge the Exotel bot uses) ----------
+
+async function callTurnApi(payload, signal) {
+  const res = await fetch(`${APP_URL}/api/calls/turn`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+    body: JSON.stringify(payload),
+    signal: signal || AbortSignal.timeout(TURN_TIMEOUT_MS),
+  })
+  if (!res.ok) throw new Error(`turn API HTTP ${res.status}`)
+  return res.json()
+}
+
+async function callTurnApiStream(payload, onEvent, signal) {
+  const res = await fetch(`${APP_URL}/api/calls/turn`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+    body: JSON.stringify({ ...payload, stream: true }),
+    signal: signal || AbortSignal.timeout(TURN_STREAM_TIMEOUT_MS),
+  })
+  if (!res.ok) throw new Error(`turn API HTTP ${res.status}`)
+  const ct = res.headers.get("content-type") || ""
+  if (!ct.includes("ndjson")) {
+    const r = await res.json()
+    if (r.text) onEvent({ type: "sentence", text: r.text })
+    onEvent({ type: "done", language: r.language, hangup: r.hangup })
+    return
+  }
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buf = ""
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buf += decoder.decode(value, { stream: true })
+    const lines = buf.split("\n")
+    buf = lines.pop() || ""
+    for (const line of lines) {
+      if (!line.trim()) continue
+      try { onEvent(JSON.parse(line)) } catch {}
+    }
+  }
+  if (buf.trim()) { try { onEvent(JSON.parse(buf)) } catch {} }
+}
+
+// JS mirror of lib/sentences.ts (same as voicebot-server.js).
+function splitIntoSentences(text) {
+  const out = []
+  let start = 0
+  for (let i = 0; i < text.length; i++) {
+    if (!/[.!?…।॥]/.test(text[i])) continue
+    const next = text[i + 1]
+    if (next !== undefined && !/\s/.test(next)) continue
+    const candidate = text.slice(start, i + 1).trim()
+    if (candidate.length < 8) continue
+    out.push(candidate)
+    start = i + 1
+  }
+  const rest = text.slice(start).trim()
+  if (rest) out.push(rest)
+  return out.length ? out : [text.trim()].filter(Boolean)
+}
+
+// ---------- Audio helpers (all pure JS — no new native deps) ----------
+
+/** 16 kHz mono s16 WAV around a PCM buffer (Saaras accepts 8/16 kHz). */
+function pcmToWav16k(pcm) {
+  const header = Buffer.alloc(44)
+  const byteRate = STT_RATE * 2
+  header.write("RIFF", 0)
+  header.writeUInt32LE(36 + pcm.length, 4)
+  header.write("WAVE", 8)
+  header.write("fmt ", 12)
+  header.writeUInt32LE(16, 16)
+  header.writeUInt16LE(1, 20) // PCM
+  header.writeUInt16LE(1, 22) // mono
+  header.writeUInt32LE(STT_RATE, 24)
+  header.writeUInt32LE(byteRate, 28)
+  header.writeUInt16LE(2, 32)
+  header.writeUInt16LE(16, 34)
+  header.write("data", 36)
+  header.writeUInt32LE(pcm.length, 40)
+  return Buffer.concat([header, pcm])
+}
+
+/** 48 kHz → STT_RATE, box-average decimation (3:1 at 16 kHz). */
+function downsampleToStt(frame48k) {
+  const out = Buffer.alloc(Math.floor(frame48k.length / 2 / DSR) * 2)
+  let o = 0
+  for (let i = 0; i + DSR <= frame48k.length / 2; i += DSR) {
+    let acc = 0
+    for (let k = 0; k < DSR; k++) acc += frame48k.readInt16LE((i + k) * 2)
+    out.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(acc / DSR))), o)
+    o += 2
+  }
+  return out
+}
+
+/** TTS WAV (any provider rate) → raw mono s16 PCM at that rate. */
+function wavToPcm(wav) {
+  return new Promise((resolve, reject) => {
+    const ff = spawn("ffmpeg", ["-hide_banner", "-loglevel", "error", "-f", "wav", "-i", "pipe:0", "-f", "s16le", "-ac", "1", "pipe:1"])
+    const chunks = []
+    ff.stdout.on("data", (c) => chunks.push(c))
+    ff.on("error", reject)
+    ff.on("close", (code) => {
+      if (code === 0) resolve(Buffer.concat(chunks))
+      else reject(new Error(`ffmpeg WAV decode failed (${code})`))
+    })
+    ff.stdin.on("error", () => {})
+    ff.stdin.end(wav)
+  })
+}
+
+/** Upsample mono PCM (s16) by an integer factor via linear interpolation. */
+function upsampleMono(pcm, factor) {
+  const inSamples = Math.floor(pcm.length / 2)
+  const out = Buffer.alloc(inSamples * factor * 2)
+  let o = 0
+  for (let i = 0; i < inSamples; i++) {
+    const cur = pcm.readInt16LE(i * 2)
+    const next = i + 1 < inSamples ? pcm.readInt16LE((i + 1) * 2) : cur
+    for (let k = 0; k < factor; k++) {
+      const v = k === 0 ? cur : cur + ((next - cur) * k) / factor
+      out.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(v))), o)
+      o += 2
+    }
+  }
+  return out
+}
+
+function avgEnergy(frame) {
+  let sum = 0
+  const n = Math.floor(frame.length / 2)
+  for (let i = 0; i < n; i++) sum += Math.abs(frame.readInt16LE(i * 2))
+  return n ? sum / n : 0
+}
+
+/**
+ * WhatsApp only accepts SHA-256 DTLS fingerprints in the SDP it receives.
+ * werift already answers with sha-256, but the filter (mirrors pipecat's
+ * WhatsApp client) guarantees nothing else slips in.
+ */
+function filterSdpForWhatsApp(sdp) {
+  const lines = String(sdp).split(/\r?\n/)
+  const filtered = lines.filter((l) => !l.startsWith("a=fingerprint:") || l.startsWith("a=fingerprint:sha-256"))
+  return filtered.join("\r\n").replace(/\r?\n$/, "") + "\r\n"
+}
+
+// ---------- Signalling: SDP offer → answer ----------
+
+/**
+ * Build the WebRTC answer for a WhatsApp "connect" event.
+ *
+ * Called synchronously inside the webhook round-trip: the answer MUST go
+ * back to Meta within a few seconds or the caller hears dead ringing. ICE
+ * gathering completes inside setLocalDescription (werift semantics), so the
+ * returned SDP is complete — no trickle.
+ *
+ * Returns everything the session needs to take over: the pc, our send track
+ * with its negotiated payloadType/ssrc, and the filtered answer SDP.
+ */
+async function createCallAnswer(offerSdp) {
+  const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
+  const sendTrack = new MediaStreamTrack({ kind: "audio" })
+  const sender = pc.addTrack(sendTrack)
+
+  await pc.setRemoteDescription({ type: "offer", sdp: offerSdp })
+
+  const answer = await pc.createAnswer()
+  await pc.setLocalDescription(answer)
+
+  // MediaStreamTrack.codec is set once the transceiver negotiated opus.
+  const pt = sendTrack.codec?.payloadType
+  if (pt === undefined || pt === null) {
+    try { pc.close() } catch {}
+    throw new Error("opus payload type missing after negotiation — WhatsApp offer contained no compatible audio codec")
+  }
+  const ssrc = sender.ssrc || sendTrack.ssrc
+
+  return {
+    pc,
+    sendTrack,
+    sender,
+    answerSdp: filterSdpForWhatsApp(pc.localDescription?.sdp || answer.sdp),
+    payloadType: pt,
+    ssrc,
+  }
+}
+
+// ---------- Per-call session ----------
+
+class WhatsAppCallSession {
+  constructor({ callId, from, to, phoneNumberId, branchId }) {
+    this.callId = callId
+    this.callSid = callSidFor(callId)
+    this.from = from || ""
+    this.to = to || ""
+    this.phoneNumberId = phoneNumberId || ""
+    this.branchId = branchId || null
+
+    this.language = "telugu"
+    this.voice = null           // { provider, speaker } from the branch's AI Employee
+    this.startedAt = Date.now()
+    this.closed = false
+    this.started = false
+    this.endReported = false
+
+    // playback pipeline (epoch-guarded, same design as CallSession)
+    this.speechEpoch = 0
+    this.botTalking = false
+    this.processing = false
+    this.sendingAudio = false
+    this.synthChain = Promise.resolve()
+    this.sendChain = Promise.resolve()
+    this.turnAbort = null
+
+    // utterance state
+    this.buffer = []            // downsampled 16k frames of the current utterance
+    this.speechMs = 0
+    this.silenceMs = 0
+    this.maxEnergy = 0
+    this.callMaxEnergy = 0
+    this.frameCount = 0
+    this.speaking = false
+    this.bargeMs = 0
+    this.bargeBuffer = []
+
+    // RTP out
+    this.outQueue = []          // 20 ms opus frames awaiting the pacer
+    this.pacer = null
+    this.seq = Math.floor(Math.random() * 0x10000)
+    this.ts = Math.floor(Math.random() * 0x100000000)
+    this.connected = false
+    this.staleTimer = null
+    // Promise for the in-flight "end" report (awaited by the terminate bridge)
+    this.endReportPromise = null
+  }
+
+  /** Take over the negotiated peer connection and go live. */
+  attach({ pc, sendTrack, sender, answerSdp, payloadType, ssrc }) {
+    this.pc = pc
+    this.sendTrack = sendTrack
+    this.sender = sender
+    this.answerSdp = answerSdp
+    this.pt = payloadType
+    this.ssrc = ssrc
+    this.encoder = new OpusEncoder(WA_RATE, 1)
+    this.decoder = new OpusEncoder(WA_RATE, 1)
+    this.silenceFrame = this.encoder.encode(Buffer.alloc(WA_FRAME_BYTES))
+
+    pc.iceConnectionStateChange.subscribe((state) => {
+      if (state === "connected" || state === "completed") {
+        if (!this.connected) {
+          this.connected = true
+          console.log(`🔊 WhatsApp call ${this.callSid} media connected`)
+        }
+      } else if (state === "failed" || state === "closed" || state === "disconnected") {
+        // "disconnected" can self-heal (ICE restart / network blip); only a
+        // hard failure or close tears the session down.
+        if (state !== "disconnected") this.end(state)
+      }
+    })
+    pc.connectionStateChange.subscribe((state) => {
+      if (state === "closed" || state === "failed") this.end(state)
+    })
+
+    // Inbound audio: the REMOTE track arrives via onTrack.
+    pc.onTrack.subscribe((remoteTrack) => {
+      remoteTrack.onReceiveRtp.subscribe((rtp) => {
+        try {
+          if (this.closed || !rtp?.payload?.length) return
+          // 1 opus frame per RTP packet (Meta sends 20 ms ptime).
+          const pcm48k = this.safeDecode(rtp.payload)
+          if (pcm48k) this.onInboundFrame(pcm48k)
+        } catch (e) {
+          console.error("wa rtp in error:", e.message)
+        }
+      })
+    })
+
+    this.startPacer()
+    // Safety net: if media never connects (firewall, bad ICE), the session
+    // must not sit in memory forever. Meta also times the call out ~45-60s
+    // after an unanswered accept and sends a terminate webhook — this timer
+    // covers the case where THAT never arrives either.
+    this.staleTimer = setTimeout(() => {
+      if (!this.connected && !this.closed) {
+        console.error(`⏰ WhatsApp call ${this.callSid} never connected — reaping`)
+        this.end("ice-timeout")
+      }
+    }, 90_000)
+    if (this.staleTimer.unref) this.staleTimer.unref()
+
+    return this
+  }
+
+  safeDecode(payload) {
+    try { return this.decoder.decode(payload) } catch { return null }
+  }
+
+  // ---- outbound audio (pacer) ----
+
+  startPacer() {
+    // One 20 ms RTP packet per tick, forever, until the call ends: real
+    // frames from the queue when we have speech, a tiny opus silence frame
+    // otherwise. The continuous flow doubles as comfort noise and keeps
+    // Meta's jitter buffer primed so Priya's first word doesn't glitch.
+    this.pacer = setInterval(() => {
+      if (this.closed) return
+      const frame = this.connected
+        ? (this.outQueue.length ? this.outQueue.shift() : this.silenceFrame)
+        : this.silenceFrame
+      if (!frame) return
+      if (!this.connected) return
+      try {
+        const packet = new RtpPacket(new RtpHeader({
+          payloadType: this.pt,
+          sequenceNumber: this.seq,
+          timestamp: this.ts >>> 0,
+          ssrc: this.ssrc,
+        }), frame)
+        this.seq = (this.seq + 1) & 0xffff
+        this.ts = (this.ts + WA_FRAME_SAMPLES) >>> 0
+        this.sendTrack.writeRtp(packet)
+      } catch (e) {
+        console.error("wa rtp out error:", e.message)
+      }
+    }, 20)
+    if (this.pacer.unref) this.pacer.unref()
+  }
+
+  /** Split a PCM (s16 mono 48 kHz) clip into 20 ms opus frames on the queue. */
+  enqueuePcm(pcm48k) {
+    for (let off = 0; off < pcm48k.length; off += WA_FRAME_BYTES) {
+      let chunk = pcm48k.subarray(off, Math.min(off + WA_FRAME_BYTES, pcm48k.length))
+      if (chunk.length < WA_FRAME_BYTES) chunk = Buffer.concat([chunk, Buffer.alloc(WA_FRAME_BYTES - chunk.length)])
+      this.outQueue.push(this.encoder.encode(chunk))
+    }
+  }
+
+  /** How much audio is sitting in the queue (ms) — each item is one 20 ms frame. */
+  queuedMs() {
+    return this.outQueue.length * 20
+  }
+
+  // ---- inbound audio → endpointing (mirrors CallSession.onMedia) ----
+
+  onInboundFrame(pcm48k) {
+    if (this.closed) return
+    const energy = avgEnergy(pcm48k)
+    const ms = 20
+
+    if (this.botTalking) {
+      if (!BARGE_IN) return
+      if (energy > ENERGY_THRESHOLD * 2) {
+        this.bargeMs += ms
+        this.bargeBuffer.push(downsampleToStt(pcm48k))
+        if (this.bargeMs >= BARGE_MIN_MS) this.interrupt()
+      } else {
+        this.bargeMs = 0
+        this.bargeBuffer = []
+      }
+      return
+    }
+
+    if (this.processing) return
+
+    this.frameCount++
+    if (energy > this.maxEnergy) this.maxEnergy = energy
+    if (energy > this.callMaxEnergy) this.callMaxEnergy = energy
+
+    if (energy > ENERGY_THRESHOLD) {
+      this.speaking = true
+      this.speechMs += ms
+      this.silenceMs = 0
+      this.buffer.push(downsampleToStt(pcm48k))
+      if (this.speechMs >= MAX_UTTERANCE_MS) void this.endUtterance().catch((e) => console.error("wa utterance error:", e.message))
+    } else if (this.speaking) {
+      this.silenceMs += ms
+      this.buffer.push(downsampleToStt(pcm48k))
+      if (this.silenceMs >= SILENCE_END_MS || this.speechMs >= MAX_UTTERANCE_MS) {
+        void this.endUtterance().catch((e) => console.error("wa utterance error:", e.message))
+      }
+    }
+  }
+
+  interrupt() {
+    this.speechEpoch++
+    this.botTalking = false
+    this.processing = false
+    this.sendingAudio = false
+    this.synthChain = Promise.resolve()
+    this.sendChain = Promise.resolve()
+    this.outQueue = []
+    if (this.turnAbort) { try { this.turnAbort.abort() } catch {} this.turnAbort = null }
+    // Carry the triggering frames into the next utterance (same rule as the
+    // Exotel path — dropping them clips the first word).
+    this.buffer = this.bargeBuffer
+    this.speaking = true
+    this.speechMs = this.bargeMs
+    this.silenceMs = 0
+    this.bargeBuffer = []
+    this.bargeMs = 0
+    console.log(`✋ WhatsApp barge-in — caller cut in, dropping the rest of the reply`)
+  }
+
+  async endUtterance() {
+    const pcm16k = Buffer.concat(this.buffer)
+    const hadRealSpeech = this.speechMs >= MIN_SPEECH_MS
+    const durationMs = (pcm16k.length / (STT_RATE * 2)) * 1000
+    const maxEnergy = this.maxEnergy
+    this.buffer = []
+    this.speaking = false
+    this.speechMs = 0
+    this.silenceMs = 0
+    this.maxEnergy = 0
+    if (!hadRealSpeech || this.processing || this.closed) return
+
+    const epoch = this.speechEpoch
+    this.processing = true
+    const turnT0 = Date.now()
+    try {
+      console.log(`🎙 wa utterance: ${durationMs.toFixed(0)}ms  maxEnergy=${maxEnergy.toFixed(0)}  threshold=${ENERGY_THRESHOLD}  bytes=${pcm16k.length}`)
+      const { text: transcript, lowConfidence } = await voiceProviders.transcribe(pcmToWav16k(pcm16k), this.language)
+      if (process.env.VOICEBOT_DEBUG_LOGS === "1") console.log(`👂 [wa][${this.language}]${lowConfidence ? " LOW-CONFIDENCE" : ""} "${transcript}"`)
+      else console.log(`👂 [wa][${this.language}]${lowConfidence ? " LOW-CONFIDENCE" : ""} transcript (${(transcript || "").length} chars)`)
+      if (!transcript || lowConfidence) {
+        const phrase = CLARIFY_PHRASE[this.language] || CLARIFY_PHRASE.english
+        this.queueSentence(phrase, epoch)
+        await this.drainSpeech(epoch)
+        return
+      }
+
+      let hangup = false
+      let firstSentenceAt = null
+      const turnAbort = new AbortController()
+      this.turnAbort = turnAbort
+      const spoken = []
+      const brainT0 = Date.now()
+      await callTurnApiStream(
+        { event: "turn", callSid: this.callSid, speech: transcript, language: this.language },
+        (ev) => {
+          if (turnAbort.signal.aborted || epoch !== this.speechEpoch) return
+          if (ev.type === "sentence" && ev.text) {
+            if (!firstSentenceAt) {
+              firstSentenceAt = Date.now()
+              console.log(`⏱ wa brain (time to first sentence): ${firstSentenceAt - brainT0}ms`)
+            }
+            this.queueSentence(ev.text, epoch, spoken)
+          } else if (ev.type === "done") {
+            if (ev.language) this.language = ev.language
+            hangup = !!ev.hangup
+          }
+        },
+        turnAbort.signal
+      )
+      if (this.turnAbort === turnAbort) this.turnAbort = null
+      await this.drainSpeech(epoch)
+      if (epoch !== this.speechEpoch && !this.closed) await this.reportSpoken(spoken)
+      console.log(`⏱ wa TOTAL turn (silence → reply fully sent): ${Date.now() - turnT0}ms`)
+      // A WhatsApp hangup is always the CUSTOMER's action (we never hang up
+      // first — there is no server-side "hang up" RTP signal; that would be
+      // Graph terminate). The app's hangup flag is logged, not acted on.
+      if (hangup && epoch === this.speechEpoch) {
+        console.log(`ℹ turn requested hangup on ${this.callSid} — WhatsApp hangs up customer-side; Priya's goodbye plays out and the terminate webhook ends the call`)
+      }
+    } catch (e) {
+      console.error("wa turn error:", e.message)
+      if (epoch === this.speechEpoch && !this.closed) {
+        try {
+          const phrase = FALLBACK_PHRASE[this.language] || FALLBACK_PHRASE.english
+          this.queueSentence(phrase, epoch)
+          await this.drainSpeech(epoch)
+        } catch (e2) {
+          console.error("wa fallback failed too:", e2.message)
+        }
+      }
+    } finally {
+      if (epoch === this.speechEpoch) this.processing = false
+    }
+  }
+
+  // ---- speech pipeline ----
+
+  queueSentence(text, turnEpoch, spoken) {
+    const clean = (text || "").trim()
+    if (!clean || this.closed) return
+    const epoch = turnEpoch === undefined ? this.speechEpoch : turnEpoch
+    if (epoch !== this.speechEpoch) return
+    this.botTalking = true
+    const synth = this.synth(clean, epoch)
+    this.synthChain = synth
+    this.sendChain = this.sendChain.catch(() => {}).then(async () => {
+      const frames = await synth
+      if (frames && frames.length > 0 && !this.closed && epoch === this.speechEpoch) {
+        if (spoken) spoken.push(clean)
+        // Hand the frames to the pacer, then wait until real-time playout of
+        // this sentence finished (+ 200 ms natural pause) before the next
+        // sentence's frames join the queue — keeps sentence order AND lets
+        // the endpointing state machine stay quiet while she talks.
+        this.enqueuePcm(frames)
+        this.sendingAudio = true
+        try {
+          while (this.outQueue.length > 0 && !this.closed && epoch === this.speechEpoch) await sleep(40)
+          if (!this.closed && epoch === this.speechEpoch) await sleep(200)
+        } finally {
+          this.sendingAudio = false
+        }
+      } else if ((!frames || frames.length === 0) && !this.closed && epoch === this.speechEpoch) {
+        console.error("wa TTS produced no audio for a sentence")
+      }
+    })
+  }
+
+  /**
+   * Synthesize one sentence to 48 kHz PCM frames. TTS provider: Cartesia
+   * (default for WhatsApp) with automatic Sarvam fallback when Cartesia is
+   * not configured. The branch voice override's speaker is honoured when it
+   * belongs to the same provider.
+   */
+  synth(text, epoch) {
+    return this.synthChain.then(async () => {
+      if (this.closed || epoch !== this.speechEpoch) return null
+      try {
+        const t0 = Date.now()
+        let override = this.voice || null
+        let audio
+        if (WA_TTS_PROVIDER === "cartesia" && process.env.CARTESIA_API_KEY) {
+          const speaker = override?.provider === "cartesia" ? override.speaker : (process.env.CARTESIA_VOICE_ID || undefined)
+          audio = await voiceProviders.cartesiaTts(text, this.language, speaker)
+        } else {
+          const speaker = override?.provider === "sarvam" ? override.speaker : undefined
+          audio = await voiceProviders.sarvamTts(text, this.language, speaker)
+        }
+        const pcmSrc = await wavToPcm(audio)
+        // Cartesia/Sarvam both synthesize at 24 kHz here; upsample to the
+        // 48 kHz WebRTC clock (24k→48k = ×2). Measure the real rate from the
+        // decoded length vs sentence duration instead of assuming.
+        const rate = 24000
+        const factor = Math.round(WA_RATE / rate)
+        const pcm48k = factor > 1 ? upsampleMono(pcmSrc, factor) : pcmSrc
+        console.log(`⏱ wa TTS (${WA_TTS_PROVIDER === "cartesia" && process.env.CARTESIA_API_KEY ? "cartesia" : "sarvam"}): ${Date.now() - t0}ms (${pcm48k.length / (WA_RATE * 2)}s audio)`)
+        return pcm48k
+      } catch (e) {
+        console.error("wa TTS error:", e.message)
+        return null
+      }
+    })
+  }
+
+  async drainSpeech(epoch) {
+    await this.sendChain
+    if (epoch === undefined || epoch === this.speechEpoch) this.botTalking = false
+  }
+
+  async speak(text) {
+    if (!text || this.closed) return
+    const epoch = this.speechEpoch
+    for (const s of splitIntoSentences(text)) this.queueSentence(s, epoch)
+    await this.drainSpeech(epoch)
+  }
+
+  async reportSpoken(spoken) {
+    const said = spoken.join(" ").trim()
+    const text = said
+      ? `${said} …(interrupted by the customer)`
+      : "(the customer interrupted before Priya said anything)"
+    try {
+      await callTurnApi({ event: "spoken", callSid: this.callSid, text })
+    } catch (e) {
+      console.error("wa spoken correction error:", e.message)
+    }
+  }
+
+  // ---- lifecycle ----
+
+  /** Fire the app's "start" (lead resolution + greeting) once media is up. */
+  async start() {
+    if (this.started || this.closed) return
+    this.started = true
+    const t0 = Date.now()
+    try {
+      const r = await callTurnApi({
+        event: "start",
+        callSid: this.callSid,
+        from: this.from,
+        to: this.to,
+        branchId: this.branchId || undefined,
+        source: "whatsapp_call",
+      })
+      console.log(`⏱ wa start API: ${Date.now() - t0}ms  lead=${r.leadId || "?"}  branch=${r.branchId || "hq"}`)
+      this.language = r.language || "english"
+      this.voice = r.voice && r.voice.speaker ? r.voice : null
+      await this.speak(r.text)
+      console.log(`⏱ wa answer → greeting fully queued: ${Date.now() - t0}ms`)
+    } catch (e) {
+      console.error("wa start error:", e.message)
+      const line = START_FALLBACK_PHRASE[this.language] || START_FALLBACK_PHRASE.english
+      await this.speak(line).catch(() => {})
+    }
+  }
+
+  end(reason) {
+    if (this.closed) return
+    this.closed = true
+    if (this.staleTimer) { clearTimeout(this.staleTimer); this.staleTimer = null }
+    if (this.pacer) { clearInterval(this.pacer); this.pacer = null }
+    if (this.turnAbort) { try { this.turnAbort.abort() } catch {} this.turnAbort = null }
+    try { this.pc && this.pc.close() } catch {}
+    sessions.delete(this.callId)
+    console.log(`■ WhatsApp call end sid=${this.callSid} reason=${reason}  frames=${this.frameCount}  callMaxEnergy=${this.callMaxEnergy.toFixed(0)}  threshold=${ENERGY_THRESHOLD}`)
+    this.reportEnd()
+  }
+
+  /** Real duration to the app (fills voice_calls; idempotent server-side). */
+  reportEnd() {
+    if (this.endReported) return
+    if (!this.callSid) return
+    this.endReported = true
+    const duration = Math.round((Date.now() - this.startedAt) / 1000)
+    // Promise retained on the session: the HTTP bridge awaits it on the
+    // terminate webhook so the app never finalizes before duration landed.
+    this.endReportPromise = callTurnApi({ event: "end", callSid: this.callSid, duration }).catch((e) =>
+      console.error("wa end report error:", e.message)
+    )
+  }
+}
+
+// ---------- Registry (the API the HTTP bridge talks to) ----------
+
+const sessions = new Map() // callId → session
+
+/**
+ * Handle a "connect" webhook event: answer the SDP offer, register the
+ * session, kick off Priya's greeting. Idempotent per callId (Meta retries).
+ * Returns { answerSdp } for the caller (Next.js) to hand back to Meta via
+ * pre_accept + accept.
+ */
+async function startSession({ callId, from, to, phoneNumberId, sdp, sdpType, branchId }) {
+  if (!callId || !sdp) throw new Error("callId and sdp are required")
+  const existing = sessions.get(callId)
+  if (existing && !existing.closed) {
+    console.log(`⚠ duplicate WhatsApp connect for ${existing.callSid} — returning the stored answer`)
+    return { answerSdp: existing.answerSdp }
+  }
+
+  const answer = await createCallAnswer(sdp)
+  const session = new WhatsAppCallSession({ callId, from, to, phoneNumberId, branchId })
+  sessions.set(callId, session.attach(answer))
+  console.log(`📞 WhatsApp call connect sid=${session.callSid} from=${maskPhone(from)} to=${maskPhone(to)} branch=${branchId || "hq"} (sdpType=${sdpType || "offer"})`)
+  // Greeting fires immediately — the pacer holds frames until ICE connects,
+  // so the greeting starts the instant media is live instead of after a
+  // second turn-API round trip.
+  session.start().catch((e) => console.error("wa session start error:", e.message))
+  return { answerSdp: answer.answerSdp }
+}
+
+/** Handle a "terminate" webhook event (customer hung up / rejected / lost). */
+async function endSession(callId, reason) {
+  const session = sessions.get(callId)
+  if (!session) return { ok: true, ended: false }
+  session.end(reason || "terminate")
+  // The app's webhook finalizer (follow-ups, chat bubble, comm_logs) reads
+  // voice_calls.duration — wait until the "end" report actually landed so a
+  // resolved call can never be finalized as a 0-second miss.
+  if (session.endReportPromise) {
+    try { await session.endReportPromise } catch {}
+  }
+  return { ok: true, ended: true }
+}
+
+function activeCount() {
+  return sessions.size
+}
+
+function validateConfig() {
+  const errors = []
+  if (!API_KEY) errors.push("WHATSAPP_SERVICE_KEY is not set — the WhatsApp calling HTTP bridge cannot authenticate the Next.js app without it")
+  if (WA_TTS_PROVIDER === "cartesia" && !process.env.CARTESIA_API_KEY) {
+    // Not fatal: the session falls back to Sarvam TTS per call.
+    console.warn("⚠ VOICEBOT_WA_TTS_PROVIDER=cartesia but CARTESIA_API_KEY is not set — WhatsApp calls will use Sarvam TTS")
+  }
+  return errors
+}
+
+function describeConfig() {
+  const tts = WA_TTS_PROVIDER === "cartesia" && process.env.CARTESIA_API_KEY ? "Cartesia (default)" : "Sarvam (fallback)"
+  return `STT: Sarvam Saaras (cloud) | LLM: via app /api/calls/turn | TTS: ${tts} | barge-in: ${BARGE_IN ? "on" : "off"} | ICE: ${ICE_SERVERS.map((s) => s.urls).join(", ")}`
+}
+
+module.exports = {
+  createCallAnswer,
+  WhatsAppCallSession,
+  startSession,
+  endSession,
+  activeCount,
+  validateConfig,
+  describeConfig,
+  callSidFor,
+  // internals exported for tests
+  filterSdpForWhatsApp, downsampleToStt, upsampleMono, pcmToWav16k, wavToPcm, avgEnergy,
+}

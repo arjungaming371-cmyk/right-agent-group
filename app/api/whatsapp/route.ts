@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server"
 import crypto from "crypto"
 import pool, { query } from "@/lib/db"
 import { chatWithLLM, detectLanguage, type Language } from "@/lib/llm"
-import { sendWhatsAppText, downloadBranchWhatsAppMedia, type BranchWhatsAppCtx } from "@/lib/whatsapp"
+import { sendWhatsAppText, downloadBranchWhatsAppMedia, answerWhatsAppCall, rejectWhatsAppCall, type BranchWhatsAppCtx } from "@/lib/whatsapp"
+import { finalizeWhatsAppCall, mapCallOutcome, callSidFor } from "@/lib/whatsapp-call-finalize"
 import { resolveBranchByWhatsAppPhoneId, type BranchRow } from "@/lib/branches"
 import { buildLeadBrief } from "@/lib/lead-brain"
 import { searchKnowledgeBase } from "@/lib/knowledge-base"
@@ -91,7 +92,9 @@ export async function POST(req: NextRequest) {
         // MULTI-BRANCH ROUTING: metadata.phone_number_id is the WhatsApp
         // Business number the customer wrote to. A branch with its own WABA
         // number claims its conversations here; everything else lands on the
-        // company's default (env-credentialed) number.
+        // company's default (env-credentialed) number. Voice calls use the
+        // same resolution — the call is served by the branch that owns the
+        // CALLED number.
         let branch: BranchRow | null = null
         const phoneNumberId = value?.metadata?.phone_number_id
         if (phoneNumberId) {
@@ -101,6 +104,20 @@ export async function POST(req: NextRequest) {
         const waBranch: BranchWhatsAppCtx = branch
           ? { id: branch.id, whatsappToken: branch.whatsapp_token, whatsappPhoneNumberId: branch.whatsapp_phone_number_id, brandName: branch.brand_name }
           : null
+
+        // ---- VOICE CALLS (field "calls", WhatsApp Business Calling API) ----
+        // A change value carries EITHER call events OR messages/statuses —
+        // never both. Handle the calls (branch already resolved above — the
+        // call is served by the branch that owns the CALLED WhatsApp number)
+        // and move on.
+        if (Array.isArray(value.calls) && value.calls.length > 0) {
+          try {
+            await handleCallEvents(value.calls, waBranch, phoneNumberId)
+          } catch (e: any) {
+            console.error("whatsapp call event error (batch continues):", e.message)
+          }
+          continue
+        }
 
         // -- Delivery / read receipts → update ticks in the dashboard --
         for (const status of value.statuses || []) {
@@ -535,4 +552,149 @@ async function handleInbound(msg: any, profileName: string | null, waBranch: Bra
   // their reply — never adds latency, never writes to loan_applications
   // itself, only flags a pending row for staff to approve/reject.
   maybeProposeLoanEdit(lead.id, "priya_whatsapp", text)
+}
+
+// ============================================================================
+// VOICE CALLS — WhatsApp Business Calling API (field "calls")
+// ============================================================================
+// Inbound flow (the free path — Meta charges nothing for user-initiated
+// calls):
+//
+//   1. Customer taps the call button on the business's WhatsApp number.
+//   2. Meta webhook: value.calls[] event "connect" with session.sdp (offer).
+//   3. We forward the offer to the voicebot's loopback bridge
+//      (server/whatsapp-calls.js), which answers via werift and returns our
+//      SDP answer.
+//   4. Graph API POST /{phone_number_id}/calls — action=pre_accept then
+//      action=accept, both carrying the answer. Meta bridges the audio.
+//   5. The voicebot runs Priya (Sarvam STT → /api/calls/turn (Groq) →
+//      Cartesia TTS) over the WebRTC leg.
+//   6. Customer hangs up → Meta "terminate" webhook → voicebot reports the
+//      real duration → finalizeWhatsAppCall (chat bubble, follow-up
+//      templates, sentiment, summary, Lead Brain) — the same post-call flow
+//      Exotel calls get from /api/calls/status.
+//
+// Env: WHATSAPP_VOICE_CALLS=0 disables handling entirely (default on).
+//      VOICEBOT_INTERNAL_URL (default http://127.0.0.1:3003).
+//      WHATSAPP_SERVICE_KEY — the shared internal key (also used for turns).
+
+const VOICEBOT_URL = (process.env.VOICEBOT_INTERNAL_URL || "http://127.0.0.1:3003").replace(/\/$/, "")
+
+async function bridgeToVoicebot(path: string, payload: Record<string, any>, timeoutMs = 8000): Promise<any> {
+  const res = await fetch(`${VOICEBOT_URL}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-api-key": process.env.WHATSAPP_SERVICE_KEY || "" },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(timeoutMs),
+  })
+  const data: any = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data?.error || `voicebot HTTP ${res.status}`)
+  return data
+}
+
+async function handleCallEvents(calls: any[], waBranch: BranchWhatsAppCtx, phoneNumberId?: string | null) {
+  // Master switch: a deployment without the voicebot (or werift) keeps
+  // receiving messages; calls just decline instead of hanging on dead ring.
+  if (process.env.WHATSAPP_VOICE_CALLS === "0") {
+    for (const call of calls) {
+      if (call?.event === "connect" && (call.call_id || call.id)) {
+        await rejectWhatsAppCall(String(call.call_id || call.id), waBranch)
+      }
+    }
+    return
+  }
+
+  for (const call of calls) {
+    const callId = call?.call_id ? String(call.call_id) : (call?.id ? String(call.id) : "")
+    const event = String(call?.event || "")
+
+    if (event === "connect" && callId) {
+      const from = String(call?.from || "")
+      const to = String(call?.to || "")
+      // Meta puts the WebRTC offer in session.sdp (sdp_type "offer"); accept
+      // both shapes defensively — some webhook versions nest differently.
+      const offerSdp = String(call?.session?.sdp || call?.sdp?.sdp || "")
+      const sdpType = String(call?.session?.sdp_type || call?.sdp?.type || "offer")
+      console.log(`📞 WhatsApp voice call connect from=***${from.slice(-4)} callId=***${callId.slice(-8)} branch=${waBranch?.id || "default"}`)
+
+      if (!offerSdp) {
+        // No SDP = nothing to answer with. Decline cleanly instead of
+        // ringing into a dead bridge.
+        console.warn("wa connect: no SDP in payload — declining")
+        await rejectWhatsAppCall(callId, waBranch)
+        continue
+      }
+
+      let answerSdp: string | null = null
+      try {
+        const bridged = await bridgeToVoicebot("/whatsapp/connect", {
+          callId, from, to,
+          phoneNumberId: String(phoneNumberId || ""),
+          sdp: offerSdp,
+          sdpType,
+          branchId: waBranch?.id || null,
+        })
+        answerSdp = bridged?.answerSdp || null
+      } catch (e: any) {
+        console.error("wa connect: voicebot bridge failed:", e.message)
+      }
+
+      if (!answerSdp) {
+        // The voicebot is down / could not answer. Rejecting is the honest
+        // UX (caller sees "not answered") — better than Meta's 45s timeout.
+        await rejectWhatsAppCall(callId, waBranch).catch(() => {})
+        continue
+      }
+
+      // pre_accept (stops Meta's answering timer) then accept (goes live).
+      // Both carry the SAME answer SDP.
+      const pre = await answerWhatsAppCall(callId, from, answerSdp, "pre_accept", waBranch)
+      if (!pre.ok) {
+        console.error(`wa pre_accept failed (***${callId.slice(-8)}):`, pre.error)
+        // A failed pre-accept can still accept per Meta's flow (pre-accept
+        // is a timer reset), so try accept before giving up.
+      }
+      const acc = await answerWhatsAppCall(callId, from, answerSdp, "accept", waBranch)
+      if (!acc.ok) {
+        console.error(`wa accept failed (***${callId.slice(-8)}):`, acc.error)
+        await rejectWhatsAppCall(callId, waBranch).catch(() => {})
+      } else {
+        console.log(`✅ WhatsApp call accepted (***${callId.slice(-8)}) — Priya is live on WhatsApp`)
+      }
+      continue
+    }
+
+    if (event === "terminate" && callId) {
+      const from = String(call?.from || "")
+      const status = String(call?.status || call?.status_code || "")
+      const outcome = mapCallOutcome(status)
+      const sid = callSidFor(callId)
+      console.log(`📴 WhatsApp call terminate callId=***${callId.slice(-8)} status=${status || "unknown"} outcome=${outcome}`)
+
+      // 1) Tell the voicebot to tear the session down. The bridge awaits the
+      //    voicebot's "end" report (duration → voice_calls) before returning,
+      //    so the finalizer below always sees the real duration. The longer
+      //    timeout covers the round trip into the app's own turn API.
+      try {
+        await bridgeToVoicebot("/whatsapp/terminated", { callId, reason: status || "terminate" }, 15000)
+      } catch (e: any) {
+        // Voicebot down is NOT fatal here: the finalizer still logs the row
+        // and sends missed-call follow-ups for calls that never connected.
+        console.error("wa terminate: voicebot bridge failed:", e.message)
+      }
+
+      // 2) Finalize — chat bubble, lead status, follow-up templates,
+      //    comm_logs, AI summary, Lead Brain. Deduped by wa_message_id.
+      try {
+        await finalizeWhatsAppCall({ callSid: sid, callId, from, outcome, branchIdFromWebhook: waBranch?.id || null })
+      } catch (e: any) {
+        console.error("wa finalize error:", e.message)
+      }
+      continue
+    }
+
+    // Unknown call events (ringing, etc.) — logged once, no action exists
+    // for them on the business side.
+    if (event && callId) console.log(`📞 WhatsApp call event "${event}" (***${callId.slice(-8)}) — no action`)
+  }
 }

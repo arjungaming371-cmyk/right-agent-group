@@ -86,14 +86,23 @@ export async function POST(req: NextRequest) {
       let language = normalizeLanguage(existing?.language)
       let direction: "inbound" | "outbound" = existing?.direction === "inbound" ? "inbound" : "outbound"
       let branchId: string | null = existing?.branch_id || null
+      // WhatsApp voice calls (wacall-* sids) arrive with the branch ALREADY
+      // resolved at the webhook — metadata.phone_number_id → branch — and
+      // carried here. resolveBranchByCallerId below only knows ExoPhones, so
+      // this passthrough is what gives WhatsApp calls their branch context.
+      const bodyBranchId = typeof body?.branchId === "string" && body.branchId ? body.branchId : null
 
       // 2) Inbound call? The CALLED number (the branch's DLT ExoPhone) decides
       //    which branch serves it; then match the caller's number to a lead, or
       //    create one under that branch.
       if (!leadId && body?.from) {
         direction = "inbound"
-        // Multi-branch routing: the ExoPhone the caller dialed. Falls back to
-        // null (HQ / env-level Exotel account) when no branch claims it.
+        // Multi-branch routing: WhatsApp calls carry the branch from the
+        // webhook (phone_number_id match); Exotel calls fall back to the
+        // CALLED ExoPhone. Everything else → null (HQ / env-level account).
+        if (!branchId) {
+          branchId = bodyBranchId
+        }
         if (!branchId) {
           const branch = await resolveBranchByCallerId(body?.to || body?.To || process.env.EXOTEL_CALLER_ID)
           branchId = branch?.id || null
@@ -115,9 +124,12 @@ export async function POST(req: NextRequest) {
           // language telugu explicitly — belt-and-braces with the DB column
           // default (also telugu since the Tenglish-first change), so an old
           // database that predates the migration still behaves correctly.
+          // Source: "whatsapp_call" for WhatsApp voice calls (analytics can
+          // distinguish them from Exotel inbound_call rows).
+          const source = typeof body?.source === "string" && body.source ? body.source.slice(0, 40) : "inbound_call"
           const { data: newLead } = await db
             .from("leads")
-            .insert({ name: `Caller ${digits.slice(-4)}`, phone, source: "inbound_call", status: "new", language: "telugu", branch_id: branchId })
+            .insert({ name: `Caller ${digits.slice(-4)}`, phone, source, status: "new", language: "telugu", branch_id: branchId })
             .select()
             .single()
           leadId = newLead?.id || ""

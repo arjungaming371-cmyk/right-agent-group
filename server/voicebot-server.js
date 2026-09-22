@@ -30,11 +30,17 @@
 require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") })
 
 const crypto = require("crypto")
+const http = require("http")
 const { WebSocketServer } = require("ws")
 const { spawn } = require("child_process")
 const voiceProviders = require("./voice-providers")
+const waCalls = require("./whatsapp-calls")
 
 const PORT = parseInt(process.env.VOICEBOT_PORT || "3002")
+// HTTP bridge for the WhatsApp Business Calling integration (see
+// server/whatsapp-calls.js). The Next.js webhook forwards Meta's "calls"
+// events here; the voicebot answers the WebRTC offer and runs Priya.
+const WA_HTTP_PORT = parseInt(process.env.VOICEBOT_HTTP_PORT || "3003")
 // APP_INTERNAL_URL first: the app runs on the same machine, and going through
 // the public tunnel URL adds a Cloudflare round-trip per turn AND risks the
 // proxy buffering the NDJSON stream (which would undo sentence streaming).
@@ -1272,6 +1278,79 @@ console.log(`   barge-in: ${BARGE_IN ? `ON (energy>${BARGE_ENERGY} for ${BARGE_M
 // Fire-and-forget: the socket is already accepting calls, so a slow warm-up
 // never blocks startup — it just means an early call misses the cache.
 prewarm()
+
+// ---------- WhatsApp calling HTTP bridge ----------
+//
+// Next.js /api/whatsapp (the ONLY Meta-facing endpoint) forwards "calls"
+// field events here over loopback HTTP:
+//
+//   POST /whatsapp/connect    { callId, from, to, phoneNumberId, sdp, sdpType, branchId }
+//                             → { ok, answerSdp }   (werift WebRTC answer)
+//   POST /whatsapp/terminated { callId, reason }    → { ok, ended }
+//   GET  /health              → { ok, activeCalls }
+//
+// Auth: the SAME shared service key the voicebot already uses for the app's
+// /api/calls/turn (WHATSAPP_SERVICE_KEY, constant-time compare). Bound to
+// 127.0.0.1 — nginx never exposes this port.
+const waConfigErrors = waCalls.validateConfig()
+if (waConfigErrors.length) {
+  waConfigErrors.forEach((e) => console.error(`🚫 WhatsApp calling: ${e}`))
+}
+const httpServer = http.createServer((req, res) => {
+  const url = (req.url || "").split("?")[0]
+  const json = (code, body) => {
+    res.writeHead(code, { "Content-Type": "application/json" })
+    res.end(JSON.stringify(body))
+  }
+  // /health is unauthenticated and loopback-only — returns no call data.
+  if (req.method === "GET" && url === "/health") return json(200, { ok: true, activeCalls: waCalls.activeCount() })
+
+  if (req.method !== "POST" || !["/whatsapp/connect", "/whatsapp/terminated"].includes(url)) {
+    return json(404, { ok: false, error: "not found" })
+  }
+  const a = Buffer.from(req.headers["x-api-key"] || "")
+  const b = Buffer.from(API_KEY)
+  if (!API_KEY || a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+    return json(401, { ok: false, error: "unauthorized" })
+  }
+  let raw = ""
+  req.on("data", (c) => { raw += c; if (raw.length > 512 * 1024) req.destroy() })
+  req.on("end", () => {
+    let body
+    try { body = JSON.parse(raw || "{}") } catch { return json(400, { ok: false, error: "invalid JSON" }) }
+    // SDP offers are a few KB; everything else is identity fields. Cap them
+    // defensively anyway — this endpoint is the door into the call engine.
+    const str = (v, cap) => (typeof v === "string" ? v.slice(0, cap) : "")
+    if (url === "/whatsapp/connect") {
+      Promise.resolve()
+        .then(() => waCalls.startSession({
+          callId: str(body.callId, 128),
+          from: str(body.from, 32),
+          to: str(body.to, 32),
+          phoneNumberId: str(body.phoneNumberId, 64),
+          sdp: str(body.sdp, 64 * 1024),
+          sdpType: str(body.sdpType, 32),
+          branchId: str(body.branchId, 64) || null,
+        }))
+        .then((r) => json(200, { ok: true, ...r }))
+        .catch((e) => {
+          console.error("wa connect error:", e.message)
+          json(502, { ok: false, error: e.message })
+        })
+    } else {
+      const r = waCalls.endSession(str(body.callId, 128), str(body.reason, 64))
+      json(200, r)
+    }
+  })
+})
+httpServer.listen(WA_HTTP_PORT, "127.0.0.1", () => {
+  console.log(`WhatsApp calling bridge on http://127.0.0.1:${WA_HTTP_PORT} — ${waCalls.describeConfig()}`)
+})
+// A busy/misconfigured port must not bubble into uncaughtException — the
+// Exotel WebSocket path keeps running, only the WhatsApp bridge is down.
+httpServer.on("error", (e) => {
+  console.error(`🚫 WhatsApp calling bridge failed to bind 127.0.0.1:${WA_HTTP_PORT}: ${e.message}`)
+})
 }
 
 if (require.main === module) startServer()

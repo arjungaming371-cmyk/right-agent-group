@@ -5,7 +5,7 @@
 // toolbar (react / reply / forward) exactly where WhatsApp Web puts it.
 
 import { useState } from "react"
-import { Reply, Forward, Download, FileText, SmilePlus } from "lucide-react"
+import { Reply, Forward, Download, FileText, SmilePlus, PhoneIncoming, PhoneMissed } from "lucide-react"
 import { WA, WA_FONT, fmtMsgTime, isPlaceholder, type Msg } from "./palette"
 import { Ticks } from "./bits"
 
@@ -127,6 +127,45 @@ export default function MessageBubble({
   const canAct = !!msg.wa_message_id && (!!onReact || !!onReply || !!onForward)
 
   const kind = (msg.msg_type || "text").toLowerCase()
+
+  // ---- VOICE CALL ROW (WhatsApp Business Calling) ----
+  // Real WhatsApp renders calls as centered pill rows, not bubbles: icon
+  // circle + "Voice call · 2m 14s" + time. Missed/declined/failed get the
+  // red icon; answered calls the teal one. Inserted BEFORE the bubble path
+  // — a call row never has a tail, quote block or action toolbar.
+  if (kind === "call") {
+    const missed = /missed|failed|declined/i.test(msg.content || "")
+    return (
+      <div
+        id={`wa-msg-${msg.wa_message_id || msg.id}`}
+        data-mid={String(msg.id)}
+        className="wa-msg"
+        style={{ display: "flex", justifyContent: "center", marginTop: grouped ? 6 : 14, marginBottom: 4 }}
+      >
+        <div
+          title={missed ? "Missed WhatsApp voice call" : "WhatsApp voice call"}
+          style={{
+            display: "inline-flex", alignItems: "center", gap: 8,
+            background: WA.pill, borderRadius: 999, padding: "4px 14px 4px 6px",
+            boxShadow: "0 1px 0.5px rgba(11,20,26,0.13)", fontFamily: WA_FONT,
+          }}
+        >
+          <span style={{
+            width: 26, height: 26, borderRadius: "50%", flexShrink: 0,
+            background: missed ? "rgba(239,105,122,0.16)" : "rgba(0,168,132,0.18)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            {missed ? <PhoneMissed size={13} color={WA.danger} /> : <PhoneIncoming size={13} color={WA.teal} />}
+          </span>
+          <span style={{ fontSize: 12.5, color: missed ? WA.danger : WA.textPrimary, fontWeight: missed ? 600 : 400, whiteSpace: "nowrap" }}>
+            {msg.content || "Voice call"}
+          </span>
+          <span style={{ fontSize: 10.5, color: WA.tick, whiteSpace: "nowrap" }}>{fmtMsgTime(msg.created_at)}</span>
+        </div>
+      </div>
+    )
+  }
+
   const isMedia = ["image", "video", "audio", "document", "sticker"].includes(kind)
   const isImageish = kind === "image" || kind === "sticker"
   const caption = isMedia && msg.content && !isPlaceholder(msg.content) ? msg.content : ""

@@ -56,6 +56,83 @@ function defaultBranding(): string {
   return process.env.NEXT_PUBLIC_ORG_NAME || "Right Agent Group"
 }
 
+// ---- VOICE CALLS (WhatsApp Business Calling API) ----
+//
+// A customer calling the WhatsApp number arrives as a webhook on the
+// "calls" field: event "connect" carries Meta's WebRTC SDP offer, and the
+// business answers over  POST /{phone_number_id}/calls  with pre_accept +
+// accept (each carrying OUR answer SDP). Meta then bridges the audio —
+// that WebRTC leg is terminated by server/whatsapp-calls.js (werift),
+// which feeds the same Priya voicebot the Exotel calls use.
+//
+// Wire format (mirrors pipecat's WhatsApp client, verified against Meta):
+//   { messaging_product: "whatsapp", to, action: "pre_accept"|"accept",
+//     call_id, session: { sdp: <our answer>, sdp_type: "answer" } }
+//
+// INBOUND-ONLY by design: business-initiated calls additionally require
+// Meta's call-permission template flow (the customer must accept a consent
+// template first) — inbound is free and is this business's actual flow.
+
+/** Raw call-control POST — same shape as graphPost but /calls, not /messages. */
+async function callPost(payload: Record<string, any>, branch?: BranchWhatsAppCtx): Promise<{ ok: boolean; error?: string; status?: number }> {
+  const { token, phoneId, configured } = credsFor(branch)
+  if (!configured) {
+    return { ok: false, error: "WhatsApp Cloud API not configured — set WHATSAPP_TOKEN and WHATSAPP_PHONE_NUMBER_ID in .env" }
+  }
+  try {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 10000)
+    const res = await fetch(`${GRAPH}/${phoneId}/calls`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      signal: controller.signal,
+      body: JSON.stringify({ messaging_product: "whatsapp", ...payload }),
+    })
+    clearTimeout(timeoutId)
+    const data: any = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      return { ok: false, error: data?.error?.message || `HTTP ${res.status}`, status: res.status }
+    }
+    return { ok: true }
+  } catch (e: any) {
+    return { ok: false, error: `Meta API unreachable: ${e.message}` }
+  }
+}
+
+/**
+ * Answer an incoming WhatsApp call. pre_accept MUST precede accept (Meta
+ * rejects an accept without a pre-accept) and both carry the SAME answer
+ * SDP our WebRTC endpoint generated. `to` is the caller's WhatsApp id as it
+ * appeared in the webhook's `from`.
+ */
+export async function answerWhatsAppCall(
+  callId: string,
+  to: string,
+  answerSdp: string,
+  action: "pre_accept" | "accept",
+  branch?: BranchWhatsAppCtx
+): Promise<{ ok: boolean; error?: string; status?: number }> {
+  if (!callId || !answerSdp) return { ok: false, error: "callId and answerSdp are required" }
+  return callPost({
+    to,
+    action,
+    call_id: callId,
+    session: { sdp: answerSdp, sdp_type: "answer" },
+  }, branch)
+}
+
+/** Decline an incoming call before answering (caller sees "declined"). */
+export async function rejectWhatsAppCall(callId: string, branch?: BranchWhatsAppCtx): Promise<{ ok: boolean; error?: string }> {
+  if (!callId) return { ok: false, error: "callId required" }
+  return callPost({ action: "reject", call_id: callId }, branch)
+}
+
+/** End an active call (only valid after accept — reject is for pre-accept). */
+export async function terminateWhatsAppCall(callId: string, branch?: BranchWhatsAppCtx): Promise<{ ok: boolean; error?: string }> {
+  if (!callId) return { ok: false, error: "callId required" }
+  return callPost({ action: "terminate", call_id: callId }, branch)
+}
+
 // ---- DND / opt-out gate (2026-09 compliance pass) ----
 // Every BUSINESS-INITIATED send (form link, call follow-up, missed-call
 // follow-up) now passes through this gate. Before this, a caller who said

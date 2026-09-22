@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   // Branch-scoped users only see their branch's calls (admin sees all).
   const branchId = sessionBranchId(session)
-  let q = db.from("voice_calls").select("*, leads(name, phone)")
+  let q = db.from("voice_calls").select("*, leads(name, phone, source)")
   if (branchId) q = q.eq("branch_id", branchId)
   const { data, error } = await q.order("created_at", { ascending: false }).limit(100)
   if (error) return apiError(error)
