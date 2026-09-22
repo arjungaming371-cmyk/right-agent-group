@@ -93,6 +93,128 @@ export async function dndGate(number: string): Promise<{ ok: false; error: strin
 }
 
 /**
+ * Free-form text reply that QUOTES another message (real WhatsApp reply
+ * behaviour): Meta renders the quoted block on the customer's phone when the
+ * payload carries context.message_id = the quoted message's wa_message_id.
+ * Everything else matches sendWhatsAppText (24h window, free).
+ */
+export async function sendWhatsAppReply(
+  to: string,
+  message: string,
+  quotedWaMessageId: string,
+  branch?: BranchWhatsAppCtx
+): Promise<{ ok: boolean; id?: string; error?: string }> {
+  const number = normalizeNumber(to)
+  if (!isValidNormalizedNumber(number)) return { ok: false, error: `Invalid number: ${to}` }
+  if (!quotedWaMessageId) return sendWhatsAppText(to, message, branch)
+  const result = await graphPost({
+    to: number,
+    type: "text",
+    text: { preview_url: true, body: String(message) },
+    context: { message_id: quotedWaMessageId },
+  }, branch)
+  if (result.ok && branch) {
+    const { recordUsage } = await import("./branches")
+    recordUsage(branch.id, "whatsapp")
+  }
+  return result
+}
+
+/**
+ * Send/remove a reaction on a previously sent or received message.
+ * Meta treats this as a message of type "reaction"; an EMPTY emoji removes
+ * the sender's existing reaction. The customer sees the emoji chip on the
+ * message, exactly like reacting in the WhatsApp app.
+ */
+export async function sendWhatsAppReaction(
+  to: string,
+  waMessageId: string,
+  emoji: string,
+  branch?: BranchWhatsAppCtx
+): Promise<{ ok: boolean; error?: string }> {
+  const number = normalizeNumber(to)
+  if (!isValidNormalizedNumber(number)) return { ok: false, error: `Invalid number: ${to}` }
+  if (!waMessageId) return { ok: false, error: "waMessageId required" }
+  const result = await graphPost({
+    to: number,
+    type: "reaction",
+    reaction: { message_id: waMessageId, emoji: emoji || "" },
+  }, branch)
+  return result.ok ? { ok: true } : { ok: false, error: result.error }
+}
+
+/**
+ * Send an uploaded MEDIA message (image / video / audio / document / sticker).
+ * `mediaId` must be an id previously returned by uploadWhatsAppMedia for the
+ * SAME WABA number (media ids are account-scoped). Documents carry the
+ * original filename so the customer's download keeps its name.
+ */
+export type WhatsAppMediaKind = "image" | "video" | "audio" | "document" | "sticker"
+
+export async function sendWhatsAppMedia(
+  to: string,
+  kind: WhatsAppMediaKind,
+  mediaId: string,
+  opts: { caption?: string; filename?: string; quotedWaMessageId?: string | null } = {},
+  branch?: BranchWhatsAppCtx
+): Promise<{ ok: boolean; id?: string; error?: string }> {
+  const number = normalizeNumber(to)
+  if (!isValidNormalizedNumber(number)) return { ok: false, error: `Invalid number: ${to}` }
+  if (!mediaId) return { ok: false, error: "mediaId required" }
+
+  const payload: Record<string, any> = { to: number, type: kind }
+  const body: Record<string, any> = { id: mediaId }
+  if (opts.caption && (kind === "image" || kind === "video" || kind === "document")) {
+    body.caption = String(opts.caption).slice(0, 1024)
+  }
+  if (opts.filename && kind === "document") body.filename = opts.filename
+  payload[kind] = body
+  if (opts.quotedWaMessageId) payload.context = { message_id: opts.quotedWaMessageId }
+
+  const result = await graphPost(payload, branch)
+  if (result.ok && branch) {
+    const { recordUsage } = await import("./branches")
+    recordUsage(branch.id, "whatsapp")
+  }
+  return result
+}
+
+/**
+ * Upload media bytes to Meta for a WABA number → returns the media id to
+ * pass to sendWhatsAppMedia. WhatsApp messaging limit is 16 MB per media
+ * message; the caller (API route) enforces it before reaching here.
+ */
+export async function uploadWhatsAppMedia(
+  file: { buffer: Buffer; mimeType: string; filename: string },
+  branch?: BranchWhatsAppCtx
+): Promise<{ ok: boolean; id?: string; error?: string }> {
+  const { token, phoneId, configured } = credsFor(branch)
+  if (!configured) {
+    return { ok: false, error: branch
+      ? "Branch WhatsApp number not configured — set it in Branches, or leave blank to use the company number"
+      : "WhatsApp Cloud API not configured — set WHATSAPP_TOKEN and WHATSAPP_PHONE_NUMBER_ID in .env" }
+  }
+  try {
+    const form = new FormData()
+    form.append("messaging_product", "whatsapp")
+    form.append("file", new Blob([new Uint8Array(file.buffer)], { type: file.mimeType || "application/octet-stream" }), file.filename || "upload")
+    const res = await fetch(`${GRAPH}/${phoneId}/media`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: form,
+      signal: AbortSignal.timeout(60_000),
+    })
+    const data: any = await res.json().catch(() => ({}))
+    if (!res.ok || !data?.id) {
+      return { ok: false, error: data?.error?.message || `Media upload failed (HTTP ${res.status})` }
+    }
+    return { ok: true, id: String(data.id) }
+  } catch (e: any) {
+    return { ok: false, error: `Meta API unreachable: ${e.message}` }
+  }
+}
+
+/**
  * Template failures split in two: definitive 4xx rejections (template not
  * approved, bad param, not in template manager) — where the fallback free-form
  * text genuinely helps — and ambiguous failures (timeout after Meta may have

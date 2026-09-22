@@ -214,3 +214,69 @@ annotated in-code with a `2026-09-22` comment.
 1. **Run migrations** (`node scripts/run-migrations.js`) — applies `2026-09-22_branch_instagram_credentials.sql` (adds `branches.instagram_token` + the IG routing index). Fresh installs get both via `db:setup`.
 2. Per-branch Instagram: set the branch's **IG Business Account ID + access token** in Branches → edit branch. Inbound events on that account then route (and reply) from that branch's account automatically.
 3. No WhatsApp-facing changes in this pass — the 2026-09-20 hardening already covers it; no action needed there.
+
+---
+
+# 2026-09-22 (pass 2) — WhatsApp module rebuilt to REAL WhatsApp parity
+
+The WhatsApp view was rebuilt from the ground up to look and behave like the
+real WhatsApp Web app — and every visible control is wired to a live API, no
+decoration.
+
+## What the UI now does (all functioning)
+
+**Chat list**
+- WhatsApp Web header (profile chip + new chat + menu), search or start a new
+  chat, filter chips **All / Unread / Favourites / Groups**, **Archived**
+  screen, tick-marked previews (✓ sent / ✓✓ delivered / ✓✓ read blue),
+  📷/📄/🎤 media previews, unread badges, muted + pinned icons, per-row hover
+  menu: Pin / Mute notifications / Archive chat.
+- Offline strip (slim, WhatsApp-style) only when the Cloud API isn't healthy.
+
+**Chat window**
+- Contact header with **online / "last seen today at …"** (derived from the
+  last inbound), AI call, in-chat search (prev/next + jump + highlight),
+  header menu (contact info, mute, archive).
+- End-to-end encryption notice, **TODAY / YESTERDAY** date pills, grouped
+  bubbles with **real WhatsApp tails**, meta time + SVG **ticks** inside the
+  bubble (float-right layout like the real app), overlay meta on photos.
+- **Reply with quote** (Meta `context.message_id` — the customer's phone
+  renders the quoted block too, click jumps to the quoted message).
+- **Reactions** (Meta `type:"reaction"`, 👍❤️😂😮😢🙏👌 — click the same emoji
+  again to remove; customer reactions arrive via webhook and show as chips).
+- **Photos & videos + Document attach**: upload → Meta media API → send; the
+  chat renders images/video/audio natively and documents as download cards,
+  inbound media renders too (authenticated proxy route, never leaks the
+  token). 16 MB WhatsApp limit enforced.
+- **Forward** to any chat (text or media), emoji picker (tabbed, ~230 emoji),
+  mic dictation, textarea auto-grow, optimistic send bubbles with a clock
+  state until Meta confirms.
+- **Unread separator** ("N UNREAD MESSAGES" — opens straight to it),
+  scroll-to-bottom FAB with unread count, window-focus read receipts.
+
+**Contact info drawer** — WhatsApp identity block, live action row
+(AI call / mute / archive), About (AI summary), loan facts, notes.
+
+## Backend additions (schema + API)
+
+- `migrations/2026-09-22_whatsapp_rich_chat.sql` (+ rollback):
+  `whatsapp_messages.msg_type|media_id|media_mime|media_name|quoted_wa_id|quoted_text|quoted_from|reaction`,
+  `leads.wa_archived|wa_muted`, archived-list index. All `IF NOT EXISTS`,
+  NULL-safe, and every reader has a 42703 legacy fallback so pre-migration
+  databases keep working.
+- Webhook now stores **reactions** (never as bubbles), **reply quotes**
+  (resolved + cached locally), **media ids/mime/filenames** and renders
+  shared locations as Maps links for the AI.
+- New routes: `POST /api/whatsapp/react`, `POST /api/whatsapp/upload`,
+  `GET /api/whatsapp/media/[id]` (authenticated binary proxy, branch-aware),
+  `PATCH /api/whatsapp/chat-settings`; `send` gained `replyTo` +
+  `mediaKind/mediaId/mediaName` and returns the Meta message id;
+  `conversations` gained `?view=archived` + muted/last-type/last-status;
+  `messages` returns the rich columns.
+
+## Required actions for THIS pass
+
+1. **Run migrations** (`node scripts/run-migrations.js`) — applies the
+   rich-chat columns. Fresh installs already get them via `db:setup`.
+2. Nothing else — no new env vars. Media attach uses the existing
+   `WHATSAPP_TOKEN` / branch tokens.

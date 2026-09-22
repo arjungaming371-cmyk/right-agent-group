@@ -25,7 +25,10 @@ CREATE TABLE IF NOT EXISTS leads (
   call_count        INTEGER DEFAULT 0,
   last_called_at    TIMESTAMPTZ,
   created_at        TIMESTAMPTZ DEFAULT now(),
-  updated_at        TIMESTAMPTZ DEFAULT now()
+  updated_at        TIMESTAMPTZ DEFAULT now(),
+  -- WhatsApp chat settings (2026-09-22): archive + mute, real-WhatsApp parity
+  wa_archived       BOOLEAN NOT NULL DEFAULT false,
+  wa_muted          BOOLEAN NOT NULL DEFAULT false
 );
 CREATE INDEX IF NOT EXISTS idx_leads_phone  ON leads (phone);
 CREATE INDEX IF NOT EXISTS idx_leads_status ON leads (status);
@@ -119,7 +122,17 @@ CREATE TABLE IF NOT EXISTS whatsapp_messages (
   direction      TEXT NOT NULL CHECK (direction IN ('outbound','inbound')),
   content        TEXT NOT NULL DEFAULT '',
   status         TEXT NOT NULL,
-  created_at     TIMESTAMPTZ DEFAULT now()
+  created_at     TIMESTAMPTZ DEFAULT now(),
+  -- Rich chat (2026-09-22): media, reply quotes, reactions — see
+  -- migrations/2026-09-22_whatsapp_rich_chat.sql
+  msg_type       TEXT NOT NULL DEFAULT 'text',
+  media_id       TEXT,
+  media_mime     TEXT,
+  media_name     TEXT,
+  quoted_wa_id   TEXT,
+  quoted_text    TEXT,
+  quoted_from    TEXT,
+  reaction       TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_wa_messages_lead  ON whatsapp_messages (lead_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_wa_messages_phone ON whatsapp_messages (phone_number, created_at DESC);

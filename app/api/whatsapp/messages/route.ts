@@ -6,6 +6,10 @@ import { sessionBranchId } from "@/lib/branches"
 
 export const dynamic = "force-dynamic"
 
+// 2026-09-22 (real-WhatsApp parity): the chat window now renders media
+// (image/video/audio/document/sticker), reply quotes, reactions and the
+// branch the chat runs on — all stored per message by the rich-chat pass.
+// On a pre-migration DB (42703) it degrades to the legacy plain-text shape.
 export async function GET(req: NextRequest) {
   const session = await requireModuleOrRole(req, "whatsapp", ["admin", "agent", "viewer", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
@@ -24,15 +28,32 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const result = await query(
-      `SELECT id, direction, content, status, created_at
-       FROM whatsapp_messages
-       WHERE lead_id = $1
-       ORDER BY created_at DESC
-       LIMIT $2`,
-      [leadId, limit]
-    )
-    return NextResponse.json(result.rows.reverse())
+    try {
+      const result = await query(
+        `SELECT id, direction, content, status, created_at,
+                COALESCE(msg_type, 'text') AS msg_type,
+                media_id, media_mime, media_name,
+                quoted_wa_id, quoted_text, quoted_from, reaction,
+                wa_message_id, branch_id
+         FROM whatsapp_messages
+         WHERE lead_id = $1
+         ORDER BY created_at DESC
+         LIMIT $2`,
+        [leadId, limit]
+      )
+      return NextResponse.json(result.rows.reverse())
+    } catch (e: any) {
+      if (e?.code !== "42703") throw e
+      const result = await query(
+        `SELECT id, direction, content, status, created_at
+         FROM whatsapp_messages
+         WHERE lead_id = $1
+         ORDER BY created_at DESC
+         LIMIT $2`,
+        [leadId, limit]
+      )
+      return NextResponse.json(result.rows.reverse())
+    }
   } catch (e: any) {
     return apiError(e)
   }

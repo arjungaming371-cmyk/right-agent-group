@@ -138,8 +138,10 @@ export async function POST(req: NextRequest) {
 // are read, not just acknowledged with a placeholder: PDFs get their text
 // extracted (reusing the same parser as knowledge-base ingestion), voice
 // notes get transcribed through the Sarvam cloud STT that already backs live
-// calls. Everything else (images, video, stickers, location) stays a
-// placeholder — genuinely different work (vision model) not in scope here.
+// calls, and shared locations become tappable Maps links. Images and video
+// now carry their media id in the row itself (2026-09-22) so the dashboard
+// renders them natively — the AI still sees a placeholder (vision model is
+// genuinely different work, not in scope here).
 // Media downloads use the BRANCH's token when the message arrived on a
 // branch's WABA number — the media ID belongs to that account.
 async function resolveInboundText(msg: any, branch: BranchWhatsAppCtx = null): Promise<string> {
@@ -171,6 +173,16 @@ async function resolveInboundText(msg: any, branch: BranchWhatsAppCtx = null): P
     return `[voice message — could not transcribe]`
   }
 
+  // Location shares are useful to the AI (follow-up, distance, branch advice)
+  // and to staff — render as a tappable Google Maps link.
+  if (msg?.type === "location" && msg.location) {
+    const { latitude, longitude, name, address } = msg.location
+    const label = [name, address].filter(Boolean).join(" — ")
+    if (latitude != null && longitude != null) {
+      return `📍 Customer shared their location${label ? ` (${label})` : ""}: https://maps.google.com/?q=${latitude},${longitude}`
+    }
+  }
+
   return `[${msg?.type || "media"} message]`
 }
 
@@ -178,6 +190,35 @@ async function handleInbound(msg: any, profileName: string | null, waBranch: Bra
   const from = String(msg?.from || "").replace(/\D/g, "")
   const waMessageId = msg?.id ? String(msg.id) : null
   if (!from) return
+
+  // ---- RICH MESSAGE: REACTIONS (2026-09-22 real-WhatsApp parity) ----
+  // A reaction is metadata ON an existing message, not a message of its own:
+  // it must never claim a dedupe row or create a lead/chat bubble. Meta
+  // delivers { type: "reaction", reaction: { message_id, emoji } }; an empty
+  // emoji means "removed my reaction". Applied to inbound AND outbound rows
+  // (customers can react to our replies — the dashboard shows that chip).
+  if (msg?.type === "reaction") {
+    const target = msg.reaction?.message_id ? String(msg.reaction.message_id) : null
+    const emoji = String(msg.reaction?.emoji || "")
+    if (target) {
+      try {
+        await query(
+          `UPDATE whatsapp_messages SET reaction = NULLIF($1, '') WHERE wa_message_id = $2`,
+          [emoji, target]
+        )
+        console.log(`😊 WhatsApp reaction ${emoji || "(removed)"} on msg=***${target.slice(-6)}`)
+      } catch (e: any) {
+        if (e?.code === "42703") {
+          // Pre-migration DB (2026-09-22_whatsapp_rich_chat not run) — ignore
+        } else if (e?.code === "22P02") {
+          // target id not one of ours (or hex short form) — ignore
+        } else {
+          console.error("reaction store failed:", e.message)
+        }
+      }
+    }
+    return // done — no bubble, no AI, no lead work
+  }
 
   // ---- FIX (2026-09-20): ATOMIC, FIRST-THING dedupe ----
   // Two problems in the old order:
@@ -212,6 +253,29 @@ async function handleInbound(msg: any, profileName: string | null, waBranch: Bra
 
   const text = await resolveInboundText(msg, waBranch)
   if (!text) return
+
+  // ---- RICH MESSAGE FIELDS (2026-09-22) ----
+  // Media (image/video/audio/document/sticker), replies-that-quote, and
+  // location all carry structured data the UI renders natively now. The
+  // AI-facing `text` above stays unchanged (caption/transcript/placeholder).
+  const richType = ["image", "video", "audio", "document", "sticker", "location"].includes(msg?.type) ? String(msg.type) : "text"
+  const mediaObj = msg?.image || msg?.video || msg?.audio || msg?.document || msg?.sticker || null
+  const mediaId = mediaObj?.id ? String(mediaObj.id) : null
+  const mediaMime = mediaObj?.mime_type ? String(mediaObj.mime_type) : null
+  const mediaName = msg?.document?.filename ? String(msg.document.filename) : null
+  const quotedWaId = msg?.context?.id ? String(msg.context.id) : null
+  let quotedText: string | null = null
+  let quotedFrom: string | null = null
+  if (quotedWaId) {
+    // Resolve the quoted message locally (cached into the row so the UI never
+    // needs a second lookup). Meta's context.quoted_content is unreliable.
+    const q = await query(
+      `SELECT content, direction FROM whatsapp_messages WHERE wa_message_id = $1 LIMIT 1`,
+      [quotedWaId]
+    ).catch(() => ({ rows: [] as any[] }))
+    quotedText = (q.rows[0]?.content || msg?.context?.quoted_content?.body || "").toString().slice(0, 300) || "[message]"
+    quotedFrom = q.rows[0]?.direction || null
+  }
 
   const last10 = from.slice(-10)
   // FIX (2026-09-20): no customer phone/message content in stdout logs.
@@ -277,24 +341,47 @@ async function handleInbound(msg: any, profileName: string | null, waBranch: Bra
   // The claim already inserted the dedupe row; update it with the real
   // content/lead. If the claim was skipped (no wa_message_id) this INSERTs.
   if (waMessageId) {
-    await query(
-      `UPDATE whatsapp_messages SET lead_id = $1, content = $2, branch_id = $3
-       WHERE wa_message_id = $4 AND direction = 'inbound'`,
-      [lead.id, text, waBranch?.id || null, waMessageId]
-    ).catch(() =>
-      query(
-        `INSERT INTO whatsapp_messages (lead_id, wa_message_id, direction, content, status)
-         VALUES ($1, $2, 'inbound', $3, 'received')
-         ON CONFLICT (wa_message_id) WHERE wa_message_id IS NOT NULL DO NOTHING`,
-        [lead.id, waMessageId, text]
+    try {
+      await query(
+        `UPDATE whatsapp_messages
+            SET lead_id = $1, content = $2, branch_id = $3,
+                msg_type = $4, media_id = $5, media_mime = $6, media_name = $7,
+                quoted_wa_id = $8, quoted_text = $9, quoted_from = $10
+          WHERE wa_message_id = $11 AND direction = 'inbound'`,
+        [lead.id, text, waBranch?.id || null, richType, mediaId, mediaMime, mediaName, quotedWaId, quotedText, quotedFrom, waMessageId]
       )
-    )
+    } catch (e: any) {
+      if (e?.code !== "42703") throw e // 42703 = rich-chat migration not run → legacy columns only
+      await query(
+        `UPDATE whatsapp_messages SET lead_id = $1, content = $2, branch_id = $3
+         WHERE wa_message_id = $4 AND direction = 'inbound'`,
+        [lead.id, text, waBranch?.id || null, waMessageId]
+      ).catch(() =>
+        query(
+          `INSERT INTO whatsapp_messages (lead_id, wa_message_id, direction, content, status)
+           VALUES ($1, $2, 'inbound', $3, 'received')
+           ON CONFLICT (wa_message_id) WHERE wa_message_id IS NOT NULL DO NOTHING`,
+          [lead.id, waMessageId, text]
+        )
+      )
+    }
   } else {
-    await query(
-      `INSERT INTO whatsapp_messages (lead_id, wa_message_id, phone_number, direction, content, status, branch_id)
-       VALUES ($1, $2, $3, 'inbound', $4, 'received', $5)`,
-      [lead.id, waMessageId, `+${from}`, text, waBranch?.id || null]
-    )
+    // Legacy path (no wa_message_id): try the rich columns, fall back cleanly.
+    try {
+      await query(
+        `INSERT INTO whatsapp_messages (lead_id, wa_message_id, phone_number, direction, content, status, branch_id,
+                                       msg_type, media_id, media_mime, media_name, quoted_wa_id, quoted_text, quoted_from)
+         VALUES ($1, $2, $3, 'inbound', $4, 'received', $5, $6, $7, $8, $9, $10, $11, $12)`,
+        [lead.id, waMessageId, `+${from}`, text, waBranch?.id || null, richType, mediaId, mediaMime, mediaName, quotedWaId, quotedText, quotedFrom]
+      )
+    } catch (e: any) {
+      if (e?.code !== "42703") throw e
+      await query(
+        `INSERT INTO whatsapp_messages (lead_id, wa_message_id, phone_number, direction, content, status, branch_id)
+         VALUES ($1, $2, $3, 'inbound', $4, 'received', $5)`,
+        [lead.id, waMessageId, `+${from}`, text, waBranch?.id || null]
+      )
+    }
   }
 
   if (isNewContact) {
