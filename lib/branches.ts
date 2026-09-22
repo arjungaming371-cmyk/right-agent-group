@@ -34,6 +34,8 @@ export type BranchRow = {
   whatsapp_phone_number_id: string | null
   whatsapp_token: string | null
   whatsapp_display_name: string | null
+  instagram_account_id: string | null
+  instagram_token: string | null
   brand_name: string | null
   brand_logo_url: string | null
   brand_primary_color: string

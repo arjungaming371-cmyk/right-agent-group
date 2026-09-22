@@ -74,10 +74,20 @@ export async function POST(req: NextRequest) {
     const sentiment = negativeWords.test(allText) ? "Negative" : positiveWords.test(allText) ? "Positive" : "Neutral"
 
     await db.from("voice_calls").update({ sentiment }).eq("twilio_call_sid", callSid)
-    await db.from("leads").update({
-      status: sentiment === "Positive" ? "qualified" : "contacted",
-      updated_at: new Date().toISOString(),
-    }).eq("id", call.lead_id)
+    // FIX (2026-09-22): this update used to stomp ANY existing status — a
+    // converted / docs_pending / do_not_call lead that received (or was
+    // retried with) one more status callback got silently demoted back to
+    // "contacted", and analytics/pipelines followed the wrong state. Only
+    // the early pipeline stages may move: new → contacted → qualified.
+    // Qualified+ statuses are only ever advanced elsewhere, never demoted here.
+    await query(
+      `UPDATE leads
+          SET status = CASE WHEN $2 = 'Positive' THEN 'qualified' ELSE 'contacted' END,
+              updated_at = now()
+        WHERE id = $1
+          AND (status = 'new' OR (status = 'contacted' AND $2 = 'Positive'))`,
+      [call.lead_id, sentiment]
+    ).catch(() => {})
     refreshLeadScore(call.lead_id, sentiment).catch(() => {})
 
     // ---- WhatsApp auto-follow-up (once per call) ----

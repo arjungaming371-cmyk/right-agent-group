@@ -38,6 +38,8 @@ function safeBranch(b: BranchRow) {
     whatsapp_phone_number_id: b.whatsapp_phone_number_id || null,
     whatsapp_display_name: b.whatsapp_display_name || null,
     whatsapp_token_set: !!b.whatsapp_token,
+    instagram_account_id: b.instagram_account_id || null,
+    instagram_token_set: !!b.instagram_token,
     brand_name: b.brand_name, brand_logo_url: b.brand_logo_url,
     brand_primary_color: b.brand_primary_color, brand_tagline: b.brand_tagline,
     monthly_call_limit: b.monthly_call_limit,
@@ -82,6 +84,11 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     if ("whatsapp_phone_number_id" in (body || {})) push("whatsapp_phone_number_id", String(body.whatsapp_phone_number_id || "").trim() || null)
     if ("whatsapp_token" in (body || {})) push("whatsapp_token", String(body.whatsapp_token || "").trim() || null)
     if ("whatsapp_display_name" in (body || {})) push("whatsapp_display_name", String(body.whatsapp_display_name || "").trim().slice(0, 80) || null)
+
+    // Instagram (branch's own IG business account — write-only token,
+    // same contract as whatsapp_token above)
+    if ("instagram_account_id" in (body || {})) push("instagram_account_id", String(body.instagram_account_id || "").trim() || null)
+    if ("instagram_token" in (body || {})) push("instagram_token", String(body.instagram_token || "").trim() || null)
 
     // White-label
     if ("brand_name" in (body || {})) push("brand_name", String(body.brand_name || "").trim().slice(0, 80) || null)

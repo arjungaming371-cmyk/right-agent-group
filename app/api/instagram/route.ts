@@ -8,6 +8,7 @@ import {
   privateReplyInstagramComment,
   type BranchInstagramCtx,
 } from "@/lib/instagram"
+import { detectFrustration, flagFrustratedInstagram } from "@/lib/frustration"
 import { buildLeadBrief } from "@/lib/lead-brain"
 import { searchKnowledgeBase } from "@/lib/knowledge-base"
 import { buildEmiInstruction, buildRateInstruction, detectLoanType } from "@/lib/finance"
@@ -85,11 +86,28 @@ export async function POST(req: NextRequest) {
       // account id the event arrived on. A branch whose instagram_account_id
       // matches claims the conversation (mirrors WhatsApp's phone_number_id
       // routing). Unmatched → null = company default.
+      //
+      // FIX (2026-09-22): only the branch ID was resolved here — the auto
+      // replies then went out through sendInstagramText/replyInstagramComment
+      // with NO branch context, i.e. always the env-level credentials. On a
+      // deployment where the company default is unconfigured (branch-only
+      // setup) every auto-reply failed; where both exist, the reply went out
+      // from the WRONG (company) account. Resolve the full branch row and
+      // thread the credentials through every send.
       let branchId: string | null = null
+      let igBranch: BranchInstagramCtx = null
       try {
         if (entry?.id) {
-          const b = await query(`SELECT id FROM branches WHERE instagram_account_id = $1 LIMIT 1`, [String(entry.id)])
-          branchId = b.rows[0]?.id || null
+          const b = await query(
+            `SELECT id, instagram_token, instagram_account_id, brand_name
+               FROM branches WHERE instagram_account_id = $1 LIMIT 1`,
+            [String(entry.id)]
+          )
+          const row = b.rows[0]
+          branchId = row?.id || null
+          igBranch = row
+            ? { id: row.id, instagramToken: row.instagram_token || null, instagramAccountId: row.instagram_account_id || null, brandName: row.brand_name || null }
+            : null
         }
       } catch (e: any) {
         if (e?.code !== "42703") throw e // column not added yet → stay on default branch
@@ -100,7 +118,7 @@ export async function POST(req: NextRequest) {
       for (const msg of entry?.messaging || []) {
         if (msg.message && !msg.message.is_echo) {
           try {
-            await handleInboundDM(msg, branchId)
+            await handleInboundDM(msg, igBranch)
           } catch (e: any) {
             console.error(`inbound IG DM failed (continuing): ${e.message}`)
           }
@@ -111,7 +129,7 @@ export async function POST(req: NextRequest) {
       for (const change of entry?.changes || []) {
         if (change.field === "comments" && change.value) {
           try {
-            await handleInboundComment(change.value, branchId)
+            await handleInboundComment(change.value, igBranch)
           } catch (e: any) {
             console.error(`inbound IG comment failed (continuing): ${e.message}`)
           }
@@ -157,8 +175,11 @@ async function findLeadByIgIdentity(senderId: string, username: string | null): 
 
 /**
  * Process Inbound Instagram Direct Message (DM).
+ * `igBranch` carries the branch's own IG credentials when the DM arrived on a
+ * branch-owned account — the reply MUST go out from the same account.
  */
-async function handleInboundDM(messaging: any, branchId: string | null = null) {
+async function handleInboundDM(messaging: any, igBranch: BranchInstagramCtx = null) {
+  const branchId = igBranch?.id || null
   const senderId = messaging.sender?.id
   const text = messaging.message?.text || ""
   const messageId = messaging.message?.mid
@@ -216,16 +237,50 @@ async function handleInboundDM(messaging: any, branchId: string | null = null) {
     )
   }
 
-  // Record Comm Log
+  // FIX (2026-09-22): the insert named columns (channel, direction, content)
+  // that DO NOT EXIST on comm_logs (real columns: type, summary, outcome) —
+  // every insert failed silently and IG conversations never appeared in the
+  // Communication Log or analytics. Use the real columns, same as WhatsApp.
   if (leadId) {
     await query(
-      `INSERT INTO comm_logs (lead_id, channel, direction, content) VALUES ($1, 'instagram', 'inbound', $2)`,
-      [leadId, text]
+      `INSERT INTO comm_logs (lead_id, type, summary, outcome) VALUES ($1, 'instagram', $2, 'received')`,
+      [leadId, `IG DM: "${text.slice(0, 120)}"`]
     ).catch(() => {})
+  }
+
+  // FRUSTRATION RADAR: same keyword pass the call and WhatsApp paths run, so
+  // an angry Instagram DM flags the lead for human takeover like everywhere
+  // else. Fire-and-forget — never blocks or fails the reply.
+  if (leadId) {
+    try {
+      if (detectFrustration(text, [])) flagFrustratedInstagram(leadId, text)
+    } catch {}
   }
 
   // Trigger Priya AI Response
   try {
+    // FIX (2026-09-22): the DM AI received ONLY the current message — zero
+    // conversation history. Every turn it re-asked for details the customer
+    // had already given and contradicted earlier answers. Pull the thread's
+    // recent DMs (both directions, current message excluded — it is appended
+    // explicitly below, whether or not the claim row's content write landed).
+    const historyRes = await query(
+      `SELECT direction, content FROM (
+         SELECT direction, content, created_at FROM instagram_messages
+         WHERE ig_user_id = $1 AND type = 'dm'
+           AND content IS NOT NULL AND content != ''
+           AND ($2::text IS NULL OR ig_message_id IS NULL OR ig_message_id != $2)
+         ORDER BY created_at DESC LIMIT 14
+       ) recent ORDER BY created_at ASC`,
+      [senderId, messageId || null]
+    ).catch(() => ({ rows: [] as any[] }))
+    const history = (historyRes.rows as any[])
+      .filter((h) => h.direction === "inbound" || h.direction === "outbound")
+      .map((h) => ({
+        role: (h.direction === "inbound" ? "user" : "model") as "user" | "model",
+        content: String(h.content).slice(0, 2000),
+      }))
+
     const brief = leadId ? await buildLeadBrief(leadId).catch(() => "") : ""
     const kbContext = await searchKnowledgeBase(text).catch(() => "")
 
@@ -253,17 +308,19 @@ ${dtInfo}
 Instructions:
 - Keep your answer under 100 words (Instagram DM friendly).
 - Answer the customer's question directly.
+- NEVER re-ask for a detail the customer already gave earlier in the thread.
 - Ask a helpful follow-up question to qualify their loan needs.`
 
     const aiReply = await chatWithLLM(
-      [{ role: "user", content: text }],
+      [...history, { role: "user", content: text }],
       "english",
       extraInstructions
     )
 
     if (aiReply) {
-      // Send DM reply via Meta Graph API
-      const sent = await sendInstagramText(senderId, aiReply)
+      // Send DM reply via Meta Graph API — from the BRANCH's IG account when
+      // the DM arrived on one (see the branch-routing fix in POST).
+      const sent = await sendInstagramText(senderId, aiReply, igBranch)
       if (sent.ok) {
         // Record outbound DM
         await query(
@@ -274,8 +331,17 @@ Instructions:
 
         if (leadId) {
           await query(
-            `INSERT INTO comm_logs (lead_id, channel, direction, content) VALUES ($1, 'instagram', 'outbound', $2)`,
-            [leadId, aiReply]
+            `INSERT INTO comm_logs (lead_id, type, summary, outcome) VALUES ($1, 'instagram', $2, 'replied')`,
+            [leadId, `IG DM: "${text.slice(0, 60)}" → AI replied`]
+          ).catch(() => {})
+        }
+        // Cross-channel memory: same write the WhatsApp path does, so the
+        // Lead Brain / dashboard see IG conversations too (guarded — a
+        // missing table must never fail a sent reply).
+        if (leadId) {
+          await query(
+            `INSERT INTO ai_conversations (lead_id, role, content, language) VALUES ($1, 'user', $2, 'english'), ($1, 'model', $3, 'english')`,
+            [leadId, text, aiReply]
           ).catch(() => {})
         }
       }
@@ -287,8 +353,11 @@ Instructions:
 
 /**
  * Process Inbound Instagram Post Comment.
+ * `igBranch` carries the branch's own IG credentials when the comment arrived
+ * on a branch-owned account — replies MUST go out from the same account.
  */
-async function handleInboundComment(val: any, branchId: string | null = null) {
+async function handleInboundComment(val: any, igBranch: BranchInstagramCtx = null) {
+  const branchId = igBranch?.id || null
   const commentId = val.id
   const text = val.text || ""
   const fromUser = val.from || {}
@@ -367,8 +436,8 @@ Provide a short public reply (under 40 words) acknowledging their comment and of
     )
 
     if (publicAiReply) {
-      // 1. Send Public Comment Reply
-      const pubSent = await replyInstagramComment(commentId, publicAiReply)
+      // 1. Send Public Comment Reply — branch credentials threaded through.
+      const pubSent = await replyInstagramComment(commentId, publicAiReply, igBranch)
       if (pubSent.ok) {
         await query(
           `INSERT INTO instagram_messages (lead_id, ig_user_id, ig_username, direction, type, content, status, comment_id, branch_id)
@@ -377,9 +446,11 @@ Provide a short public reply (under 40 words) acknowledging their comment and of
         )
       }
 
-      // 2. Send Private DM Reply to Commenter
+      // 2. Send Private DM Reply to Commenter — branch credentials threaded
+      // through (this is the DM that actually converts a commenter into a
+      // lead conversation; it must come from the account they commented on).
       const privateDmText = `Hi @${username}! Thanks for commenting on our post. I'm Priya from Right Agent Group. How can I assist you with your home or business loan enquiry today?`
-      const privSent = await privateReplyInstagramComment(commentId, privateDmText)
+      const privSent = await privateReplyInstagramComment(commentId, privateDmText, igBranch)
       if (privSent.ok) {
         await query(
           `INSERT INTO instagram_messages (lead_id, ig_user_id, ig_username, direction, type, content, status, ig_message_id, branch_id)

@@ -34,6 +34,9 @@ function safeBranch(b: BranchRow) {
     whatsapp_phone_number_id: b.whatsapp_phone_number_id || null,
     whatsapp_display_name: b.whatsapp_display_name || null,
     whatsapp_token_set: !!b.whatsapp_token,
+    // instagram — token is write-only, exactly like the WhatsApp token
+    instagram_account_id: b.instagram_account_id || null,
+    instagram_token_set: !!b.instagram_token,
     // white-label
     brand_name: b.brand_name,
     brand_logo_url: b.brand_logo_url,
@@ -82,9 +85,10 @@ export async function POST(req: NextRequest) {
     const res = await query(
       `INSERT INTO branches (org_id, name, code, region, status,
          exotel_caller_id, whatsapp_phone_number_id, whatsapp_display_name,
+         instagram_account_id, instagram_token,
          brand_name, brand_logo_url, brand_primary_color, brand_tagline,
          monthly_call_limit, monthly_whatsapp_limit, max_ai_employees)
-       VALUES ($1,$2,$3,$4,'active',$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+       VALUES ($1,$2,$3,$4,'active',$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
        RETURNING *`,
       [
         orgId, name, code,
@@ -92,6 +96,8 @@ export async function POST(req: NextRequest) {
         body?.exotel_caller_id ? String(body.exotel_caller_id).trim() : null,
         body?.whatsapp_phone_number_id ? String(body.whatsapp_phone_number_id).trim() : null,
         body?.whatsapp_display_name ? String(body.whatsapp_display_name).slice(0, 80) : null,
+        body?.instagram_account_id ? String(body.instagram_account_id).trim() : null,
+        body?.instagram_token ? String(body.instagram_token).trim() : null,
         body?.brand_name ? String(body.brand_name).slice(0, 80) : null,
         body?.brand_logo_url ? String(body.brand_logo_url).slice(0, 500) : null,
         body?.brand_primary_color ? String(body.brand_primary_color).slice(0, 20) : "#4f46e5",

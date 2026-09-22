@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import { apiError } from "@/lib/api-error"
-import { db } from "@/lib/db"
+import { db, query } from "@/lib/db"
 import { makeCall } from "@/lib/exotel"
 import { requireModuleOrRole } from "@/lib/auth"
 import { sessionBranchId, checkQuota, recordUsage } from "@/lib/branches"
 import { checkCallCompliance } from "@/lib/compliance"
-import { normalizePhone } from "@/lib/phone"
+import { normalizePhone, phoneLast10, PHONE_MATCH_SQL } from "@/lib/phone"
 
 export async function GET(req: NextRequest) {
   const session = await requireModuleOrRole(req, "voice", ["admin", "agent", "viewer", "branch_manager"])
@@ -34,9 +34,13 @@ export async function POST(req: NextRequest) {
       if (!contact.phone) continue
       contact.phone = normalizePhone(contact.phone)
       try {
-        // Dedupe — one lead per phone
-        const { data: existing } = await db.from("leads").select("id").eq("phone", contact.phone).single()
-        let leadId = existing?.id
+        // Dedupe — one lead per phone. FIX (2026-09-22): exact-match missed
+        // format variants ("9876543210" vs "+919876543210") and created
+        // duplicate leads for the same person — the queue PROCESSOR already
+        // matched on last-10 digits, so the queue path and its processor
+        // disagreed. Same rule everywhere now.
+        const existing = await query(`SELECT id FROM leads WHERE ${PHONE_MATCH_SQL} LIMIT 1`, [phoneLast10(contact.phone)])
+        let leadId = existing.rows[0]?.id
 
         if (!leadId) {
           const { data: lead } = await db.from("leads").insert({
@@ -79,9 +83,9 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    // Dedupe
-    const { data: existing } = await db.from("leads").select("id").eq("phone", phone).single()
-    let leadId = existing?.id
+    // Dedupe — last-10 digits, same as batch mode + the queue processor.
+    const existing = await query(`SELECT id FROM leads WHERE ${PHONE_MATCH_SQL} LIMIT 1`, [phoneLast10(phone)])
+    let leadId = existing.rows[0]?.id
 
     if (!leadId) {
       const { data: lead } = await db.from("leads").insert({

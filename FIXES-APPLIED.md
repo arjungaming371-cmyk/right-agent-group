@@ -182,3 +182,35 @@ in-code with a `2026-09` comment. `npx tsc --noEmit` and `next build` pass.
 - IP allowlist/rate limiting now trusts `X-Real-IP`/last-XFF: correct behind our nginx or Cloudflare; if you expose the app some other way, ensure the nearest proxy sets `X-Real-IP`.
 - DNS-rebinding between our pre-check and fetch's own resolution remains theoretically possible (egress filtering is the complete control) — documented in `lib/kb-ingest.ts`.
 - Leads/loans lists are capped (default 1000, `?limit=` up to 5000). Very large installs should switch the dashboard to real pagination.
+
+---
+
+# Fixes Applied — 2026-09-22 Instagram / WhatsApp / Calling pass
+
+Follow-up audit focused on the three customer channels. Every change is
+annotated in-code with a `2026-09-22` comment.
+
+## E. Instagram
+
+| # | Fix | File(s) |
+|---|-----|---------|
+| E.1 | **Branch auto-replies went out from the wrong (or unconfigured) account**: the webhook resolved only the branch ID, then called `sendInstagramText` / `replyInstagramComment` / `privateReplyInstagramComment` with NO branch context — always the env-level credentials. The full branch row (token + account id + brand) is now resolved and threaded through every auto-reply. | `app/api/instagram/route.ts` |
+| E.2 | **`branches.instagram_token` did not exist** — `branchInstagramCtx()` read it via `(b as any)` and always got `undefined`, so per-branch IG credentials could never work (and the UI had no fields at all). Migration adds the column (+ index on `instagram_account_id`), BranchRow/API/UI now support both fields (token write-only, same contract as `whatsapp_token`). | `migrations/2026-09-22_branch_instagram_credentials.sql`, `lib/branches.ts`, `app/api/branches/route.ts`, `app/api/branches/[id]/route.ts`, `components/dashboard/branches-view.tsx`, `local-setup.sql` |
+| E.3 | **Instagram conversations never appeared in the Communication Log**: the webhook inserted into `comm_logs (lead_id, channel, direction, content)` — columns that don't exist (real: `type, summary, outcome`), so every insert failed silently. Fixed to the real columns. | `app/api/instagram/route.ts` |
+| E.4 | **Instagram DM AI had amnesia**: the LLM received only the current message — no thread history — so Priya re-asked for details the customer had already given and contradicted earlier answers. The last 14 DMs of the thread (both directions, current message excluded) now feed every reply, plus a "never re-ask known details" instruction. | `app/api/instagram/route.ts` |
+| E.5 | IG DMs were invisible to cross-channel memory: user+model turns are now recorded into `ai_conversations` (same as WhatsApp), so the Lead Brain briefs Priya on Instagram conversations too. | `app/api/instagram/route.ts` |
+| E.6 | **No frustration radar on Instagram**: an angry DM ("scam!", "stop messaging me") never surfaced anywhere. Same keyword pass as calls/WhatsApp now flags the lead (comm log alert + escalation email + dashboard notification). | `app/api/instagram/route.ts`, `lib/frustration.ts` (new `flagFrustratedInstagram`) |
+| E.7 | `.env.example` documented zero Instagram variables — a fresh deployment following it could never enable the module. Added the full `INSTAGRAM_*` block. | `.env.example` |
+
+## F. Calling
+
+| # | Fix | File(s) |
+|---|-----|---------|
+| F.1 | **Call status webhook demoted lead statuses**: every status callback overwrote `leads.status` unconditionally — a converted / docs_pending / do_not_call / qualified lead could be stomped back to "contacted" by one more (or retried) callback. Now only the early pipeline moves: new → contacted → qualified; advanced stages are never demoted. | `app/api/calls/status/route.ts` |
+| F.2 | **Duplicate leads from the outbound queue**: batch + single queue modes deduped by exact phone string ("9876543210" ≠ "+919876543210"), while the queue processor matched last-10 — the same person became two leads depending on format. All modes now match on last-10 digits. | `app/api/outbound/route.ts` |
+
+## G. Required actions for THIS pass
+
+1. **Run migrations** (`node scripts/run-migrations.js`) — applies `2026-09-22_branch_instagram_credentials.sql` (adds `branches.instagram_token` + the IG routing index). Fresh installs get both via `db:setup`.
+2. Per-branch Instagram: set the branch's **IG Business Account ID + access token** in Branches → edit branch. Inbound events on that account then route (and reply) from that branch's account automatically.
+3. No WhatsApp-facing changes in this pass — the 2026-09-20 hardening already covers it; no action needed there.

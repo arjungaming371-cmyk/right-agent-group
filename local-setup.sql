@@ -581,6 +581,8 @@ CREATE TABLE IF NOT EXISTS branches (
   whatsapp_phone_number_id TEXT,
   whatsapp_token           TEXT,
   whatsapp_display_name    TEXT,
+  instagram_account_id     TEXT,
+  instagram_token          TEXT,
   brand_name         TEXT,
   brand_logo_url     TEXT,
   brand_primary_color TEXT NOT NULL DEFAULT '#4f46e5',
@@ -594,6 +596,7 @@ CREATE TABLE IF NOT EXISTS branches (
 CREATE INDEX IF NOT EXISTS idx_branches_org    ON branches (org_id);
 CREATE INDEX IF NOT EXISTS idx_branches_caller ON branches (exotel_caller_id);
 CREATE INDEX IF NOT EXISTS idx_branches_wa_pid ON branches (whatsapp_phone_number_id);
+CREATE INDEX IF NOT EXISTS idx_branches_ig_acc ON branches (instagram_account_id);
 
 -- AI Employees (shared across branches or dedicated to one)
 CREATE TABLE IF NOT EXISTS ai_employees (

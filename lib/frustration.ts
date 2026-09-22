@@ -70,7 +70,7 @@ export function detectHumanRequest(speech: string): boolean {
 }
 
 /** Emails ADMIN_EMAIL the moment a caller/chatter is flagged. No-op if SMTP isn't configured. */
-async function sendEscalationEmail(channel: "Phone call" | "WhatsApp", leadId: string | null, snippet: string): Promise<void> {
+async function sendEscalationEmail(channel: "Phone call" | "WhatsApp" | "Instagram", leadId: string | null, snippet: string): Promise<void> {
   const to = process.env.ADMIN_EMAIL || ""
   if (!to || !isMailConfigured()) return
   let leadName = "Unknown lead"
@@ -174,6 +174,32 @@ export function flagFrustratedWhatsApp(leadId: string | null, message: string): 
       })
     } catch (e: any) {
       console.error("flagFrustratedWhatsApp error:", e.message)
+    }
+  })()
+}
+
+/** Same idea for Instagram DMs — an angry DM flags the lead exactly like the
+ * call and WhatsApp paths do, so the dashboard shows one consistent
+ * "needs a human" queue across every channel. (2026-09-22: the IG webhook
+ * previously ran NO frustration pass at all — a customer shouting "stop
+ * messaging me, scam!" on Instagram never surfaced anywhere.) */
+export function flagFrustratedInstagram(leadId: string | null, message: string): void {
+  ;(async () => {
+    try {
+      await query(
+        `INSERT INTO comm_logs (lead_id, type, summary, outcome)
+         VALUES ($1, 'alert', $2, 'needs_human')`,
+        [leadId, `⚠️ FRUSTRATED INSTAGRAM DM — said: "${message.slice(0, 120)}" — consider a human reply`]
+      )
+      await sendEscalationEmail("Instagram", leadId, message)
+      createNotification({
+        type: "escalation",
+        title: `${await leadDisplayName(leadId)} needs a human`,
+        body: `Instagram — "${message.slice(0, 120)}"`,
+        linkView: "instagram",
+      })
+    } catch (e: any) {
+      console.error("flagFrustratedInstagram error:", e.message)
     }
   })()
 }

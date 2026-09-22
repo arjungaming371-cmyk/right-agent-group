@@ -20,6 +20,7 @@ type Branch = {
   exotel_sid: string | null; exotel_caller_id: string | null; exotel_flow_app_id: string | null
   exotel_api_key_set: boolean; exotel_api_token_set: boolean
   whatsapp_phone_number_id: string | null; whatsapp_display_name: string | null; whatsapp_token_set: boolean
+  instagram_account_id: string | null; instagram_token_set: boolean
   brand_name: string | null; brand_logo_url: string | null; brand_primary_color: string; brand_tagline: string | null
   monthly_call_limit: number | null; monthly_whatsapp_limit: number | null; max_ai_employees: number | null
 }
@@ -594,6 +595,15 @@ function BranchModal({ branch, saving, onClose, onSubmit }: {
               <input name="whatsapp_token" placeholder={branch?.whatsapp_token_set ? "Token configured — type to replace" : "Permanent System User token"} className={inputCls} />
               <input name="whatsapp_display_name" defaultValue={branch?.whatsapp_display_name || ""} placeholder="Display name" className={inputCls} />
             </div>
+          </section>
+
+          <section>
+            <div className={labelCls}>Instagram (branch's own IG business account)</div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <input name="instagram_account_id" defaultValue={branch?.instagram_account_id || ""} placeholder="IG Business Account ID" className={inputCls} />
+              <input name="instagram_token" placeholder={branch?.instagram_token_set ? "Token configured — type to replace" : "Access token with instagram_manage_messages"} className={inputCls} />
+            </div>
+            <p className="mt-1.5 text-[11.5px] text-[var(--text-muted)]">DMs and comments on this account are answered by THIS branch's AI Employee, from this account. Leave blank to use the company Instagram.</p>
           </section>
 
           <section>
