@@ -95,6 +95,78 @@ async function runPromptTunerScan() {
   }
 }
 
+// Instagram Comment Scanner: guarantees comments get automated replies even if
+// Meta webhook delivery is delayed, filtered by Standard Access, or waiting on
+// tester acceptance. Deduplicated atomically by comment_id in the DB.
+let igCommentScanRunning = false
+async function runInstagramCommentScan() {
+  if (igCommentScanRunning) return
+  igCommentScanRunning = true
+  try {
+    const token = process.env.INSTAGRAM_ACCESS_TOKEN
+    const accountId = process.env.INSTAGRAM_ACCOUNT_ID || "me"
+    if (!token) return
+
+    const appUrl = process.env.APP_INTERNAL_URL || "http://127.0.0.1:3000"
+    const isIgLogin = token.startsWith("IG")
+    const base = isIgLogin ? "https://graph.instagram.com/v21.0" : "https://graph.facebook.com/v21.0"
+    const target = isIgLogin ? "me" : accountId
+
+    const mediaRes = await fetch(`${base}/${target}/media?fields=id,comments_count&limit=5&access_token=${token}`, {
+      signal: AbortSignal.timeout(10_000),
+    }).catch(() => null)
+    if (!mediaRes || !mediaRes.ok) return
+    const mediaData = await mediaRes.json().catch(() => null)
+    const mediaList = mediaData?.data || []
+
+    for (const m of mediaList) {
+      if (!m.id || !m.comments_count || m.comments_count <= 0) continue
+      const commRes = await fetch(`${base}/${m.id}/comments?fields=id,text,username,from,timestamp&limit=10&access_token=${token}`, {
+        signal: AbortSignal.timeout(10_000),
+      }).catch(() => null)
+      if (!commRes || !commRes.ok) continue
+      const commData = await commRes.json().catch(() => null)
+      const comments = commData?.data || []
+
+      for (const c of comments) {
+        if (!c.id || !c.text) continue
+        const senderId = c.from?.id || ""
+        const username = (c.from?.username || c.username || "").toLowerCase()
+        if (senderId === accountId || senderId === "17841437996447189" || username === "arjungaming371") continue
+
+        await fetch(`${appUrl}/api/instagram`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            object: "instagram",
+            entry: [
+              {
+                id: accountId,
+                time: Date.now(),
+                changes: [
+                  {
+                    field: "comments",
+                    value: {
+                      id: c.id,
+                      text: c.text,
+                      from: c.from || { id: c.id, username: c.username || "instagram_user" },
+                      media: { id: m.id },
+                    },
+                  },
+                ],
+              },
+            ],
+          }),
+        }).catch(() => null)
+      }
+    }
+  } catch (e: any) {
+    // Fail-safe — never crash scheduler
+  } finally {
+    igCommentScanRunning = false
+  }
+}
+
 export function startScheduler() {
   // instrumentation.ts's register() can fire more than once in dev under
   // Next.js hot-reload — guard so we never register the same cron job twice.
@@ -110,5 +182,10 @@ export function startScheduler() {
   // Prompt Tuner, Sunday 09:00 server time — quiet day, after the week's calls have accumulated.
   cron.schedule("0 9 * * 0", () => runPromptTunerScan())
 
-  console.log("[scheduler] in-app cron started — daily digest 08:00, weekly digest Mon 08:00, lead brain scan every 5m, prompt tuner Sun 09:00 (server time)")
+  // Automated Instagram comment poller: runs every 20s to catch new comments
+  setInterval(() => {
+    runInstagramCommentScan().catch(() => {})
+  }, 20_000)
+
+  console.log("[scheduler] in-app cron started — daily digest 08:00, weekly digest Mon 08:00, lead brain scan every 5m, prompt tuner Sun 09:00, ig comment scan every 20s")
 }
