@@ -36,3 +36,7 @@ debug-audio/
 
 # pg_dump output from BACKUP.ps1 — real customer data, never commit it
 backups/
+
+# scratch directory for local debugging scripts & tokens
+scratch/
+
