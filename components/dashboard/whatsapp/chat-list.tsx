@@ -16,6 +16,7 @@ export type ListTab = "all" | "unread" | "favourites" | "groups"
 export default function ChatList({
   leads, selected, ready, canEdit, tab, onTab, archivedOpen, onArchivedOpen,
   onOpenArchived, onSelect, onNewChat, onPin, onMute, onArchive, onRefresh,
+  onDiagnose, diagnosing,
 }: {
   leads: Lead[]
   selected: Lead | null
@@ -32,6 +33,8 @@ export default function ChatList({
   onMute: (l: Lead) => void
   onArchive: (l: Lead) => void
   onRefresh: () => void
+  onDiagnose?: () => void
+  diagnosing?: boolean
 }) {
   const [search, setSearch] = useState("")
   const [menuOpen, setMenuOpen] = useState(false)
@@ -126,7 +129,13 @@ export default function ChatList({
       {!ready && (
         <div style={{ background: "#49272c", color: "#ffd7d7", fontSize: 12.5, padding: "7px 16px", display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#ef697a", flexShrink: 0 }} />
-          Offline — check WHATSAPP_TOKEN / WHATSAPP_PHONE_NUMBER_ID. Messages can't send.
+          <span style={{ flex: 1 }}>Offline — check WHATSAPP_TOKEN / WHATSAPP_PHONE_NUMBER_ID. Messages can't send.</span>
+          {onDiagnose && (
+            <button onClick={onDiagnose} disabled={diagnosing} style={{
+              background: "transparent", border: "1px solid rgba(255,215,215,0.4)", color: "#ffd7d7",
+              borderRadius: 999, fontSize: 11.5, padding: "3px 10px", cursor: "pointer", flexShrink: 0,
+            }}>{diagnosing ? "Checking…" : "Diagnose"}</button>
+          )}
         </div>
       )}
 

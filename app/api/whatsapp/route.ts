@@ -542,7 +542,10 @@ async function handleInbound(msg: any, profileName: string | null, waBranch: Bra
     )
     await query(
       `INSERT INTO comm_logs (lead_id, type, summary, outcome) VALUES ($1, 'whatsapp', $2, $3)`,
-      [lead.id, `WA: "${text.slice(0, 60)}" → AI replied`, sent.ok ? "replied" : "reply_failed"]
+      // On failure the Meta rejection reason rides in the summary — the Comm
+      // Log view then answers "why is this customer not getting our replies"
+      // without touching pm2 logs (expired token, 24h window 131047…).
+      [lead.id, `WA: "${text.slice(0, 60)}" → AI replied${sent.ok ? "" : ` — FAILED: ${sent.error || "unknown error"}`}`, sent.ok ? "replied" : "reply_failed"]
     ).catch(() => {})
   }
 

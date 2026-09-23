@@ -342,6 +342,11 @@ async function graphPost(payload: Record<string, any>, branch?: BranchWhatsAppCt
     const data: any = await res.json().catch(() => ({}))
     if (!res.ok) {
       const msg = data?.error?.message || `HTTP ${res.status}`
+      // Surface WHY Meta refused — expired token (190), outside the 24h
+      // service window (131047), re-engagement required, wrong number…
+      // Without this line a dead send looks like "message not delivered"
+      // with zero explanation anywhere in pm2 logs.
+      console.error(`WA send failed → ${payload.to || "?"} HTTP ${res.status}: ${msg}${data?.error?.error_data?.details ? ` — ${data.error.error_data.details}` : ""}${data?.error?.code ? ` (code ${data.error.code})` : ""}`)
       return { ok: false, error: msg, status: res.status }
     }
     return { ok: true, id: data?.messages?.[0]?.id }
