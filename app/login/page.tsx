@@ -18,7 +18,10 @@ export default async function LoginPage({
 }) {
   const params = await searchParams
   const error = params?.error
-  const next = params?.next && params.next.startsWith("/") ? params.next : "/"
+  // Default destination is the CONSOLE — "/" is now the public marketing
+  // homepage, so after sign-in staff must land at /dashboard, not back on
+  // the landing page.
+  const next = params?.next && params.next.startsWith("/") && params.next !== "/" ? params.next : "/dashboard"
   const otpStep = params?.otp === "1"
 
   return (

@@ -23,7 +23,9 @@ export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get("code")
   const state = req.nextUrl.searchParams.get("state")
   const cookieState = req.cookies.get("oauth_state")?.value
-  const nextPath = req.cookies.get("oauth_next")?.value || "/"
+  // Default destination is the console ("/" is the public marketing homepage
+  // since 2026-09-24 — signed-in staff must never bounce back to it).
+  const nextPath = req.cookies.get("oauth_next")?.value || "/dashboard"
 
   const fail = (reason: string) =>
     NextResponse.redirect(`${appUrl}/login?error=${encodeURIComponent(reason)}`)
@@ -122,7 +124,7 @@ export async function GET(req: NextRequest) {
     logAudit("signed in", email, {})
 
     // Reject backslash + protocol-relative forms (see isSafeNextPath).
-    const safeNext = isSafeNextPath(nextPath) ? nextPath : "/"
+    const safeNext = isSafeNextPath(nextPath) ? nextPath : "/dashboard"
 
     // ---- TWO-FACTOR AUTH (Access Controls toggle) ----
     // Admin sign-ins get an emailed 6-digit code before the session cookie
