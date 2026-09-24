@@ -22,7 +22,18 @@ export const GET = withParams("assistant/chats", async (
     return NextResponse.json({ error: "not found" }, { status: 404 })
   }
 
-  const res = await query(`SELECT role, content, created_at FROM assistant_messages WHERE chat_id = $1 ORDER BY created_at ASC`, [id])
+  // Cap the payload: a months-old voice session can hold thousands of turns —
+  // loading one in full froze the transcript pane and shipped megabytes of
+  // JSON for nothing. Latest 300 turns, oldest-first for rendering.
+  const res = await query(
+    `SELECT role, content, created_at
+       FROM (
+         SELECT role, content, created_at FROM assistant_messages
+          WHERE chat_id = $1 ORDER BY created_at DESC LIMIT 300
+       ) recent
+      ORDER BY created_at ASC`,
+    [id]
+  )
   return NextResponse.json({ messages: res.rows })
 })
 

@@ -192,8 +192,8 @@ export async function startCall(
       )
       name = res.rows[0]?.name
       isRepeatCall = !res.rows[0]?.first_call
-    } catch (e: any) {
-      console.error("greeting name/call_count update error:", e.message)
+    } catch (e) {
+      console.error("greeting name/call_count update error:", e instanceof Error ? e.message : e)
     }
   }
   if (callSid) {
@@ -217,10 +217,10 @@ export async function startCall(
         },
         { onConflict: "twilio_call_sid" }
       )
-      .catch((e: any) =>
+      .catch((e) =>
         // A swallowed failure here used to erase the entire call's conversation
         // record with no trace — now it is at least visible in the pm2 logs.
-        console.error("voice_calls upsert error (call row may be missing/stale):", e.message))
+        console.error("voice_calls upsert error (call row may be missing/stale):", e instanceof Error ? e.message : e))
   }
 
   const hasName = name && !PLACEHOLDER_NAME_RE.test(name)
@@ -243,10 +243,10 @@ async function getHistory(callSid: string): Promise<{ role: "user" | "model"; co
     // FIX (2026-09-20): re-parsed + returned in full on EVERY turn — cap the
     // working set (the reply path only ever uses the last 12 messages, and
     // extraction now takes 12 too).
-    return transcript
+    return (transcript as { role?: unknown; text?: unknown }[])
       .slice(-40)
-      .map((t: any) => ({ role: t.role === "ai" ? ("model" as const) : ("user" as const), content: t.text ?? "" }))
-      .filter((m: any) => m.content)
+      .map((t) => ({ role: t.role === "ai" ? ("model" as const) : ("user" as const), content: typeof t.text === "string" ? t.text : "" }))
+      .filter((m) => m.content)
   } catch {
     return []
   }
@@ -270,7 +270,7 @@ async function updateTranscriptAsync(callSid: string | null, speech: string, rep
         WHERE twilio_call_sid = $1`,
       [callSid, newTurns]
     )
-  } catch (e: any) {
+  } catch (e) {
     console.error("transcript update error:", e)
   }
 }
@@ -312,7 +312,7 @@ export async function correctLastSpokenReply(callSid: string, spokenText: string
       [callSid, spokenText]
     )
     return (res.rowCount || 0) > 0
-  } catch (e: any) {
+  } catch (e) {
     console.error("transcript correction error:", e)
     return false
   }
@@ -542,8 +542,8 @@ async function completeLeadIfReady(opts: {
       // Only on SUCCESS — if the link send failed, the post-call fallback
       // template is the customer's only remaining automatic touchpoint.
       if (callSid && result.ok) {
-        db.from("voice_calls").update({ followup_sent: true }).eq("twilio_call_sid", callSid).catch((e: any) =>
-          console.error("followup_sent flag error (status webhook may double-message):", e.message))
+        db.from("voice_calls").update({ followup_sent: true }).eq("twilio_call_sid", callSid).catch((e) =>
+          console.error("followup_sent flag error (status webhook may double-message):", e instanceof Error ? e.message : e))
       }
       // Surface the exact link in the dashboard's Communication Log.
       const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "")
@@ -554,7 +554,7 @@ async function completeLeadIfReady(opts: {
           ? `Application form link sent on WhatsApp to ${waNumber}: ${appUrl}/form/${token}`
           : `Application form link generated but WhatsApp send FAILED (${result.error}) — share manually: ${appUrl}/form/${token}`,
         outcome: result.ok ? "sent" : "failed",
-      }).catch((e: any) => console.error("comm_log form-link entry error:", e.message))
+      }).catch((e) => console.error("comm_log form-link entry error:", e instanceof Error ? e.message : e))
       // Priya just told the customer "the link is on its way" — if the send
       // actually failed, ping the operator to share it manually before the
       // customer gives up waiting.
@@ -583,8 +583,8 @@ async function markVoicemail(callSid: string | null, speech: string): Promise<vo
   // runPostCallAnalysis below reads the completed transcript, not a
   // still-in-flight write.
   await updateTranscriptAsync(callSid, speech, "(Detected voicemail/answering machine — call ended)")
-  await db.from("voice_calls").update({ outcome: "voicemail", status: "completed" }).eq("twilio_call_sid", callSid).catch((e: any) =>
-    console.error("voicemail mark error:", e.message))
+  await db.from("voice_calls").update({ outcome: "voicemail", status: "completed" }).eq("twilio_call_sid", callSid).catch((e) =>
+    console.error("voicemail mark error:", e instanceof Error ? e.message : e))
   runPostCallAnalysis(callSid)
 }
 

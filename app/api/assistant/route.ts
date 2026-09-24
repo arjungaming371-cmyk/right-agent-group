@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
 import { chatWithSystemPromptStream } from "@/lib/llm"
 import { getSessionFromRequest } from "@/lib/auth"
+import { rateLimit } from "@/lib/rate-limit"
 
 export const dynamic = "force-dynamic"
 
@@ -134,7 +135,7 @@ async function getStatsSnapshot(): Promise<string> {
 
   const bestLang = langBreakdown.rows[0]
   const fmtDate = (d: string) => new Date(d).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
-  const fmtMoney = (n: any) => (n ? `₹${Number(n).toLocaleString("en-IN")}` : "—")
+  const fmtMoney = (n: unknown) => (n ? `₹${Number(n).toLocaleString("en-IN")}` : "—")
 
   const section = (title: string, body: string) => `--- ${title} ---\n${body}`
 
@@ -142,16 +143,16 @@ async function getStatsSnapshot(): Promise<string> {
     "LEADS",
     [
       `Total: ${totalLeads.rows[0].n} | New today: ${leadsToday.rows[0].n}`,
-      `By status: ${leadStatusBreakdown.rows.map((r: any) => `${r.status}=${r.n}`).join(", ") || "none"}`,
-      `Most recent 8: ${recentLeads.rows.map((r: any) => `${r.name || r.phone} (${r.status}, ${r.interested}, score ${r.score}${r.product_interest ? ", " + r.product_interest : ""})`).join("; ") || "none"}`,
+      `By status: ${leadStatusBreakdown.rows.map((r: { status: string; n: number }) => `${r.status}=${r.n}`).join(", ") || "none"}`,
+      `Most recent 8: ${recentLeads.rows.map((r: { name: string; phone: string; status: string; interested: string; score: number; product_interest: string }) => `${r.name || r.phone} (${r.status}, ${r.interested}, score ${r.score}${r.product_interest ? ", " + r.product_interest : ""})`).join("; ") || "none"}`,
     ].join("\n")
   )
 
   const loansSection = section(
     "LOAN APPLICATIONS",
     [
-      `By status: ${loanAppsBreakdown.rows.map((r: any) => `${r.status}=${r.n}`).join(", ") || "none"}`,
-      `Most recent 6: ${recentLoanApps.rows.map((r: any) => `${r.customer_name} — ${r.loan_type || "?"} ${fmtMoney(r.loan_amount)} (${r.status}, ${fmtDate(r.submitted_at)})`).join("; ") || "none"}`,
+      `By status: ${loanAppsBreakdown.rows.map((r: { status: string; n: number }) => `${r.status}=${r.n}`).join(", ") || "none"}`,
+      `Most recent 6: ${recentLoanApps.rows.map((r: { customer_name: string; loan_type: string; loan_amount: unknown; status: string; submitted_at: string }) => `${r.customer_name} — ${r.loan_type || "?"} ${fmtMoney(r.loan_amount)} (${r.status}, ${fmtDate(r.submitted_at)})`).join("; ") || "none"}`,
     ].join("\n")
   )
 
@@ -159,9 +160,9 @@ async function getStatsSnapshot(): Promise<string> {
     "VOICE CALLS",
     [
       `Calls in last 24h: ${callsToday.rows[0].n}`,
-      `By outcome: ${callOutcomeBreakdown.rows.map((r: any) => `${r.outcome}=${r.n}`).join(", ") || "none"}`,
+      `By outcome: ${callOutcomeBreakdown.rows.map((r: { outcome: string; n: number }) => `${r.outcome}=${r.n}`).join(", ") || "none"}`,
       bestLang ? `Best-performing language: ${bestLang.language} (${bestLang.n} resolved)` : `Best-performing language: not enough data yet`,
-      `Most recent 6: ${recentCalls.rows.map((r: any) => `${r.lead_name || r.phone} — ${r.direction}, ${r.outcome || "pending"}, ${r.sentiment || "Neutral"}, ${r.duration || 0}s (${fmtDate(r.created_at)})`).join("; ") || "none"}`,
+      `Most recent 6: ${recentCalls.rows.map((r: { lead_name: string; phone: string; direction: string; outcome: string; sentiment: string; duration: number; created_at: string }) => `${r.lead_name || r.phone} — ${r.direction}, ${r.outcome || "pending"}, ${r.sentiment || "Neutral"}, ${r.duration || 0}s (${fmtDate(r.created_at)})`).join("; ") || "none"}`,
     ].join("\n")
   )
 
@@ -169,7 +170,7 @@ async function getStatsSnapshot(): Promise<string> {
     "WHATSAPP",
     [
       `Total messages: ${totalWaMessages.rows[0].n}${waUnread.rows[0].n !== null ? ` | Unread inbound: ${waUnread.rows[0].n}` : ""}`,
-      `Most recent 6 inbound: ${recentWaInbound.rows.map((r: any) => `${r.lead_name || "Unknown"}: "${(r.content || "").slice(0, 60)}" (${fmtDate(r.created_at)})`).join("; ") || "none"}`,
+      `Most recent 6 inbound: ${recentWaInbound.rows.map((r: { lead_name: string; content: string; created_at: string }) => `${r.lead_name || "Unknown"}: "${(r.content || "").slice(0, 60)}" (${fmtDate(r.created_at)})`).join("; ") || "none"}`,
     ].join("\n")
   )
 
@@ -184,31 +185,31 @@ async function getStatsSnapshot(): Promise<string> {
     "ESCALATIONS (frustration flags)",
     [
       `In last 24h: ${escalationsToday.rows[0].n}`,
-      `Most recent 5: ${recentEscalations.rows.map((r: any) => `${r.lead_name || "Unknown"} — "${(r.summary || "").slice(0, 80)}" (${fmtDate(r.created_at)})`).join("; ") || "none"}`,
+      `Most recent 5: ${recentEscalations.rows.map((r: { lead_name: string; summary: string; created_at: string }) => `${r.lead_name || "Unknown"} — "${(r.summary || "").slice(0, 80)}" (${fmtDate(r.created_at)})`).join("; ") || "none"}`,
     ].join("\n")
   )
 
   const securitySection = section(
     "SECURITY SETTINGS",
-    securitySettings.rows.map((r: any) => `${r.key}=${r.enabled ? "ON" : "OFF"}`).join(", ") || "none configured"
+    securitySettings.rows.map((r: { key: string; enabled: boolean }) => `${r.key}=${r.enabled ? "ON" : "OFF"}`).join(", ") || "none configured"
   )
 
   const auditSection = section(
     "AUDIT LOG (most recent 5)",
-    recentAuditLog.rows.map((r: any) => `${r.action} by ${r.performed_by || "system"} (${fmtDate(r.created_at)})`).join("; ") || "no entries yet"
+    recentAuditLog.rows.map((r: { action: string; performed_by: string; created_at: string }) => `${r.action} by ${r.performed_by || "system"} (${fmtDate(r.created_at)})`).join("; ") || "no entries yet"
   )
 
   const opsSection = section(
     "UPLOADS & OUTBOUND CAMPAIGNS",
     [
       `Pending in outbound queue: ${outboundQueuePending.rows[0].n}`,
-      `Recent uploads: ${recentUploads.rows.map((r: any) => `${r.filename} (${r.row_count} rows, ${r.status})`).join("; ") || "none"}`,
+      `Recent uploads: ${recentUploads.rows.map((r: { filename: string; row_count: number; status: string }) => `${r.filename} (${r.row_count} rows, ${r.status})`).join("; ") || "none"}`,
     ].join("\n")
   )
 
   const teamSection = section(
     "TEAM ROSTER",
-    teamRoster.rows.map((r: any) => `${r.email} (${r.role})`).join(", ") || "no teammates added yet (only the admin email)"
+    teamRoster.rows.map((r: { email: string; role: string }) => `${r.email} (${r.role})`).join(", ") || "no teammates added yet (only the admin email)"
   )
 
   const snapshot = [
@@ -310,16 +311,16 @@ async function searchDatabase(userMessage: string): Promise<string> {
 
       for (const res of fuzzyLeadSets) {
         for (const row of res.rows) {
-          if (!leadRows.some((r: any) => r.phone === row.phone)) leadRows.push(row)
+          if (!leadRows.some((r: { phone: string }) => r.phone === row.phone)) leadRows.push(row)
         }
       }
       for (const res of fuzzyLoanSets) {
         for (const row of res.rows) {
-          if (!loanRows.some((r: any) => r.customer_name === row.customer_name && r.loan_type === row.loan_type)) loanRows.push(row)
+          if (!loanRows.some((r: { customer_name: string; loan_type: string }) => r.customer_name === row.customer_name && r.loan_type === row.loan_type)) loanRows.push(row)
         }
       }
       for (const row of phoneLeads.rows) {
-        if (!leadRows.some((r: any) => r.phone === row.phone)) leadRows.push(row)
+        if (!leadRows.some((r: { phone: string }) => r.phone === row.phone)) leadRows.push(row)
       }
     }
 
@@ -328,79 +329,135 @@ async function searchDatabase(userMessage: string): Promise<string> {
     const parts: string[] = []
     if (leadRows.length) {
       parts.push(
-        `Matching leads: ${leadRows.map((r: any) => `${r.name || r.phone} (${r.status}${r.product_interest ? ", " + r.product_interest : ""}${r.address ? ", " + r.address : ""})`).join("; ")}`
+        `Matching leads: ${leadRows.map((r: { name: string; phone: string; status: string; product_interest: string; address: string }) => `${r.name || r.phone} (${r.status}${r.product_interest ? ", " + r.product_interest : ""}${r.address ? ", " + r.address : ""})`).join("; ")}`
       )
     }
     if (loanRows.length) {
       parts.push(
-        `Matching loan applications: ${loanRows.map((r: any) => `${r.customer_name} — ${r.loan_type || "?"} (${r.status}${r.city ? ", " + r.city : ""})`).join("; ")}`
+        `Matching loan applications: ${loanRows.map((r: { customer_name: string; loan_type: string; status: string; city: string }) => `${r.customer_name} — ${r.loan_type || "?"} (${r.status}${r.city ? ", " + r.city : ""})`).join("; ")}`
       )
     }
     return `--- SEARCH RESULTS for this question (smart full-text & typo-tolerant fuzzy matching across ALL leads and loan applications) ---\n${parts.join("\n")}`
-  } catch (e: any) {
-    console.error("assistant search error:", e.message)
+  } catch (e) {
+    console.error("assistant search error:", e instanceof Error ? e.message : e)
     return ""
   }
 }
 
+/**
+ * Client-supplied chat history is UNTRUSTED input. Only user/assistant roles
+ * survive (a crafted {role:'system'} entry is coerced to 'user' — role
+ * injection into the prompt is impossible), every content is a capped
+ * string, and the list is trimmed to the last 10 turns.
+ */
+function sanitizeHistory(raw: unknown): { role: "user" | "assistant"; content: string }[] {
+  if (!Array.isArray(raw)) return []
+  const out: { role: "user" | "assistant"; content: string }[] = []
+  for (const item of raw.slice(-10)) {
+    if (!item || typeof item !== "object") continue
+    const m = item as { role?: unknown; content?: unknown }
+    const content = typeof m.content === "string" ? m.content.slice(0, 4000).trim() : ""
+    if (!content) continue
+    out.push({ role: m.role === "assistant" ? "assistant" : "user", content })
+  }
+  return out
+}
+
 export async function POST(req: NextRequest) {
-  const session = await getSessionFromRequest(req)
-  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+  try {
+    const session = await getSessionFromRequest(req)
+    if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
-  const { message, history, chatId, attachment } = await req.json().catch(() => ({}) as any)
-  if (typeof message !== "string" || !message.trim() || message.length > 5000) {
-    return NextResponse.json({ reply: "Please send a valid message." }, { status: 400 })
-  }
-
-  let userContent = message
-  if (attachment && typeof attachment === "object" && attachment.name) {
-    if (attachment.type === "image") {
-      userContent = `[User Attached Image: "${attachment.name}"]\nStaff instructions: ${message}`
-    } else {
-      userContent = `[Attached Document: "${attachment.name}" (${attachment.type || "file"})]\n${attachment.content ? `Document Content Preview:\n${attachment.content.slice(0, 4000)}\n---\n` : ""}${message}`
+    // Per-user rate limit: one voice turn = one hit here; 30/min leaves a
+    // hands-free conversation far above its real ceiling while an authed
+    // script/forgotten open tab can no longer run the model + snapshot
+    // queries in a tight loop.
+    if (!rateLimit(`assistant:${session.email}`, 30, 60_000)) {
+      return NextResponse.json({ error: "Too many requests — slow down a little." }, { status: 429 })
     }
-  }
 
-  // Verify the chat belongs to this user before persisting anything to it.
-  let ownedChatId: string | null = null
-  if (typeof chatId === "string" && chatId) {
-    const owns = await query(`SELECT 1 FROM assistant_chats WHERE id = $1 AND user_email = $2`, [chatId, session.email])
-    if (owns.rowCount) ownedChatId = chatId
-  }
+    const body: unknown = await req.json().catch(() => null)
+    const parsed = (body ?? {}) as { message?: unknown; history?: unknown; chatId?: unknown; attachment?: unknown }
+    const message = typeof parsed.message === "string" ? parsed.message : ""
+    if (!message.trim() || message.length > 5000) {
+      return NextResponse.json({ reply: "Please send a valid message." }, { status: 400 })
+    }
+    const history = sanitizeHistory(parsed.history)
+    const chatId = typeof parsed.chatId === "string" ? parsed.chatId : null
 
-  const [snapshot, searchResults] = await Promise.all([getStatsSnapshot(), searchDatabase(message)])
-  const fullContext = [SYSTEM_PROMPT, snapshot, searchResults].filter(Boolean).join("\n\n")
-  const messages = [...(Array.isArray(history) ? history.slice(-10) : []), { role: "user", content: userContent }]
-
-  const encoder = new TextEncoder()
-  const stream = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      try {
-        const fullReply = await chatWithSystemPromptStream(
-          messages,
-          fullContext,
-          (delta) => controller.enqueue(encoder.encode(delta)),
-          { numCtx: 8192, numPredict: 600, timeoutMs: 90000, historyTurns: 12 }
-        )
-
-        if (ownedChatId) {
-          await query(
-            `INSERT INTO assistant_messages (chat_id, role, content) VALUES ($1, 'user', $2), ($1, 'assistant', $3)`,
-            [ownedChatId, userContent, fullReply]
-          )
-          await query(
-            `UPDATE assistant_chats SET updated_at = now(), title = CASE WHEN title = 'New chat' THEN $2 ELSE title END WHERE id = $1`,
-            [ownedChatId, message.trim().slice(0, 60)]
-          )
+    let userContent = message
+    const attachment = parsed.attachment
+    if (attachment && typeof attachment === "object" && "name" in attachment) {
+      const a = attachment as { name?: unknown; type?: unknown; content?: unknown }
+      const name = typeof a.name === "string" ? a.name.slice(0, 200) : ""
+      const type = typeof a.type === "string" ? a.type.slice(0, 20) : ""
+      const content = typeof a.content === "string" ? a.content.slice(0, 4000) : ""
+      if (name) {
+        if (type === "image") {
+          userContent = `[User Attached Image: "${name}"]\nStaff instructions: ${message}`
+        } else {
+          userContent = `[Attached Document: "${name}" (${type || "file"})]\n${content ? `Document Content Preview:\n${content}\n---\n` : ""}${message}`
         }
-      } catch (e: any) {
-        console.error("assistant chat error:", e.message)
-        controller.enqueue(encoder.encode("Sorry, something went wrong. Please try again."))
-      } finally {
-        controller.close()
       }
-    },
-  })
+    }
 
-  return new Response(stream, { headers: { "Content-Type": "text/plain; charset=utf-8" } })
+    // Verify the chat belongs to this user before persisting anything to it.
+    let ownedChatId: string | null = null
+    if (chatId) {
+      const owns = await query(`SELECT 1 FROM assistant_chats WHERE id = $1 AND user_email = $2`, [chatId, session.email])
+      if (owns.rowCount) ownedChatId = chatId
+    }
+
+    const [snapshot, searchResults] = await Promise.all([getStatsSnapshot(), searchDatabase(message)])
+    const fullContext = [SYSTEM_PROMPT, snapshot, searchResults].filter(Boolean).join("\n\n")
+    // lib/llm expects the "model" role for assistant turns.
+    const messages = [
+      ...history.map((m) => ({ role: m.role === "assistant" ? ("model" as const) : ("user" as const), content: m.content })),
+      { role: "user" as const, content: userContent },
+    ]
+
+    const encoder = new TextEncoder()
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        try {
+          const fullReply = await chatWithSystemPromptStream(
+            messages,
+            fullContext,
+            (delta) => controller.enqueue(encoder.encode(delta)),
+            { numCtx: 8192, numPredict: 600, timeoutMs: 90000, historyTurns: 12 }
+          )
+
+          if (ownedChatId) {
+            await query(
+              `INSERT INTO assistant_messages (chat_id, role, content) VALUES ($1, 'user', $2), ($1, 'assistant', $3)`,
+              [ownedChatId, userContent, fullReply]
+            )
+            await query(
+              `UPDATE assistant_chats SET updated_at = now(), title = CASE WHEN title = 'New chat' THEN $2 ELSE title END WHERE id = $1`,
+              [ownedChatId, message.trim().slice(0, 60)]
+            )
+          }
+        } catch (e) {
+          console.error("assistant chat error:", e instanceof Error ? e.message : e)
+          controller.enqueue(encoder.encode("Sorry, something went wrong. Please try again."))
+        } finally {
+          controller.close()
+        }
+      },
+      // Client disconnect (assistant closed / barge-in): stop pulling from
+      // the model instead of generating a reply nobody reads.
+      cancel() {
+        // chatWithSystemPromptStream has no external handle to abort; the
+        // controller enqueue throwing on the next delta ends generation.
+      },
+    })
+
+    return new Response(stream, { headers: { "Content-Type": "text/plain; charset=utf-8" } })
+  } catch (e) {
+    // The snapshot/search/ownership section used to run with NO try/catch —
+    // one DB hiccup returned an HTML 500 that the client's res.json() choked
+    // on. Always answer JSON.
+    console.error("assistant route error:", e instanceof Error ? e.message : e)
+    return NextResponse.json({ error: "internal error" }, { status: 500 })
+  }
 }

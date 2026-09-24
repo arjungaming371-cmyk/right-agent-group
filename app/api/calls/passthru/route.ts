@@ -47,8 +47,8 @@ export async function GET(req: NextRequest) {
       )
     }
     console.log(`Passthru: ${callSid} | recordingUrl: ${recordingUrl || "(none in this callback)"}`)
-  } catch (e: any) {
-    console.error("passthru update error:", e.message)
+  } catch (e) {
+    console.error("passthru update error:", e instanceof Error ? e.message : e)
   }
 
   return new NextResponse("OK", { status: 200 })

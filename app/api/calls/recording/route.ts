@@ -87,7 +87,7 @@ export async function GET(req: NextRequest) {
         "Cache-Control": noStore ? "no-store" : "private, max-age=3600",
       },
     })
-  } catch (e: any) {
+  } catch (e) {
     return apiError(e)
   }
 }

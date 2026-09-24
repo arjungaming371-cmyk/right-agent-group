@@ -14,6 +14,20 @@ export async function POST(req: NextRequest) {
   // The dialer only ever works the session's own branch queue (null = HQ = all).
   const branchId = sessionBranchId(session)
 
+  // Shape of an outbound_queue row actually used by the dialer loop below —
+  // replaces the previous untyped `item: any` without forcing `unknown`
+  // narrowing noise through the whole body.
+  type QueueRow = {
+    id: string
+    lead_id: string | null
+    phone: string
+    name: string | null
+    language: string | null
+    product_interest: string | null
+    notes: string | null
+    branch_id: string | null
+  }
+
   // FIX (2026-09-20): ATOMIC CLAIM. The old flow was SELECT pending rows →
   // dial → mark 'called'. Two operators (or a double-click / two tabs / the
   // 4s dashboard poller) could run this route simultaneously and BOTH read
@@ -33,8 +47,8 @@ export async function POST(req: NextRequest) {
      )
      RETURNING *`,
     [branchId, Math.min(limit, 50)]
-  ).catch(async (e: any) => {
-    if (e?.code !== "42703") throw e // claimed_at column not added yet → claim without reaper support
+  ).catch(async (e) => {
+    if (!((e as { code?: unknown })?.code === "42703")) throw e // claimed_at column not added yet → claim without reaper support
     return query(
       `UPDATE outbound_queue SET status = 'dialing'
        WHERE id IN (
@@ -48,7 +62,7 @@ export async function POST(req: NextRequest) {
       [branchId, Math.min(limit, 50)]
     )
   })
-  const pending = claim.rows
+  const pending = claim.rows as QueueRow[]
 
   if (!pending || pending.length === 0) {
     return NextResponse.json({ called: 0, failed: 0, total: 0 })
@@ -69,7 +83,7 @@ export async function POST(req: NextRequest) {
     const batch = pending.slice(i, i + batchSize)
 
     await Promise.allSettled(
-      batch.map(async (item: any) => {
+      batch.map(async (item: QueueRow) => {
         try {
           // Get lead details for AI context
           let leadId = item.lead_id || null

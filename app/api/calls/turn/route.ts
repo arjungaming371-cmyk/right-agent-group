@@ -32,7 +32,7 @@ export const dynamic = "force-dynamic"
 
 // Telugu is the business's home market and the default first language —
 // Priya opens in Telugu and switches when the caller speaks something else.
-function normalizeLanguage(input: any): Language {
+function normalizeLanguage(input: unknown): Language {
   return input === "hindi" || input === "telugu" || input === "english" ? input : "telugu"
 }
 
@@ -55,15 +55,35 @@ function resolveSpokenLanguage(speech: string, current: Language): Language {
   return detected
 }
 
+// Wire format from server/voicebot-server.js + server/whatsapp-calls.js.
+// Everything optional: the bridge only sets what the event needs.
+type TurnBody = {
+  event?: unknown
+  callSid?: unknown
+  from?: unknown
+  to?: unknown
+  To?: unknown
+  branchId?: unknown
+  source?: unknown
+  speech?: unknown
+  language?: unknown
+  stream?: unknown
+  instructions?: unknown
+  text?: unknown
+  duration?: unknown
+}
+
+type TurnStreamEvent = { type: "sentence" | "done"; text?: string; language?: Language; hangup?: boolean }
+
 export async function POST(req: NextRequest) {
   // FIX (2026-09-20): constant-time compare via the shared helper (was !==).
   if (!verifyServiceKey(req)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   }
 
-  let body: any
+  let body: TurnBody
   try {
-    body = await req.json()
+    body = (await req.json()) as TurnBody
   } catch {
     return NextResponse.json({ error: "invalid JSON" }, { status: 400 })
   }
@@ -104,7 +124,9 @@ export async function POST(req: NextRequest) {
           branchId = bodyBranchId
         }
         if (!branchId) {
-          const branch = await resolveBranchByCallerId(body?.to || body?.To || process.env.EXOTEL_CALLER_ID)
+          const branch = await resolveBranchByCallerId(
+            String(body?.to || body?.To || process.env.EXOTEL_CALLER_ID || "")
+          )
           branchId = branch?.id || null
         }
         const digits = String(body.from).replace(/\D/g, "")
@@ -163,8 +185,12 @@ export async function POST(req: NextRequest) {
       if (language !== current) {
         // Persist the switch — on the call row (so later turns and history stay
         // consistent) AND on the lead (so their NEXT call greets them right).
-        db.from("voice_calls").update({ language }).eq("twilio_call_sid", callSid).catch(() => {})
-        if (call?.lead_id) db.from("leads").update({ language }).eq("id", call.lead_id).catch(() => {})
+        // Logged, not silently swallowed: a failed persist made Priya flip
+        // back to the old language on the very next turn with no trace.
+        db.from("voice_calls").update({ language }).eq("twilio_call_sid", callSid).catch((e) =>
+          console.error("language switch persist (call row) failed:", e instanceof Error ? e.message : e))
+        if (call?.lead_id) db.from("leads").update({ language }).eq("id", call.lead_id).catch((e) =>
+          console.error("language switch persist (lead) failed:", e instanceof Error ? e.message : e))
       }
 
       const turnOpts = {
@@ -193,15 +219,27 @@ export async function POST(req: NextRequest) {
         const encoder = new TextEncoder()
         const stream = new ReadableStream({
           async start(controller) {
-            const emit = (obj: any) => controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"))
+            // closed-guard: if the voicebot disconnects mid-turn, enqueue on a
+            // closed controller THROWS — and that throw inside the catch's
+            // own emit would escalate into an unhandled rejection. Latch and
+            // emit no-op instead.
+            let closed = false
+            const emit = (obj: TurnStreamEvent) => {
+              if (closed) return
+              try {
+                controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"))
+              } catch {
+                closed = true
+              }
+            }
             try {
               const result = await handleTurnStream(turnOpts, (sentence) => emit({ type: "sentence", text: sentence }))
               emit({ type: "done", language, hangup: result.hangup })
-            } catch (e: any) {
-              console.error("turn stream error:", e.message)
+            } catch (e) {
+              console.error("turn stream error:", e instanceof Error ? e.message : e)
               emit({ type: "done", language, hangup: false })
             }
-            controller.close()
+            try { controller.close() } catch {}
           },
         })
         return new NextResponse(stream, {
@@ -248,8 +286,8 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json({ error: "unknown event" }, { status: 400 })
-  } catch (e: any) {
-    console.error("turn api error:", e.message)
+  } catch (e) {
+    console.error("turn api error:", e instanceof Error ? e.message : e)
     return NextResponse.json({ error: "internal error" }, { status: 500 })
   }
 }

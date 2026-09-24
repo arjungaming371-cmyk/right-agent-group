@@ -117,7 +117,7 @@ export async function POST(req: NextRequest) {
     })
 
     return NextResponse.json({ ok: true, callSid: call.sid })
-  } catch (e: any) {
+  } catch (e) {
     return apiError(e)
   }
 }

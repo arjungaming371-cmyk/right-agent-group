@@ -23,11 +23,11 @@ export async function POST(req: NextRequest) {
     let recordingUrl: string | null = null
     const contentType = req.headers.get("content-type") || ""
     if (contentType.includes("application/json")) {
-      const body: any = await req.json().catch(() => ({}))
-      callSid      = body.CallSid ?? body.call_sid ?? ""
-      callStatus   = (body.Status ?? body.CallStatus ?? body.status ?? "").toLowerCase()
+      const body = ((await req.json().catch(() => ({}))) ?? {}) as Record<string, unknown>
+      callSid      = String(body.CallSid ?? body.call_sid ?? "")
+      callStatus   = String(body.Status ?? body.CallStatus ?? body.status ?? "").toLowerCase()
       duration     = parseInt(String(body.ConversationDuration ?? body.CallDuration ?? body.duration ?? "0")) || 0
-      recordingUrl = body.RecordingUrl ?? body.recording_url ?? null
+      recordingUrl = typeof body.RecordingUrl === "string" ? body.RecordingUrl : typeof body.recording_url === "string" ? body.recording_url : null
     } else {
       const fd = await req.formData()
       callSid      = (fd.get("CallSid") as string) ?? ""
@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
     // overwrite here was stomping the accurate value our own voicebot
     // already reported via /api/calls/turn (observed live: real calls with
     // full conversations still showed 0:00 in Voice Logs).
-    let call: any
+    let call: Record<string, unknown> | undefined
     try {
       const res = await query(
         `UPDATE voice_calls
@@ -59,15 +59,31 @@ export async function POST(req: NextRequest) {
         [callSid, callStatus, outcome, duration, recordingUrl]
       )
       call = res.rows[0]
-    } catch (callError: any) {
-      console.error("update error:", callError.message)
+    } catch (callError) {
+      console.error("update error:", callError instanceof Error ? callError.message : callError)
       return new NextResponse("OK", { status: 200 })
     }
     if (!call?.lead_id) return new NextResponse("OK", { status: 200 })
+    const leadId = String(call.lead_id)
 
-    const transcript = Array.isArray(call.transcript) ? call.transcript
-      : (typeof call.transcript === "string" ? JSON.parse(call.transcript) : [])
-    const allText = transcript.map((t: any) => t.text ?? "").join(" ").toLowerCase()
+    // Transcript arrives as jsonb (array) but tolerate the string form. The
+    // previous inline JSON.parse threw on malformed strings and — being
+    // inside the route's big try — silently skipped EVERYTHING below for
+    // that call: sentiment, lead bump, WhatsApp follow-up and summary all
+    // vanished with only a generic log line.
+    const rawTranscript: unknown = call.transcript
+    let transcript: { text?: unknown; role?: unknown }[] = []
+    if (Array.isArray(rawTranscript)) {
+      transcript = rawTranscript as { text?: unknown; role?: unknown }[]
+    } else if (typeof rawTranscript === "string") {
+      try {
+        const parsed: unknown = JSON.parse(rawTranscript)
+        if (Array.isArray(parsed)) transcript = parsed as { text?: unknown; role?: unknown }[]
+      } catch {
+        transcript = []
+      }
+    }
+    const allText = transcript.map((t) => (typeof t.text === "string" ? t.text : "")).join(" ").toLowerCase()
 
     const positiveWords = /yes\b|interested|please|confirm|okay|ok\b|sure|good|great/
     const negativeWords = /\bno\b|not interested|busy|later|cancel|dont|nope/
@@ -86,9 +102,9 @@ export async function POST(req: NextRequest) {
               updated_at = now()
         WHERE id = $1
           AND (status = 'new' OR (status = 'contacted' AND $2 = 'Positive'))`,
-      [call.lead_id, sentiment]
+      [leadId, sentiment]
     ).catch(() => {})
-    refreshLeadScore(call.lead_id, sentiment).catch(() => {})
+    refreshLeadScore(leadId, sentiment).catch(() => {})
 
     // ---- WhatsApp auto-follow-up (once per call) ----
     // Skipped entirely if a call already sent the full application-link
@@ -108,20 +124,20 @@ export async function POST(req: NextRequest) {
           [callSid]
         )
         claimWon = (claim.rowCount || 0) > 0
-      } catch (claimError: any) {
-        console.error("followup claim error:", claimError.message)
+      } catch (claimError) {
+        console.error("followup claim error:", claimError instanceof Error ? claimError.message : claimError)
       }
       if (claimWon) {
-        const { data: lead } = await db.from("leads").select("name, phone, whatsapp_number").eq("id", call.lead_id).single()
+        const { data: lead } = await db.from("leads").select("name, phone, whatsapp_number").eq("id", leadId).single()
         const target = lead?.whatsapp_number || lead?.phone
         // Per-branch WhatsApp: the follow-up goes from the BRANCH's WABA
         // number (and passes the branch quota gate), or the company number.
-        const waBranch = await branchWhatsAppCtx(call.branch_id)
+        const waBranch = await branchWhatsAppCtx(typeof call.branch_id === "string" ? call.branch_id : null)
 
         if (target && outcome === "resolved" && transcript.length > 0) {
           const result = await sendCallFollowUp(target, lead?.name || "there", waBranch)
           await db.from("comm_logs").insert({
-            lead_id: call.lead_id,
+            lead_id: leadId,
             type: "whatsapp",
             summary: result.ok ? "Post-call WhatsApp follow-up sent" : `Post-call WhatsApp follow-up failed: ${result.error}`,
             outcome: result.ok ? "sent" : "failed",
@@ -139,7 +155,9 @@ export async function POST(req: NextRequest) {
     }
 
     if (callStatus === "completed" && transcript.length > 0) {
-      const transcriptText = transcript.map((t: any) => `${t.role === "ai" ? "Priya" : "Customer"}: ${t.text}`).join("\n")
+      const transcriptText = transcript
+        .map((t) => `${t.role === "ai" ? "Priya" : "Customer"}: ${typeof t.text === "string" ? t.text : ""}`)
+        .join("\n")
       try {
         const summary = await generateLeadSummary(transcriptText)
         await db.from("voice_calls").update({ ai_summary: summary }).eq("twilio_call_sid", callSid)

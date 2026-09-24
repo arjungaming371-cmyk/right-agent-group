@@ -62,10 +62,10 @@ async function sarvamTranscribe(buffer: Buffer, language?: string): Promise<stri
       console.error(`sarvamTranscribe error: HTTP ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`)
       return ""
     }
-    const data: any = await res.json().catch(() => ({}))
-    return typeof data.transcript === "string" ? data.transcript.trim() : ""
-  } catch (e: any) {
-    console.error("sarvamTranscribe error:", e.message)
+    const data = (await res.json().catch(() => null)) as { transcript?: unknown } | null
+    return typeof data?.transcript === "string" ? data.transcript.trim() : ""
+  } catch (e) {
+    console.error("sarvamTranscribe error:", e instanceof Error ? e.message : e)
     return ""
   }
 }

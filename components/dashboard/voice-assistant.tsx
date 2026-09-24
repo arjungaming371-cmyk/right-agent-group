@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useEffect, useRef, useCallback } from "react"
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import {
   Mic,
   MicOff,
@@ -35,8 +35,37 @@ import {
   Loader2,
 } from "lucide-react"
 import { useToast } from "@/components/ui/toast"
+import {
+  type SpeechRecognitionLike,
+  type SpeechRecognitionEventLike,
+  type SpeechRecognitionErrorEventLike,
+  getSpeechRecognitionCtor,
+} from "@/lib/web-speech"
 
 export type VoiceAssistantLanguage = "english" | "telugu" | "hindi"
+
+/** Machine-readable dashboard-action proposal parsed out of a Priya reply. */
+export interface ActionProposal {
+  type: string
+  title?: string
+  description?: string
+  payload?: Record<string, unknown>
+}
+
+/** Extract (and JSON-validate) the ```action:proposal block from a reply.
+ *  Legacy fence labels (json:action / action) are accepted so older chat
+ *  history keeps rendering its proposal cards. */
+function parseActionProposal(reply: string): ActionProposal | null {
+  const match = reply.match(/```(?:action:proposal|json:action|action)\s*([\s\S]*?)\s*```/)
+  if (!match) return null
+  try {
+    const parsed: unknown = JSON.parse(match[1])
+    if (!parsed || typeof parsed !== "object" || typeof (parsed as ActionProposal).type !== "string") return null
+    return parsed as ActionProposal
+  } catch {
+    return null
+  }
+}
 
 export interface ChatSummary {
   id: string
@@ -86,7 +115,7 @@ const QUICK_PROMPTS: Record<VoiceAssistantLanguage, { title: string; query: stri
 interface Message {
   role: "user" | "assistant"
   text: string
-  actionProposal?: any
+  actionProposal?: ActionProposal | null
   timestamp: string
 }
 
@@ -117,12 +146,32 @@ function cleanMarkdownForSpeech(text: string): string {
     .trim()
 }
 
-// Client-side Web Audio synthesis chimes (0 external files needed)
+// Client-side Web Audio synthesis chimes (0 external files needed).
+// PERF/LEAK FIX: this used to construct a FRESH AudioContext per chime and
+// never close it — browsers cap concurrent AudioContexts (~6 in Chrome), so
+// after a handful of hands-free turns every chime silently died (swallowed
+// by the catch below). One lazily-created context is now reused for the
+// whole session.
+let chimeCtx: AudioContext | null = null
+function getChimeCtx(): AudioContext | null {
+  try {
+    if (!chimeCtx || chimeCtx.state === "closed") {
+      const Ctor = window.AudioContext ??
+        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+      if (!Ctor) return null
+      chimeCtx = new Ctor()
+    }
+    if (chimeCtx.state === "suspended") void chimeCtx.resume().catch(() => {})
+    return chimeCtx
+  } catch {
+    return null
+  }
+}
+
 function playAudioChime(type: "listen_start" | "listen_stop" | "reply_ready") {
   try {
-    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext
-    if (!AudioCtx) return
-    const ctx = new AudioCtx()
+    const ctx = getChimeCtx()
+    if (!ctx) return
     const osc = ctx.createOscillator()
     const gain = ctx.createGain()
     osc.connect(gain)
@@ -145,7 +194,10 @@ function playAudioChime(type: "listen_start" | "listen_stop" | "reply_ready") {
       osc.start(ctx.currentTime)
       osc.stop(ctx.currentTime + 0.16)
     }
-  } catch {}
+  } catch {
+    // Chimes are decoration — a blocked/degraded audio graph must never
+    // break the assistant's actual listen/think/speak loop.
+  }
 }
 
 export default function VoiceAssistant({
@@ -183,7 +235,7 @@ export default function VoiceAssistant({
   const [activeChatTitle, setActiveChatTitle] = useState<string>("")
   const [loadingChat, setLoadingChat] = useState(false)
 
-  const recognitionRef = useRef<any>(null)
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const audioUrlRef = useRef<string | null>(null)
   const isListeningRef = useRef(false)
@@ -191,6 +243,59 @@ export default function VoiceAssistant({
   const scrollEndRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const animFrameRef = useRef<number | null>(null)
+  // Pending hands-free re-listen timer (scheduled after a reply finishes).
+  // Stored so stopAll()/unmount can cancel it — otherwise closing the
+  // assistant during the 500-600ms window would still fire startListening()
+  // and reopen the microphone with the UI already gone.
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // ---- latest-value refs (stale-closure fix) ----
+  // startListening is memoized on [language] and recognition.onend captures
+  // whatever handleSendMessage existed at THAT render. In hands-free mode
+  // every subsequent voice turn therefore ran against the very first
+  // render's state: history sent to the API was frozen at just the greeting,
+  // and a chat created mid-session was never seen (every turn could even
+  // create a NEW chat row). The handlers below read the live values through
+  // these refs instead of closed-over state.
+  const messagesRef = useRef(messages)
+  const chatIdRef = useRef(chatId)
+  const languageRef = useRef(language)
+  const mutedRef = useRef(muted)
+  const continuousModeRef = useRef(continuousMode)
+  const isOpenRef = useRef(isOpen)
+  const showHistoryDrawerRef = useRef(showHistoryDrawer)
+  const stateRef = useRef(state)
+  messagesRef.current = messages
+  chatIdRef.current = chatId
+  languageRef.current = language
+  mutedRef.current = muted
+  continuousModeRef.current = continuousMode
+  isOpenRef.current = isOpen
+  showHistoryDrawerRef.current = showHistoryDrawer
+  stateRef.current = state
+  // The message-sending implementation itself is replaced on EVERY render —
+  // async flows (recognition.onend, speakResponse continuation) call it
+  // through the ref and always hit the freshest logic.
+  const sendMessageRef = useRef<(text: string) => void>(() => {})
+
+  function clearReconnectTimer() {
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current)
+      reconnectTimerRef.current = null
+    }
+  }
+
+  /** Schedule the next hands-free listen; cancelled by stopAll/close. Muted
+   *  mode still keeps listening — mute silences playback, not the loop. */
+  function scheduleReconnect(delayMs: number) {
+    clearReconnectTimer()
+    reconnectTimerRef.current = setTimeout(() => {
+      reconnectTimerRef.current = null
+      if (continuousModeRef.current && isOpenRef.current) {
+        void startListening()
+      }
+    }, delayMs)
+  }
 
   // Load past chats
   const loadChats = useCallback(async () => {
@@ -198,8 +303,9 @@ export default function VoiceAssistant({
     try {
       const res = await fetch("/api/assistant/chats")
       if (res.ok) {
-        const data = await res.json()
-        setChats(data.chats || [])
+        const data: unknown = await res.json().catch(() => null)
+        const chats = (data as { chats?: unknown } | null)?.chats
+        setChats(Array.isArray(chats) ? (chats as ChatSummary[]) : [])
       }
     } catch (e) {
       console.warn("Failed to load past chats:", e)
@@ -229,7 +335,52 @@ export default function VoiceAssistant({
     }
   }, [isOpen])
 
+  // Keyboard shortcuts. The UI always PROMISED these ("Close (Esc)" title,
+  // "press Spacebar to speak" hint) but no handler ever existed — dead
+  // affordances. Esc: close drawer first, then the assistant. Spacebar:
+  // push-to-talk toggle, only when NOT typing in the text input (the
+  // original hint's intent) and never with modifiers.
+  useEffect(() => {
+    if (!isOpen) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault()
+        // Read the drawer state through its ref — handlers must not run side
+        // effects inside setState updaters (StrictMode double-invokes them).
+        if (showHistoryDrawerRef.current) {
+          setShowHistoryDrawer(false)
+        } else {
+          stopAll()
+          onClose()
+        }
+        return
+      }
+      if (e.key === " " && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        const target = e.target as HTMLElement | null
+        const tag = target?.tagName
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target?.isContentEditable) return
+        e.preventDefault()
+        const s = stateRef.current
+        if (s === "listening") stopListening()
+        else if (s === "speaking") stopSpeaking()
+        else if (s === "idle") void startListening()
+      }
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [isOpen, onClose])
+
+  // Unmount safety net: cancel the reconnect timer + abort any in-flight
+  // fetch so nothing fires after the component is gone.
+  useEffect(() => {
+    return () => {
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current)
+      abortControllerRef.current?.abort()
+    }
+  }, [])
+
   function stopAll() {
+    clearReconnectTimer()
     stopListening()
     stopSpeaking()
     if (abortControllerRef.current) {
@@ -253,9 +404,10 @@ export default function VoiceAssistant({
       window.speechSynthesis.cancel()
     }
     setPlayingMsgIndex(null)
-    if (state === "speaking") {
-      setState("idle")
-    }
+    // Functional update: stopSpeaking is called from audio event handlers
+    // registered renders ago — reading the raw `state` there was a stale
+    // read that could leave the state machine stuck on "speaking".
+    setState((s) => (s === "speaking" ? "idle" : s))
   }
 
   function startNewChat() {
@@ -285,20 +437,16 @@ export default function VoiceAssistant({
     try {
       const res = await fetch(`/api/assistant/chats/${c.id}`)
       if (!res.ok) throw new Error("Failed to load chat")
-      const data = await res.json()
-      const loaded: Message[] = (data.messages || []).map((m: any) => {
-        let actionProposal = null
-        const proposalMatch = m.content.match(/```(?:action:proposal|json:action|action)\s*([\s\S]*?)\s*```/)
-        if (proposalMatch) {
-          try {
-            actionProposal = JSON.parse(proposalMatch[1])
-          } catch {}
-        }
+      const data: unknown = await res.json()
+      const rawMessages = (data as { messages?: unknown } | null)?.messages
+      if (!Array.isArray(rawMessages)) throw new Error("Malformed chat payload")
+      const loaded: Message[] = (rawMessages as { role?: unknown; content?: unknown; created_at?: unknown }[]).map((m) => {
+        const content = typeof m.content === "string" ? m.content : ""
         return {
-          role: m.role as "user" | "assistant",
-          text: m.content,
-          actionProposal,
-          timestamp: m.created_at
+          role: m.role === "user" ? ("user" as const) : ("assistant" as const),
+          text: content,
+          actionProposal: parseActionProposal(content),
+          timestamp: typeof m.created_at === "string"
             ? new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
             : "Earlier",
         }
@@ -324,15 +472,22 @@ export default function VoiceAssistant({
 
   async function deleteChat(id: string, e?: React.MouseEvent) {
     if (e) e.stopPropagation()
+    // Optimistic UI, but HONEST: the previous version removed the row, fired
+    // the DELETE and toasted success without ever checking res.ok — a server
+    // failure left the chat deleted on screen but alive in the DB (a ghost
+    // that reappeared on next load, telling the user the delete lied).
+    const snapshot = chats
     setChats((prev) => prev.filter((c) => c.id !== id))
     setConfirmDeleteId(null)
     if (chatId === id) {
       startNewChat()
     }
     try {
-      await fetch(`/api/assistant/chats/${id}`, { method: "DELETE" })
+      const res = await fetch(`/api/assistant/chats/${id}`, { method: "DELETE" })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
       toast.success("Conversation deleted")
     } catch {
+      setChats(snapshot)
       toast.error("Failed to delete chat")
     }
   }
@@ -357,9 +512,7 @@ export default function VoiceAssistant({
       } catch {}
       recognitionRef.current = null
     }
-    if (state === "listening") {
-      setState("idle")
-    }
+    setState((s) => (s === "listening" ? "idle" : s))
   }
 
   // Canvas 60fps organic wave visualizer animation
@@ -430,11 +583,12 @@ export default function VoiceAssistant({
 
   // Speech-to-Text handler
   const startListening = useCallback(async () => {
+    if (!isOpenRef.current) return
+    clearReconnectTimer()
     stopSpeaking()
     playAudioChime("listen_start")
 
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+    const SpeechRecognition = getSpeechRecognitionCtor()
 
     if (!SpeechRecognition) {
       toast.error("Speech recognition is not supported in this browser. Please use Chrome or Edge.")
@@ -459,7 +613,7 @@ export default function VoiceAssistant({
       const recognition = new SpeechRecognition()
       recognition.continuous = false
       recognition.interimResults = true
-      recognition.lang = LANG_CONFIG[language].bcp47
+      recognition.lang = LANG_CONFIG[languageRef.current].bcp47
       recognition.maxAlternatives = 1
 
       recognition.onstart = () => {
@@ -468,19 +622,18 @@ export default function VoiceAssistant({
         setUserTranscript("")
       }
 
-      recognition.onresult = (event: any) => {
+      recognition.onresult = (event: SpeechRecognitionEventLike) => {
         let interim = ""
         let final = ""
         for (let i = event.resultIndex; i < event.results.length; ++i) {
-          const trans = event.results[i][0].transcript
+          const trans = event.results[i][0]?.transcript ?? ""
           if (event.results[i].isFinal) final += trans
           else interim += trans
         }
-        const currentText = final || interim
-        setUserTranscript(currentText)
+        setUserTranscript(final || interim)
       }
 
-      recognition.onerror = (event: any) => {
+      recognition.onerror = (event: SpeechRecognitionErrorEventLike) => {
         if (event.error !== "no-speech" && event.error !== "aborted") {
           console.warn("Speech recognition error:", event.error)
         }
@@ -491,7 +644,10 @@ export default function VoiceAssistant({
         isListeningRef.current = false
         setUserTranscript((latestText) => {
           if (latestText && latestText.trim().length > 1) {
-            handleSendMessage(latestText.trim())
+            // Read through the ref: the recognition object (and therefore this
+            // handler) was created by an OLD render's startListening — calling
+            // the captured function directly sent FROZEN history to the API.
+            sendMessageRef.current(latestText.trim())
             return ""
           } else {
             setState("idle")
@@ -502,7 +658,7 @@ export default function VoiceAssistant({
 
       recognitionRef.current = recognition
       recognition.start()
-    } catch (err: any) {
+    } catch (err) {
       console.error("Failed to start speech recognition:", err)
       setState("idle")
     }
@@ -510,10 +666,12 @@ export default function VoiceAssistant({
 
   // Play audio speech output using /api/tts or fallback
   const speakResponse = useCallback(async (spokenText: string) => {
-    if (muted || !spokenText.trim()) {
+    // Live values via refs — speakResponse may be invoked from handlers bound
+    // to renders-old audio/utterance objects.
+    if (mutedRef.current || !spokenText.trim()) {
       setState("idle")
-      if (continuousMode && isOpen) {
-        setTimeout(() => startListening(), 600)
+      if (continuousModeRef.current && isOpenRef.current) {
+        scheduleReconnect(600)
       }
       return
     }
@@ -527,7 +685,7 @@ export default function VoiceAssistant({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           text: spokenText.slice(0, 480),
-          language: language,
+          language: languageRef.current,
         }),
       })
 
@@ -540,8 +698,8 @@ export default function VoiceAssistant({
 
         audio.onended = () => {
           stopSpeaking()
-          if (continuousMode && isOpen) {
-            setTimeout(() => startListening(), 500)
+          if (continuousModeRef.current && isOpenRef.current) {
+            scheduleReconnect(500)
           }
         }
 
@@ -552,12 +710,12 @@ export default function VoiceAssistant({
         await audio.play()
         return
       }
-    } catch (e: any) {
-      console.warn("TTS endpoint failed, using browser speech synthesis fallback:", e.message)
+    } catch (e) {
+      console.warn("TTS endpoint failed, using browser speech synthesis fallback:", e instanceof Error ? e.message : e)
     }
 
     fallbackSpeechSynthesis(spokenText)
-  }, [muted, language, continuousMode, isOpen, startListening])
+  }, [isOpen])
 
   function fallbackSpeechSynthesis(text: string) {
     if (typeof window === "undefined" || !window.speechSynthesis) {
@@ -567,13 +725,13 @@ export default function VoiceAssistant({
 
     window.speechSynthesis.cancel()
     const utterance = new SpeechSynthesisUtterance(text.slice(0, 320))
-    utterance.lang = LANG_CONFIG[language].bcp47
+    utterance.lang = LANG_CONFIG[languageRef.current].bcp47
     utterance.rate = 1.02
 
     utterance.onend = () => {
-      setState("idle")
-      if (continuousMode && isOpen) {
-        setTimeout(() => startListening(), 500)
+      setState((s) => (s === "speaking" ? "idle" : s))
+      if (continuousModeRef.current && isOpenRef.current) {
+        scheduleReconnect(500)
       }
     }
 
@@ -584,7 +742,10 @@ export default function VoiceAssistant({
     window.speechSynthesis.speak(utterance)
   }
 
-  // Query assistant
+  // Query assistant. The implementation is assigned to sendMessageRef on
+  // every render (see the latest-value refs above) so hands-free voice turns
+  // and reply-completion continuations always execute THIS render's version
+  // — with live messages history and live chatId.
   async function handleSendMessage(text: string) {
     if (!text.trim()) return
 
@@ -598,8 +759,9 @@ export default function VoiceAssistant({
     try {
       abortControllerRef.current = new AbortController()
 
-      // Ensure an active chat session exists so messages persist to database
-      let activeChatId = chatId
+      // Ensure an active chat session exists so messages persist to database.
+      // Reads the CURRENT chatId (not the memoization-frozen one).
+      let activeChatId = chatIdRef.current
       if (!activeChatId) {
         try {
           const chatRes = await fetch("/api/assistant/chats", {
@@ -608,11 +770,12 @@ export default function VoiceAssistant({
             body: JSON.stringify({ title: text.slice(0, 55) }),
           })
           if (chatRes.ok) {
-            const chatData = await chatRes.json()
-            if (chatData?.chat?.id) {
-              activeChatId = chatData.chat.id
+            const chatData: unknown = await chatRes.json()
+            const created = (chatData as { chat?: { id?: unknown; title?: unknown } } | null)?.chat
+            if (created && typeof created.id === "string") {
+              activeChatId = created.id
               setChatId(activeChatId)
-              setActiveChatTitle(chatData.chat.title || text.slice(0, 55))
+              if (typeof created.title === "string") setActiveChatTitle(created.title)
             }
           }
         } catch (e) {
@@ -625,7 +788,7 @@ export default function VoiceAssistant({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: text,
-          history: messages.slice(-6).map((m) => ({ role: m.role, content: m.text })),
+          history: messagesRef.current.slice(-6).map((m) => ({ role: m.role, content: m.text })),
           chatId: activeChatId,
         }),
         signal: abortControllerRef.current.signal,
@@ -645,13 +808,7 @@ export default function VoiceAssistant({
         }
       }
 
-      let actionProposal = null
-      const proposalMatch = fullReply.match(/```action:proposal\s*([\s\S]*?)\s*```/)
-      if (proposalMatch) {
-        try {
-          actionProposal = JSON.parse(proposalMatch[1])
-        } catch {}
-      }
+      const actionProposal = parseActionProposal(fullReply)
 
       const assistantMsg: Message = {
         role: "assistant",
@@ -663,12 +820,14 @@ export default function VoiceAssistant({
       setMessages((prev) => [...prev, assistantMsg])
 
       // Refresh chat list in background to reflect updated titles & timestamps
-      loadChats()
+      void loadChats()
 
       const spokenText = cleanMarkdownForSpeech(fullReply)
-      speakResponse(spokenText)
-    } catch (e: any) {
-      if (e.name !== "AbortError") {
+      void speakResponse(spokenText)
+    } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") {
+        setState("idle")
+      } else {
         console.error("Voice assistant error:", e)
         const errMsg = "I encountered a network issue while retrieving CRM data. Please ask me again."
         setMessages((prev) => [
@@ -679,16 +838,15 @@ export default function VoiceAssistant({
             timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
           },
         ])
-        speakResponse(errMsg)
-      } else {
-        setState("idle")
+        void speakResponse(errMsg)
       }
     }
   }
+  sendMessageRef.current = (text) => { void handleSendMessage(text) }
 
   // Approve action proposal
-  async function executeAction(proposal: any) {
-    if (!proposal) return
+  async function executeAction(proposal: ActionProposal) {
+    if (!proposal?.type) return
     setExecutingAction(true)
     try {
       const res = await fetch("/api/assistant/action", {
@@ -696,18 +854,21 @@ export default function VoiceAssistant({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           actionType: proposal.type,
-          payload: proposal.payload,
+          payload: proposal.payload ?? {},
         }),
       })
 
-      const data = await res.json()
+      // res.json() used to be called unguarded — a 502 HTML page from a
+      // proxy threw SyntaxError here and surfaced as the misleading
+      // "Network error while executing action" toast.
+      const data = (await res.json().catch(() => null)) as { message?: string; error?: string } | null
       if (res.ok) {
         setActionDone(true)
-        toast.success(data.message || "Command executed successfully!")
+        toast.success(data?.message || "Command executed successfully!")
         window.dispatchEvent(new CustomEvent("rag:refresh"))
-        speakResponse("Done. The action has been executed and your dashboard is updated.")
+        void speakResponse("Done. The action has been executed and your dashboard is updated.")
       } else {
-        toast.error(data.error || "Execution failed")
+        toast.error(data?.error || `Execution failed (HTTP ${res.status})`)
       }
     } catch {
       toast.error("Network error while executing action")
@@ -1559,7 +1720,7 @@ export default function VoiceAssistant({
                             </div>
                           </div>
                           <button
-                            onClick={() => executeAction(m.actionProposal)}
+                            onClick={() => { if (m.actionProposal) void executeAction(m.actionProposal) }}
                             disabled={executingAction}
                             style={{
                               background: "linear-gradient(135deg, #6366f1 0%, #a855f7 100%)",

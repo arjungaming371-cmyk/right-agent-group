@@ -58,6 +58,18 @@ export function formatCallDuration(totalSeconds: number): string {
  * @param from     the caller's WhatsApp id (E.164 digits) — lead matching
  * @param outcome  mapped terminate status
  */
+// Transcript turn shape stored in voice_calls.transcript (jsonb array).
+type TranscriptTurn = { role?: unknown; text?: unknown }
+
+type VoiceCallRow = {
+  lead_id: string | null
+  duration: unknown
+  branch_id: string | null
+  transcript: unknown
+  followup_sent: boolean | null
+  ai_summary: string | null
+}
+
 export async function finalizeWhatsAppCall(opts: {
   callSid: string
   callId: string
@@ -69,16 +81,16 @@ export async function finalizeWhatsAppCall(opts: {
   if (!callId || !from) return
 
   // ---- 1. The call's own row (turn start created it for ANSWERED calls) ----
-  let call: any = null
+  let call: VoiceCallRow | null = null
   try {
     const res = await query(
       `SELECT lead_id, duration, branch_id, transcript, followup_sent, ai_summary
          FROM voice_calls WHERE twilio_call_sid = $1 LIMIT 1`,
       [callSid]
     )
-    call = res.rows[0] || null
-  } catch (e: any) {
-    console.error("wa finalize: voice_calls lookup failed:", e.message)
+    call = (res.rows[0] as VoiceCallRow) || null
+  } catch (e) {
+    console.error("wa finalize: voice_calls lookup failed:", e instanceof Error ? e.message : e)
   }
 
   // ---- 2. Resolve the lead (answered: from the call row; missed: by phone) ----
@@ -109,8 +121,8 @@ export async function finalizeWhatsAppCall(opts: {
           .single()
         leadId = created?.data?.id || null
       }
-    } catch (e: any) {
-      console.error("wa finalize: lead resolve failed:", e.message)
+    } catch (e) {
+      console.error("wa finalize: lead resolve failed:", e instanceof Error ? e.message : e)
     }
   }
 
@@ -139,8 +151,8 @@ export async function finalizeWhatsAppCall(opts: {
     // A duplicate bubble means this call was already finalized — stop here
     // so Meta webhook retries can't double-send follow-up templates.
     if ((claim.rowCount || 0) === 0) return
-  } catch (e: any) {
-    if (e?.code === "42703") {
+  } catch (e) {
+    if (e && typeof e === "object" && "code" in e && (e as { code?: unknown }).code === "42703") {
       // Pre-rich-chat DB (no msg_type column) — insert the plain row.
       await query(
         `INSERT INTO whatsapp_messages
@@ -150,15 +162,15 @@ export async function finalizeWhatsAppCall(opts: {
         [waCallRowId, leadId, `+${digits}`, bubbleContent, answered ? "logged" : "received"]
       ).catch(() => {})
     } else {
-      console.error("wa finalize: bubble insert failed:", e.message)
+      console.error("wa finalize: bubble insert failed:", e instanceof Error ? e.message : e)
     }
   }
 
   if (!leadId) return
 
   // ---- 4. Transcript sentiment + lead status (same rules as Exotel) ----
-  const transcript = Array.isArray(call?.transcript) ? call.transcript : []
-  const allText = transcript.map((t: any) => t.text ?? "").join(" ").toLowerCase()
+  const transcript = Array.isArray(call?.transcript) ? (call.transcript as TranscriptTurn[]) : []
+  const allText = transcript.map((t) => (typeof t.text === "string" ? t.text : "")).join(" ").toLowerCase()
   const positiveWords = /yes\b|interested|please|confirm|okay|ok\b|sure|good|great/
   const negativeWords = /\bno\b|not interested|busy|later|cancel|dont|nope/
   const sentiment = !answered
@@ -199,8 +211,8 @@ export async function finalizeWhatsAppCall(opts: {
           [callSid]
         )
         claimWon = (claim.rowCount || 0) > 0
-      } catch (e: any) {
-        console.error("wa finalize: followup claim error:", e.message)
+      } catch (e) {
+        console.error("wa finalize: followup claim error:", e instanceof Error ? e.message : e)
       }
     } else {
       // No voice_calls row (never answered): the bubble-row dedupe above is
@@ -233,7 +245,9 @@ export async function finalizeWhatsAppCall(opts: {
 
   // ---- 6. Summary + comm_logs + Lead Brain (completed calls only) ----
   if (answered && transcript.length > 0) {
-    const transcriptText = transcript.map((t: any) => `${t.role === "ai" ? "Priya" : "Customer"}: ${t.text}`).join("\n")
+    const transcriptText = transcript
+      .map((t) => `${t.role === "ai" ? "Priya" : "Customer"}: ${typeof t.text === "string" ? t.text : ""}`)
+      .join("\n")
     try {
       const summary = await generateLeadSummary(transcriptText)
       await db.from("voice_calls").update({ ai_summary: summary }).eq("twilio_call_sid", callSid)

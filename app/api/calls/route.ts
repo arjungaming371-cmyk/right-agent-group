@@ -5,6 +5,25 @@ import { makeCall } from "@/lib/exotel"
 import { requireModuleOrRole } from "@/lib/auth"
 import { sessionBranchId, checkQuota, recordUsage } from "@/lib/branches"
 import { checkCallCompliance } from "@/lib/compliance"
+import { readJson, sanitizePhone, sanitizeText } from "@/lib/api-route"
+
+// Shape shared by both sources of the WhatsApp tab: voice_calls rows and the
+// missed-call bubbles mapped from whatsapp_messages (see GET below).
+type CallRow = {
+  id: string
+  lead_id: string | null
+  twilio_call_sid: string | null
+  direction: string
+  status: string
+  duration: number | null
+  outcome: string | null
+  created_at: string
+  phone: string | null
+  branch_id: string | null
+  leads: { name: string; phone: string; source: string | null } | null
+}
+
+const CALL_LANGUAGES = new Set(["english", "hindi", "telugu"])
 
 export async function GET(req: NextRequest) {
   const session = await requireModuleOrRole(req, "voice", ["admin", "agent", "viewer", "branch_manager"])
@@ -21,7 +40,7 @@ export async function GET(req: NextRequest) {
   if (channel === "whatsapp") q = q.like("twilio_call_sid", "wacall-%")
   const { data, error } = await q.order("created_at", { ascending: false }).limit(100)
   if (error) return apiError(error)
-  let rows: any[] = data ?? []
+  let rows = (data ?? []) as CallRow[]
 
   // WhatsApp Calls tab: MISSED / declined / failed WhatsApp calls never
   // reach voice_calls (no session → no turn-start row), but finalizeWhatsAppCall
@@ -39,7 +58,15 @@ export async function GET(req: NextRequest) {
       .like("wa_message_id", "wacall-%")
     if (branchId) mb = mb.eq("branch_id", branchId)
     const missedRes = await mb.order("created_at", { ascending: false }).limit(100)
-    const missed = ((missedRes.data ?? []) as any[]).map((m) => ({
+    const missed = ((missedRes.data ?? []) as {
+      wa_message_id?: string | null
+      id: string
+      lead_id?: string | null
+      created_at: string
+      phone_number?: string | null
+      branch_id?: string | null
+      leads?: CallRow["leads"]
+    }[]).map((m): CallRow => ({
       id: m.wa_message_id || m.id,
       lead_id: m.lead_id ?? null,
       twilio_call_sid: m.wa_message_id || null,
@@ -63,8 +90,14 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const session = await requireModuleOrRole(req, "voice", ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
-  const { leadId, phone, language, instructions } = await req.json()
+  // readJson (not bare req.json()): a malformed/huge body used to throw and
+  // surface as an HTML 500; now it degrades to a 400-style validation path.
+  const body = (await readJson(req)) as { leadId?: unknown; phone?: unknown; language?: unknown; instructions?: unknown } | null
+  const phone = sanitizePhone(body?.phone)
   if (!phone) return NextResponse.json({ error: "phone required" }, { status: 400 })
+  const leadId = typeof body?.leadId === "string" && body.leadId.length <= 64 ? body.leadId : null
+  const language = typeof body?.language === "string" && CALL_LANGUAGES.has(body.language) ? body.language : "telugu"
+  const instructions = sanitizeText(body?.instructions, 1000)
   const compliance = await checkCallCompliance({ leadId, phone })
   if (!compliance.allowed) {
     return NextResponse.json({ error: compliance.reason }, { status: 403 })
@@ -83,19 +116,19 @@ export async function POST(req: NextRequest) {
     const internal = process.env.APP_INTERNAL_URL || "http://127.0.0.1:3000"
     fetch(`${internal}/api/warmup`, { method: "POST" }).catch(() => {})
 
-    const call = await makeCall(phone, leadId ?? "", language ?? "telugu", instructions, branchId)
+    const call = await makeCall(phone, leadId ?? "", language, instructions, branchId)
     await db.from("voice_calls").insert({
-      lead_id: leadId ?? null,
+      lead_id: leadId,
       twilio_call_sid: call.sid,
       direction: "outbound",
       status: "initiated",
-      language: language ?? "telugu",
+      language,
       phone,
       branch_id: branchId,
       // Exotel's voicebot bridge only ever knows the call SID — it can't
       // hand back custom text per turn — so this is stored here and read
       // back by /api/calls/turn instead of being passed through the call.
-      instructions: instructions?.trim() || null,
+      instructions: instructions || null,
     })
     if (branchId) recordUsage(branchId, "call")
     if (leadId) {

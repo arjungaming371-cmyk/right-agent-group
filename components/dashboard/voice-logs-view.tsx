@@ -14,9 +14,10 @@ import { SkeletonList } from "../ui/skeleton"
 import VoiceDictation from "../ui/voice-dictation"
 import { smartFilter } from "@/lib/smart-search"
 
+type TranscriptTurn = { text?: unknown; content?: unknown; role?: unknown }
 type Call = {
   id: string; phone: string; direction: string; duration: number
-  status: string; sentiment: string; outcome: string; transcript: any[]
+  status: string; sentiment: string; outcome: string; transcript: TranscriptTurn[]
   recording_url: string; language: string; created_at: string
   leads?: { name: string; phone: string; source?: string | null }
 }
@@ -62,7 +63,7 @@ export default function VoiceLogsView({ role }: { role: Role }) {
       c.sentiment,
       c.direction,
       c.language,
-      Array.isArray(c.transcript) ? c.transcript.map((t: any) => t.text || t.content || "").join(" ") : "",
+      Array.isArray(c.transcript) ? c.transcript.map((t: TranscriptTurn) => (typeof t.text === "string" ? t.text : typeof t.content === "string" ? t.content : "")).join(" ") : "",
     ])
   }, [calls, search])
 
@@ -238,8 +239,17 @@ export default function VoiceLogsView({ role }: { role: Role }) {
     if (!silent || calls.length === 0) setLoading(true)
     try {
       const [cr, lr] = await Promise.all([fetch("/api/calls"), fetch("/api/leads")])
-      if (cr.ok) setCalls(await cr.json())
-      if (lr.ok) setLeads(await lr.json())
+      // Array.isArray guards: an error-object body (e.g. {error:'unauthorized'})
+      // assigned to state used to crash the next render's .filter with
+      // "calls.filter is not a function".
+      if (cr.ok) {
+        const data: unknown = await cr.json()
+        setCalls(Array.isArray(data) ? (data as Call[]) : [])
+      }
+      if (lr.ok) {
+        const data: unknown = await lr.json()
+        setLeads(Array.isArray(data) ? (data as Lead[]) : [])
+      }
     } finally {
       setLoading(false)
     }
@@ -320,7 +330,7 @@ export default function VoiceLogsView({ role }: { role: Role }) {
 
           <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
             {["lead", "manual"].map(m => (
-              <button key={m} onClick={() => setMode(m as any)} style={{
+              <button key={m} onClick={() => setMode(m as "lead" | "manual")} style={{
                 padding: "6px 14px", borderRadius: 8, fontSize: 13,
                 border: "1px solid var(--border)",
                 background: mode === m ? "rgba(59,130,246,0.15)" : "transparent",
@@ -823,12 +833,12 @@ export default function VoiceLogsView({ role }: { role: Role }) {
               <div>
                 <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 12, fontWeight: 600, letterSpacing: "0.05em" }}>TRANSCRIPT</div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {selected.transcript.map((t: any, i: number) => (
+                  {selected.transcript.map((t: TranscriptTurn, i: number) => (
                     <div key={i} style={{ display: "flex", gap: 12, padding: "8px 12px", borderRadius: 8, background: t.role === "ai" ? "rgba(59,130,246,0.08)" : "var(--overlay-soft)" }}>
                       <span style={{ fontSize: 12, fontWeight: 700, color: t.role === "ai" ? "var(--accent-blue)" : "var(--text-muted)", minWidth: 80, flexShrink: 0, textTransform: "uppercase" }}>
                         {t.role === "ai" ? "Priya" : "Customer"}
                       </span>
-                      <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>{t.text}</span>
+                      <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>{typeof t.text === "string" ? t.text : ""}</span>
                     </div>
                   ))}
                 </div>

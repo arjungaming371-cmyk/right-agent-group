@@ -58,11 +58,11 @@ async function sarvamSpeech(text: string, language: Language): Promise<Buffer | 
       signal: AbortSignal.timeout(20000),
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`)
-    const data: any = await res.json()
-    const wav = Buffer.from(Array.isArray(data?.audios) ? data.audios.join("") : "", "base64")
+    const data = (await res.json()) as { audios?: unknown }
+    const wav = Buffer.from(Array.isArray(data?.audios) ? (data.audios as string[]).join("") : "", "base64")
     return wav.length > 100 ? wav : null
-  } catch (e: any) {
-    console.error("Sarvam TTS error:", e.message)
+  } catch (e) {
+    console.error("Sarvam TTS error:", e instanceof Error ? e.message : e)
     return null
   }
 }
@@ -113,8 +113,8 @@ async function cartesiaSpeech(text: string, language: Language): Promise<Buffer 
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`)
     const wav = Buffer.from(await res.arrayBuffer())
     return wav.length > 100 ? wav : null
-  } catch (e: any) {
-    console.error("Cartesia TTS error:", e.message)
+  } catch (e) {
+    console.error("Cartesia TTS error:", e instanceof Error ? e.message : e)
     return null
   }
 }
@@ -145,8 +145,8 @@ async function elevenLabsSpeech(text: string): Promise<Buffer | null> {
     if (!res.ok) throw new Error(`ElevenLabs HTTP ${res.status}`)
     const buf = Buffer.from(await res.arrayBuffer())
     return buf.length > 1000 ? buf : null
-  } catch (e: any) {
-    console.error("ElevenLabs TTS error:", e.message)
+  } catch (e) {
+    console.error("ElevenLabs TTS error:", e instanceof Error ? e.message : e)
     return null
   }
 }
@@ -186,8 +186,8 @@ export async function checkTtsHealth(): Promise<{ ok: boolean; message: string }
       })
       if (!res.ok) return { ok: false, message: `ElevenLabs check failed: HTTP ${res.status}` }
       return { ok: true, message: `TTS working — ElevenLabs API (Model: eleven_turbo_v2_5, Voice ID: ${ELEVEN_VOICE_ID})` }
-    } catch (e: any) {
-      return { ok: false, message: `ElevenLabs service unreachable: ${e.message}` }
+    } catch (e) {
+      return { ok: false, message: `ElevenLabs service unreachable: ${e instanceof Error ? e.message : e}` }
     }
   }
 

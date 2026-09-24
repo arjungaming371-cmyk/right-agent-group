@@ -6,6 +6,29 @@ import { normalizePhone } from "@/lib/phone"
 
 export const dynamic = "force-dynamic"
 
+// The proposal payload arrives from the CLIENT — parsed out of the model's
+// reply (or tampered with by a compromised session). The system prompt is a
+// convention, NOT validation: every enum below is enforced server-side so a
+// hallucinated or malicious payload can't write arbitrary status strings,
+// script languages or security keys into the DB.
+const ACTION_TYPES = new Set([
+  "update_script", "add_kb_entry", "update_kb_entry", "delete_kb_entry",
+  "add_lead", "update_lead", "update_loan", "add_dnd", "remove_dnd", "toggle_security",
+])
+const SCRIPT_LANGUAGES = new Set(["base", "english", "hindi", "telugu"])
+const LEAD_STATUSES = new Set(["new", "contacted", "qualified", "callback", "lost"])
+const LOAN_STATUSES = new Set(["approved", "underwriting", "rejected", "documents_pending"])
+const PRODUCT_INTERESTS = new Set(["personal", "business", "home"])
+const KB_CATEGORIES = new Set(["Loans", "General", "FAQ", "Policies"])
+const SECURITY_KEY_RE = /^[a-z0-9_]{1,64}$/i
+
+function asRecord(v: unknown): Record<string, unknown> {
+  return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {}
+}
+function str(v: unknown, maxLen: number): string {
+  return typeof v === "string" ? v.trim().slice(0, maxLen) : ""
+}
+
 export async function POST(req: NextRequest) {
   // CRITICAL SECURITY: Only Admin commands can execute dashboard changes!
   const session = await requireRole(req, ["admin"])
@@ -17,17 +40,19 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const body = await req.json()
+    const body = asRecord(await req.json().catch(() => null))
     const { type, payload } = body
 
-    if (!type || !payload) {
-      return NextResponse.json({ error: "Action type and payload are required" }, { status: 400 })
+    if (typeof type !== "string" || !ACTION_TYPES.has(type) || !payload) {
+      return NextResponse.json({ error: "Valid action type and payload are required" }, { status: 400 })
     }
+    const p = asRecord(payload)
 
     switch (type) {
       case "update_script": {
-        const { language = "base", content } = payload
-        if (!content || !content.trim()) {
+        const language = typeof p.language === "string" && SCRIPT_LANGUAGES.has(p.language) ? p.language : "base"
+        const content = str(p.content, 20000)
+        if (!content) {
           return NextResponse.json({ error: "Script content cannot be empty" }, { status: 400 })
         }
 
@@ -60,18 +85,20 @@ export async function POST(req: NextRequest) {
       }
 
       case "add_kb_entry": {
-        const { title, content, category = "General", is_active = true } = payload
-        if (!title?.trim() || !content?.trim()) {
+        const title = str(p.title, 200)
+        const content = str(p.content, 4000)
+        const category = str(p.category, 100)
+        if (!title || !content) {
           return NextResponse.json({ error: "Title and content are required for Knowledge Base entry" }, { status: 400 })
         }
 
         const { data, error } = await db
           .from("knowledge_base")
           .insert({
-            title: title.trim().slice(0, 200),
-            content: content.trim().slice(0, 4000),
-            category: category ? category.slice(0, 100) : "General",
-            is_active: is_active !== false,
+            title,
+            content,
+            category: KB_CATEGORIES.has(category) ? category : "General",
+            is_active: p.is_active !== false,
             created_by: session.email,
           })
           .select()
@@ -88,14 +115,17 @@ export async function POST(req: NextRequest) {
       }
 
       case "update_kb_entry": {
-        const { id, title, content, category, is_active } = payload
+        const id = str(p.id, 64)
         if (!id) return NextResponse.json({ error: "Knowledge base entry id required" }, { status: 400 })
 
-        const updates: Record<string, any> = { updated_at: new Date().toISOString() }
-        if (typeof title === "string") updates.title = title.trim().slice(0, 200)
-        if (typeof content === "string") updates.content = content.trim().slice(0, 4000)
-        if (typeof category === "string") updates.category = category.slice(0, 100)
-        if (typeof is_active === "boolean") updates.is_active = is_active
+        const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
+        const title = typeof p.title === "string" ? p.title.trim().slice(0, 200) : ""
+        const content = typeof p.content === "string" ? p.content.trim().slice(0, 4000) : ""
+        const category = typeof p.category === "string" ? p.category.slice(0, 100) : ""
+        if (title) updates.title = title
+        if (content) updates.content = content
+        if (category && KB_CATEGORIES.has(category)) updates.category = category
+        if (typeof p.is_active === "boolean") updates.is_active = p.is_active
 
         const { data, error } = await db.from("knowledge_base").update(updates).eq("id", id).select().single()
         if (error) throw new Error(error.message)
@@ -109,7 +139,8 @@ export async function POST(req: NextRequest) {
       }
 
       case "delete_kb_entry": {
-        const { id, title } = payload
+        const id = str(p.id, 64)
+        const title = str(p.title, 200)
         if (!id) return NextResponse.json({ error: "Knowledge base entry id required" }, { status: 400 })
 
         await db.from("knowledge_base").delete().eq("id", id)
@@ -121,19 +152,29 @@ export async function POST(req: NextRequest) {
       }
 
       case "add_lead": {
-        let { name, phone, product_interest, loan_amount, notes, city, address } = payload
+        const name = str(p.name, 120)
+        const phone = str(p.phone, 20)
+        const notes = str(p.notes, 2000)
+        const city = str(p.city, 120)
+        const address = str(p.address, 500)
         if (!phone) {
           return NextResponse.json({ error: "Lead phone number is required" }, { status: 400 })
         }
 
         const normalized = normalizePhone(phone)
+        if (!normalized) {
+          return NextResponse.json({ error: "Phone number could not be parsed — use digits with country code" }, { status: 400 })
+        }
+        const loanAmountRaw = typeof p.loan_amount === "string" || typeof p.loan_amount === "number" ? Number(p.loan_amount) : null
+        const loanAmount = loanAmountRaw !== null && Number.isFinite(loanAmountRaw) && loanAmountRaw > 0 ? loanAmountRaw : null
+        const productInterest = typeof p.product_interest === "string" && PRODUCT_INTERESTS.has(p.product_interest) ? p.product_interest : "personal"
         const { data, error } = await db
           .from("leads")
           .insert({
-            name: name?.trim() || "New Lead",
+            name: name || "New Lead",
             phone: normalized,
-            product_interest: product_interest || "personal",
-            loan_amount: loan_amount ? parseFloat(loan_amount) : null,
+            product_interest: productInterest,
+            loan_amount: loanAmount,
             city: city || null,
             address: address || null,
             notes: notes || "Created via Ops Assistant",
@@ -154,9 +195,11 @@ export async function POST(req: NextRequest) {
       }
 
       case "add_dnd": {
-        const { phone, reason } = payload
+        const phone = str(p.phone, 20)
+        const reason = str(p.reason, 200)
         if (!phone) return NextResponse.json({ error: "Phone number required" }, { status: 400 })
         const normalized = normalizePhone(phone)
+        if (!normalized) return NextResponse.json({ error: "Phone number could not be parsed" }, { status: 400 })
 
         await query(
           `INSERT INTO dnd_suppression (phone, reason, added_by) VALUES ($1, $2, $3)
@@ -172,8 +215,12 @@ export async function POST(req: NextRequest) {
       }
 
       case "toggle_security": {
-        const { key, enabled } = payload
+        const key = str(p.key, 64)
+        const enabled = Boolean(p.enabled)
         if (!key) return NextResponse.json({ error: "Security key required" }, { status: 400 })
+        if (!SECURITY_KEY_RE.test(key)) {
+          return NextResponse.json({ error: "Invalid security key format" }, { status: 400 })
+        }
 
         await query(
           `INSERT INTO security_settings (key, enabled, updated_by, updated_at)
@@ -190,23 +237,32 @@ export async function POST(req: NextRequest) {
       }
 
       case "update_lead": {
-        const { id, phone, status, score, notes, product_interest, interested } = payload
+        const id = str(p.id, 64)
+        const phone = str(p.phone, 20)
         if (!id && !phone) {
           return NextResponse.json({ error: "Lead ID or phone number is required" }, { status: 400 })
         }
 
-        const updates: Record<string, any> = { updated_at: new Date().toISOString() }
-        if (typeof status === "string") updates.status = status
-        if (typeof score === "number") updates.score = score
-        if (typeof notes === "string") updates.notes = notes
-        if (typeof product_interest === "string") updates.product_interest = product_interest
-        if (typeof interested === "string") updates.interested = interested
+        const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
+        if (typeof p.status === "string") {
+          if (!LEAD_STATUSES.has(p.status)) {
+            return NextResponse.json({ error: `Invalid lead status "${p.status.slice(0, 40)}"` }, { status: 400 })
+          }
+          updates.status = p.status
+        }
+        if (typeof p.score === "number" && Number.isFinite(p.score)) {
+          updates.score = Math.max(0, Math.min(100, Math.round(p.score)))
+        }
+        if (typeof p.notes === "string") updates.notes = p.notes.slice(0, 2000)
+        if (typeof p.product_interest === "string" && PRODUCT_INTERESTS.has(p.product_interest)) updates.product_interest = p.product_interest
+        if (typeof p.interested === "string") updates.interested = p.interested.slice(0, 40)
 
         let result
         if (id) {
           result = await db.from("leads").update(updates).eq("id", id).select().single()
         } else {
           const norm = normalizePhone(phone)
+          if (!norm) return NextResponse.json({ error: "Phone number could not be parsed" }, { status: 400 })
           result = await db.from("leads").update(updates).eq("phone", norm).select().single()
         }
 
@@ -221,12 +277,17 @@ export async function POST(req: NextRequest) {
       }
 
       case "update_loan": {
-        const { id, status, notes } = payload
+        const id = str(p.id, 64)
         if (!id) return NextResponse.json({ error: "Loan application ID is required" }, { status: 400 })
 
-        const updates: Record<string, any> = { updated_at: new Date().toISOString() }
-        if (typeof status === "string") updates.status = status
-        if (typeof notes === "string") updates.notes = notes
+        const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
+        if (typeof p.status === "string") {
+          if (!LOAN_STATUSES.has(p.status)) {
+            return NextResponse.json({ error: `Invalid loan status "${p.status.slice(0, 40)}"` }, { status: 400 })
+          }
+          updates.status = p.status
+        }
+        if (typeof p.notes === "string") updates.notes = p.notes.slice(0, 2000)
 
         const { data, error } = await db.from("loan_applications").update(updates).eq("id", id).select().single()
         if (error) throw new Error(error.message)
@@ -240,9 +301,10 @@ export async function POST(req: NextRequest) {
       }
 
       case "remove_dnd": {
-        const { phone } = payload
+        const phone = str(p.phone, 20)
         if (!phone) return NextResponse.json({ error: "Phone number required" }, { status: 400 })
         const normalized = normalizePhone(phone)
+        if (!normalized) return NextResponse.json({ error: "Phone number could not be parsed" }, { status: 400 })
 
         await query(`DELETE FROM dnd_suppression WHERE phone = $1`, [normalized])
         logAudit("dnd removed via ops assistant", session.email, { phone: normalized })
@@ -253,10 +315,10 @@ export async function POST(req: NextRequest) {
       }
 
       default:
-        return NextResponse.json({ error: `Unknown action type: ${type}` }, { status: 400 })
+        return NextResponse.json({ error: "Unknown action type" }, { status: 400 })
     }
-  } catch (err: any) {
+  } catch (err) {
     console.error("Ops assistant action failed:", err)
-    return NextResponse.json({ error: err.message || "Failed to execute action" }, { status: 500 })
+    return NextResponse.json({ error: err instanceof Error ? err.message : "Failed to execute action" }, { status: 500 })
   }
 }

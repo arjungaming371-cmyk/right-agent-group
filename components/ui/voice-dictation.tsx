@@ -2,6 +2,12 @@
 
 import { useState, useRef, useEffect } from "react"
 import { Mic, Loader2 } from "lucide-react"
+import {
+  type SpeechRecognitionLike,
+  type SpeechRecognitionEventLike,
+  type SpeechRecognitionErrorEventLike,
+  getSpeechRecognitionCtor,
+} from "@/lib/web-speech"
 
 interface VoiceDictationProps {
   onTranscript: (text: string) => void
@@ -26,7 +32,7 @@ export function VoiceDictation({
   const [listening, setListening] = useState(false)
   const [initializing, setInitializing] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
-  const recognitionRef = useRef<any>(null)
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
   const onTranscriptRef = useRef(onTranscript)
 
   // Keep latest callback reference without tearing down recognition
@@ -46,8 +52,7 @@ export function VoiceDictation({
   }, [])
 
   const startListening = async () => {
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+    const SpeechRecognition = getSpeechRecognitionCtor()
 
     if (!SpeechRecognition) {
       alert("Voice speech recognition is not supported in this browser. Please use Google Chrome or Microsoft Edge.")
@@ -64,7 +69,7 @@ export function VoiceDictation({
         // release the stream right away so recognition can take over
         stream.getTracks().forEach((track) => track.stop())
       }
-    } catch (permErr: any) {
+    } catch (permErr) {
       console.warn("Microphone permission error:", permErr)
       setInitializing(false)
       alert("Microphone permission was denied. Please allow microphone access in your browser address bar and try again.")
@@ -90,14 +95,14 @@ export function VoiceDictation({
         setListening(true)
       }
 
-      recognition.onresult = (event: any) => {
+      recognition.onresult = (event: SpeechRecognitionEventLike) => {
         const transcript = event.results[0]?.[0]?.transcript
         if (transcript && onTranscriptRef.current) {
           onTranscriptRef.current(transcript)
         }
       }
 
-      recognition.onerror = (event: any) => {
+      recognition.onerror = (event: SpeechRecognitionErrorEventLike) => {
         console.warn("Speech recognition error:", event.error)
         setListening(false)
         setInitializing(false)
@@ -117,7 +122,7 @@ export function VoiceDictation({
 
       recognitionRef.current = recognition
       recognition.start()
-    } catch (err: any) {
+    } catch (err) {
       console.error("Failed to start SpeechRecognition:", err)
       setListening(false)
       setInitializing(false)
