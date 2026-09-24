@@ -21,7 +21,14 @@ import {
 import ChatList, { WhatsAppGlyph } from "./whatsapp/chat-list"
 import ChatWindow from "./whatsapp/chat-window"
 import { ContactInfo, NewChatModal, ForwardModal } from "./whatsapp/panels"
+import CallsList from "./whatsapp/calls-list"
+import { DiagnoseModal, runDiagnostic } from "./whatsapp/diagnose"
 import type { ListTab } from "./whatsapp/chat-list"
+import { Phone } from "lucide-react"
+
+// Left-panel bottom nav — real WhatsApp Web splits Chats | Calls; we do the
+// same two (Updates/Communities don't exist on the Cloud API).
+type PanelMode = "chats" | "calls"
 
 export default function WhatsAppView({ role }: { role: Role }) {
   const canEdit = role !== "viewer"
@@ -43,6 +50,9 @@ export default function WhatsAppView({ role }: { role: Role }) {
   const [calling, setCalling]       = useState(false)
   const [showNewChat, setShowNewChat] = useState(false)
   const [allLeads, setAllLeads]     = useState<Lead[]>([])
+  const [mode, setMode]             = useState<PanelMode>("chats")
+  const [diagnoseOpen, setDiagnoseOpen] = useState(false)
+  const [diagnosing, setDiagnosing] = useState(false)
 
   const loadEpochRef = useRef(0)
   const didInitialSelect = useRef(false)
@@ -263,6 +273,15 @@ export default function WhatsAppView({ role }: { role: Role }) {
     }
   }
 
+  // ---- WhatsApp connection diagnostic — one click tells you WHY sends fail ----
+  async function diagnose() {
+    setDiagnosing(true)
+    const r = await runDiagnostic()
+    setDiagnosing(false)
+    if (r.ok) toast.success(`WhatsApp healthy — ${r.verified_name || "number"} <${r.phone || "?"}>`)
+    else setDiagnoseOpen(true) // full modal with the Meta error + fix hints
+  }
+
   const archiveChat = (lead: Lead) => {
     patchSettings(lead, { archived: !lead.wa_archived })
     toast.success(lead.wa_archived ? "Chat unarchived" : "Chat archived")
@@ -332,23 +351,75 @@ export default function WhatsAppView({ role }: { role: Role }) {
       background: WA.panelBg, boxShadow: "0 20px 40px rgba(0,0,0,0.3)", fontFamily: WA_FONT, position: "relative",
     }}>
       <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
-        <ChatList
-          leads={listLeads}
-          selected={selected}
-          ready={!!ready}
-          canEdit={canEdit}
-          tab={tab}
-          onTab={setTab}
-          archivedOpen={archivedOpen}
-          onArchivedOpen={setArchivedOpen}
-          onOpenArchived={() => setArchivedOpen(true)}
-          onSelect={openChat}
-          onNewChat={openNewChatModal}
-          onPin={togglePin}
-          onMute={muteChat}
-          onArchive={archiveChat}
-          onRefresh={loadLeads}
-        />
+        {/* Left panel: chats OR calls, with the WhatsApp-style bottom nav */}
+        <div style={{ display: "flex", flexDirection: "column", minWidth: 0, flexShrink: 0, width: "100%" }} className="md:w-auto">
+          <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
+            {mode === "chats" ? (
+              <ChatList
+                leads={listLeads}
+                selected={selected}
+                ready={!!ready}
+                canEdit={canEdit}
+                tab={tab}
+                onTab={setTab}
+                archivedOpen={archivedOpen}
+                onArchivedOpen={setArchivedOpen}
+                onOpenArchived={() => setArchivedOpen(true)}
+                onSelect={openChat}
+                onNewChat={openNewChatModal}
+                onPin={togglePin}
+                onMute={muteChat}
+                onArchive={archiveChat}
+                onRefresh={loadLeads}
+                onDiagnose={diagnose}
+                diagnosing={diagnosing}
+              />
+            ) : (
+              <CallsList
+                leads={listLeads}
+                onOpenChat={openChat}
+                onRefresh={loadLeads}
+                onDiagnose={diagnose}
+                ready={!!ready}
+              />
+            )}
+          </div>
+
+          {/* bottom nav — Chats | Calls, WhatsApp-Web style */}
+          <div style={{
+            display: "flex", background: WA.headerBg, borderTop: `1px solid ${WA.hairline}`,
+          }}>
+            {(["chats", "calls"] as PanelMode[]).map((m) => {
+              const active = mode === m
+              return (
+                <button key={m} onClick={() => setMode(m)} style={{
+                  flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
+                  padding: "8px 0 7px", background: "transparent", border: 0, cursor: "pointer",
+                  borderTop: active ? `2px solid ${WA.teal}` : "2px solid transparent",
+                  color: active ? WA.tealBright : WA.textSecondary,
+                }}>
+                  {m === "chats" ? (
+                    <span style={{ position: "relative", display: "inline-flex" }}>
+                      <WhatsAppGlyph size={19} color={active ? WA.tealBright : WA.textSecondary} />
+                      {unreadTotal > 0 && (
+                        <span style={{
+                          position: "absolute", top: -5, right: -9, background: WA.tealBright, color: "#111",
+                          borderRadius: 999, fontSize: 9.5, fontWeight: 700, minWidth: 15, height: 15,
+                          display: "flex", alignItems: "center", justifyContent: "center", padding: "0 3px",
+                        }}>{unreadTotal > 99 ? "99+" : unreadTotal}</span>
+                      )}
+                    </span>
+                  ) : (
+                    <Phone size={18} />
+                  )}
+                  <span style={{ fontSize: 10.5, fontWeight: active ? 600 : 400 }}>
+                    {m === "chats" ? "Chats" : "Calls"}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
 
         {selected ? (
           <>
@@ -422,6 +493,7 @@ export default function WhatsAppView({ role }: { role: Role }) {
           onCreate={(phone, name) => startNewChat(null, phone, name)}
         />
       )}
+      {diagnoseOpen && <DiagnoseModal onClose={() => setDiagnoseOpen(false)} />}
     </div>
   )
 }

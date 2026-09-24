@@ -375,8 +375,9 @@ async function graphPost(payload: Record<string, any>, branch?: BranchWhatsAppCt
     clearTimeout(timeoutId)
     const data: any = await res.json().catch(() => ({}))
     if (!res.ok) {
-      const msg = data?.error?.message || `HTTP ${res.status}`
-      console.error(`❌ [WhatsApp graphPost] HTTP ${res.status} error: tokenPrefix="${token.slice(0, 15)}..." tokenSuffix="...${token.slice(-10)}" tokenLen=${token.length} phoneId="${phoneId}" error:`, JSON.stringify(data?.error || data))
+      // Surface WHY Meta refused — expired token (190), outside the 24h
+      // service window (131047), re-engagement required, wrong number…
+      console.error(`WA send failed → ${payload.to || "?"} HTTP ${res.status}: ${msg}${data?.error?.error_data?.details ? ` — ${data.error.error_data.details}` : ""}${data?.error?.code ? ` (code ${data.error.code})` : ""} tokenPrefix="${token.slice(0, 15)}..." phoneId="${phoneId}" error:`, JSON.stringify(data?.error || data))
       return { ok: false, error: msg, status: res.status }
     }
     return { ok: true, id: data?.messages?.[0]?.id }
