@@ -530,6 +530,9 @@ async function handleInbound(msg: any, profileName: string | null, waBranch: Bra
     // Sends from the BRANCH's WABA number when the message arrived on one —
     // the conversation stays on the number the customer actually wrote to.
     const sent = await sendWhatsAppText(from, aiReply, waBranch)
+    if (!sent.ok) {
+      console.error(`❌ [WhatsApp AI Reply Send Failed] to=${from}:`, sent.error)
+    }
     await query(
       `INSERT INTO whatsapp_messages (lead_id, wa_message_id, phone_number, direction, content, status, branch_id)
        VALUES ($1, $2, $3, 'outbound', $4, $5, $6)`,

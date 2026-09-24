@@ -17,12 +17,41 @@
 // FREE and unlimited. Only business-initiated template sends cost money
 // (utility ≈ ₹0.115 + GST per message).
 
+import fs from "fs"
+import path from "path"
+
 const GRAPH = "https://graph.facebook.com/v21.0"
-const TOKEN = process.env.WHATSAPP_TOKEN || ""
-const PHONE_ID = process.env.WHATSAPP_PHONE_NUMBER_ID || ""
 const FORM_TEMPLATE = process.env.WHATSAPP_FORM_TEMPLATE || "loan_application_form"
 const CALL_FOLLOWUP_TEMPLATE = process.env.WHATSAPP_CALL_FOLLOWUP_TEMPLATE || "call_followup"
 const MISSED_CALL_TEMPLATE = process.env.WHATSAPP_MISSED_CALL_TEMPLATE || "missed_call_followup"
+
+function getLiveEnvToken(): string {
+  try {
+    const envPath = path.resolve(process.cwd(), ".env")
+    if (fs.existsSync(envPath)) {
+      const content = fs.readFileSync(envPath, "utf8")
+      const match = content.match(/^WHATSAPP_TOKEN=(.*)$/m)
+      if (match) {
+        return match[1].split("#")[0].trim()
+      }
+    }
+  } catch {}
+  return String(process.env.WHATSAPP_TOKEN || "").split("#")[0].trim()
+}
+
+function getLiveEnvPhoneId(): string {
+  try {
+    const envPath = path.resolve(process.cwd(), ".env")
+    if (fs.existsSync(envPath)) {
+      const content = fs.readFileSync(envPath, "utf8")
+      const match = content.match(/^WHATSAPP_PHONE_NUMBER_ID=(.*)$/m)
+      if (match) {
+        return match[1].split("#")[0].trim()
+      }
+    }
+  } catch {}
+  return String(process.env.WHATSAPP_PHONE_NUMBER_ID || "").split("#")[0].trim()
+}
 
 /** Branch context for a send — resolved once per flow, passed everywhere. */
 export type BranchWhatsAppCtx = {
@@ -45,10 +74,15 @@ export async function branchWhatsAppCtx(branchId: string | null | undefined): Pr
   }
 }
 
+function cleanEnvVal(val?: string | null): string {
+  if (!val) return ""
+  return String(val).split("#")[0].trim()
+}
+
 /** Per-send credentials: the branch's WABA when it has one, else the env default. */
 function credsFor(branch?: BranchWhatsAppCtx): { token: string; phoneId: string; configured: boolean } {
-  const token = branch?.whatsappToken || process.env.WHATSAPP_TOKEN || TOKEN
-  const phoneId = branch?.whatsappPhoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID || PHONE_ID
+  const token = cleanEnvVal(branch?.whatsappToken) || getLiveEnvToken()
+  const phoneId = cleanEnvVal(branch?.whatsappPhoneNumberId) || getLiveEnvPhoneId()
   return { token, phoneId, configured: !!(token && phoneId) }
 }
 
@@ -342,6 +376,7 @@ async function graphPost(payload: Record<string, any>, branch?: BranchWhatsAppCt
     const data: any = await res.json().catch(() => ({}))
     if (!res.ok) {
       const msg = data?.error?.message || `HTTP ${res.status}`
+      console.error(`❌ [WhatsApp graphPost] HTTP ${res.status} error: tokenPrefix="${token.slice(0, 15)}..." tokenSuffix="...${token.slice(-10)}" tokenLen=${token.length} phoneId="${phoneId}" error:`, JSON.stringify(data?.error || data))
       return { ok: false, error: msg, status: res.status }
     }
     return { ok: true, id: data?.messages?.[0]?.id }
@@ -378,8 +413,9 @@ async function downloadMediaWith(mediaId: string, token: string): Promise<{ buff
 
 /** Default (env-credentialed) media download — kept for existing callers. */
 export async function downloadWhatsAppMedia(mediaId: string): Promise<{ buffer: Buffer; mimeType: string } | null> {
-  if (!TOKEN) return null
-  return downloadMediaWith(mediaId, TOKEN)
+  const token = getLiveEnvToken()
+  if (!token) return null
+  return downloadMediaWith(mediaId, token)
 }
 
 /** Branch-scoped media download (voice notes sent TO a branch's WABA number). */
