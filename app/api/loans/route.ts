@@ -4,8 +4,9 @@ import { db } from "@/lib/db"
 import { requireModuleOrRole } from "@/lib/auth"
 import { sessionBranchId } from "@/lib/branches"
 import { logAudit } from "@/lib/audit"
+import { withRoute, readJson } from "@/lib/api-route"
 
-export async function GET(req: NextRequest) {
+export const GET = withRoute("loans", async (req: NextRequest) => {
   const { searchParams } = new URL(req.url)
   const session = await requireModuleOrRole(req, "loans", ["admin", "agent", "viewer", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
@@ -39,7 +40,7 @@ export async function GET(req: NextRequest) {
   // FIX (2026-09-20): PAN is a regulated financial identifier — the list
   // response shipped it in full to every reader on every poll. Mask it here
   // (the single-application detail view still returns the real value).
-  const masked = (data || []).map((row: any) => ({
+  const masked = (data || []).map((row: Record<string, unknown>) => ({
     ...row,
     pan_number: typeof row.pan_number === "string" && row.pan_number.length >= 10
       ? `${row.pan_number.slice(0, 2)}${"X".repeat(row.pan_number.length - 4)}${row.pan_number.slice(-2)}`
@@ -48,25 +49,29 @@ export async function GET(req: NextRequest) {
       : null,
   }))
   return NextResponse.json(masked)
-}
+})
 
-export async function POST(req: NextRequest) {
+export const POST = withRoute("loans", async (req: NextRequest) => {
   // The customer-facing form (app/api/form/[token]) inserts directly, not
   // through here — this is the staff/dashboard creation path.
   const session = await requireModuleOrRole(req, "loans", ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
-  const body = await req.json()
+  const body = (await readJson(req)) as Record<string, unknown> | null
+  if (!body) return NextResponse.json({ error: "invalid body" }, { status: 400 })
   body.branch_id = sessionBranchId(session)
   const { data, error } = await db.from("loan_applications").insert(body).select().single()
   if (error) return apiError(error)
   logAudit("loan application created", session.email, { loanAppId: data?.id, customerName: body.customer_name })
   return NextResponse.json(data)
-}
+})
 
-export async function PATCH(req: NextRequest) {
+export const PATCH = withRoute("loans", async (req: NextRequest) => {
   const session = await requireModuleOrRole(req, "loans", ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
-  const { id, ...raw } = await req.json()
+  const parsed = await readJson(req)
+  if (!parsed) return NextResponse.json({ error: "invalid body" }, { status: 400 })
+  const { id, ...raw } = parsed
+  if (typeof id !== "string" || !id) return NextResponse.json({ error: "id required" }, { status: 400 })
   // 2026-09 fix (mass assignment): server-managed columns are not writable
   // from the client — the old spread let a crafted PATCH set branch_id or
   // submitted_at (moving applications between branches / backdating them).
@@ -83,4 +88,4 @@ export async function PATCH(req: NextRequest) {
   if (!data) return NextResponse.json({ error: "application not found in your branch" }, { status: 404 })
   logAudit("loan application updated", session.email, { loanAppId: id, fields: Object.keys(updates) })
   return NextResponse.json(data)
-}
+})

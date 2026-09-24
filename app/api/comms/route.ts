@@ -3,8 +3,9 @@ import { apiError } from "@/lib/api-error"
 import { db, query } from "@/lib/db"
 import { requireModuleOrRole } from "@/lib/auth"
 import { sessionBranchId } from "@/lib/branches"
+import { withRoute } from "@/lib/api-route"
 
-export async function GET(req: NextRequest) {
+export const GET = withRoute("comms", async (req: NextRequest) => {
   const session = await requireModuleOrRole(req, "comms", ["admin", "agent", "viewer", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   // Branch scope: comm logs joined against branch-owned leads only.
@@ -19,7 +20,7 @@ export async function GET(req: NextRequest) {
       [branchId]
     )
     // Shape matches the Supabase-style select("*, leads(name)") rows below.
-    return NextResponse.json(res.rows.map((r: any) => ({ ...r, leads: r.lead_name ? { name: r.lead_name } : null })))
+    return NextResponse.json(res.rows.map((r: Record<string, unknown>) => ({ ...r, leads: r.lead_name ? { name: r.lead_name } : null })))
   }
   const { data, error } = await db
     .from("comm_logs")
@@ -28,4 +29,4 @@ export async function GET(req: NextRequest) {
     .limit(200)
   if (error) return apiError(error)
   return NextResponse.json(data ?? [])
-}
+})

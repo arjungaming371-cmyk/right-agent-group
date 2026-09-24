@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
 import { requireRole } from "@/lib/auth"
+import { withRoute } from "@/lib/api-route"
 
 // Team roster — joins team_profiles (name/avatar/last login, captured
 // automatically from Google at sign-in) with allowed_emails (role). The
@@ -8,7 +9,7 @@ import { requireRole } from "@/lib/auth"
 // allowed_emails) is included separately since their role is a special
 // case, not a table row. Used by the profile modal (own + teammates) and
 // the /access team management page.
-export async function GET(req: NextRequest) {
+export const GET = withRoute("team", async (req: NextRequest) => {
   const session = await requireRole(req, ["admin", "agent", "viewer", "developer", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
@@ -70,4 +71,4 @@ export async function GET(req: NextRequest) {
   }
 
   return NextResponse.json(rows)
-}
+})

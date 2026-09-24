@@ -2,11 +2,12 @@ import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
 import { requireModuleOrRole } from "@/lib/auth"
 import { sessionBranchId } from "@/lib/branches"
+import { withRoute } from "@/lib/api-route"
 
 // GET — list edit requests, newest first. Defaults to pending only (what the
 // dashboard's approval queue needs); ?status=all|approved|rejected for the
 // history view on a given application.
-export async function GET(req: NextRequest) {
+export const GET = withRoute("loans/edit-requests", async (req: NextRequest) => {
   const session = await requireModuleOrRole(req, "loans", ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
@@ -16,7 +17,7 @@ export async function GET(req: NextRequest) {
   const applicationId = searchParams.get("applicationId")
 
   const where: string[] = []
-  const params: any[] = []
+  const params: unknown[] = []
   let i = 1
 
   if (branchId) {
@@ -47,4 +48,4 @@ export async function GET(req: NextRequest) {
     params
   )
   return NextResponse.json(res.rows)
-}
+})

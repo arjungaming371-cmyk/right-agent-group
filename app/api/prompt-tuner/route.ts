@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
 import { requireRole } from "@/lib/auth"
+import { withRoute } from "@/lib/api-route"
 
 export const dynamic = "force-dynamic"
 
 // GET — list suggestions, newest first. Admin-only: this surface exists
 // inside the Script Manager, which is already admin-gated end to end.
-export async function GET(req: NextRequest) {
+export const GET = withRoute("prompt-tuner", async (req: NextRequest) => {
   const session = await requireRole(req, ["admin"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
@@ -21,4 +22,4 @@ export async function GET(req: NextRequest) {
     params
   )
   return NextResponse.json({ suggestions: res.rows })
-}
+})

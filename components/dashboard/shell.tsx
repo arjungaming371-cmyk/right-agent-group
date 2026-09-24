@@ -9,31 +9,77 @@ import {
 import { ToastProvider } from "../ui/toast"
 import CommandPalette from "../ui/command-palette"
 import LeadsView    from "./leads-view"
-import LoanAppsView from "./loan-apps-view"
-import VoiceLogsView from "./voice-logs-view"
-import WhatsAppView  from "./whatsapp-view"
-import InstagramView from "./instagram-view"
-import CommLogView   from "./comm-log-view"
-import SecurityView  from "./security-view"
-import UploadView    from "./upload-view"
-import ScriptView    from "./script-view"
-import KnowledgeBaseView from "./knowledge-base-view"
+
+// Code splitting: every non-default view is loaded on first navigation
+// instead of shipping in the dashboard's initial bundle. LeadsView stays
+// static — it is the default view and must not flash a loading frame.
+// VoiceAssistant / ProfileModal / CommandPalette are gated behind an
+// "ever opened" flag so the chunk is fetched on first use, not at mount.
+const LoanAppsView = dynamic(() => import("./loan-apps-view"), {
+  ssr: false,
+  loading: () => <ViewFallback label="Loan Applications" />,
+})
+const VoiceLogsView = dynamic(() => import("./voice-logs-view"), {
+  ssr: false,
+  loading: () => <ViewFallback label="Voice Logs" />,
+})
+const WhatsAppView  = dynamic(() => import("./whatsapp-view"), {
+  ssr: false,
+  loading: () => <ViewFallback label="WhatsApp Chat" />,
+})
+const InstagramView = dynamic(() => import("./instagram-view"), {
+  ssr: false,
+  loading: () => <ViewFallback label="Instagram Chat" />,
+})
+const CommLogView   = dynamic(() => import("./comm-log-view"), {
+  ssr: false,
+  loading: () => <ViewFallback label="Communication Log" />,
+})
+const SecurityView  = dynamic(() => import("./security-view"), {
+  ssr: false,
+  loading: () => <ViewFallback label="Security" />,
+})
+const UploadView    = dynamic(() => import("./upload-view"), {
+  ssr: false,
+  loading: () => <ViewFallback label="Upload & Data" />,
+})
+const ScriptView    = dynamic(() => import("./script-view"), {
+  ssr: false,
+  loading: () => <ViewFallback label="Priya's Script" />,
+})
+const KnowledgeBaseView = dynamic(() => import("./knowledge-base-view"), {
+  ssr: false,
+  loading: () => <ViewFallback label="Knowledge Base" />,
+})
+
 // recharts is ~400kB and only the Analytics tab uses it. Statically imported
 // it landed in the dashboard bundle for every user, including the ones who
 // never open that tab — load it on demand instead.
 const AnalyticsView = dynamic(() => import("./analytics-view"), {
   ssr: false,
-  loading: () => <div style={{ padding: 24, color: "var(--text-muted)" }}>Loading analytics…</div>,
+  loading: () => <ViewFallback label="Analytics" />,
 })
-import QuickChat     from "./quick-chat"
 import NotificationBell from "./notification-bell"
 import ThemeSwitcher from "./theme-switcher"
-import DeveloperLogsView from "./developer-logs-view"
-import CalendarView from "./calendar-view"
-import ProfileModal from "./profile-modal"
-import BranchesView from "./branches-view"
-import VoiceAssistant from "./voice-assistant"
+const DeveloperLogsView = dynamic(() => import("./developer-logs-view"), {
+  ssr: false,
+  loading: () => <ViewFallback label="Activity Logs" />,
+})
+const CalendarView = dynamic(() => import("./calendar-view"), {
+  ssr: false,
+  loading: () => <ViewFallback label="Calendar" />,
+})
+const ProfileModal = dynamic(() => import("./profile-modal"), { ssr: false })
+const BranchesView = dynamic(() => import("./branches-view"), {
+  ssr: false,
+  loading: () => <ViewFallback label="Branches & Staff AI" />,
+})
+const VoiceAssistant = dynamic(() => import("./voice-assistant"), { ssr: false })
 import { usePolling } from "@/lib/use-poll"
+
+function ViewFallback({ label }: { label: string }) {
+  return <div style={{ padding: 24, color: "var(--text-muted)" }}>Loading {label}…</div>
+}
 
 export type ViewKey = "leads" | "loans" | "voice" | "whatsapp" | "instagram" | "comms" | "calendar" | "security" | "upload" | "script" | "knowledge" | "analytics" | "branches" | "dev-logs"
 export type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
@@ -127,6 +173,10 @@ export default function DashboardShell() {
   // Sidebar is a slide-in drawer below the md breakpoint — closed by default.
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [voiceAssistantOpen, setVoiceAssistantOpen] = useState(false)
+  // Heavy overlays mount on first open — their chunks are only fetched when
+  // actually needed (VoiceAssistant alone is a ~2k-line component).
+  const [voiceAssistantEverOpened, setVoiceAssistantEverOpened] = useState(false)
+  const [paletteEverOpened, setPaletteEverOpened] = useState(false)
 
   // Global shortcuts: Ctrl+K for palette, Alt+V for Personal Voice Assistant
   useEffect(() => {
@@ -215,6 +265,14 @@ export default function DashboardShell() {
 
   useEffect(() => { loadSystemStatus() }, [])
   usePolling(loadSystemStatus, 60000)
+
+  // Mount-on-first-open gates (see state above).
+  useEffect(() => {
+    if (voiceAssistantOpen) setVoiceAssistantEverOpened(true)
+  }, [voiceAssistantOpen])
+  useEffect(() => {
+    if (paletteOpen) setPaletteEverOpened(true)
+  }, [paletteOpen])
 
   async function logout() {
     try { await fetch("/api/auth/logout", { method: "POST" }) } catch {}
@@ -491,22 +549,26 @@ export default function DashboardShell() {
         </main>
       </div>
       {/* Floating QuickChat removed */}
-      <VoiceAssistant
-        isOpen={voiceAssistantOpen}
-        onClose={() => setVoiceAssistantOpen(false)}
-        userEmail={userEmail}
-        role={role}
-      />
+      {voiceAssistantEverOpened && (
+        <VoiceAssistant
+          isOpen={voiceAssistantOpen}
+          onClose={() => setVoiceAssistantOpen(false)}
+          userEmail={userEmail}
+          role={role}
+        />
+      )}
       {showProfile && <ProfileModal email={userEmail} role={role} onClose={() => setShowProfile(false)} />}
       {/* Neutralizes the mobile slide-in transform at md+ so the sidebar is
           always visible on desktop regardless of mobileNavOpen state. */}
       <style>{`@media (min-width: 768px) { .mobile-nav-drawer { transform: none !important; } }`}</style>
-      <CommandPalette
-        open={paletteOpen}
-        onClose={() => setPaletteOpen(false)}
-        onNavigate={navigateFromPalette}
-        allowedViews={allowedViews}
-      />
+      {paletteEverOpened && (
+        <CommandPalette
+          open={paletteOpen}
+          onClose={() => setPaletteOpen(false)}
+          onNavigate={navigateFromPalette}
+          allowedViews={allowedViews}
+        />
+      )}
     </div>
     </ToastProvider>
   )

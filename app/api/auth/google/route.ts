@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server"
 import { isSafeNextPath } from "@/lib/auth"
+import { withRoute } from "@/lib/api-route"
 
 export const dynamic = "force-dynamic"
 
 // Step 1 of Google Sign-In: redirect to Google's consent screen.
 // A random `state` value is stored in a short-lived cookie to block CSRF.
-export async function GET(req: NextRequest) {
+export const GET = withRoute("auth/google", async (req: NextRequest) => {
   const clientId = process.env.GOOGLE_CLIENT_ID
   const appUrl = process.env.NEXT_PUBLIC_APP_URL
   if (!clientId || !appUrl) {
@@ -32,4 +33,4 @@ export async function GET(req: NextRequest) {
   res.cookies.set("oauth_state", state, { httpOnly: true, secure, sameSite: "lax", path: "/", maxAge: 600 })
   res.cookies.set("oauth_next", safeNext, { httpOnly: true, secure, sameSite: "lax", path: "/", maxAge: 600 })
   return res
-}
+})

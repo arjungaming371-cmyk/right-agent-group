@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getSessionFromRequest } from "@/lib/auth"
 import { checkWhatsAppHealth, liveEnvWhatsAppCreds } from "@/lib/whatsapp"
+import { withRoute } from "@/lib/api-route"
 
 export const dynamic = "force-dynamic"
 
-export async function GET(req: NextRequest) {
+export const GET = withRoute("whatsapp/status", async (req: NextRequest) => {
   // FIX (2026-09-20): middleware-only protection → also verify the session
   // here (health message can carry config error details).
   const session = await getSessionFromRequest(req)
@@ -28,6 +29,6 @@ export async function GET(req: NextRequest) {
     _healthCache = { at: now, ok: health.ok, message: health.message }
   }
   return NextResponse.json({ configured: true, ready: _healthCache.ok, message: _healthCache.message })
-}
+})
 
 let _healthCache: { at: number; ok: boolean; message?: string } | null = null

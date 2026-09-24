@@ -3,6 +3,7 @@ import { query } from "@/lib/db"
 import { requireModuleOrRole } from "@/lib/auth"
 import { sessionBranchId } from "@/lib/branches"
 import { toCsv } from "@/lib/csv"
+import { withRoute } from "@/lib/api-route"
 
 export const dynamic = "force-dynamic"
 
@@ -14,7 +15,7 @@ const COLUMNS = [
 // Read-only export, available to every logged-in role — exporting data you
 // can already see in the Leads table isn't a new privilege, just a format.
 // Branch-scoped sessions export ONLY their branch's leads.
-export async function GET(req: NextRequest) {
+export const GET = withRoute("leads/export", async (req: NextRequest) => {
   const session = await requireModuleOrRole(req, "leads", ["admin", "agent", "viewer", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const branchId = sessionBranchId(session)
@@ -31,4 +32,4 @@ export async function GET(req: NextRequest) {
       "Content-Disposition": `attachment; filename="${filename}"`,
     },
   })
-}
+})

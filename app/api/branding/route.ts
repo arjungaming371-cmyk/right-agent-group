@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getBranding } from "@/lib/branches"
+import { withRoute, queryString } from "@/lib/api-route"
 
 export const dynamic = "force-dynamic"
 
@@ -10,8 +11,8 @@ export const dynamic = "force-dynamic"
 //
 // Only public-safe fields are exposed — no numbers, no credentials, no quotas.
 
-export async function GET(req: NextRequest) {
-  const branchId = req.nextUrl.searchParams.get("branch")
+export const GET = withRoute("branding", async (req: NextRequest) => {
+  const branchId = queryString(req, "branch", 64)
   const branding = await getBranding(branchId)
   return NextResponse.json(branding)
-}
+})

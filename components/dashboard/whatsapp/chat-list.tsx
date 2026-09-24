@@ -4,7 +4,7 @@
 // All / Unread / Favourites / Groups filter chips, the Archived row, and rows
 // with hover menus (pin / mute / archive) — every action wired to the API.
 
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useMemo } from "react"
 import {
   Search, MessageSquarePlus, MoreVertical, Archive, Pin, BellOff, ChevronDown, Users, ArrowLeft,
   BellRing, Volume2, VolumeX,
@@ -59,20 +59,29 @@ export default function ChatList({
     return () => window.removeEventListener("keydown", onKey)
   }, [])
 
-  const archivedCount = leads.filter(l => l.wa_archived).length
-  const visible = leads.filter(l => archivedOpen ? !!l.wa_archived : !l.wa_archived)
-
-  const tabFiltered = visible.filter(l => {
-    if (tab === "unread") return (l.unread ?? 0) > 0
-    if (tab === "favourites") return !!l.pinned
-    if (tab === "groups") return false // 1:1 Cloud API chats only — honest empty state
-    return true
-  })
-  const filtered = smartFilter(tabFiltered, search, (l) => [
-    l.name, l.phone, l.whatsapp_number, l.last_message, l.product_interest, l.address, l.notes,
-  ])
-  const unreadChats = visible.filter(l => (l.unread ?? 0) > 0).length
-  const unreadTotal = visible.reduce((n, l) => n + (l.unread ?? 0), 0)
+  // PERF: these five derived lists used to re-run on EVERY render — including
+  // every keystroke in the search box and every parent re-render from the 3-4s
+  // message poll. useMemo keys them to (leads, archivedOpen, tab, search) so
+  // typing/polling only recomputes when the inputs actually change.
+  const { archivedCount, filtered, unreadChats, unreadTotal } = useMemo(() => {
+    const archived = leads.filter(l => l.wa_archived)
+    const visible = archivedOpen ? archived : leads.filter(l => !l.wa_archived)
+    const tabFiltered = visible.filter(l => {
+      if (tab === "unread") return (l.unread ?? 0) > 0
+      if (tab === "favourites") return !!l.pinned
+      if (tab === "groups") return false // 1:1 Cloud API chats only — honest empty state
+      return true
+    })
+    const searched = smartFilter(tabFiltered, search, (l) => [
+      l.name, l.phone, l.whatsapp_number, l.last_message, l.product_interest, l.address, l.notes,
+    ])
+    return {
+      archivedCount: archived.length,
+      filtered: searched,
+      unreadChats: visible.filter(l => (l.unread ?? 0) > 0).length,
+      unreadTotal: visible.reduce((n, l) => n + (l.unread ?? 0), 0),
+    }
+  }, [leads, archivedOpen, tab, search])
 
   // ---- Archived screen (full list replacement, like WhatsApp) ----
   if (archivedOpen) {

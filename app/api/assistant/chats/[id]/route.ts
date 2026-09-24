@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
 import { getSessionFromRequest } from "@/lib/auth"
+import { withParams } from "@/lib/api-route"
 
 export const dynamic = "force-dynamic"
 
@@ -9,7 +10,10 @@ async function assertOwnership(chatId: string, email: string): Promise<boolean> 
   return (res.rowCount ?? 0) > 0
 }
 
-export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export const GET = withParams("assistant/chats", async (
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) => {
   const session = await getSessionFromRequest(req)
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
@@ -20,9 +24,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const res = await query(`SELECT role, content, created_at FROM assistant_messages WHERE chat_id = $1 ORDER BY created_at ASC`, [id])
   return NextResponse.json({ messages: res.rows })
-}
+})
 
-export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export const DELETE = withParams("assistant/chats", async (
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) => {
   const session = await getSessionFromRequest(req)
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
@@ -34,4 +41,4 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   // ON DELETE CASCADE on assistant_messages.chat_id handles the messages.
   await query(`DELETE FROM assistant_chats WHERE id = $1`, [id])
   return NextResponse.json({ ok: true })
-}
+})

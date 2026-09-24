@@ -3,6 +3,7 @@ import { checkWhatsAppHealth } from "@/lib/whatsapp"
 import { checkLLMHealth } from "@/lib/llm"
 import { checkDbHealth } from "@/lib/db"
 import { rateLimit, clientIp } from "@/lib/rate-limit"
+import { withRoute } from "@/lib/api-route"
 
 export const dynamic = "force-dynamic"
 
@@ -13,7 +14,7 @@ export const dynamic = "force-dynamic"
 let _cache: { body: object; at: number } | null = null
 const STATUS_TTL_MS = 60_000
 
-export async function GET(req: NextRequest) {
+export const GET = withRoute("system/status", async (req: NextRequest) => {
   if (!rateLimit(`sysstatus:${clientIp(req)}`, 10, 60_000)) {
     return NextResponse.json({ error: "Too many requests" }, { status: 429 })
   }
@@ -38,4 +39,4 @@ export async function GET(req: NextRequest) {
   }
   _cache = { body, at: Date.now() }
   return NextResponse.json(body)
-}
+})
