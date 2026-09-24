@@ -4,8 +4,11 @@
 // All / Unread / Favourites / Groups filter chips, the Archived row, and rows
 // with hover menus (pin / mute / archive) — every action wired to the API.
 
-import { useState, useRef } from "react"
-import { Search, MessageSquarePlus, MoreVertical, Archive, Pin, BellOff, ChevronDown, Users, ArrowLeft } from "lucide-react"
+import { useState, useRef, useEffect } from "react"
+import {
+  Search, MessageSquarePlus, MoreVertical, Archive, Pin, BellOff, ChevronDown, Users, ArrowLeft,
+  BellRing, Volume2, VolumeX,
+} from "lucide-react"
 import { WA, WA_FONT, fmtListTime, mediaPreview, type Lead } from "./palette"
 import { Avatar, IconBtn, Ticks } from "./bits"
 import VoiceDictation from "../../ui/voice-dictation"
@@ -16,7 +19,7 @@ export type ListTab = "all" | "unread" | "favourites" | "groups"
 export default function ChatList({
   leads, selected, ready, canEdit, tab, onTab, archivedOpen, onArchivedOpen,
   onOpenArchived, onSelect, onNewChat, onPin, onMute, onArchive, onRefresh,
-  onDiagnose, diagnosing,
+  onDiagnose, diagnosing, notifOn, onToggleNotifs, soundOn, onToggleSound,
 }: {
   leads: Lead[]
   selected: Lead | null
@@ -35,11 +38,26 @@ export default function ChatList({
   onRefresh: () => void
   onDiagnose?: () => void
   diagnosing?: boolean
+  notifOn?: boolean
+  onToggleNotifs?: () => void
+  soundOn?: boolean
+  onToggleSound?: () => void
 }) {
   const [search, setSearch] = useState("")
   const [menuOpen, setMenuOpen] = useState(false)
   const [rowMenu, setRowMenu] = useState<string | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
+
+  // Esc dismisses the header / row menus (WhatsApp Web behaviour)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return
+      setMenuOpen(false)
+      setRowMenu(null)
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [])
 
   const archivedCount = leads.filter(l => l.wa_archived).length
   const visible = leads.filter(l => archivedOpen ? !!l.wa_archived : !l.wa_archived)
@@ -59,7 +77,9 @@ export default function ChatList({
   // ---- Archived screen (full list replacement, like WhatsApp) ----
   if (archivedOpen) {
     return (
-      <div style={{ borderRight: `1px solid ${WA.hairline}`, flexDirection: "column", background: WA.panelBg, flexShrink: 0, display: "flex", width: "100%" }} className="w-full md:w-[380px]">
+      // FIX (2026-09-24): inline width:"100%" used to override md:w-[380px]
+      // (inline beats classes) — width now comes from classes only.
+      <div className="flex w-full md:w-[380px]" style={{ borderRight: `1px solid ${WA.hairline}`, flexDirection: "column", background: WA.panelBg, flexShrink: 0 }}>
         <div style={{ padding: "18px 12px 18px 8px", background: WA.headerBg, display: "flex", alignItems: "center", gap: 6 }}>
           <IconBtn title="Back to chats" onClick={() => onArchivedOpen(false)}><ArrowLeft size={20} /></IconBtn>
           <div style={{ fontWeight: 600, fontSize: 16.5, color: WA.textPrimary, display: "flex", alignItems: "center", gap: 10 }}>
@@ -86,9 +106,12 @@ export default function ChatList({
   }
 
   // ---- Normal list ----
+  // FIX (2026-09-24): the parent wrapper now owns show/hide (selected-based)
+  // and the responsive width — this root must ALWAYS render flexibly, so the
+  // wrapper's mobile/full ↔ desktop/380px split actually applies.
   return (
     <div
-      className={`${selected ? "hidden md:flex" : "flex"} w-full md:w-[380px]`}
+      className="flex w-full md:w-[380px]"
       style={{ borderRight: `1px solid ${WA.hairline}`, flexDirection: "column", background: WA.panelBg, flexShrink: 0 }}
       onClick={() => setRowMenu(null)}
     >
@@ -119,6 +142,20 @@ export default function ChatList({
               >
                 <MenuItem icon={<Archive size={16} />} label={`Archived chats${archivedCount ? ` (${archivedCount})` : ""}`} onClick={() => { setMenuOpen(false); onOpenArchived() }} />
                 <MenuItem icon={<Search size={15} />} label="Refresh chats" onClick={() => { setMenuOpen(false); onRefresh() }} />
+                {onToggleNotifs && (
+                  <MenuItem
+                    icon={notifOn ? <BellRing size={16} /> : <BellOff size={16} />}
+                    label={notifOn ? "Notifications on" : "Turn on notifications"}
+                    onClick={() => { setMenuOpen(false); onToggleNotifs() }}
+                  />
+                )}
+                {onToggleSound && (
+                  <MenuItem
+                    icon={soundOn ? <Volume2 size={16} /> : <VolumeX size={16} />}
+                    label={soundOn ? "Message sounds on" : "Message sounds off"}
+                    onClick={() => { setMenuOpen(false); onToggleSound() }}
+                  />
+                )}
               </div>
             )}
           </div>

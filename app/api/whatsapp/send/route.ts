@@ -101,8 +101,11 @@ export async function POST(req: NextRequest) {
     await db.from("comm_logs").insert({ lead_id: leadId, type: "whatsapp", summary, outcome: "sent" }).catch(() => {})
     // Outbound quoted rows cache the quoted text so the UI (and the customer's
     // own quote rendering) always has it — mirror of the inbound webhook logic.
+    // Awaited (2026-09-24): was a floating promise, so the server could respond
+    // before the quote cache was written and the optimistic UI would briefly
+    // render the quote as unresolved.
     if (replyTo) {
-      query(
+      await query(
         `UPDATE whatsapp_messages
             SET quoted_wa_id = $1,
                 quoted_text  = COALESCE((SELECT content FROM whatsapp_messages WHERE wa_message_id = $1 LIMIT 1), '[message]'),

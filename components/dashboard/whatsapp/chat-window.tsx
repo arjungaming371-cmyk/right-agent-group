@@ -6,10 +6,11 @@
 // bottom FAB, in-chat search, and the full composer (emoji picker, photo &
 // document attach with upload, reply bar, mic dictation, send).
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, useLayoutEffect } from "react"
 import {
   ChevronLeft, ChevronDown, Search, PhoneCall, MoreVertical, Smile, Paperclip,
   Send, X, ImagePlus, FileText, Lock, MessageCircle, Info, BellOff, Bell, Archive,
+  Download, History,
 } from "lucide-react"
 import { WA, WA_FONT, CHAT_WALLPAPER, fmtDatePill, fmtLastSeen, type Lead, type Msg } from "./palette"
 import { Avatar, IconBtn } from "./bits"
@@ -22,6 +23,7 @@ export default function ChatWindow({
   onBack, replyTo, setReplyTo, onReact, onForward, onToggleInfo,
   unreadAtOpen, onAIcall, calling, onMute, onArchive,
   uploading, uploadName, onFilePicked,
+  hasMore, loadingEarlier, onLoadEarlier,
 }: {
   lead: Lead
   messages: Msg[]
@@ -45,6 +47,9 @@ export default function ChatWindow({
   uploading: boolean
   uploadName: string
   onFilePicked: (file: File, kind: "media" | "document") => void
+  hasMore?: boolean
+  loadingEarlier?: boolean
+  onLoadEarlier?: () => Promise<void>
 }) {
   const [showEmoji, setShowEmoji] = useState(false)
   const [attachOpen, setAttachOpen] = useState(false)
@@ -54,10 +59,16 @@ export default function ChatWindow({
   const [matchIdx, setMatchIdx] = useState(0)
   const [highlight, setHighlight] = useState<string | null>(null)
   const [atBottom, setAtBottom] = useState(true)
+  // fullscreen image viewer (real WhatsApp opens photos in an overlay)
+  const [lightbox, setLightbox] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
   const mediaInputRef = useRef<HTMLInputElement>(null)
   const docInputRef = useRef<HTMLInputElement>(null)
+  // scroll anchor for "Load earlier" — { prevHeight, prevTop } snapshot taken
+  // before the prepend; restored after commit so the viewport stays glued to
+  // the message the user was reading (exactly like WhatsApp history paging)
+  const restoreAnchorRef = useRef<{ prevHeight: number; prevTop: number } | null>(null)
 
   const lastInbound = [...messages].reverse().find(m => m.direction === "inbound")
 
@@ -72,6 +83,36 @@ export default function ChatWindow({
     const el = scrollRef.current
     if (el) el.scrollTop = el.scrollHeight
   }, [lead.id])
+
+  // keep the reading position stable after older messages are prepended
+  useLayoutEffect(() => {
+    const anchor = restoreAnchorRef.current
+    const el = scrollRef.current
+    if (!anchor || !el) return
+    restoreAnchorRef.current = null
+    el.scrollTop = el.scrollHeight - anchor.prevHeight + anchor.prevTop
+  }, [messages.length])
+
+  async function handleLoadEarlier() {
+    const el = scrollRef.current
+    if (!el || !onLoadEarlier) return
+    restoreAnchorRef.current = { prevHeight: el.scrollHeight, prevTop: el.scrollTop }
+    await onLoadEarlier()
+  }
+
+  // Esc closes overlays top-down: lightbox → emoji → attach → menu → reply
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return
+      if (lightbox) { setLightbox(null); return }
+      if (showEmoji) { setShowEmoji(false); return }
+      if (attachOpen) { setAttachOpen(false); return }
+      if (menuOpen) { setMenuOpen(false); return }
+      if (replyTo) setReplyTo(null)
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [lightbox, showEmoji, attachOpen, menuOpen, replyTo])
 
   function onScroll() {
     const el = scrollRef.current
@@ -216,6 +257,26 @@ export default function ChatWindow({
         }}
       >
         {/* encryption notice — the real chat opens with this */}
+        {/* "Load earlier messages" — real WhatsApp pages history upward */}
+        {hasMore && messages.length > 0 && (
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: 14 }}>
+            <button
+              onClick={handleLoadEarlier}
+              disabled={loadingEarlier}
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 7, background: WA.pill,
+                color: WA.tealBright, fontSize: 12.5, fontWeight: 500, border: "none",
+                borderRadius: 999, padding: "6px 16px", cursor: loadingEarlier ? "default" : "pointer",
+                opacity: loadingEarlier ? 0.7 : 1, boxShadow: "0 1px 0.5px rgba(11,20,26,0.13)",
+              }}
+            >
+              {loadingEarlier
+                ? <span style={{ width: 13, height: 13, borderRadius: "50%", border: `2px solid ${WA.tealBright}44`, borderTopColor: WA.tealBright, display: "inline-block", animation: "spin 0.8s linear infinite" }} />
+                : <History size={14} />}
+              {loadingEarlier ? "Loading…" : "Load earlier messages"}
+            </button>
+          </div>
+        )}
         <div style={{ display: "flex", justifyContent: "center", marginBottom: 18 }}>
           <div style={{
             background: WA.pill, borderRadius: 8, padding: "7px 14px", maxWidth: "88%",
@@ -280,6 +341,7 @@ export default function ChatWindow({
                   onReact={canEdit ? onReact : undefined}
                   onForward={canEdit ? onForward : undefined}
                   onJump={jumpToMsg}
+                  onOpenImage={setLightbox}
                 />
               </div>
             </div>
@@ -401,6 +463,56 @@ export default function ChatWindow({
       ) : (
         <div style={{ padding: "14px 16px", background: WA.headerBg, textAlign: "center", color: WA.textSecondary, fontSize: 13 }}>
           View only — no send permission
+        </div>
+      )}
+
+      {/* ---- fullscreen photo viewer (click a photo in the chat) ---- */}
+      {lightbox && (
+        <div
+          onClick={() => setLightbox(null)}
+          style={{
+            position: "fixed", inset: 0, zIndex: 120, background: "rgba(11,20,26,0.94)",
+            display: "flex", alignItems: "center", justifyContent: "center", cursor: "zoom-out",
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ position: "absolute", top: 14, right: 14, display: "flex", gap: 8, zIndex: 121, cursor: "default" }}
+          >
+            <a
+              href={lightbox}
+              download
+              title="Download photo"
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                width: 40, height: 40, borderRadius: "50%", background: WA.headerBg, color: WA.textPrimary,
+                display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
+                boxShadow: "0 4px 14px rgba(0,0,0,0.5)", textDecoration: "none",
+              }}
+            >
+              <Download size={19} />
+            </a>
+            <button
+              title="Close (Esc)"
+              onClick={() => setLightbox(null)}
+              style={{
+                width: 40, height: 40, borderRadius: "50%", background: WA.headerBg, border: "none",
+                color: WA.textPrimary, display: "flex", alignItems: "center", justifyContent: "center",
+                cursor: "pointer", boxShadow: "0 4px 14px rgba(0,0,0,0.5)",
+              }}
+            >
+              <X size={21} />
+            </button>
+          </div>
+          <img
+            src={lightbox}
+            alt="Photo"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              maxWidth: "92vw", maxHeight: "88vh", borderRadius: 6, objectFit: "contain",
+              boxShadow: "0 30px 80px rgba(0,0,0,0.6)", cursor: "default",
+            }}
+          />
         </div>
       )}
     </div>

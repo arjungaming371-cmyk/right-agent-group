@@ -280,6 +280,26 @@
 }
 .spin { animation: spin 1s linear infinite; }
 
+/* ---------------------------------------------------------------------------
+ * WhatsApp module (components/dashboard/whatsapp) — hover-reveal toolbar.
+ * MessageBubble renders the react/reply/forward toolbar with inline
+ * opacity:0/pointer-events:none and flips a `wa-msg-hover` class on the
+ * row's mouseenter. This rule is what reveals it — it was MISSING, so the
+ * toolbar (the core WhatsApp interaction) never appeared at all. !important
+ * is required because the hidden state is an inline style, which beats any
+ * ordinary class rule.
+ * ------------------------------------------------------------------------- */
+.wa-msg-hover .wa-msg-actions {
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  transform: translateY(0);
+}
+.wa-msg-actions {
+  transform: translateY(2px);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+
 /* Promo page (app/apply) — blobs, marquee, reveal-on-scroll, audio bars */
 @keyframes blobFloat1 {
   0%, 100% { transform: translate(0, 0) scale(1); }

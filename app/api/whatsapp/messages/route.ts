@@ -17,6 +17,11 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const leadId = searchParams.get("leadId")
   const limit  = Math.min(500, Math.max(1, parseInt(searchParams.get("limit") || "100") || 100))
+  // ?before=<ISO timestamp> — cursor for the chat window's "Load earlier
+  // messages" (real WhatsApp pages history upward). Returns the page of
+  // messages strictly OLDER than the cursor, oldest→newest.
+  const beforeRaw = searchParams.get("before")
+  const before = beforeRaw && !isNaN(Date.parse(beforeRaw)) ? beforeRaw : null
   if (!leadId) return NextResponse.json([])
 
   const branchId = sessionBranchId(session)
@@ -37,9 +42,10 @@ export async function GET(req: NextRequest) {
                 wa_message_id, branch_id
          FROM whatsapp_messages
          WHERE lead_id = $1
+           AND ($2::timestamptz IS NULL OR created_at < $2::timestamptz)
          ORDER BY created_at DESC
-         LIMIT $2`,
-        [leadId, limit]
+         LIMIT $3`,
+        [leadId, before, limit]
       )
       return NextResponse.json(result.rows.reverse())
     } catch (e: any) {
@@ -48,9 +54,10 @@ export async function GET(req: NextRequest) {
         `SELECT id, direction, content, status, created_at
          FROM whatsapp_messages
          WHERE lead_id = $1
+           AND ($2::timestamptz IS NULL OR created_at < $2::timestamptz)
          ORDER BY created_at DESC
-         LIMIT $2`,
-        [leadId, limit]
+         LIMIT $3`,
+        [leadId, before, limit]
       )
       return NextResponse.json(result.rows.reverse())
     }

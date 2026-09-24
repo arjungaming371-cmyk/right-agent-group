@@ -65,13 +65,14 @@ function fmtDuration(sec?: number | null) {
 }
 
 export default function CallsList({
-  leads, onOpenChat, onRefresh, onDiagnose, ready,
+  leads, onOpenChat, onRefresh, onDiagnose, ready, onMissedCount,
 }: {
   leads: Lead[]
   onOpenChat: (l: Lead) => void
   onRefresh: () => void
   onDiagnose: () => void
   ready: boolean
+  onMissedCount?: (n: number) => void
 }) {
   const [calls, setCalls] = useState<CallRow[]>([])
   const [filter, setFilter] = useState<"all" | "missed">("all")
@@ -110,6 +111,10 @@ export default function CallsList({
 
   const missedCount = calls.filter(isMissed).length
 
+  // report up so the Chats|Calls bottom nav can show the red missed badge
+  // (real WhatsApp marks the Calls tab until you've viewed it)
+  useEffect(() => { onMissedCount?.(missedCount) }, [missedCount, onMissedCount])
+
   // tap → open the lead's chat; lead not in the conversations list → build a
   // minimal stand-in so the chat screen still opens (same trick NewChat uses)
   function open(c: CallRow) {
@@ -135,10 +140,13 @@ export default function CallsList({
   }
 
   return (
-    <div style={{
-      borderRight: `1px solid ${WA.hairline}`, flexDirection: "column", background: WA.panelBg,
-      flexShrink: 0, display: "flex", width: "100%",
-    }} className="w-full md:w-[380px]">
+    // FIX (2026-09-24): dropped the inline width:"100%" — it overrode
+    // md:w-[380px] (inline styles beat classes) and stretched this panel
+    // over the chat window; width is class-driven like the chat list now.
+    <div
+      className="flex w-full md:w-[380px]"
+      style={{ borderRight: `1px solid ${WA.hairline}`, flexDirection: "column", background: WA.panelBg, flexShrink: 0 }}
+    >
 
       {/* header — WhatsApp Calls title row */}
       <div style={{ padding: "18px 16px 10px 20px", background: WA.headerBg, display: "flex", alignItems: "center", justifyContent: "space-between" }}>

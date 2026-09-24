@@ -5,7 +5,7 @@
 // toolbar (react / reply / forward) exactly where WhatsApp Web puts it.
 
 import { useState } from "react"
-import { Reply, Forward, Download, FileText, SmilePlus, PhoneIncoming, PhoneMissed } from "lucide-react"
+import { Reply, Forward, Download, FileText, SmilePlus, PhoneIncoming, PhoneMissed, Copy, Check } from "lucide-react"
 import { WA, WA_FONT, fmtMsgTime, isPlaceholder, type Msg } from "./palette"
 import { Ticks } from "./bits"
 
@@ -111,7 +111,7 @@ function MediaBody({ msg, onOpenImage }: { msg: Msg; onOpenImage: (url: string) 
 }
 
 export default function MessageBubble({
-  msg, contactName, showTail, grouped, onReply, onReact, onForward, onJump,
+  msg, contactName, showTail, grouped, onReply, onReact, onForward, onJump, onOpenImage,
 }: {
   msg: Msg
   contactName: string
@@ -121,9 +121,12 @@ export default function MessageBubble({
   onReact?: (m: Msg, emoji: string) => void
   onForward?: (m: Msg) => void
   onJump?: (id: string) => void
+  /** fullscreen photo viewer — parent renders the overlay (lightbox) */
+  onOpenImage?: (url: string) => void
 }) {
   const out = msg.direction === "outbound"
   const [reactOpen, setReactOpen] = useState(false)
+  const [copied, setCopied] = useState(false)
   const canAct = !!msg.wa_message_id && (!!onReact || !!onReply || !!onForward)
 
   const kind = (msg.msg_type || "text").toLowerCase()
@@ -171,6 +174,18 @@ export default function MessageBubble({
   const caption = isMedia && msg.content && !isPlaceholder(msg.content) ? msg.content : ""
   const bodyText = isMedia ? caption : msg.content
   const hasMetaOverlay = isImageish && !caption
+  // copy is available for ANY message that carries text (no wa_message_id
+  // needed — optimistic rows copy too)
+  const canCopy = !!bodyText && !!bodyText.trim()
+
+  async function copyText(e: React.MouseEvent) {
+    e.stopPropagation()
+    try {
+      await navigator.clipboard.writeText(bodyText || "")
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1200)
+    } catch {}
+  }
 
   return (
     <div
@@ -185,8 +200,8 @@ export default function MessageBubble({
       onMouseEnter={e => { e.currentTarget.classList.add("wa-msg-hover") }}
       onMouseLeave={e => { e.currentTarget.classList.remove("wa-msg-hover"); setReactOpen(false) }}
     >
-      {/* hover action toolbar — react / reply / forward, like WhatsApp Web */}
-      {canAct && (
+      {/* hover action toolbar — react / reply / copy / forward, like WhatsApp Web */}
+      {(canAct || canCopy) && (
         <div
           className="wa-msg-actions"
           style={{
@@ -204,6 +219,11 @@ export default function MessageBubble({
           {onReply && (
             <button title="Reply" onClick={(e) => { e.stopPropagation(); onReply(msg) }} style={actionBtnStyle}>
               <Reply size={15} style={{ transform: "scaleX(-1)" }} />
+            </button>
+          )}
+          {canCopy && (
+            <button title={copied ? "Copied!" : "Copy text"} onClick={copyText} style={actionBtnStyle}>
+              {copied ? <Check size={15} color={WA.tealBright} /> : <Copy size={15} />}
             </button>
           )}
           {onForward && (
@@ -242,7 +262,7 @@ export default function MessageBubble({
         {showTail && <BubbleTail out={out} />}
         {msg.quoted_wa_id && <QuoteBlock msg={msg} onJump={onJump} />}
 
-        {isMedia && <MediaBody msg={msg} onOpenImage={(url) => window.open(url, "_blank")} />}
+        {isMedia && <MediaBody msg={msg} onOpenImage={(url) => (onOpenImage ? onOpenImage(url) : window.open(url, "_blank"))} />}
 
         {bodyText ? (
           <div style={{
