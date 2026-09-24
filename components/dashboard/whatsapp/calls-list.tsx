@@ -1,18 +1,18 @@
 "use client"
 
-// WhatsApp Calls tab — the real WhatsApp "Calls" screen adapted to what the
-// system can actually do:
+// WhatsApp Calls tab — the real WhatsApp "Calls" screen:
 //
-//   • rows = voice_calls (BOTH networks: WhatsApp WebRTC calls wacall-* AND
-//     Exotel phone calls), newest first, All / Missed filter chips
+//   • rows = WHATSAPP calls ONLY (voice_calls wacall-* + missed-call bubbles
+//     from whatsapp_messages) — Exotel/local phone-line calls stay in Voice
+//     Logs / Comm Log, exactly like the real app only lists WhatsApp calls
+//   • newest first, All / Missed filter chips
 //   • red name + missed arrow for unanswered, teal arrows for in/out
-//   • channel glyph: WhatsApp logo for wacall-* rows, phone for Exotel
 //   • tap a row → opens that lead's chat (call bubble + full history live
 //     there) — this is the "management" hop
 //   • phone button → AI call back via Exotel (WhatsApp business-initiated
 //     calls aren't offered by Meta yet — permission-template gated)
 //
-// Data source: GET /api/calls (voice_calls ⋈ leads, branch-scoped).
+// Data source: GET /api/calls?channel=whatsapp (branch-scoped).
 
 import { useEffect, useMemo, useState } from "react"
 import {
@@ -80,7 +80,9 @@ export default function CallsList({
 
   async function load() {
     try {
-      const res = await fetch("/api/calls")
+      // channel=whatsapp → only WhatsApp calls (wacall-*), never the local
+      // phone-line calls — the WhatsApp Calls screen stays WhatsApp-only.
+      const res = await fetch("/api/calls?channel=whatsapp")
       const data = await res.json()
       if (Array.isArray(data)) setCalls(data)
     } catch {}
@@ -198,8 +200,8 @@ export default function CallsList({
             </div>
             <div style={{ fontSize: 12.5, maxWidth: 250, lineHeight: 1.5 }}>
               {filter === "missed"
-                ? "Every WhatsApp voice call and phone call got answered."
-                : "WhatsApp voice calls to your number and Priya's phone calls will show up here."}
+                ? "Every WhatsApp voice call got answered."
+                : "WhatsApp voice calls to your business number will show up here."}
             </div>
           </div>
         )}

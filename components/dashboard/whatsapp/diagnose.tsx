@@ -4,7 +4,7 @@
 // my phone?" in one click. Pings Meta with the live sender credentials and
 // shows the raw result plus human hints for the common failures.
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { WA, WA_FONT } from "./palette"
 
 export type DiagResult = {
@@ -55,9 +55,17 @@ export function DiagnoseModal({ onClose }: { onClose: () => void }) {
   const [result, setResult] = useState<DiagResult | null>(null)
   const [busy, setBusy] = useState(true)
 
-  if (result === null && busy) {
-    runDiagnostic().then((r) => { setResult(r); setBusy(false) })
-  }
+  // ONE ping per mount — the old render-phase call re-fired on every render
+  // while busy (double under Strict Mode), spamming Meta with check requests.
+  useEffect(() => {
+    let cancelled = false
+    runDiagnostic().then((r) => {
+      if (cancelled) return
+      setResult(r)
+      setBusy(false)
+    })
+    return () => { cancelled = true }
+  }, [])
 
   const hints = result ? HINTS.filter((h) => h.match(result)) : []
 

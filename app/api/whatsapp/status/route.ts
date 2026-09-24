@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getSessionFromRequest } from "@/lib/auth"
-import { checkWhatsAppHealth } from "@/lib/whatsapp"
+import { checkWhatsAppHealth, liveEnvWhatsAppCreds } from "@/lib/whatsapp"
 
 export const dynamic = "force-dynamic"
 
@@ -10,7 +10,11 @@ export async function GET(req: NextRequest) {
   const session = await getSessionFromRequest(req)
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
-  const configured = !!(process.env.WHATSAPP_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID)
+  // Live read (same creds the sender uses) — a boot-time process.env check
+  // kept saying "not configured" after the token was added to .env until the
+  // next restart, while sends already worked.
+  const { token, phoneId } = liveEnvWhatsAppCreds()
+  const configured = !!(token && phoneId)
   if (!configured) {
     return NextResponse.json({ configured: false, ready: false, message: "Set WHATSAPP_TOKEN and WHATSAPP_PHONE_NUMBER_ID in .env" })
   }

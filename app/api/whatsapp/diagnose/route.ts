@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireModuleOrRole } from "@/lib/auth"
-import { branchWhatsAppCtx } from "@/lib/whatsapp"
+import { branchWhatsAppCtx, liveEnvWhatsAppCreds } from "@/lib/whatsapp"
 
 export const dynamic = "force-dynamic"
 
@@ -23,8 +23,11 @@ export async function GET(req: NextRequest) {
   const branchId = req.nextUrl.searchParams.get("branchId") || null
   const ctx = await branchWhatsAppCtx(branchId || undefined)
 
-  const token = ctx?.whatsappToken || process.env.WHATSAPP_TOKEN
-  const phoneId = ctx?.whatsappPhoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID
+  // Same live read the sender uses — diagnosing with boot-time env could
+  // report a stale token while real sends go out with the fresh one.
+  const live = liveEnvWhatsAppCreds()
+  const token = ctx?.whatsappToken || live.token
+  const phoneId = ctx?.whatsappPhoneNumberId || live.phoneId
 
   if (!token || !phoneId) {
     return NextResponse.json({

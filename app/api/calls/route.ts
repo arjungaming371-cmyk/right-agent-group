@@ -11,11 +11,53 @@ export async function GET(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   // Branch-scoped users only see their branch's calls (admin sees all).
   const branchId = sessionBranchId(session)
+  // channel=whatsapp → WhatsApp Calls tab ONLY (twilio_call_sid = wacall-*).
+  // Without it the tab mixed in every Exotel/local phone-line call, which is
+  // not how WhatsApp's Calls screen works — phone-line calls stay in
+  // Voice Logs / Comm Log (this endpoint's other consumers).
+  const channel = req.nextUrl.searchParams.get("channel")
   let q = db.from("voice_calls").select("*, leads(name, phone, source)")
   if (branchId) q = q.eq("branch_id", branchId)
+  if (channel === "whatsapp") q = q.like("twilio_call_sid", "wacall-%")
   const { data, error } = await q.order("created_at", { ascending: false }).limit(100)
   if (error) return apiError(error)
-  return NextResponse.json(data ?? [])
+  let rows: any[] = data ?? []
+
+  // WhatsApp Calls tab: MISSED / declined / failed WhatsApp calls never
+  // reach voice_calls (no session → no turn-start row), but finalizeWhatsAppCall
+  // logs a call bubble for them (whatsapp_messages msg_type='call',
+  // status='received'). Merge those in so the tab shows the complete WhatsApp
+  // call history — answered (with duration) AND missed — newest first. On a
+  // pre-rich-chat DB the msg_type filter errors and the shim returns []: the
+  // tab then degrades gracefully to answered calls only.
+  if (channel === "whatsapp") {
+    let mb = db
+      .from("whatsapp_messages")
+      .select("*, leads(name, phone, source)")
+      .eq("msg_type", "call")
+      .eq("status", "received")
+      .like("wa_message_id", "wacall-%")
+    if (branchId) mb = mb.eq("branch_id", branchId)
+    const missedRes = await mb.order("created_at", { ascending: false }).limit(100)
+    const missed = ((missedRes.data ?? []) as any[]).map((m) => ({
+      id: m.wa_message_id || m.id,
+      lead_id: m.lead_id ?? null,
+      twilio_call_sid: m.wa_message_id || null,
+      direction: "inbound",
+      status: "missed",
+      duration: 0,
+      outcome: "missed",
+      created_at: m.created_at,
+      phone: m.phone_number ?? null,
+      branch_id: m.branch_id ?? null,
+      leads: m.leads ?? null,
+    }))
+    rows = [...rows, ...missed]
+      .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())
+      .slice(0, 100)
+  }
+
+  return NextResponse.json(rows)
 }
 
 export async function POST(req: NextRequest) {

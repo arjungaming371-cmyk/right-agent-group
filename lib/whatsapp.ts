@@ -53,6 +53,17 @@ function getLiveEnvPhoneId(): string {
   return String(process.env.WHATSAPP_PHONE_NUMBER_ID || "").split("#")[0].trim()
 }
 
+/**
+ * Live env credentials for DIAGNOSTIC surfaces (status dot, connection
+ * diagnostic). These must judge the SAME credentials the sender actually
+ * uses — getLiveEnv* re-reads .env from disk, so an edited .env is reflected
+ * without a restart. Reading process.env directly made the offline banner
+ * and the diagnostic disagree with real send behaviour after an env edit.
+ */
+export function liveEnvWhatsAppCreds(): { token: string; phoneId: string } {
+  return { token: getLiveEnvToken(), phoneId: getLiveEnvPhoneId() }
+}
+
 /** Branch context for a send — resolved once per flow, passed everywhere. */
 export type BranchWhatsAppCtx = {
   id: string

@@ -55,7 +55,7 @@ function assertSafeIdentifier(name: string): string {
   return name
 }
 
-type Filter = { column: string; op: "eq" | "ilike"; value: any }
+type Filter = { column: string; op: "eq" | "ilike" | "like"; value: any }
 
 // ---- INSERT builder ----
 class InsertBuilder implements PromiseLike<{ data: any; error: any }> {
@@ -309,6 +309,15 @@ class SelectBuilder implements PromiseLike<{ data: any; error: any; count?: numb
     return this
   }
 
+  // Exact SQL LIKE — the caller supplies the wildcards (e.g. "wacall-%").
+  // Unlike ilike(), the pattern is kept verbatim: partial matches with custom
+  // prefixes (voice_calls sid namespaces) need the % where it is, not wrapped
+  // around both ends.
+  like(column: string, pattern: string) {
+    this.filters.push({ column: assertSafeIdentifier(column), op: "like", value: pattern })
+    return this
+  }
+
   order(column: string, opts?: { ascending?: boolean }) {
     this.orderCol = assertSafeIdentifier(column)
     this.orderAsc = opts?.ascending ?? true
@@ -339,7 +348,11 @@ class SelectBuilder implements PromiseLike<{ data: any; error: any; count?: numb
     const parts = this.filters.map((f, i) => {
       params.push(f.op === "ilike" ? `%${f.value}%` : f.value)
       const col = prefix ? `${prefix}.${f.column}` : f.column
-      return f.op === "ilike" ? `${col} ILIKE $${i + 1}` : `${col} = $${i + 1}`
+      return f.op === "ilike"
+        ? `${col} ILIKE $${i + 1}`
+        : f.op === "like"
+          ? `${col} LIKE $${i + 1}`
+          : `${col} = $${i + 1}`
     })
     return { clause: "WHERE " + parts.join(" AND "), params }
   }
