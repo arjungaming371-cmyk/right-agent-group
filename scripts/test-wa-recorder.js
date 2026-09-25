@@ -164,10 +164,11 @@ function ok(name, cond, extra) {
   // ---------- 8. Kill switch (child process: env is read at require time) ----------
   {
     const { execFileSync } = require("child_process")
+    const recorderPath = path.join(__dirname, "..", "server", "recorder.js")
     const out = execFileSync(process.execPath, [
       "-e",
-      "process.env.RECORD_CALLS='0';process.env.RECORDINGS_DIR='" + SCRATCH + "';" +
-      "const r=require('" + path.join(__dirname, "..", "server", "recorder.js") + "');" +
+      "process.env.RECORD_CALLS='0';process.env.RECORDINGS_DIR=" + JSON.stringify(SCRATCH) + ";" +
+      "const r=require(" + JSON.stringify(recorderPath) + ");" +
       "console.log(r.createFor('wacall-x') === null ? 'KILLSWITCH-OK' : 'KILLSWITCH-FAIL')",
     ]).toString().trim()
     ok("RECORD_CALLS=0: createFor returns null", out === "KILLSWITCH-OK", out)
