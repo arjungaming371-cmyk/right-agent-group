@@ -27,7 +27,7 @@ type UploadBody = {
   bytes?: unknown
 }
 
-const CALL_SID_RE = /^wacall-[A-Za-z0-9_-]{1,120}$/
+const CALL_SID_RE = /^wacall-[A-Za-z0-9_.\-+=:@]{1,200}$/
 
 export async function POST(req: NextRequest) {
   if (!verifyServiceKey(req)) {

@@ -14,7 +14,7 @@ export function recordingsDir(): string {
 // The voicebot only ever produces <callSid>.mp3|wav and the file route only
 // ever serves these — a strict allowlist instead of trying to sanitize
 // arbitrary input. (callSid itself is `wacall-` + Meta's call id.)
-const RECORDING_NAME_RE = /^wacall-[A-Za-z0-9_-]{1,120}\.(mp3|wav)$/
+const RECORDING_NAME_RE = /^wacall-[A-Za-z0-9_.-]{1,200}\.(mp3|wav)$/
 
 /**
  * Resolve a recording filename to a path INSIDE the recordings directory.

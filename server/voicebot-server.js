@@ -1305,7 +1305,7 @@ const httpServer = http.createServer((req, res) => {
   // /health is unauthenticated and loopback-only — returns no call data.
   if (req.method === "GET" && url === "/health") return json(200, { ok: true, activeCalls: waCalls.activeCount() })
 
-  if (req.method !== "POST" || !["/whatsapp/connect", "/whatsapp/terminated"].includes(url)) {
+  if (req.method !== "POST" || !["/whatsapp/connect", "/whatsapp/terminated", "/whatsapp/wait-connected"].includes(url)) {
     return json(404, { ok: false, error: "not found" })
   }
   const a = Buffer.from(req.headers["x-api-key"] || "")
@@ -1337,6 +1337,10 @@ const httpServer = http.createServer((req, res) => {
           console.error("wa connect error:", e.message)
           json(502, { ok: false, error: e.message })
         })
+    } else if (url === "/whatsapp/wait-connected") {
+      waCalls.waitConnectedSession(str(body.callId, 128), Number(body.timeoutMs) || 2500)
+        .then((r) => json(200, r))
+        .catch((e) => json(200, { ok: false, connected: false, error: e.message }))
     } else {
       const r = waCalls.endSession(str(body.callId, 128), str(body.reason, 64))
       json(200, r)

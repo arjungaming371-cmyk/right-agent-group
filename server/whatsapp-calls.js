@@ -78,9 +78,9 @@ const MAX_UTTERANCE_MS = 15000
 const BARGE_IN = (process.env.VOICEBOT_WA_BARGE_IN || "1").trim() === "1"
 const BARGE_MIN_MS = parseInt(process.env.VOICEBOT_WA_BARGE_MIN_MS || "300")
 
-// TTS: WhatsApp calls default to Cartesia (as requested). "sarvam" flips the
-// whole channel back; a missing Cartesia key falls back to Sarvam per call.
-const WA_TTS_PROVIDER = (process.env.VOICEBOT_WA_TTS_PROVIDER || "cartesia").toLowerCase()
+// TTS: WhatsApp calls default to Sarvam or Cartesia if specified.
+// Automatic Sarvam fallback is always active if Cartesia fails or runs out of credits.
+const WA_TTS_PROVIDER = (process.env.VOICEBOT_WA_TTS_PROVIDER || process.env.TTS_PROVIDER || "sarvam").toLowerCase()
 
 // STUN only — this process runs on a public-IP server (AWS), Meta's SFU is
 // publicly reachable; a TURN relay is never needed for this topology.
@@ -343,11 +343,15 @@ async function createCallAnswer(offerSdp) {
   }
   const ssrc = sender.ssrc || sendTrack.ssrc
 
+  console.log(`📋 WhatsApp WebRTC Offer:\n${offerSdp.trim()}`)
+  const filtered = filterSdpForWhatsApp(pc.localDescription?.sdp || answer.sdp)
+  console.log(`📋 WhatsApp WebRTC Answer:\n${filtered.trim()}`)
+
   return {
     pc,
     sendTrack,
     sender,
-    answerSdp: filterSdpForWhatsApp(pc.localDescription?.sdp || answer.sdp),
+    answerSdp: filtered,
     payloadType: pt,
     ssrc,
     remoteTrack,
@@ -423,20 +427,34 @@ class WhatsAppCallSession {
     this.silenceFrame = this.encoder.encode(Buffer.alloc(WA_FRAME_BYTES))
 
     pc.iceConnectionStateChange.subscribe((state) => {
-      if (state === "connected" || state === "completed") {
-        if (!this.connected) {
-          this.connected = true
-          console.log(`🔊 WhatsApp call ${this.callSid} media connected`)
-        }
-      } else if (state === "failed" || state === "closed" || state === "disconnected") {
-        // "disconnected" can self-heal (ICE restart / network blip); only a
-        // hard failure or close tears the session down.
-        if (state !== "disconnected") this.end(state)
+      console.log(`🧊 WhatsApp call ${this.callSid} ICE state: ${state}`)
+      if (state === "failed" || state === "closed") {
+        this.end(state)
       }
     })
     pc.connectionStateChange.subscribe((state) => {
-      if (state === "closed" || state === "failed") this.end(state)
+      console.log(`🔒 WhatsApp call ${this.callSid} PC state: ${state} (dtls=${this.sender?.dtlsTransport?.state})`)
+      if (state === "connected") {
+        if (!this.connected) {
+          this.connected = true
+          console.log(`🔊 WhatsApp call ${this.callSid} media connected (PC connected)`)
+        }
+      } else if (state === "closed" || state === "failed") {
+        this.end(state)
+      }
     })
+
+    if (this.sender?.dtlsTransport) {
+      this.sender.dtlsTransport.onStateChange.subscribe((state) => {
+        console.log(`🔐 WhatsApp call ${this.callSid} DTLS state: ${state}`)
+        if (state === "connected") {
+          if (!this.connected) {
+            this.connected = true
+            console.log(`🔊 WhatsApp call ${this.callSid} media connected (DTLS connected)`)
+          }
+        }
+      })
+    }
 
     // Inbound audio: the REMOTE track. werift fires onTrack during
     // setRemoteDescription — createCallAnswer already captured it (see
@@ -446,8 +464,13 @@ class WhatsAppCallSession {
     const bindInbound = (track) => {
       if (inboundBound || !track) return
       inboundBound = true
+      console.log(`📥 WhatsApp call ${this.callSid} inbound track bound (${track.kind || "audio"})`)
       track.onReceiveRtp.subscribe((rtp) => {
         try {
+          if (!this._firstInboundLogged) {
+            this._firstInboundLogged = true
+            console.log(`📥 WhatsApp call ${this.callSid} first inbound RTP packet received (len=${rtp?.payload?.length})`)
+          }
           if (this.closed || !rtp?.payload?.length) return
           // 1 opus frame per RTP packet (Meta sends 20 ms ptime).
           const pcm48k = this.safeDecode(rtp.payload)
@@ -478,6 +501,38 @@ class WhatsAppCallSession {
     return this
   }
 
+  waitForConnected(timeoutMs = 2500) {
+    if (this.closed) return Promise.resolve(false)
+    if (this.sender?.dtlsTransport?.state === "connected" || this.connected) {
+      return Promise.resolve(true)
+    }
+    return new Promise((resolve) => {
+      let settled = false
+      const done = (val) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        try { dtlsSub?.unsubscribe?.() } catch {}
+        try { pcSub?.unsubscribe?.() } catch {}
+        resolve(val)
+      }
+      const timer = setTimeout(() => done(this.sender?.dtlsTransport?.state === "connected" || this.connected), timeoutMs)
+      if (timer.unref) timer.unref()
+
+      let dtlsSub = null
+      if (this.sender?.dtlsTransport) {
+        dtlsSub = this.sender.dtlsTransport.onStateChange.subscribe((st) => {
+          if (st === "connected") done(true)
+          else if (st === "failed" || st === "closed") done(false)
+        })
+      }
+      const pcSub = this.pc?.connectionStateChange?.subscribe?.((st) => {
+        if (st === "connected") done(true)
+        else if (st === "failed" || st === "closed") done(false)
+      })
+    })
+  }
+
   safeDecode(payload) {
     try { return this.decoder.decode(payload) } catch { return null }
   }
@@ -491,12 +546,20 @@ class WhatsAppCallSession {
     // Meta's jitter buffer primed so Priya's first word doesn't glitch.
     this.pacer = setInterval(() => {
       if (this.closed) return
+      // DTLS must be connected before transmitting real speech frames.
+      // If frames are dequeued before DTLS connects, werift drops them silently.
+      const dtlsState = this.sender?.dtlsTransport?.state
+      const isReady = dtlsState === "connected" || (this.connected && !dtlsState)
+      if (!isReady) {
+        return
+      }
+      if (!this.connected) {
+        this.connected = true
+        console.log(`🔊 WhatsApp call ${this.callSid} media flowing over DTLS`)
+      }
       const isReal = this.outQueue.length > 0
-      const frame = this.connected
-        ? (isReal ? this.outQueue.shift() : this.silenceFrame)
-        : this.silenceFrame
+      const frame = isReal ? this.outQueue.shift() : this.silenceFrame
       if (!frame) return
-      if (!this.connected) return
       try {
         const packet = new RtpPacket(new RtpHeader({
           payloadType: this.pt,
@@ -730,12 +793,22 @@ class WhatsAppCallSession {
         const t0 = Date.now()
         let override = this.voice || null
         let audio
+        let providerUsed = WA_TTS_PROVIDER
         if (WA_TTS_PROVIDER === "cartesia" && process.env.CARTESIA_API_KEY) {
           const speaker = override?.provider === "cartesia" ? override.speaker : (process.env.CARTESIA_VOICE_ID || undefined)
-          audio = await voiceProviders.cartesiaTts(text, this.language, speaker)
+          try {
+            audio = await voiceProviders.cartesiaTts(text, this.language, speaker)
+            providerUsed = "cartesia"
+          } catch (cartesiaErr) {
+            console.warn(`[WA] Cartesia TTS failed (${cartesiaErr.message}), falling back to Sarvam TTS`)
+            const sarvamSpeaker = override?.provider === "sarvam" ? override.speaker : undefined
+            audio = await voiceProviders.sarvamTts(text, this.language, sarvamSpeaker)
+            providerUsed = "sarvam (fallback)"
+          }
         } else {
           const speaker = override?.provider === "sarvam" ? override.speaker : undefined
           audio = await voiceProviders.sarvamTts(text, this.language, speaker)
+          providerUsed = "sarvam"
         }
         const pcmSrc = await wavToPcm(audio)
         // Cartesia/Sarvam both synthesize at 24 kHz here; upsample to the
@@ -744,7 +817,7 @@ class WhatsAppCallSession {
         const rate = 24000
         const factor = Math.round(WA_RATE / rate)
         const pcm48k = factor > 1 ? upsampleMono(pcmSrc, factor) : pcmSrc
-        console.log(`⏱ wa TTS (${WA_TTS_PROVIDER === "cartesia" && process.env.CARTESIA_API_KEY ? "cartesia" : "sarvam"}): ${Date.now() - t0}ms (${pcm48k.length / (WA_RATE * 2)}s audio)`)
+        console.log(`⏱ wa TTS (${providerUsed}): ${Date.now() - t0}ms (${pcm48k.length / (WA_RATE * 2)}s audio)`)
         return pcm48k
       } catch (e) {
         console.error("wa TTS error:", e.message)
@@ -908,6 +981,13 @@ async function endSession(callId, reason) {
   return { ok: true, ended: true }
 }
 
+async function waitConnectedSession(callId, timeoutMs = 2500) {
+  const session = sessions.get(callId)
+  if (!session) return { ok: false, connected: false }
+  const connected = await session.waitForConnected(timeoutMs)
+  return { ok: true, connected }
+}
+
 function activeCount() {
   return sessions.size
 }
@@ -923,7 +1003,7 @@ function validateConfig() {
 }
 
 function describeConfig() {
-  const tts = WA_TTS_PROVIDER === "cartesia" && process.env.CARTESIA_API_KEY ? "Cartesia (default)" : "Sarvam (fallback)"
+  const tts = WA_TTS_PROVIDER === "cartesia" && process.env.CARTESIA_API_KEY ? "Cartesia (with Sarvam fallback)" : "Sarvam"
   const rec = recorder.REC_ENABLED ? `on (${recorder.recordingsDir()})` : "off"
   return `STT: Sarvam Saaras (cloud) | LLM: via app /api/calls/turn | TTS: ${tts} | barge-in: ${BARGE_IN ? "on" : "off"} | recording: ${rec} | ICE: ${ICE_SERVERS.map((s) => s.urls).join(", ")}`
 }
@@ -933,6 +1013,7 @@ module.exports = {
   WhatsAppCallSession,
   startSession,
   endSession,
+  waitConnectedSession,
   activeCount,
   validateConfig,
   describeConfig,

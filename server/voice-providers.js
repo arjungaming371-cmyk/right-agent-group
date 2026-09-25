@@ -279,7 +279,12 @@ async function synthesize(text, language, voiceOverride) {
   const vo = voiceOverride || null
   // Employee explicitly wants Cartesia and it is usable.
   if (vo?.provider === "cartesia" && CARTESIA_API_KEY && (vo.speaker || CARTESIA_VOICE_ID)) {
-    return cartesiaTts(text, language, vo.speaker)
+    try {
+      return await cartesiaTts(text, language, vo.speaker)
+    } catch (e) {
+      console.warn(`[synthesize] Cartesia failed (${e.message}), falling back to Sarvam TTS`)
+      return sarvamTts(text, language, vo?.provider === "sarvam" ? vo.speaker : undefined)
+    }
   }
   // Employee explicitly wants Sarvam (always usable — the key is mandatory).
   if (vo?.provider === "sarvam" && SARVAM_API_KEY) {
@@ -288,7 +293,12 @@ async function synthesize(text, language, voiceOverride) {
   // No usable override — default dispatch, threading through a same-provider
   // speaker override if the employee's provider happens to match.
   if (TTS_CALL_PROVIDER === "cartesia") {
-    return cartesiaTts(text, language, vo?.provider === "cartesia" ? vo.speaker : undefined)
+    try {
+      return await cartesiaTts(text, language, vo?.provider === "cartesia" ? vo.speaker : undefined)
+    } catch (e) {
+      console.warn(`[synthesize] Cartesia failed (${e.message}), falling back to Sarvam TTS`)
+      return sarvamTts(text, language, vo?.provider === "sarvam" ? vo.speaker : undefined)
+    }
   }
   return sarvamTts(text, language, vo?.provider === "sarvam" ? vo.speaker : undefined)
 }
