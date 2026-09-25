@@ -27,6 +27,15 @@
 // voice_calls row is written BEFORE the phone rings so /api/calls/turn's
 // "start" event resolves lead + language + branch with zero extra lookups.
 //
+// `instructions` ("What should Priya talk about?") is honored on BOTH
+// channels: it is stored on the voice_calls row, where /api/calls/turn's
+// turn handler already reads it — the same field the legacy /api/calls
+// phone path used. Every dial also writes a comm_logs row so the lead's
+// timeline shows the attempt, and warms the LLM while the phone rings.
+//
+// Full machine (channels, permission gates, status lifecycle, scripts,
+// campaign queue, runbook): docs/OUTBOUND-CALLS.md.
+//
 // Env: WHATSAPP_OUTBOUND_CALLS=0 hard-disables the whatsapp/auto channels
 //      (phone stays available) — for deployments that have not enabled
 //      Business Calling on their WABA number yet.
@@ -41,6 +50,7 @@ import { branchWhatsAppCtx, placeWhatsAppCall } from "@/lib/whatsapp"
 import { checkCallCompliance } from "@/lib/compliance"
 import { normalizePhone } from "@/lib/phone"
 import { bridgeToVoicebot } from "@/lib/voicebot-bridge"
+import { sanitizeText } from "@/lib/api-route"
 
 export const dynamic = "force-dynamic"
 
@@ -61,7 +71,7 @@ export async function POST(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const branchId = sessionBranchId(session)
 
-  let body: { leadId?: string; channel?: string }
+  let body: { leadId?: string; channel?: string; instructions?: string }
   try {
     body = await req.json()
   } catch {
@@ -89,6 +99,11 @@ export async function POST(req: NextRequest) {
   const phone = normalizePhone(lead.whatsapp_number || lead.phone)
   if (!phone) return NextResponse.json({ error: "lead has no callable phone number" }, { status: 400 })
   const language = lead.language || "telugu"
+  // "What should Priya talk about?" — same field, same cap, both channels.
+  const instructions = sanitizeText(body?.instructions, 1000) || null
+
+  // Warm the LLM while the phone rings (same as the legacy /api/calls path).
+  fetch(`${process.env.APP_INTERNAL_URL || "http://127.0.0.1:3000"}/api/warmup`, { method: "POST" }).catch(() => {})
 
   // 2) Channel resolution for "auto": WhatsApp callback is only safe when
   //    the lead recently called US (Meta's implicit callback permission).
@@ -171,6 +186,8 @@ export async function POST(req: NextRequest) {
 
       // 4d. Log the call row BEFORE it rings — /api/calls/turn "start" then
       //     resolves direction=outbound, lead, language and branch from it.
+      //     `instructions` rides on the row: the turn handler reads it from
+      //     there on every turn (the WhatsApp session can't pass custom text).
       const callSid = `wacall-${placed.callId}`
       await db.from("voice_calls").insert({
         lead_id: leadId,
@@ -180,8 +197,17 @@ export async function POST(req: NextRequest) {
         language,
         phone,
         branch_id: branchId || lead.branch_id || null,
+        instructions,
       })
       if (branchId) recordUsage(branchId, "call")
+      await db.from("comm_logs").insert({
+        lead_id: leadId,
+        type: "call",
+        summary: instructions
+          ? `Outbound WhatsApp call initiated to ${phone} — "${instructions}"`
+          : `Outbound WhatsApp call initiated to ${phone}`,
+        outcome: "pending",
+      }).catch(() => {})
       console.log(`📤 WhatsApp outbound dial lead=${leadId} to=***${phone.slice(-4)} callId=***${placed.callId.slice(-8)} registered=${reg.ok ? "yes" : "no"}`)
       return NextResponse.json({ ok: true, channel: "whatsapp", callSid, status: "ringing" })
     }
@@ -196,8 +222,17 @@ export async function POST(req: NextRequest) {
       language,
       phone,
       branch_id: branchId || lead.branch_id || null,
+      instructions,
     })
     if (branchId) recordUsage(branchId, "call")
+    await db.from("comm_logs").insert({
+      lead_id: leadId,
+      type: "call",
+      summary: instructions
+        ? `Outbound AI call initiated to ${phone} — "${instructions}"`
+        : `Outbound AI call initiated to ${phone}`,
+      outcome: "pending",
+    }).catch(() => {})
     return NextResponse.json({ ok: true, channel: "phone", callSid: call.sid, status: "initiated" })
   } catch (e) {
     return apiError(e)
