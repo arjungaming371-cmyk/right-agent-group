@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
 import { createSessionToken, createOtpPendingToken, isSafeNextPath, SESSION_COOKIE, sessionCookieOptions, type Role } from "@/lib/auth"
-import { createNotification } from "@/lib/notifications"
+import { createLoginNotificationOncePerDay } from "@/lib/notifications"
 import { isSecurityEnabled } from "@/lib/security"
 import { isMailConfigured, sendMail } from "@/lib/mail"
 import { logAudit } from "@/lib/audit"
@@ -170,7 +170,8 @@ export async function GET(req: NextRequest) {
     // account's email and existence to everyone, undoing the point of hiding
     // it from Team Access / the audit log / the Ops Assistant elsewhere.
     if (role !== "developer") {
-      createNotification({ type: "login", title: "Team member signed in", body: `${email} (${role})` })
+      // Once-per-day dedupe: logins must not bury escalations in the bell.
+      createLoginNotificationOncePerDay(`${email} (${role})`)
     }
 
     const token = await createSessionToken(email, role, { orgId, branchId })
