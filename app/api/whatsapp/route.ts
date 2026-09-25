@@ -112,9 +112,9 @@ export async function POST(req: NextRequest) {
         // and move on.
         if (Array.isArray(value.calls) && value.calls.length > 0) {
           try {
-            await handleCallEvents(value.calls, waBranch, phoneNumberId)
-          } catch (e: any) {
-            console.error("whatsapp call event error (batch continues):", e.message)
+            await handleCallEvents(value.calls as WhatsAppCallEvent[], waBranch, phoneNumberId)
+          } catch (e) {
+            console.error("whatsapp call event error (batch continues):", e instanceof Error ? e.message : e)
           }
           continue
         }
@@ -586,19 +586,37 @@ async function handleInbound(msg: any, profileName: string | null, waBranch: Bra
 
 const VOICEBOT_URL = (process.env.VOICEBOT_INTERNAL_URL || "http://127.0.0.1:3003").replace(/\/$/, "")
 
-async function bridgeToVoicebot(path: string, payload: Record<string, any>, timeoutMs = 8000): Promise<any> {
+// One Meta "calls"-field event (WhatsApp Business Calling API). Fields are
+// optional: Meta's shapes vary slightly across webhook versions, and every
+// access site below narrows defensively.
+type WhatsAppCallEvent = {
+  event?: string
+  call_id?: string
+  id?: string
+  from?: string
+  to?: string
+  status?: string
+  status_code?: string
+  session?: { sdp?: string; sdp_type?: string }
+  sdp?: { sdp?: string; type?: string }
+}
+
+// What the voicebot's loopback bridge answers with.
+type VoicebotBridgeResult = { ok?: boolean; error?: string; answerSdp?: string; ended?: boolean }
+
+async function bridgeToVoicebot(path: string, payload: Record<string, unknown>, timeoutMs = 8000): Promise<VoicebotBridgeResult> {
   const res = await fetch(`${VOICEBOT_URL}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": process.env.WHATSAPP_SERVICE_KEY || "" },
     body: JSON.stringify(payload),
     signal: AbortSignal.timeout(timeoutMs),
   })
-  const data: any = await res.json().catch(() => ({}))
+  const data = (await res.json().catch(() => ({}))) as VoicebotBridgeResult
   if (!res.ok) throw new Error(data?.error || `voicebot HTTP ${res.status}`)
   return data
 }
 
-async function handleCallEvents(calls: any[], waBranch: BranchWhatsAppCtx, phoneNumberId?: string | null) {
+async function handleCallEvents(calls: WhatsAppCallEvent[], waBranch: BranchWhatsAppCtx, phoneNumberId?: string | null) {
   // Master switch: a deployment without the voicebot (or werift) keeps
   // receiving messages; calls just decline instead of hanging on dead ring.
   if (process.env.WHATSAPP_VOICE_CALLS === "0") {
@@ -641,8 +659,8 @@ async function handleCallEvents(calls: any[], waBranch: BranchWhatsAppCtx, phone
           branchId: waBranch?.id || null,
         })
         answerSdp = bridged?.answerSdp || null
-      } catch (e: any) {
-        console.error("wa connect: voicebot bridge failed:", e.message)
+      } catch (e) {
+        console.error("wa connect: voicebot bridge failed:", e instanceof Error ? e.message : e)
       }
 
       if (!answerSdp) {
@@ -683,18 +701,18 @@ async function handleCallEvents(calls: any[], waBranch: BranchWhatsAppCtx, phone
       //    timeout covers the round trip into the app's own turn API.
       try {
         await bridgeToVoicebot("/whatsapp/terminated", { callId, reason: status || "terminate" }, 15000)
-      } catch (e: any) {
+      } catch (e) {
         // Voicebot down is NOT fatal here: the finalizer still logs the row
         // and sends missed-call follow-ups for calls that never connected.
-        console.error("wa terminate: voicebot bridge failed:", e.message)
+        console.error("wa terminate: voicebot bridge failed:", e instanceof Error ? e.message : e)
       }
 
       // 2) Finalize — chat bubble, lead status, follow-up templates,
       //    comm_logs, AI summary, Lead Brain. Deduped by wa_message_id.
       try {
         await finalizeWhatsAppCall({ callSid: sid, callId, from, outcome, branchIdFromWebhook: waBranch?.id || null })
-      } catch (e: any) {
-        console.error("wa finalize error:", e.message)
+      } catch (e) {
+        console.error("wa finalize error:", e instanceof Error ? e.message : e)
       }
       continue
     }

@@ -78,6 +78,14 @@ const MAX_UTTERANCE_MS = 15000
 const BARGE_IN = (process.env.VOICEBOT_WA_BARGE_IN || "1").trim() === "1"
 const BARGE_MIN_MS = parseInt(process.env.VOICEBOT_WA_BARGE_MIN_MS || "300")
 
+// Dead-peer backstop while CONNECTED: Meta's "terminate" webhook can be lost
+// (webhook outage, Next.js pm2 restart at call end) and werift does not run
+// ICE consent-freshness for us. A connected session whose inbound RTP goes
+// silent for this long is dead — reap it so the pacer, the peer connection
+// and the recorder temp files cannot leak forever. Opus DTX still emits
+// frames every ~400 ms, so 120 s of TRUE silence only ever means a corpse.
+const MEDIA_TIMEOUT_MS = Math.max(30_000, parseInt(process.env.VOICEBOT_WA_MEDIA_TIMEOUT_MS || "120000") || 120_000)
+
 // TTS: WhatsApp calls default to Cartesia (as requested). "sarvam" flips the
 // whole channel back; a missing Cartesia key falls back to Sarvam per call.
 const WA_TTS_PROVIDER = (process.env.VOICEBOT_WA_TTS_PROVIDER || "cartesia").toLowerCase()
@@ -254,10 +262,15 @@ function downsampleToStt(frame48k) {
   return out
 }
 
-/** TTS WAV (any provider rate) → raw mono s16 PCM at that rate. */
+/** TTS WAV (ANY provider sample rate) → mono s16 PCM at the 48 kHz WebRTC
+ *  clock, resampled BY FFMPEG. The provider rates are deployment-tunable
+ *  (SARVAM_TTS_SAMPLE_RATE / CARTESIA_SAMPLE_RATE) — hardcoding 24 kHz here
+ *  and hand-upsampling ×2 guaranteed chipmunk audio the moment either env
+ *  was changed (e.g. an 8 kHz Exotel-tuned deployment). One ffmpeg spawn per
+ *  sentence either way — the resample is free. */
 function wavToPcm(wav) {
   return new Promise((resolve, reject) => {
-    const ff = spawn("ffmpeg", ["-hide_banner", "-loglevel", "error", "-f", "wav", "-i", "pipe:0", "-f", "s16le", "-ac", "1", "pipe:1"])
+    const ff = spawn("ffmpeg", ["-hide_banner", "-loglevel", "error", "-f", "wav", "-i", "pipe:0", "-f", "s16le", "-ac", "1", "-ar", String(WA_RATE), "pipe:1"])
     const chunks = []
     ff.stdout.on("data", (c) => chunks.push(c))
     ff.on("error", reject)
@@ -368,6 +381,8 @@ class WhatsAppCallSession {
     this.language = "telugu"
     this.voice = null           // { provider, speaker } from the branch's AI Employee
     this.startedAt = Date.now()
+    this.connectedAt = 0        // epoch ms of the FIRST ICE connect — 0 = media never flowed
+    this.lastInboundAt = Date.now() // media-inactivity watchdog clock (see pacer)
     this.closed = false
     this.started = false
     this.endReported = false
@@ -426,6 +441,7 @@ class WhatsAppCallSession {
       if (state === "connected" || state === "completed") {
         if (!this.connected) {
           this.connected = true
+          this.connectedAt = Date.now()
           console.log(`🔊 WhatsApp call ${this.callSid} media connected`)
         }
       } else if (state === "failed" || state === "closed" || state === "disconnected") {
@@ -491,6 +507,15 @@ class WhatsAppCallSession {
     // Meta's jitter buffer primed so Priya's first word doesn't glitch.
     this.pacer = setInterval(() => {
       if (this.closed) return
+      // Media-inactivity watchdog — the twin of attach()'s never-connected
+      // staleTimer. Checked on this 20 ms tick because it is already running:
+      // zero cost, and it cannot forget to fire the way a separate timer that
+      // gets cleared/recreated would.
+      if (this.connected && Date.now() - this.lastInboundAt > MEDIA_TIMEOUT_MS) {
+        console.error(`⏰ WhatsApp call ${this.callSid}: no inbound media for ${Math.round(MEDIA_TIMEOUT_MS / 1000)}s — reaping (terminate webhook was likely lost)`)
+        this.end("media-timeout")
+        return
+      }
       const isReal = this.outQueue.length > 0
       const frame = this.connected
         ? (isReal ? this.outQueue.shift() : this.silenceFrame)
@@ -547,12 +572,16 @@ class WhatsAppCallSession {
     // ONE downsample per frame, shared by the recorder (always) and the STT
     // buffer (per state below) — the branches used to downsample separately.
     const pcm16k = downsampleToStt(pcm48k)
+    this.lastInboundAt = Date.now()
     // Recording captures EVERY inbound frame — including audio the endpointer
     // drops (while Priya talks, while the brain is thinking). A recording
     // that skips the caller talking over Priya would be useless in a dispute.
     if (this.recorder) this.recorder.pushInbound(pcm16k)
     const energy = avgEnergy(pcm48k)
-    const ms = 20
+    // Frame duration FROM THE DECODED PCM, not a hardcoded 20: Meta's ptime
+    // is 20 ms today but is not contractual, and a 60 ms frame used to make
+    // every silence/MAX_UTTERANCE timer tick 3× too slow (sluggish turn-taking).
+    const ms = (pcm48k.length / 2 / WA_RATE) * 1000
 
     if (this.botTalking) {
       if (!BARGE_IN) return
@@ -737,13 +766,9 @@ class WhatsAppCallSession {
           const speaker = override?.provider === "sarvam" ? override.speaker : undefined
           audio = await voiceProviders.sarvamTts(text, this.language, speaker)
         }
-        const pcmSrc = await wavToPcm(audio)
-        // Cartesia/Sarvam both synthesize at 24 kHz here; upsample to the
-        // 48 kHz WebRTC clock (24k→48k = ×2). Measure the real rate from the
-        // decoded length vs sentence duration instead of assuming.
-        const rate = 24000
-        const factor = Math.round(WA_RATE / rate)
-        const pcm48k = factor > 1 ? upsampleMono(pcmSrc, factor) : pcmSrc
+        const pcm48k = await wavToPcm(audio)
+        // pcm48k is guaranteed WA_RATE mono s16 — wavToPcm resamples whatever
+        // the provider synthesized to the WebRTC clock (see wavToPcm above).
         console.log(`⏱ wa TTS (${WA_TTS_PROVIDER === "cartesia" && process.env.CARTESIA_API_KEY ? "cartesia" : "sarvam"}): ${Date.now() - t0}ms (${pcm48k.length / (WA_RATE * 2)}s audio)`)
         return pcm48k
       } catch (e) {
@@ -779,9 +804,11 @@ class WhatsAppCallSession {
 
   // ---- lifecycle ----
 
-  /** The consent line for the CURRENT language, or null when not recording. */
+  /** The consent line for the CURRENT language, or null when not recording.
+   *  Gates on the recorder's REAL state — a disk failure must never have
+   *  Priya announce a recording that will not exist. */
   recordingNotice() {
-    if (!this.recorder) return null
+    if (!this.recorder || !this.recorder.recording()) return null
     return RECORDING_NOTICE_TEXT || RECORDING_NOTICE_PHRASE[this.language] || RECORDING_NOTICE_PHRASE.english
   }
 
@@ -856,7 +883,13 @@ class WhatsAppCallSession {
     if (this.endReported) return
     if (!this.callSid) return
     this.endReported = true
-    const duration = Math.round((Date.now() - this.startedAt) / 1000)
+    // Real TALK time, not wall time. startedAt counts accept → ICE connect
+    // dead air — and when media NEVER connected it counted the customer's
+    // entire frustrated wait, turning a dead-ring hang-up into a fake
+    // "completed 40s call" (wrong bubble, wrong follow-up template, wrong
+    // lead bump). Duration 0 = never talked; the finalizer then honestly
+    // treats the call as MISSED.
+    const duration = this.connectedAt ? Math.round((Date.now() - this.connectedAt) / 1000) : 0
     // Promise retained on the session: the HTTP bridge awaits it on the
     // terminate webhook so the app never finalizes before duration landed.
     this.endReportPromise = callTurnApi({ event: "end", callSid: this.callSid, duration }).catch((e) =>

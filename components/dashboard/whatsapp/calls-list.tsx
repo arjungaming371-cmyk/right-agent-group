@@ -44,6 +44,10 @@ const MISSED_STATUSES = ["missed", "failed", "no-answer", "cancelled", "busy"]
 
 function isMissed(c: CallRow) {
   const s = (c.status || "").toLowerCase()
+  // A live/just-started call is NOT a miss. duration stays 0/null until the
+  // voicebot's "end" report lands, so the old check (inbound && duration 0)
+  // painted every answered call red "Missed" for its whole duration.
+  if (s.includes("progress") || s.includes("initiat") || s.includes("ring")) return false
   return MISSED_STATUSES.some((m) => s.includes(m)) || (c.direction === "inbound" && (c.duration ?? 0) === 0)
 }
 
@@ -81,6 +85,9 @@ export default function CallsList({
   const [filter, setFilter] = useState<"all" | "missed">("all")
   const [search, setSearch] = useState("")
   const [loading, setLoading] = useState(true)
+  // explicit error state (staff spec) — a 500/401 body used to be silently
+  // swallowed and the tab showed a stale list with no hint anything was wrong
+  const [loadError, setLoadError] = useState(false)
   // inline recording player — one at a time, mounted ONLY while playing
   // (lazy: zero <audio> elements for the other 99 rows)
   const [playingId, setPlayingId] = useState<string | null>(null)
@@ -98,8 +105,15 @@ export default function CallsList({
       // phone-line calls — the WhatsApp Calls screen stays WhatsApp-only.
       const res = await fetch("/api/calls?channel=whatsapp")
       const data = await res.json()
-      if (Array.isArray(data)) setCalls(data)
-    } catch {}
+      if (Array.isArray(data)) {
+        setCalls(data)
+        setLoadError(false)
+      } else {
+        setLoadError(true)
+      }
+    } catch {
+      setLoadError(true)
+    }
     setLoading(false)
   }
 
@@ -181,6 +195,18 @@ export default function CallsList({
             background: "transparent", border: "1px solid rgba(255,215,215,0.4)", color: "#ffd7d7",
             borderRadius: 999, fontSize: 11.5, padding: "3px 10px", cursor: "pointer",
           }}>Diagnose</button>
+        </div>
+      )}
+
+      {/* load-failure strip — the list may be stale; never fail silently */}
+      {loadError && (
+        <div style={{ background: "#49272c", color: "#ffd7d7", fontSize: 12.5, padding: "7px 16px", display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ width: 7, height: 7, borderRadius: "50%", background: WA.danger, flexShrink: 0 }} />
+          <span style={{ flex: 1 }}>Couldn't load calls — the list may be out of date.</span>
+          <button onClick={() => { setLoading(true); load() }} style={{
+            background: "transparent", border: "1px solid rgba(255,215,215,0.4)", color: "#ffd7d7",
+            borderRadius: 999, fontSize: 11.5, padding: "3px 10px", cursor: "pointer",
+          }}>Retry</button>
         </div>
       )}
 

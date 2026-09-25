@@ -190,6 +190,15 @@ class CallRecorder {
     } catch { /* error handler flips streamsOk */ }
   }
 
+  /**
+   * True while capture is genuinely writing to disk. The consent notice
+   * gates on this: a disk-full/mkdir failure must never have Priya announce
+   * "this call is recorded" when no recording will exist.
+   */
+  recording() {
+    return this.started && this.streamsOk && !this.done
+  }
+
   /** Close both streams; safe to call twice. */
   async closeStreams() {
     const close = (s) => new Promise((res) => {
