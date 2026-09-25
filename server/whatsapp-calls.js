@@ -51,6 +51,7 @@ const {
 } = require("werift")
 const { OpusEncoder } = require("@discordjs/opus")
 const voiceProviders = require("./voice-providers")
+const recorder = require("./recorder")
 
 // ---------- Configuration ----------
 
@@ -108,11 +109,52 @@ const START_FALLBACK_PHRASE = {
 const TURN_TIMEOUT_MS = parseInt(process.env.VOICEBOT_TURN_TIMEOUT_MS || "20000")
 const TURN_STREAM_TIMEOUT_MS = parseInt(process.env.VOICEBOT_TURN_STREAM_TIMEOUT_MS || "90000")
 
+// Call recording (RECORD_CALLS=0 disables both the capture AND the notice).
+// The consent line is spoken BEFORE the greeting whenever a recording is
+// actually running — India's telecom norms and general call etiquette both
+// require the caller to know. A custom line can be set per deployment.
+const RECORDING_NOTICE_TEXT = (process.env.RECORDING_NOTICE_TEXT || "").trim()
+const RECORDING_NOTICE_PHRASE = {
+  english: "Please note, this call is recorded for quality and training purposes.",
+  telugu: "దయచేసి గమనించండి, ఈ కాల్ క్వాలిటీ మరియు ట్రైనింగ్ ప్రయోజనాల కోసం రికార్డ్ చేయబడుతుంది.",
+  hindi: "कृपया ध्यान दें, गुणवत्ता और प्रशिक्षण उद्देश्यों के लिए यह कॉल रिकॉर्ड की जा रही है।",
+}
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const maskPhone = (p) => (p && String(p).length > 6 ? `${String(p).slice(0, 3)}****${String(p).slice(-3)}` : (p || "?"))
 
 // WhatsApp call ids can be long; the app keys everything off callSid.
 const callSidFor = (callId) => `wacall-${callId}`
+
+/**
+ * POST the finished recording's metadata to the app so the voice_calls row
+ * picks up its playable URL. Two attempts — the app may be mid-restart at
+ * exactly call-end time. File itself is already on the shared disk.
+ */
+async function uploadRecordingMeta(callSid, meta) {
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const res = await fetch(`${APP_URL}/api/calls/recording/upload`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        body: JSON.stringify({
+          callSid,
+          filename: meta.filename,
+          format: meta.format,
+          bytes: meta.bytes,
+          durationSec: meta.durationSec,
+        }),
+        signal: AbortSignal.timeout(15_000),
+      })
+      if (res.ok) return true
+      throw new Error(`HTTP ${res.status}`)
+    } catch (e) {
+      console.error(`wa recording upload (attempt ${attempt}/2) error: ${e.message}`)
+      if (attempt < 2) await sleep(2000)
+    }
+  }
+  return false
+}
 
 // ---------- Turn API (same bridge the Exotel bot uses) ----------
 
@@ -359,6 +401,13 @@ class WhatsAppCallSession {
     this.staleTimer = null
     // Promise for the in-flight "end" report (awaited by the terminate bridge)
     this.endReportPromise = null
+
+    // Call recording — created per session, started only when media attaches.
+    // null when RECORD_CALLS=0 (every capture point then no-ops).
+    this.recorder = recorder.createFor(this.callSid)
+    // Mirror of outQueue at 16 kHz (one entry per queued opus frame) so the
+    // pacer can record EXACTLY what it plays out — see enqueuePcm/startPacer.
+    this.outPcmQueue = []
   }
 
   /** Take over the negotiated peer connection and go live. */
@@ -424,6 +473,8 @@ class WhatsAppCallSession {
     }, 90_000)
     if (this.staleTimer.unref) this.staleTimer.unref()
 
+    if (this.recorder) this.recorder.start()
+
     return this
   }
 
@@ -440,8 +491,9 @@ class WhatsAppCallSession {
     // Meta's jitter buffer primed so Priya's first word doesn't glitch.
     this.pacer = setInterval(() => {
       if (this.closed) return
+      const isReal = this.outQueue.length > 0
       const frame = this.connected
-        ? (this.outQueue.length ? this.outQueue.shift() : this.silenceFrame)
+        ? (isReal ? this.outQueue.shift() : this.silenceFrame)
         : this.silenceFrame
       if (!frame) return
       if (!this.connected) return
@@ -455,6 +507,15 @@ class WhatsAppCallSession {
         this.seq = (this.seq + 1) & 0xffff
         this.ts = (this.ts + WA_FRAME_SAMPLES) >>> 0
         this.sendTrack.writeRtp(packet)
+        // Recording captures the PLAYOUT timeline, not the synth timeline:
+        // a real frame records its own PCM (popped from the index-aligned
+        // mirror queue), a silence tick records silence. Barge-in-dropped
+        // sentences therefore never pollute the recording, and the two
+        // sides stay sample-aligned from call start.
+        if (this.recorder) {
+          const pcm = (isReal && this.outPcmQueue.length) ? this.outPcmQueue.shift() : recorder.SILENCE_20MS
+          this.recorder.pushOutbound(pcm)
+        }
       } catch (e) {
         console.error("wa rtp out error:", e.message)
       }
@@ -468,6 +529,9 @@ class WhatsAppCallSession {
       let chunk = pcm48k.subarray(off, Math.min(off + WA_FRAME_BYTES, pcm48k.length))
       if (chunk.length < WA_FRAME_BYTES) chunk = Buffer.concat([chunk, Buffer.alloc(WA_FRAME_BYTES - chunk.length)])
       this.outQueue.push(this.encoder.encode(chunk))
+      // Same slice at 16 kHz for the recorder, index-aligned with outQueue so
+      // the pacer can pop both together and record what it ACTUALLY plays.
+      if (this.recorder) this.outPcmQueue.push(downsampleToStt(chunk))
     }
   }
 
@@ -480,6 +544,13 @@ class WhatsAppCallSession {
 
   onInboundFrame(pcm48k) {
     if (this.closed) return
+    // ONE downsample per frame, shared by the recorder (always) and the STT
+    // buffer (per state below) — the branches used to downsample separately.
+    const pcm16k = downsampleToStt(pcm48k)
+    // Recording captures EVERY inbound frame — including audio the endpointer
+    // drops (while Priya talks, while the brain is thinking). A recording
+    // that skips the caller talking over Priya would be useless in a dispute.
+    if (this.recorder) this.recorder.pushInbound(pcm16k)
     const energy = avgEnergy(pcm48k)
     const ms = 20
 
@@ -487,7 +558,7 @@ class WhatsAppCallSession {
       if (!BARGE_IN) return
       if (energy > ENERGY_THRESHOLD * 2) {
         this.bargeMs += ms
-        this.bargeBuffer.push(downsampleToStt(pcm48k))
+        this.bargeBuffer.push(pcm16k)
         if (this.bargeMs >= BARGE_MIN_MS) this.interrupt()
       } else {
         this.bargeMs = 0
@@ -506,11 +577,11 @@ class WhatsAppCallSession {
       this.speaking = true
       this.speechMs += ms
       this.silenceMs = 0
-      this.buffer.push(downsampleToStt(pcm48k))
+      this.buffer.push(pcm16k)
       if (this.speechMs >= MAX_UTTERANCE_MS) void this.endUtterance().catch((e) => console.error("wa utterance error:", e.message))
     } else if (this.speaking) {
       this.silenceMs += ms
-      this.buffer.push(downsampleToStt(pcm48k))
+      this.buffer.push(pcm16k)
       if (this.silenceMs >= SILENCE_END_MS || this.speechMs >= MAX_UTTERANCE_MS) {
         void this.endUtterance().catch((e) => console.error("wa utterance error:", e.message))
       }
@@ -525,6 +596,7 @@ class WhatsAppCallSession {
     this.synthChain = Promise.resolve()
     this.sendChain = Promise.resolve()
     this.outQueue = []
+    this.outPcmQueue = []
     if (this.turnAbort) { try { this.turnAbort.abort() } catch {} this.turnAbort = null }
     // Carry the triggering frames into the next utterance (same rule as the
     // Exotel path — dropping them clips the first word).
@@ -707,6 +779,12 @@ class WhatsAppCallSession {
 
   // ---- lifecycle ----
 
+  /** The consent line for the CURRENT language, or null when not recording. */
+  recordingNotice() {
+    if (!this.recorder) return null
+    return RECORDING_NOTICE_TEXT || RECORDING_NOTICE_PHRASE[this.language] || RECORDING_NOTICE_PHRASE.english
+  }
+
   /** Fire the app's "start" (lead resolution + greeting) once media is up. */
   async start() {
     if (this.started || this.closed) return
@@ -724,12 +802,17 @@ class WhatsAppCallSession {
       console.log(`⏱ wa start API: ${Date.now() - t0}ms  lead=${r.leadId || "?"}  branch=${r.branchId || "hq"}`)
       this.language = r.language || "english"
       this.voice = r.voice && r.voice.speaker ? r.voice : null
+      // Recording consent BEFORE the greeting — the caller must know the
+      // call is recorded from the first spoken word onward.
+      const notice = this.recordingNotice()
+      if (notice) await this.speak(notice)
       await this.speak(r.text)
       console.log(`⏱ wa answer → greeting fully queued: ${Date.now() - t0}ms`)
     } catch (e) {
       console.error("wa start error:", e.message)
+      const notice = this.recordingNotice()
       const line = START_FALLBACK_PHRASE[this.language] || START_FALLBACK_PHRASE.english
-      await this.speak(line).catch(() => {})
+      await this.speak(notice ? `${notice} ${line}` : line).catch(() => {})
     }
   }
 
@@ -743,6 +826,29 @@ class WhatsAppCallSession {
     sessions.delete(this.callId)
     console.log(`■ WhatsApp call end sid=${this.callSid} reason=${reason}  frames=${this.frameCount}  callMaxEnergy=${this.callMaxEnergy.toFixed(0)}  threshold=${ENERGY_THRESHOLD}`)
     this.reportEnd()
+    // Recording finalize runs AFTER the call is torn down and fully off the
+    // call path: mix + MP3 transcode + upload happen in the background. A
+    // failure here is logged, never thrown — the call is already over.
+    if (this.recorder) void this.finishRecording()
+  }
+
+  /** Mix + upload the recording (fire-and-forget from end()). Never throws. */
+  async finishRecording() {
+    try {
+      const t0 = Date.now()
+      const meta = await this.recorder.finalize()
+      if (!meta) {
+        console.log(`🎙 wa recording ${this.callSid}: no audio captured (never connected) — nothing saved`)
+        return
+      }
+      console.log(`🎙 wa recording ${this.callSid}: ${meta.format} ${Math.round(meta.bytes / 1024)}KB  ${meta.durationSec}s  mixed in ${Date.now() - t0}ms`)
+      const ok = await uploadRecordingMeta(this.callSid, meta)
+      if (!ok) {
+        console.error(`🎙 wa recording ${this.callSid}: file saved locally (${meta.filename}) but the app could not be updated — it will NOT appear in the dashboard`)
+      }
+    } catch (e) {
+      console.error(`wa recording finalize error: ${e.message}`)
+    }
   }
 
   /** Real duration to the app (fills voice_calls; idempotent server-side). */
@@ -818,7 +924,8 @@ function validateConfig() {
 
 function describeConfig() {
   const tts = WA_TTS_PROVIDER === "cartesia" && process.env.CARTESIA_API_KEY ? "Cartesia (default)" : "Sarvam (fallback)"
-  return `STT: Sarvam Saaras (cloud) | LLM: via app /api/calls/turn | TTS: ${tts} | barge-in: ${BARGE_IN ? "on" : "off"} | ICE: ${ICE_SERVERS.map((s) => s.urls).join(", ")}`
+  const rec = recorder.REC_ENABLED ? `on (${recorder.recordingsDir()})` : "off"
+  return `STT: Sarvam Saaras (cloud) | LLM: via app /api/calls/turn | TTS: ${tts} | barge-in: ${BARGE_IN ? "on" : "off"} | recording: ${rec} | ICE: ${ICE_SERVERS.map((s) => s.urls).join(", ")}`
 }
 
 module.exports = {
@@ -832,4 +939,9 @@ module.exports = {
   callSidFor,
   // internals exported for tests
   filterSdpForWhatsApp, downsampleToStt, upsampleMono, pcmToWav16k, wavToPcm, avgEnergy,
+  RECORDING_NOTICE_PHRASE,
 }
+
+// Sweep orphaned recording files (crash mid-call / lost finalize) once at
+// module load — after a pm2 restart this runs exactly once.
+recorder.cleanupStale()

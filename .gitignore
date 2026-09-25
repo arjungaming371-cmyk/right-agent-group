@@ -40,3 +40,6 @@ backups/
 # scratch directory for local debugging scripts & tokens
 scratch/
 
+
+# call recordings (written by server/voicebot, served by the app)
+recordings/

@@ -14,10 +14,10 @@
 //
 // Data source: GET /api/calls?channel=whatsapp (branch-scoped).
 
-import { useEffect, useMemo, useState } from "react"
+import { Fragment, useEffect, useMemo, useState } from "react"
 import {
   Search, Phone, PhoneIncoming, PhoneOutgoing, PhoneMissed,
-  RefreshCw, Video,
+  RefreshCw, Video, Play, Pause,
 } from "lucide-react"
 import { WA, WA_FONT, type Lead } from "./palette"
 import { Avatar, IconBtn } from "./bits"
@@ -25,6 +25,7 @@ import { WhatsAppGlyph } from "./chat-list"
 
 export type CallRow = {
   id: string
+  lead_id?: string | null
   twilio_call_sid?: string | null
   direction?: string | null
   status?: string | null
@@ -32,6 +33,8 @@ export type CallRow = {
   outcome?: string | null
   created_at?: string
   phone?: string | null
+  language?: string | null
+  recording_url?: string | null
   leads?: { name?: string; phone?: string; source?: string } | null
 }
 
@@ -78,6 +81,16 @@ export default function CallsList({
   const [filter, setFilter] = useState<"all" | "missed">("all")
   const [search, setSearch] = useState("")
   const [loading, setLoading] = useState(true)
+  // inline recording player — one at a time, mounted ONLY while playing
+  // (lazy: zero <audio> elements for the other 99 rows)
+  const [playingId, setPlayingId] = useState<string | null>(null)
+  const [playerError, setPlayerError] = useState(false)
+
+  function togglePlay(c: CallRow) {
+    if (!c.recording_url) return
+    setPlayerError(false)
+    setPlayingId((cur) => (cur === c.id ? null : c.id))
+  }
 
   async function load() {
     try {
@@ -118,7 +131,7 @@ export default function CallsList({
   // tap → open the lead's chat; lead not in the conversations list → build a
   // minimal stand-in so the chat screen still opens (same trick NewChat uses)
   function open(c: CallRow) {
-    const leadId = (c as any).lead_id as string | undefined
+    const leadId = c.lead_id || undefined
     const found = leads.find((l) => l.id === leadId || l.phone === (c.phone || c.leads?.phone))
     if (found) { onOpenChat(found); return }
     const phone = c.phone || c.leads?.phone || ""
@@ -135,7 +148,7 @@ export default function CallsList({
     if (!phone) return
     await fetch("/api/calls", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ phone, language: (c as any).language || "telugu" }),
+      body: JSON.stringify({ phone, language: c.language || "telugu" }),
     })
   }
 
@@ -219,8 +232,11 @@ export default function CallsList({
           const wa = isWhatsAppCall(c.twilio_call_sid)
           const outbound = c.direction === "outbound"
           const name = c.leads?.name || c.phone || "Unknown"
+          const playable = !missed && !!c.recording_url
+          const isPlaying = playingId === c.id
           return (
-            <div key={c.id} onClick={() => open(c)} style={{
+            <Fragment key={c.id}>
+            <div onClick={() => open(c)} style={{
               display: "flex", alignItems: "center", gap: 12, padding: "9px 14px", cursor: "pointer",
             }}
               onMouseEnter={(e) => (e.currentTarget.style.background = WA.hover)}
@@ -253,6 +269,21 @@ export default function CallsList({
                 </div>
               </div>
 
+              {/* call recording — WhatsApp calls are recorded by the voicebot
+                  (mixed caller + Priya); tap to play inline, like Voice Logs */}
+              {playable && (
+                <button
+                  title={isPlaying ? "Stop recording" : "Play recording"}
+                  aria-label={isPlaying ? "Stop recording" : "Play recording"}
+                  onClick={(e) => { e.stopPropagation(); togglePlay(c) }}
+                  style={{ background: "transparent", border: 0, cursor: "pointer", padding: 6, borderRadius: "50%", display: "flex" }}
+                >
+                  {isPlaying
+                    ? <Pause size={17} style={{ color: WA.tealBright }} />
+                    : <Play size={17} style={{ color: WA.textSecondary }} />}
+                </button>
+              )}
+
               {/* AI call back over the phone line (Meta gates business-initiated
                   WhatsApp calling behind a permission template, honestly
                   disabled until that's approved) */}
@@ -264,6 +295,29 @@ export default function CallsList({
                 <Phone size={17} style={{ color: WA.teal }} />
               </button>
             </div>
+
+            {isPlaying && (
+              <div onClick={(e) => e.stopPropagation()} style={{
+                padding: "2px 14px 10px 70px", background: WA.hover,
+              }}>
+                {playerError ? (
+                  <div style={{ fontSize: 12, color: "#ea0038", padding: "4px 0" }}>
+                    Recording unavailable — the file may still be processing.
+                  </div>
+                ) : (
+                  <audio
+                    key={c.id}
+                    controls
+                    autoPlay
+                    preload="none"
+                    src={c.recording_url || undefined}
+                    onError={() => setPlayerError(true)}
+                    style={{ width: "100%", height: 34 }}
+                  />
+                )}
+              </div>
+            )}
+            </Fragment>
           )
         })}
       </div>
