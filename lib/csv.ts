@@ -25,3 +25,43 @@ export function toCsv(rows: Record<string, any>[], columns: string[]): string {
   const body = rows.map(row => columns.map(col => escapeCell(row[col])).join(","))
   return "\uFEFF" + [header, ...body].join("\r\n")
 }
+
+// ---------------------------------------------------------------------------
+// PARSING side — RFC4180-aware single-line splitter.
+//
+// The lead CSV upload used to do a naive `row.split(",")`, which silently
+// corrupted every contact whose field contains a comma: `name` "Rao, Kumar"
+// spilled into `phone`, "Hyderabad, Telangana" into `language`, and the row
+// was then either rejected as junk or (worse) queued with a mangled number.
+// Excel / Google Sheets quote such cells with doubled internal quotes —
+// this splitter honors exactly that quoting. Handles a stray UTF-8 BOM in
+// the header cell ("\uFEFFname" used to never match the `name` column).
+// ---------------------------------------------------------------------------
+export function splitCsvLine(line: string): string[] {
+  const out: string[] = []
+  let cur = ""
+  let inQuotes = false
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]
+    if (inQuotes) {
+      if (ch === '"') {
+        if (line[i + 1] === '"') { cur += '"'; i++ } // escaped quote ""
+        else inQuotes = false
+      } else {
+        cur += ch
+      }
+    } else if (ch === '"') {
+      inQuotes = true
+    } else if (ch === ",") {
+      out.push(cur.trim())
+      cur = ""
+    } else {
+      cur += ch
+    }
+  }
+  out.push(cur.trim())
+  // Strip the BOM from the first cell (only meaningful for line 1, but
+  // harmless elsewhere — no real contact field starts with \uFEFF).
+  if (out.length > 0) out[0] = out[0].replace(/^\uFEFF/, "")
+  return out
+}

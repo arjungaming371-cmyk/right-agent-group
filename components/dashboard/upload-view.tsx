@@ -75,7 +75,8 @@ export default function UploadView() {
       })
       const data = await res.json()
       if (res.ok) {
-        toast.success(`${data.queued} contacts queued — use batch controls below to start calling`)
+        const skippedNote = data.skipped ? ` — ${data.skipped} duplicate${data.skipped > 1 ? "s" : ""} skipped` : ""
+        toast.success(`${data.queued} contacts queued${skippedNote} — use batch controls below to start calling`)
         load()
       } else {
         toast.error(data.error || "Queueing failed")
@@ -92,9 +93,33 @@ export default function UploadView() {
   function cancelPreview() { setPreview(null) }
 
   async function addToQueue() {
-    const res = await fetch("/api/outbound", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(queueForm) })
-    if (res.ok) { toast.success("Added to outbound queue"); setQueueForm({ name: "", phone: "", language: "telugu", product_interest: "Home Loan", notes: "" }); load() }
-    else { const d = await res.json(); toast.error(d.error || "Could not add to queue") }
+    // FIX (2026-09-26): this form used to POST the single contact directly,
+    // and the API's single-contact mode dials IMMEDIATELY — an agent filling
+    // in "Add to Queue" made Priya call the customer right now, mid-typing,
+    // with zero review. It now goes through the same queue-only batch path as
+    // the CSV confirm: nothing dials until "Start Calling" below.
+    const res = await fetch("/api/outbound", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contacts: [{
+        name: queueForm.name,
+        phone: queueForm.phone,
+        language: queueForm.language,
+        product_interest: queueForm.product_interest,
+        notes: queueForm.notes,
+      }] }),
+    })
+    const d = await res.json()
+    if (res.ok) {
+      if (d.queued > 0) {
+        toast.success(`Added to outbound queue${d.skipped ? " — was already queued, no duplicate created" : ""}`)
+        setQueueForm({ name: "", phone: "", language: "telugu", product_interest: "Home Loan", notes: "" })
+      } else {
+        toast.error("Already in the queue — each number can wait in the queue only once")
+      }
+      load()
+    }
+    else { toast.error(d.error || "Could not add to queue") }
   }
 
   async function runBatch() {
@@ -125,24 +150,25 @@ export default function UploadView() {
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
         <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: 24 }}>
-          <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}><ClipboardList size={16} strokeWidth={1.9} style={{ color: "var(--accent-violet)" }} /> Upload Contacts (CSV / Google Sheet)</div>
+          <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}><ClipboardList size={16} strokeWidth={1.9} style={{ color: "var(--accent-violet)" }} /> Upload Contacts (CSV)</div>
           <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16 }}>Upload a CSV with columns: name, phone, language, product_interest, notes</div>
           <div style={{ border: "2px dashed var(--border)", borderRadius: 10, padding: 28, textAlign: "center", cursor: "pointer", marginBottom: 12 }} onClick={() => csvRef.current?.click()}>
             <FolderUp size={30} strokeWidth={1.4} style={{ marginBottom: 8, color: "var(--text-muted)" }} />
             <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>Click to upload CSV</div>
-            <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>Supports .csv, .xlsx, .xls</div>
+            <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>Supports .csv — from Excel or Google Sheet: File → Download / Save As → CSV</div>
           </div>
-          <input ref={csvRef} type="file" accept=".csv,.xlsx,.xls" style={{ display: "none" }} onChange={(e) => uploadFile(e, "contacts")} />
+          <input ref={csvRef} type="file" accept=".csv,.txt" style={{ display: "none" }} onChange={(e) => uploadFile(e, "contacts")} />
         </div>
 
         <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: 24 }}>
           <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}><FileText size={16} strokeWidth={1.9} style={{ color: "var(--accent-cyan)" }} /> Upload AI Script / Document</div>
-          <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16 }}>Upload what AI should reference during calls — .txt, .pdf, .docx</div>
+          <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16 }}>Stored in the Knowledge Base — Priya references it live on calls. Word files: save as PDF first</div>
           <div style={{ border: "2px dashed var(--border)", borderRadius: 10, padding: 28, textAlign: "center", cursor: "pointer", marginBottom: 12 }} onClick={() => docRef.current?.click()}>
             <FileUp size={30} strokeWidth={1.4} style={{ marginBottom: 8, color: "var(--text-muted)" }} />
             <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>Click to upload script</div>
+            <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>Supports .txt, .csv, .pdf</div>
           </div>
-          <input ref={docRef} type="file" accept=".txt,.pdf,.docx,.doc" style={{ display: "none" }} onChange={(e) => uploadFile(e, "script")} />
+          <input ref={docRef} type="file" accept=".txt,.csv,.pdf" style={{ display: "none" }} onChange={(e) => uploadFile(e, "script")} />
         </div>
       </div>
 
