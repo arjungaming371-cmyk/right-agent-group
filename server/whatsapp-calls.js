@@ -254,10 +254,15 @@ function downsampleToStt(frame48k) {
   return out
 }
 
-/** TTS WAV (any provider rate) → raw mono s16 PCM at that rate. */
-function wavToPcm(wav) {
+/** TTS WAV (any provider rate) → raw mono s16 PCM resampled cleanly to 48 kHz WebRTC rate via ffmpeg. */
+function wavToPcm48k(wav) {
   return new Promise((resolve, reject) => {
-    const ff = spawn("ffmpeg", ["-hide_banner", "-loglevel", "error", "-f", "wav", "-i", "pipe:0", "-f", "s16le", "-ac", "1", "pipe:1"])
+    const ff = spawn("ffmpeg", [
+      "-hide_banner", "-loglevel", "error",
+      "-f", "wav", "-i", "pipe:0",
+      "-ar", "48000", "-ac", "1", "-f", "s16le",
+      "pipe:1"
+    ])
     const chunks = []
     ff.stdout.on("data", (c) => chunks.push(c))
     ff.on("error", reject)
@@ -269,6 +274,7 @@ function wavToPcm(wav) {
     ff.stdin.end(wav)
   })
 }
+const wavToPcm = wavToPcm48k
 
 /** Upsample mono PCM (s16) by an integer factor via linear interpolation. */
 function upsampleMono(pcm, factor) {
@@ -540,23 +546,11 @@ class WhatsAppCallSession {
   // ---- outbound audio (pacer) ----
 
   startPacer() {
-    // One 20 ms RTP packet per tick, forever, until the call ends: real
-    // frames from the queue when we have speech, a tiny opus silence frame
-    // otherwise. The continuous flow doubles as comfort noise and keeps
-    // Meta's jitter buffer primed so Priya's first word doesn't glitch.
-    this.pacer = setInterval(() => {
+    let pacerStartTime = null
+    let totalPacketsSent = 0
+
+    const sendOneTick = () => {
       if (this.closed) return
-      // DTLS must be connected before transmitting real speech frames.
-      // If frames are dequeued before DTLS connects, werift drops them silently.
-      const dtlsState = this.sender?.dtlsTransport?.state
-      const isReady = dtlsState === "connected" || (this.connected && !dtlsState)
-      if (!isReady) {
-        return
-      }
-      if (!this.connected) {
-        this.connected = true
-        console.log(`🔊 WhatsApp call ${this.callSid} media flowing over DTLS`)
-      }
       const isReal = this.outQueue.length > 0
       const frame = isReal ? this.outQueue.shift() : this.silenceFrame
       if (!frame) return
@@ -570,11 +564,6 @@ class WhatsAppCallSession {
         this.seq = (this.seq + 1) & 0xffff
         this.ts = (this.ts + WA_FRAME_SAMPLES) >>> 0
         this.sendTrack.writeRtp(packet)
-        // Recording captures the PLAYOUT timeline, not the synth timeline:
-        // a real frame records its own PCM (popped from the index-aligned
-        // mirror queue), a silence tick records silence. Barge-in-dropped
-        // sentences therefore never pollute the recording, and the two
-        // sides stay sample-aligned from call start.
         if (this.recorder) {
           const pcm = (isReal && this.outPcmQueue.length) ? this.outPcmQueue.shift() : recorder.SILENCE_20MS
           this.recorder.pushOutbound(pcm)
@@ -582,7 +571,39 @@ class WhatsAppCallSession {
       } catch (e) {
         console.error("wa rtp out error:", e.message)
       }
-    }, 20)
+    }
+
+    // High-resolution pacer interval (runs every 5ms on Node/Windows).
+    // Uses performance.now() elapsed time to pace exactly 50 packets per second (20ms real-time audio),
+    // eliminating timer jitter and Windows 15.6ms clock quantisation that causes slow-motion audio.
+    this.pacer = setInterval(() => {
+      if (this.closed) return
+      const dtlsState = this.sender?.dtlsTransport?.state
+      const isReady = dtlsState === "connected" || (this.connected && !dtlsState)
+      if (!isReady) {
+        return
+      }
+      if (!this.connected) {
+        this.connected = true
+        console.log(`🔊 WhatsApp call ${this.callSid} media flowing over DTLS`)
+      }
+
+      const now = performance.now()
+      if (pacerStartTime === null) {
+        pacerStartTime = now
+        totalPacketsSent = 0
+      }
+
+      const elapsedMs = now - pacerStartTime
+      const targetPackets = Math.floor(elapsedMs / 20) + 1
+      const burstLimit = 3
+      let sentThisTick = 0
+      while (totalPacketsSent < targetPackets && sentThisTick < burstLimit && !this.closed) {
+        sendOneTick()
+        totalPacketsSent++
+        sentThisTick++
+      }
+    }, 5)
     if (this.pacer.unref) this.pacer.unref()
   }
 
@@ -810,13 +831,7 @@ class WhatsAppCallSession {
           audio = await voiceProviders.sarvamTts(text, this.language, speaker)
           providerUsed = "sarvam"
         }
-        const pcmSrc = await wavToPcm(audio)
-        // Cartesia/Sarvam both synthesize at 24 kHz here; upsample to the
-        // 48 kHz WebRTC clock (24k→48k = ×2). Measure the real rate from the
-        // decoded length vs sentence duration instead of assuming.
-        const rate = 24000
-        const factor = Math.round(WA_RATE / rate)
-        const pcm48k = factor > 1 ? upsampleMono(pcmSrc, factor) : pcmSrc
+        const pcm48k = await wavToPcm48k(audio)
         console.log(`⏱ wa TTS (${providerUsed}): ${Date.now() - t0}ms (${pcm48k.length / (WA_RATE * 2)}s audio)`)
         return pcm48k
       } catch (e) {

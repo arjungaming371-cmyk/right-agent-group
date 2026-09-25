@@ -652,25 +652,14 @@ async function handleCallEvents(calls: any[], waBranch: BranchWhatsAppCtx, phone
         continue
       }
 
-      // pre_accept (stops Meta's answering timer, begins WebRTC ICE/DTLS negotiation).
-      // Both carry the SAME answer SDP.
+      // pre_accept (stops Meta's answering timer) then accept (opens Meta media gateway).
+      // Both carry the SAME answer SDP. In werift, startPacer safely holds frames
+      // in queue until DTLS connects, so sending accept promptly activates Meta's SFU.
       const pre = await answerWhatsAppCall(callId, from, answerSdp, "pre_accept", waBranch)
       if (!pre.ok) {
         console.error(`wa pre_accept failed (***${callId.slice(-8)}):`, pre.error)
-        // A failed pre-accept can still accept per Meta's flow (pre-accept
-        // is a timer reset), so try accept before giving up.
       } else {
-        console.log(`📡 WhatsApp pre_accept sent (***${callId.slice(-8)}) — negotiating WebRTC media`)
-      }
-
-      // Wait for WebRTC media (ICE + DTLS) to establish before sending accept.
-      // Meta docs: accept should be sent after media path is established.
-      try {
-        const waitRes = await bridgeToVoicebot("/whatsapp/wait-connected", { callId, timeoutMs: 2500 }, 3500)
-        console.log(`📡 WhatsApp WebRTC connection readiness (***${callId.slice(-8)}): connected=${waitRes?.connected ?? false}`)
-      } catch (e: any) {
-        console.log(`📡 WhatsApp WebRTC wait fallback delay (1.5s):`, e.message)
-        await new Promise((r) => setTimeout(r, 1500))
+        console.log(`📡 WhatsApp pre_accept sent (***${callId.slice(-8)})`)
       }
 
       const acc = await answerWhatsAppCall(callId, from, answerSdp, "accept", waBranch)
