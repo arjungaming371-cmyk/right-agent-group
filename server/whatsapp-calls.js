@@ -13,7 +13,8 @@
 //   opus RTP in (48 kHz) → decode → silence-based endpointing (same state
 //   machine as voicebot-server's CallSession) → Sarvam Saaras STT
 //     → Next.js /api/calls/turn  (Groq/Sarvam LLM = Priya, DB, Lead Brain)
-//     → Cartesia Sonic TTS (24 kHz WAV) → upsample → opus RTP out (48 kHz)
+//     → Cartesia/Sarvam TTS (WAV, ANY rate) → resample to 48 kHz by the WAV
+//       header (ffmpeg, pure-JS fallback) → opus RTP out (48 kHz)
 //
 // STT stays Sarvam, the LLM stays Groq (via the app's turn API) and TTS
 // defaults to CARTESIA for WhatsApp calls (VOICEBOT_WA_TTS_PROVIDER=cartesia,
@@ -262,42 +263,134 @@ function downsampleToStt(frame48k) {
   return out
 }
 
+/** Walk a RIFF/WAVE buffer chunk-by-chunk (never a fixed 44-byte layout —
+ *  providers prepend/append LIST/fact chunks). Returns the fmt fields plus
+ *  the raw data payload. Throws on anything that is not a parseable WAV. */
+function parseWav(wav) {
+  if (!wav || wav.length < 44 ||
+      wav.toString("ascii", 0, 4) !== "RIFF" ||
+      wav.toString("ascii", 8, 12) !== "WAVE") {
+    throw new Error("not a RIFF/WAVE buffer")
+  }
+  let off = 12
+  let fmt = null
+  let data = null
+  while (off + 8 <= wav.length) {
+    const id = wav.toString("ascii", off, off + 4)
+    const size = wav.readUInt32LE(off + 4)
+    const body = off + 8
+    if (id === "fmt " && !fmt) {
+      fmt = {
+        audioFormat: wav.readUInt16LE(body),
+        channels: wav.readUInt16LE(body + 2),
+        sampleRate: wav.readUInt32LE(body + 4),
+        bitsPerSample: wav.readUInt16LE(body + 14),
+      }
+    } else if (id === "data" && !data) {
+      data = wav.subarray(body, Math.min(body + size, wav.length))
+    }
+    off = body + size + (size % 2) // chunks are word-aligned
+  }
+  if (!fmt || !data || !data.length) throw new Error("WAV missing fmt/data chunk")
+  return { ...fmt, pcm: data }
+}
+
+/** Quick header peek for diagnostics — the TRUE rate the TTS delivered
+ *  (null when the buffer is not parseable). */
+function wavSampleRate(wav) {
+  try { return parseWav(wav).sampleRate } catch { return null }
+}
+
+/**
+ * Resample mono s16 PCM from srcRate to dstRate via fractional linear
+ * interpolation. Identity (buffer copy) when the rates already match.
+ *
+ * This is the speed-correctness core of the whole calling stack: the output
+ * duration always equals the input duration (±1 sample), no matter what
+ * rate the TTS provider delivered — the old hardcoded "assume 24 kHz and
+ * double" turned every non-24 kHz source into slow motion / chipmunk.
+ */
+function resamplePcmMono(pcm, srcRate, dstRate) {
+  const inSamples = Math.floor(pcm.length / 2)
+  if (!inSamples) return Buffer.alloc(0)
+  if (!srcRate || !dstRate || srcRate === dstRate) return Buffer.from(pcm)
+  const outSamples = Math.max(1, Math.round((inSamples * dstRate) / srcRate))
+  const out = Buffer.alloc(outSamples * 2)
+  const step = srcRate / dstRate
+  for (let i = 0; i < outSamples; i++) {
+    const pos = i * step
+    const i0 = Math.min(Math.floor(pos), inSamples - 1)
+    const i1 = Math.min(i0 + 1, inSamples - 1)
+    const frac = pos - i0
+    const cur = pcm.readInt16LE(i0 * 2)
+    const v = i1 === i0 ? cur : cur + (pcm.readInt16LE(i1 * 2) - cur) * frac
+    out.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(v))), i * 2)
+  }
+  return out
+}
+
+/** Legacy integer-factor helper (test-locked API) — fractional resampler
+ *  under the hood so there is exactly ONE resample implementation. */
+function upsampleMono(pcm, factor) {
+  return resamplePcmMono(pcm, 1, factor)
+}
+
+/** Pure-JS TTS decode — the ffmpeg-free wavToPcm fallback. Accepts mono or
+ *  stereo s16 PCM WAV at ANY rate (stereo folds to mono by averaging). */
+function jsWavToPcm48k(wav) {
+  const { audioFormat, channels, sampleRate, bitsPerSample, pcm } = parseWav(wav)
+  if (bitsPerSample !== 16 || (audioFormat !== 1 && audioFormat !== 0xfffe)) {
+    throw new Error(`unsupported WAV (format=${audioFormat}, ${bitsPerSample}-bit) — install ffmpeg for full codec support`)
+  }
+  let mono = pcm
+  if (channels === 2) {
+    mono = Buffer.alloc(Math.floor(pcm.length / 4) * 2)
+    for (let i = 0; i + 3 < pcm.length; i += 4) {
+      mono.writeInt16LE(
+        Math.max(-32768, Math.min(32767, Math.round((pcm.readInt16LE(i) + pcm.readInt16LE(i + 2)) / 2))),
+        (i / 4) * 2,
+      )
+    }
+  } else if (channels !== 1) {
+    throw new Error(`unsupported WAV channel count: ${channels}`)
+  }
+  return resamplePcmMono(mono, sampleRate, WA_RATE)
+}
+
+let _warnedNoFfmpeg = false
+
 /** TTS WAV (ANY provider sample rate) → mono s16 PCM at the 48 kHz WebRTC
- *  clock, resampled BY FFMPEG. The provider rates are deployment-tunable
- *  (SARVAM_TTS_SAMPLE_RATE / CARTESIA_SAMPLE_RATE) — hardcoding 24 kHz here
- *  and hand-upsampling ×2 guaranteed chipmunk audio the moment either env
- *  was changed (e.g. an 8 kHz Exotel-tuned deployment). One ffmpeg spawn per
- *  sentence either way — the resample is free. */
+ *  clock. Primary path: ffmpeg, which reads the WAV HEADER (source of truth)
+ *  and resamples — no hardcoded rate anywhere. Fallback: the pure-JS header
+ *  walk + linear resampler, so a server without ffmpeg (or a build that
+ *  chokes on a stream) still gets correct-speed audio instead of dead air.
+ *  One ffmpeg spawn per sentence either way — the resample is free. */
 function wavToPcm(wav) {
   return new Promise((resolve, reject) => {
     const ff = spawn("ffmpeg", ["-hide_banner", "-loglevel", "error", "-f", "wav", "-i", "pipe:0", "-f", "s16le", "-ac", "1", "-ar", String(WA_RATE), "pipe:1"])
     const chunks = []
+    let ffError = null
     ff.stdout.on("data", (c) => chunks.push(c))
-    ff.on("error", reject)
+    ff.on("error", (e) => { ffError = e })
     ff.on("close", (code) => {
-      if (code === 0) resolve(Buffer.concat(chunks))
-      else reject(new Error(`ffmpeg WAV decode failed (${code})`))
+      if (code === 0 && chunks.length) return resolve(Buffer.concat(chunks))
+      if (ffError && (ffError.code === "ENOENT" || ffError.code === "EACCES")) {
+        if (!_warnedNoFfmpeg) {
+          _warnedNoFfmpeg = true
+          console.warn("⚠ ffmpeg not found on PATH — TTS decode falls back to the pure-JS resampler (install ffmpeg for best quality)")
+        }
+      } else {
+        console.warn(`⚠ ffmpeg WAV decode failed (${ffError ? ffError.message : `exit ${code}`}) — trying the pure-JS resampler`)
+      }
+      try {
+        resolve(jsWavToPcm48k(wav))
+      } catch (e) {
+        reject(new Error(`TTS WAV decode failed: ffmpeg=${ffError ? ffError.message : `exit ${code}`}, js=${e.message}`))
+      }
     })
     ff.stdin.on("error", () => {})
     ff.stdin.end(wav)
   })
-}
-
-/** Upsample mono PCM (s16) by an integer factor via linear interpolation. */
-function upsampleMono(pcm, factor) {
-  const inSamples = Math.floor(pcm.length / 2)
-  const out = Buffer.alloc(inSamples * factor * 2)
-  let o = 0
-  for (let i = 0; i < inSamples; i++) {
-    const cur = pcm.readInt16LE(i * 2)
-    const next = i + 1 < inSamples ? pcm.readInt16LE((i + 1) * 2) : cur
-    for (let k = 0; k < factor; k++) {
-      const v = k === 0 ? cur : cur + ((next - cur) * k) / factor
-      out.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(v))), o)
-      o += 2
-    }
-  }
-  return out
 }
 
 function avgEnergy(frame) {
@@ -769,7 +862,11 @@ class WhatsAppCallSession {
         const pcm48k = await wavToPcm(audio)
         // pcm48k is guaranteed WA_RATE mono s16 — wavToPcm resamples whatever
         // the provider synthesized to the WebRTC clock (see wavToPcm above).
-        console.log(`⏱ wa TTS (${WA_TTS_PROVIDER === "cartesia" && process.env.CARTESIA_API_KEY ? "cartesia" : "sarvam"}): ${Date.now() - t0}ms (${pcm48k.length / (WA_RATE * 2)}s audio)`)
+        // The logged INPUT rate is the ops proof of speed correctness: if a
+        // provider ever ignores/overrides the requested sample_rate, it shows
+        // up here instead of as mysterious slow-motion / chipmunk audio.
+        const inRate = wavSampleRate(audio)
+        console.log(`⏱ wa TTS (${WA_TTS_PROVIDER === "cartesia" && process.env.CARTESIA_API_KEY ? "cartesia" : "sarvam"}): ${Date.now() - t0}ms (in @ ${inRate || "?"} Hz → ${(pcm48k.length / (WA_RATE * 2)).toFixed(1)}s @ 48k)`)
         return pcm48k
       } catch (e) {
         console.error("wa TTS error:", e.message)
@@ -972,6 +1069,7 @@ module.exports = {
   callSidFor,
   // internals exported for tests
   filterSdpForWhatsApp, downsampleToStt, upsampleMono, pcmToWav16k, wavToPcm, avgEnergy,
+  parseWav, wavSampleRate, resamplePcmMono, jsWavToPcm48k,
   RECORDING_NOTICE_PHRASE,
 }
 
