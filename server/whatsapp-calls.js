@@ -35,14 +35,21 @@
 //   4. ICE/DTLS/SRTP connect; the pacer starts streaming; Priya greets.
 //
 // Run by voicebot-server.js (HTTP on 127.0.0.1:VOICEBOT_HTTP_PORT, default
-// 3003, auth = WHATSAPP_SERVICE_KEY). Outbound (business-initiated) WhatsApp
-// calls need Meta's call-permission template flow and are NOT implemented
-// here — inbound is the free path and this business's actual use case.
+// 3003, auth = WHATSAPP_SERVICE_KEY). Both directions are implemented:
+//   • INBOUND  (customer → business, free): the webhook carries Meta's offer,
+//     we answer — see startSession().
+//   • OUTBOUND (business → customer, needs Meta call permission): WE create
+//     the offer, Graph action=connect rings the customer, Meta's webhook
+//     later delivers the answer — see createOutboundOffer() /
+//     attachOutboundSession(). Outbound reuses the ENTIRE session machinery
+//     below (pacer, endpointing, turns, recording) — only the SDP direction
+//     flips.
 //
 // Dependencies (server/package.json): werift, @discordjs/opus.
 
 require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") })
 
+const crypto = require("crypto")
 const { spawn } = require("child_process")
 const {
   RTCPeerConnection,
@@ -1038,6 +1045,156 @@ async function endSession(callId, reason) {
   return { ok: true, ended: true }
 }
 
+// ---------- Business-initiated (outbound) WhatsApp calls ----------
+//
+// Meta lets a business PLACE a WhatsApp voice call once the customer has
+// granted call permission — implicitly (they called us first; Meta allows
+// calling a user back after an inbound call) or explicitly (the
+// call-permission template flow, approved per user in WhatsApp).
+//
+// The WebRTC direction FLIPS versus inbound: we generate the SDP OFFER,
+// Next.js POSTs it to Graph (action=connect), Meta rings the customer, and
+// the "calls" webhook later delivers their ANSWER SDP — which completes the
+// negotiation HERE and goes live with the full session machinery (pacer,
+// endpointing, turns, recording — all identical to inbound).
+//
+// Loopback lifecycle (same WHATSAPP_SERVICE_KEY auth as connect):
+//   1. /whatsapp/outbound-offer    → { pendingId, offerSdp }  (offer held here)
+//   2. Next.js Graph POST /calls   → Meta returns the call_id
+//   3. /whatsapp/outbound-register { pendingId, callId }       (callId → pending)
+//   4. webhook answer → /whatsapp/outbound-accept { callId, sdp }
+//      → attachOutboundSession() → session live under the Meta call_id
+//   5. /whatsapp/outbound-cancel releases a held offer on any Graph error,
+//      and the TTL sweeper guarantees a peer connection can never leak.
+
+const OUTBOUND_OFFER_TTL_MS = Math.max(30_000,
+  parseInt(process.env.VOICEBOT_WA_OUTBOUND_TTL_MS || "180000") || 180_000)
+
+// pendingId → held offer; once Graph accepts, callId (Meta) → pendingId.
+const pendingOutbound = new Map()
+const outboundByCallId = new Map()
+
+function dropPendingOffer(pendingId, reason) {
+  const pending = pendingOutbound.get(pendingId)
+  if (!pending) return false
+  pendingOutbound.delete(pendingId)
+  if (pending.callId && outboundByCallId.get(pending.callId) === pendingId) {
+    outboundByCallId.delete(pending.callId)
+  }
+  try { pending.pc.close() } catch {}
+  console.log(`↩ WhatsApp outbound offer ${pendingId} dropped (${reason || "canceled"})`)
+  return true
+}
+
+/** Generate + hold the WebRTC offer for one business-initiated call. The
+ *  caller (Next.js dial route) MUST place it with Graph and register the
+ *  returned call_id, or the sweeper reclaims the peer connection. */
+async function createOutboundOffer({ phoneNumberId, from, to, branchId }) {
+  const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
+  const sendTrack = new MediaStreamTrack({ kind: "audio" })
+  const sender = pc.addTrack(sendTrack)
+  // werift fires onTrack inside setRemoteDescription — i.e. the moment the
+  // customer's ANSWER arrives, possibly minutes after this offer was made.
+  // Capture the track through a closure the accept path reads later.
+  let remoteTrack = null
+  pc.onTrack.subscribe((track) => { remoteTrack = track })
+
+  try {
+    const offer = await pc.createOffer()
+    await pc.setLocalDescription(offer) // ICE gathering completes inside (werift)
+  } catch (e) {
+    try { pc.close() } catch {}
+    throw new Error(`outbound offer failed: ${e.message}`)
+  }
+
+  const pendingId = `waout-${crypto.randomUUID()}`
+  const offerSdp = filterSdpForWhatsApp(pc.localDescription?.sdp || "")
+  pendingOutbound.set(pendingId, {
+    pc, sendTrack, sender,
+    getRemoteTrack: () => remoteTrack,
+    offerSdp,
+    from: from || "",        // the CUSTOMER's wa_id we are dialing
+    to: to || "",
+    phoneNumberId: phoneNumberId || "",
+    branchId: branchId || null,
+    callId: null,
+    createdAt: Date.now(),
+  })
+  console.log(`📤 WhatsApp outbound offer held ${pendingId} (branch=${branchId || "hq"}) — awaiting Graph connect + answer`)
+  return { pendingId, offerSdp }
+}
+
+/** Bind Meta's call_id to a held offer (step 3 — Graph accepted our connect). */
+function registerOutboundCallId({ pendingId, callId }) {
+  if (!pendingId || !callId) return { ok: false, error: "pendingId and callId are required" }
+  const pending = pendingOutbound.get(pendingId)
+  if (!pending) return { ok: false, error: "pending offer not found or expired" }
+  pending.callId = callId
+  outboundByCallId.set(callId, pendingId)
+  return { ok: true }
+}
+
+/** The customer answered: complete the negotiation and go live. */
+async function attachOutboundSession({ callId, sdp, from, to }) {
+  if (!callId || !sdp) throw new Error("callId and sdp are required")
+  const pendingId = outboundByCallId.get(callId)
+  if (!pendingId) throw new Error(`no pending outbound offer for callId ***${String(callId).slice(-8)} (wrong callId, or the offer expired/canceled)`)
+  const pending = pendingOutbound.get(pendingId)
+  if (!pending) {
+    outboundByCallId.delete(callId)
+    throw new Error("pending offer expired before the answer arrived")
+  }
+  pendingOutbound.delete(pendingId)
+  outboundByCallId.delete(callId)
+
+  try {
+    await pending.pc.setRemoteDescription({ type: "answer", sdp })
+  } catch (e) {
+    try { pending.pc.close() } catch {}
+    throw new Error(`outbound answer rejected: ${e.message}`)
+  }
+
+  // Negotiation completed — the codec/ssrc are final exactly like inbound.
+  const pt = pending.sendTrack.codec?.payloadType
+  if (pt === undefined || pt === null) {
+    try { pending.pc.close() } catch {}
+    throw new Error("opus payload type missing after answer negotiation — customer SDP contained no compatible audio codec")
+  }
+  const ssrc = pending.sender.ssrc || pending.sendTrack.ssrc
+
+  const session = new WhatsAppCallSession({
+    callId,
+    from: from || pending.from,   // the customer's wa_id (who we called)
+    to: to || pending.to,
+    phoneNumberId: pending.phoneNumberId,
+    branchId: pending.branchId,
+  })
+  sessions.set(callId, session.attach({
+    pc: pending.pc, sendTrack: pending.sendTrack, sender: pending.sender,
+    answerSdp: null, payloadType: pt, ssrc,
+    remoteTrack: pending.getRemoteTrack(),
+  }))
+  console.log(`📞 WhatsApp OUTBOUND call answered sid=${session.callSid} to=${maskPhone(session.from)} branch=${session.branchId || "hq"}`)
+  // Greeting fires immediately — the pacer holds frames until ICE connects,
+  // identical to the inbound path.
+  session.start().catch((e) => console.error("wa outbound session start error:", e.message))
+  return { ok: true, callSid: session.callSid }
+}
+
+function cancelOutboundOffer(pendingId, reason) {
+  return dropPendingOffer(pendingId, reason)
+}
+
+// TTL sweeper — a Graph error, a crash between offer and register, or a
+// customer who never answers must not leak a peer connection forever.
+const __outboundSweep = setInterval(() => {
+  const now = Date.now()
+  for (const [pendingId, pending] of pendingOutbound) {
+    if (now - pending.createdAt > OUTBOUND_OFFER_TTL_MS) dropPendingOffer(pendingId, "ttl expired")
+  }
+}, 30_000)
+if (__outboundSweep.unref) __outboundSweep.unref()
+
 function activeCount() {
   return sessions.size
 }
@@ -1063,6 +1220,11 @@ module.exports = {
   WhatsAppCallSession,
   startSession,
   endSession,
+  // outbound (business-initiated)
+  createOutboundOffer,
+  registerOutboundCallId,
+  attachOutboundSession,
+  cancelOutboundOffer,
   activeCount,
   validateConfig,
   describeConfig,

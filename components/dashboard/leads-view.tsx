@@ -276,6 +276,29 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
     }
   }
 
+  // Business-initiated WhatsApp call — Meta rings the lead's WhatsApp app;
+  // the voicebot's WebRTC leg is identical to an inbound WhatsApp call.
+  async function startWaCall() {
+    if (!callTarget) return
+    setCalling(`wa-${callTarget.id}`)
+    try {
+      const res = await fetch("/api/calls/dial", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ leadId: callTarget.id, channel: "whatsapp" }),
+      })
+      const data = await res.json()
+      if (res.ok) toast.success("WhatsApp call placed — ringing on the lead's WhatsApp now")
+      else toast.error(data.error || "WhatsApp call failed")
+    } catch {
+      toast.error("WhatsApp call failed — check your connection and try again")
+    } finally {
+      setCalling(null)
+      setCallTarget(null)
+      setCallInstructions("")
+    }
+  }
+
   async function sendWa() {
     if (!waTarget || !waText.trim()) return
     setWaSending(true)
@@ -577,9 +600,23 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
             <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
               <button onClick={() => setCallTarget(null)} style={{ flex: 1, padding: 10, background: "transparent", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text-secondary)" }}>Cancel</button>
               <button onClick={startCall} disabled={calling === callTarget.id} className="btn-primary" style={{ flex: 1, height: 40 }}>
-                <Phone size={14} strokeWidth={2} /> {calling === callTarget.id ? "Calling…" : "Start Call"}
+                <Phone size={14} strokeWidth={2} /> {calling === callTarget.id ? "Calling…" : "Phone Call"}
               </button>
             </div>
+            <button
+              onClick={startWaCall}
+              disabled={calling === `wa-${callTarget.id}` || calling === callTarget.id}
+              style={{
+                width: "100%", marginTop: 10, height: 40, borderRadius: 8,
+                border: "1px solid var(--border)", cursor: "pointer",
+                display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6,
+                fontSize: 13, fontWeight: 600,
+                background: calling === `wa-${callTarget.id}` ? "var(--bg-card)" : "#25D366",
+                color: calling === `wa-${callTarget.id}` ? "var(--text-muted)" : "#06331d",
+              }}
+            >
+              <Phone size={14} strokeWidth={2} /> {calling === `wa-${callTarget.id}` ? "Calling…" : "WhatsApp Call"}
+            </button>
           </div>
         </div>
       )}

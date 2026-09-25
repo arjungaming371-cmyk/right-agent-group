@@ -1287,6 +1287,11 @@ prewarm()
 //   POST /whatsapp/connect    { callId, from, to, phoneNumberId, sdp, sdpType, branchId }
 //                             → { ok, answerSdp }   (werift WebRTC answer)
 //   POST /whatsapp/terminated { callId, reason }    → { ok, ended }
+//   POST /whatsapp/outbound-offer    { phoneNumberId, from, to, branchId }
+//                             → { ok, pendingId, offerSdp }  (business-initiated offer held here)
+//   POST /whatsapp/outbound-register { pendingId, callId }  → { ok }  (Meta call_id → pending)
+//   POST /whatsapp/outbound-accept   { callId, sdp, from, to } → { ok, callSid }  (customer answered)
+//   POST /whatsapp/outbound-cancel   { pendingId, reason } → { ok }
 //   GET  /health              → { ok, activeCalls }
 //
 // Auth: the SAME shared service key the voicebot already uses for the app's
@@ -1305,7 +1310,11 @@ const httpServer = http.createServer((req, res) => {
   // /health is unauthenticated and loopback-only — returns no call data.
   if (req.method === "GET" && url === "/health") return json(200, { ok: true, activeCalls: waCalls.activeCount() })
 
-  if (req.method !== "POST" || !["/whatsapp/connect", "/whatsapp/terminated"].includes(url)) {
+  if (req.method !== "POST" || ![
+    "/whatsapp/connect", "/whatsapp/terminated",
+    "/whatsapp/outbound-offer", "/whatsapp/outbound-register",
+    "/whatsapp/outbound-accept", "/whatsapp/outbound-cancel",
+  ].includes(url)) {
     return json(404, { ok: false, error: "not found" })
   }
   const a = Buffer.from(req.headers["x-api-key"] || "")
@@ -1337,6 +1346,40 @@ const httpServer = http.createServer((req, res) => {
           console.error("wa connect error:", e.message)
           json(502, { ok: false, error: e.message })
         })
+    } else if (url === "/whatsapp/outbound-offer") {
+      Promise.resolve()
+        .then(() => waCalls.createOutboundOffer({
+          phoneNumberId: str(body.phoneNumberId, 64),
+          from: str(body.from, 32),
+          to: str(body.to, 32),
+          branchId: str(body.branchId, 64) || null,
+        }))
+        .then((r) => json(200, { ok: true, ...r }))
+        .catch((e) => {
+          console.error("wa outbound offer error:", e.message)
+          json(502, { ok: false, error: e.message })
+        })
+    } else if (url === "/whatsapp/outbound-register") {
+      const r = waCalls.registerOutboundCallId({
+        pendingId: str(body.pendingId, 128),
+        callId: str(body.callId, 128),
+      })
+      json(r.ok ? 200 : 404, r)
+    } else if (url === "/whatsapp/outbound-accept") {
+      Promise.resolve()
+        .then(() => waCalls.attachOutboundSession({
+          callId: str(body.callId, 128),
+          sdp: str(body.sdp, 64 * 1024),
+          from: str(body.from, 32),
+          to: str(body.to, 32),
+        }))
+        .then((r) => json(200, { ok: true, ...r }))
+        .catch((e) => {
+          console.error("wa outbound accept error:", e.message)
+          json(502, { ok: false, error: e.message })
+        })
+    } else if (url === "/whatsapp/outbound-cancel") {
+      json(200, { ok: waCalls.cancelOutboundOffer(str(body.pendingId, 128), str(body.reason, 64)) })
     } else {
       const r = waCalls.endSession(str(body.callId, 128), str(body.reason, 64))
       json(200, r)

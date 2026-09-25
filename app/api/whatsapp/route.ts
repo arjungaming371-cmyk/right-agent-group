@@ -16,6 +16,7 @@ import { extractPdfText } from "@/lib/kb-ingest"
 import { transcribeAudio } from "@/lib/stt"
 import { currentDateTimeInstruction } from "@/lib/compliance"
 import { rateLimit, clientIp } from "@/lib/rate-limit"
+import { bridgeToVoicebot } from "@/lib/voicebot-bridge"
 
 export const dynamic = "force-dynamic"
 
@@ -583,8 +584,8 @@ async function handleInbound(msg: any, profileName: string | null, waBranch: Bra
 // Env: WHATSAPP_VOICE_CALLS=0 disables handling entirely (default on).
 //      VOICEBOT_INTERNAL_URL (default http://127.0.0.1:3003).
 //      WHATSAPP_SERVICE_KEY — the shared internal key (also used for turns).
-
-const VOICEBOT_URL = (process.env.VOICEBOT_INTERNAL_URL || "http://127.0.0.1:3003").replace(/\/$/, "")
+//      The loopback bridge client itself lives in lib/voicebot-bridge.ts
+//      (shared with the outbound dialer, /api/calls/dial).
 
 // One Meta "calls"-field event (WhatsApp Business Calling API). Fields are
 // optional: Meta's shapes vary slightly across webhook versions, and every
@@ -601,20 +602,9 @@ type WhatsAppCallEvent = {
   sdp?: { sdp?: string; type?: string }
 }
 
-// What the voicebot's loopback bridge answers with.
+// What the voicebot's loopback bridge answers with (full shape lives in
+// lib/voicebot-bridge.ts, shared with the dialer).
 type VoicebotBridgeResult = { ok?: boolean; error?: string; answerSdp?: string; ended?: boolean }
-
-async function bridgeToVoicebot(path: string, payload: Record<string, unknown>, timeoutMs = 8000): Promise<VoicebotBridgeResult> {
-  const res = await fetch(`${VOICEBOT_URL}${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-api-key": process.env.WHATSAPP_SERVICE_KEY || "" },
-    body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(timeoutMs),
-  })
-  const data = (await res.json().catch(() => ({}))) as VoicebotBridgeResult
-  if (!res.ok) throw new Error(data?.error || `voicebot HTTP ${res.status}`)
-  return data
-}
 
 async function handleCallEvents(calls: WhatsAppCallEvent[], waBranch: BranchWhatsAppCtx, phoneNumberId?: string | null) {
   // Master switch: a deployment without the voicebot (or werift) keeps
@@ -684,6 +674,33 @@ async function handleCallEvents(calls: WhatsAppCallEvent[], waBranch: BranchWhat
         await rejectWhatsAppCall(callId, waBranch).catch(() => {})
       } else {
         console.log(`✅ WhatsApp call accepted (***${callId.slice(-8)}) — Priya is live on WhatsApp`)
+      }
+      continue
+    }
+
+    // BUSINESS-INITIATED ANSWER: a call WE placed (via /api/calls/dial) was
+    // picked up — Meta delivers the customer's WebRTC answer SDP here.
+    // Webhook versions differ on the event label ("accept", or "connect"
+    // re-used with sdp_type "answer"), so accept ANY event that carries an
+    // answer SDP. The matching offer is held on the voicebot under the
+    // call_id this event carries (registered at dial time).
+    const outAnswerSdp = String(call?.session?.sdp || call?.sdp?.sdp || "")
+    const outAnswerType = String(call?.session?.sdp_type || call?.sdp?.type || "")
+    if (callId && outAnswerSdp && (outAnswerType === "answer" || event === "accept")) {
+      console.log(`📞 WhatsApp OUTBOUND call answered callId=***${callId.slice(-8)} (event="${event || "answer"}") — completing negotiation`)
+      try {
+        await bridgeToVoicebot("/whatsapp/outbound-accept", {
+          callId,
+          sdp: outAnswerSdp,
+          from: String(call?.from || ""),
+          to: String(call?.to || ""),
+        }, 10000)
+        console.log(`✅ WhatsApp OUTBOUND call live (***${callId.slice(-8)}) — Priya is dialing out on WhatsApp`)
+      } catch (e) {
+        // The held offer may have expired while the phone rang (TTL), or the
+        // voicebot restarted. The call dies silently on Meta's side — log
+        // loudly, nothing else can be done from the business side.
+        console.error("wa outbound accept: voicebot bridge failed:", e instanceof Error ? e.message : e)
       }
       continue
     }

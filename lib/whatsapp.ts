@@ -114,9 +114,12 @@ function defaultBranding(): string {
 //   { messaging_product: "whatsapp", to, action: "pre_accept"|"accept",
 //     call_id, session: { sdp: <our answer>, sdp_type: "answer" } }
 //
-// INBOUND-ONLY by design: business-initiated calls additionally require
-// Meta's call-permission template flow (the customer must accept a consent
-// template first) — inbound is free and is this business's actual flow.
+// BUSINESS-INITIATED calls (outbound) live in placeWhatsAppCall below: the
+// WebRTC direction flips — WE offer (action=connect, sdp_type "offer"), Meta
+// rings the customer, and the answer arrives on the "calls" webhook (routed
+// to the voicebot's /whatsapp/outbound-accept by app/api/whatsapp). Meta
+// gates outbound on call permission: granted implicitly when the customer
+// called us first, or explicitly via the call-permission template flow.
 
 /** Raw call-control POST — same shape as graphPost but /calls, not /messages. */
 async function callPost(payload: Record<string, any>, branch?: BranchWhatsAppCtx): Promise<{ ok: boolean; error?: string; status?: number }> {
@@ -176,6 +179,63 @@ export async function rejectWhatsAppCall(callId: string, branch?: BranchWhatsApp
 export async function terminateWhatsAppCall(callId: string, branch?: BranchWhatsAppCtx): Promise<{ ok: boolean; error?: string }> {
   if (!callId) return { ok: false, error: "callId required" }
   return callPost({ action: "terminate", call_id: callId }, branch)
+}
+
+/**
+ * Place a BUSINESS-INITIATED WhatsApp call (Meta Business Calling API).
+ *
+ * We are the caller, so WE provide the WebRTC offer (generated + held by
+ * server/whatsapp-calls.js via the loopback /whatsapp/outbound-offer).
+ * Meta rings the customer; when they answer, the "calls" webhook delivers
+ * their answer SDP, which app/api/whatsapp forwards to the voicebot to go
+ * live. `to` is the customer's WhatsApp id (phone digits WITH country code,
+ * no "+" — the same shape webhook `from` uses).
+ *
+ * Meta's permission gate: a customer who called us can be called back;
+ * otherwise they must have accepted a call-permission request. A rejection
+ * surfaces Meta's RAW error text — the dashboard dialer shows it directly,
+ * so an un-granted number is diagnosable without server log access.
+ */
+export async function placeWhatsAppCall(
+  to: string,
+  offerSdp: string,
+  branch?: BranchWhatsAppCtx
+): Promise<{ ok: boolean; callId?: string; error?: string; status?: number }> {
+  const { token, phoneId, configured } = credsFor(branch)
+  if (!configured) {
+    return { ok: false, error: "WhatsApp Cloud API not configured — set WHATSAPP_TOKEN and WHATSAPP_PHONE_NUMBER_ID in .env" }
+  }
+  if (!to || !offerSdp) return { ok: false, error: "to and offerSdp are required" }
+  try {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 15000)
+    const res = await fetch(`${GRAPH}/${phoneId}/calls`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      signal: controller.signal,
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        to,
+        action: "connect",
+        session: { sdp: offerSdp, sdp_type: "offer" },
+      }),
+    })
+    clearTimeout(timeoutId)
+    const data: any = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      return { ok: false, error: data?.error?.message || `HTTP ${res.status}`, status: res.status }
+    }
+    // The placed call's id has appeared under different keys across webhook
+    // versions — parse every known location defensively. Without it we
+    // cannot match the answer webhook to this call.
+    const callId: string | undefined = data?.calls?.[0]?.id || data?.call_id || data?.id || data?.messages?.[0]?.id
+    if (!callId) {
+      return { ok: false, error: "Meta accepted the call but returned no call_id — cannot track the answer webhook", status: res.status }
+    }
+    return { ok: true, callId }
+  } catch (e: any) {
+    return { ok: false, error: `Meta API unreachable: ${e.message}` }
+  }
 }
 
 // ---- DND / opt-out gate (2026-09 compliance pass) ----
