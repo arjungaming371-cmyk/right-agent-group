@@ -52,6 +52,16 @@ const KnowledgeBaseView = dynamic(() => import("./knowledge-base-view"), {
   loading: () => <ViewFallback label="Knowledge Base" />,
 })
 
+// Floating ops chatbot (Executive Operations Commander) — drag bubble bottom-
+// right, chat history, attachments, voice dictation, action proposals with
+// admin approval (POST /api/assistant + /api/assistant/action). Was unmounted
+// during the initial import; restored on request. Lazy-loaded and SSR-off:
+// it's a floating widget, so there is intentionally no visible loading state.
+const QuickChat = dynamic(() => import("./quick-chat"), {
+  ssr: false,
+  loading: () => <></>,
+})
+
 // recharts is ~400kB and only the Analytics tab uses it. Statically imported
 // it landed in the dashboard bundle for every user, including the ones who
 // never open that tab — load it on demand instead.
@@ -548,7 +558,8 @@ export default function DashboardShell() {
           {view === "dev-logs" && role === "developer" && <DeveloperLogsView userEmail={userEmail} />}
         </main>
       </div>
-      {/* Floating QuickChat removed */}
+      {/* Floating ops chatbot — back by popular demand. */}
+      <QuickChat role={role} userEmail={userEmail} />
       {voiceAssistantEverOpened && (
         <VoiceAssistant
           isOpen={voiceAssistantOpen}
