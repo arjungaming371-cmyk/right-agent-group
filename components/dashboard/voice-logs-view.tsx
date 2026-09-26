@@ -177,9 +177,13 @@ export default function VoiceLogsView({ role }: { role: Role }) {
   function downloadRecording(call: Call) {
     const url = proxyRecordingUrl(call.recording_url)
     if (!url) return
+    // WhatsApp recordings are MP3, Exotel's are WAV — label the file by what
+    // it actually is instead of always claiming .wav.
+    const path = url.split("?")[0]
+    const ext = path.toLowerCase().endsWith(".mp3") ? "mp3" : "wav"
     const link = document.createElement("a")
     link.href = url
-    link.download = `call-recording-${call.phone || "call"}-${call.id.slice(0, 8)}.wav`
+    link.download = `call-recording-${call.phone || "call"}-${call.id.slice(0, 8)}.${ext}`
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)

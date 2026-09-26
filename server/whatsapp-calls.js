@@ -13,7 +13,8 @@
 //   opus RTP in (48 kHz) → decode → silence-based endpointing (same state
 //   machine as voicebot-server's CallSession) → Sarvam Saaras STT
 //     → Next.js /api/calls/turn  (Groq/Sarvam LLM = Priya, DB, Lead Brain)
-//     → Cartesia Sonic TTS (24 kHz WAV) → upsample → opus RTP out (48 kHz)
+//     → Cartesia/Sarvam TTS (WAV, ANY rate) → resample to 48 kHz by the WAV
+//       header (ffmpeg, pure-JS fallback) → opus RTP out (48 kHz)
 //
 // STT stays Sarvam, the LLM stays Groq (via the app's turn API) and TTS
 // defaults to CARTESIA for WhatsApp calls (VOICEBOT_WA_TTS_PROVIDER=cartesia,
@@ -34,14 +35,21 @@
 //   4. ICE/DTLS/SRTP connect; the pacer starts streaming; Priya greets.
 //
 // Run by voicebot-server.js (HTTP on 127.0.0.1:VOICEBOT_HTTP_PORT, default
-// 3003, auth = WHATSAPP_SERVICE_KEY). Outbound (business-initiated) WhatsApp
-// calls need Meta's call-permission template flow and are NOT implemented
-// here — inbound is the free path and this business's actual use case.
+// 3003, auth = WHATSAPP_SERVICE_KEY). Both directions are implemented:
+//   • INBOUND  (customer → business, free): the webhook carries Meta's offer,
+//     we answer — see startSession().
+//   • OUTBOUND (business → customer, needs Meta call permission): WE create
+//     the offer, Graph action=connect rings the customer, Meta's webhook
+//     later delivers the answer — see createOutboundOffer() /
+//     attachOutboundSession(). Outbound reuses the ENTIRE session machinery
+//     below (pacer, endpointing, turns, recording) — only the SDP direction
+//     flips.
 //
 // Dependencies (server/package.json): werift, @discordjs/opus.
 
 require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") })
 
+const crypto = require("crypto")
 const { spawn } = require("child_process")
 const {
   RTCPeerConnection,
@@ -77,6 +85,14 @@ const MAX_UTTERANCE_MS = 15000
 // probe before enabling this — see voicebot-server.js).
 const BARGE_IN = (process.env.VOICEBOT_WA_BARGE_IN || "1").trim() === "1"
 const BARGE_MIN_MS = parseInt(process.env.VOICEBOT_WA_BARGE_MIN_MS || "300")
+
+// Dead-peer backstop while CONNECTED: Meta's "terminate" webhook can be lost
+// (webhook outage, Next.js pm2 restart at call end) and werift does not run
+// ICE consent-freshness for us. A connected session whose inbound RTP goes
+// silent for this long is dead — reap it so the pacer, the peer connection
+// and the recorder temp files cannot leak forever. Opus DTX still emits
+// frames every ~400 ms, so 120 s of TRUE silence only ever means a corpse.
+const MEDIA_TIMEOUT_MS = Math.max(30_000, parseInt(process.env.VOICEBOT_WA_MEDIA_TIMEOUT_MS || "120000") || 120_000)
 
 // TTS: WhatsApp calls default to Sarvam or Cartesia if specified.
 // Automatic Sarvam fallback is always active if Cartesia fails or runs out of credits.
@@ -254,44 +270,136 @@ function downsampleToStt(frame48k) {
   return out
 }
 
-/** TTS WAV (any provider rate) → raw mono s16 PCM resampled cleanly to 48 kHz WebRTC rate via ffmpeg. */
-function wavToPcm48k(wav) {
+/** Walk a RIFF/WAVE buffer chunk-by-chunk (never a fixed 44-byte layout —
+ *  providers prepend/append LIST/fact chunks). Returns the fmt fields plus
+ *  the raw data payload. Throws on anything that is not a parseable WAV. */
+function parseWav(wav) {
+  if (!wav || wav.length < 44 ||
+      wav.toString("ascii", 0, 4) !== "RIFF" ||
+      wav.toString("ascii", 8, 12) !== "WAVE") {
+    throw new Error("not a RIFF/WAVE buffer")
+  }
+  let off = 12
+  let fmt = null
+  let data = null
+  while (off + 8 <= wav.length) {
+    const id = wav.toString("ascii", off, off + 4)
+    const size = wav.readUInt32LE(off + 4)
+    const body = off + 8
+    if (id === "fmt " && !fmt) {
+      fmt = {
+        audioFormat: wav.readUInt16LE(body),
+        channels: wav.readUInt16LE(body + 2),
+        sampleRate: wav.readUInt32LE(body + 4),
+        bitsPerSample: wav.readUInt16LE(body + 14),
+      }
+    } else if (id === "data" && !data) {
+      data = wav.subarray(body, Math.min(body + size, wav.length))
+    }
+    off = body + size + (size % 2) // chunks are word-aligned
+  }
+  if (!fmt || !data || !data.length) throw new Error("WAV missing fmt/data chunk")
+  return { ...fmt, pcm: data }
+}
+
+/** Quick header peek for diagnostics — the TRUE rate the TTS delivered
+ *  (null when the buffer is not parseable). */
+function wavSampleRate(wav) {
+  try { return parseWav(wav).sampleRate } catch { return null }
+}
+
+/**
+ * Resample mono s16 PCM from srcRate to dstRate via fractional linear
+ * interpolation. Identity (buffer copy) when the rates already match.
+ *
+ * This is the speed-correctness core of the whole calling stack: the output
+ * duration always equals the input duration (±1 sample), no matter what
+ * rate the TTS provider delivered — the old hardcoded "assume 24 kHz and
+ * double" turned every non-24 kHz source into slow motion / chipmunk.
+ */
+function resamplePcmMono(pcm, srcRate, dstRate) {
+  const inSamples = Math.floor(pcm.length / 2)
+  if (!inSamples) return Buffer.alloc(0)
+  if (!srcRate || !dstRate || srcRate === dstRate) return Buffer.from(pcm)
+  const outSamples = Math.max(1, Math.round((inSamples * dstRate) / srcRate))
+  const out = Buffer.alloc(outSamples * 2)
+  const step = srcRate / dstRate
+  for (let i = 0; i < outSamples; i++) {
+    const pos = i * step
+    const i0 = Math.min(Math.floor(pos), inSamples - 1)
+    const i1 = Math.min(i0 + 1, inSamples - 1)
+    const frac = pos - i0
+    const cur = pcm.readInt16LE(i0 * 2)
+    const v = i1 === i0 ? cur : cur + (pcm.readInt16LE(i1 * 2) - cur) * frac
+    out.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(v))), i * 2)
+  }
+  return out
+}
+
+/** Legacy integer-factor helper (test-locked API) — fractional resampler
+ *  under the hood so there is exactly ONE resample implementation. */
+function upsampleMono(pcm, factor) {
+  return resamplePcmMono(pcm, 1, factor)
+}
+
+/** Pure-JS TTS decode — the ffmpeg-free wavToPcm fallback. Accepts mono or
+ *  stereo s16 PCM WAV at ANY rate (stereo folds to mono by averaging). */
+function jsWavToPcm48k(wav) {
+  const { audioFormat, channels, sampleRate, bitsPerSample, pcm } = parseWav(wav)
+  if (bitsPerSample !== 16 || (audioFormat !== 1 && audioFormat !== 0xfffe)) {
+    throw new Error(`unsupported WAV (format=${audioFormat}, ${bitsPerSample}-bit) — install ffmpeg for full codec support`)
+  }
+  let mono = pcm
+  if (channels === 2) {
+    mono = Buffer.alloc(Math.floor(pcm.length / 4) * 2)
+    for (let i = 0; i + 3 < pcm.length; i += 4) {
+      mono.writeInt16LE(
+        Math.max(-32768, Math.min(32767, Math.round((pcm.readInt16LE(i) + pcm.readInt16LE(i + 2)) / 2))),
+        (i / 4) * 2,
+      )
+    }
+  } else if (channels !== 1) {
+    throw new Error(`unsupported WAV channel count: ${channels}`)
+  }
+  return resamplePcmMono(mono, sampleRate, WA_RATE)
+}
+
+let _warnedNoFfmpeg = false
+
+/** TTS WAV (ANY provider sample rate) → mono s16 PCM at the 48 kHz WebRTC
+ *  clock. Primary path: ffmpeg, which reads the WAV HEADER (source of truth)
+ *  and resamples — no hardcoded rate anywhere. Fallback: the pure-JS header
+ *  walk + linear resampler, so a server without ffmpeg (or a build that
+ *  chokes on a stream) still gets correct-speed audio instead of dead air.
+ *  One ffmpeg spawn per sentence either way — the resample is free. */
+function wavToPcm(wav) {
   return new Promise((resolve, reject) => {
-    const ff = spawn("ffmpeg", [
-      "-hide_banner", "-loglevel", "error",
-      "-f", "wav", "-i", "pipe:0",
-      "-ar", "48000", "-ac", "1", "-f", "s16le",
-      "pipe:1"
-    ])
+    const ff = spawn("ffmpeg", ["-hide_banner", "-loglevel", "error", "-f", "wav", "-i", "pipe:0", "-f", "s16le", "-ac", "1", "-ar", String(WA_RATE), "pipe:1"])
     const chunks = []
+    let ffError = null
     ff.stdout.on("data", (c) => chunks.push(c))
-    ff.on("error", reject)
+    ff.on("error", (e) => { ffError = e })
     ff.on("close", (code) => {
-      if (code === 0) resolve(Buffer.concat(chunks))
-      else reject(new Error(`ffmpeg WAV decode failed (${code})`))
+      if (code === 0 && chunks.length) return resolve(Buffer.concat(chunks))
+      if (ffError && (ffError.code === "ENOENT" || ffError.code === "EACCES")) {
+        if (!_warnedNoFfmpeg) {
+          _warnedNoFfmpeg = true
+          console.warn("⚠ ffmpeg not found on PATH — TTS decode falls back to the pure-JS resampler (install ffmpeg for best quality)")
+        }
+      } else {
+        console.warn(`⚠ ffmpeg WAV decode failed (${ffError ? ffError.message : `exit ${code}`}) — trying the pure-JS resampler`)
+      }
+      try {
+        resolve(jsWavToPcm48k(wav))
+      } catch (e) {
+        reject(new Error(`TTS WAV decode failed: ffmpeg=${ffError ? ffError.message : `exit ${code}`}, js=${e.message}`))
+      }
     })
     ff.stdin.on("error", () => {})
     ff.stdin.end(wav)
   })
 }
-const wavToPcm = wavToPcm48k
-
-/** Upsample mono PCM (s16) by an integer factor via linear interpolation. */
-function upsampleMono(pcm, factor) {
-  const inSamples = Math.floor(pcm.length / 2)
-  const out = Buffer.alloc(inSamples * factor * 2)
-  let o = 0
-  for (let i = 0; i < inSamples; i++) {
-    const cur = pcm.readInt16LE(i * 2)
-    const next = i + 1 < inSamples ? pcm.readInt16LE((i + 1) * 2) : cur
-    for (let k = 0; k < factor; k++) {
-      const v = k === 0 ? cur : cur + ((next - cur) * k) / factor
-      out.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(v))), o)
-      o += 2
-    }
-  }
-  return out
-}
+const wavToPcm48k = wavToPcm
 
 function avgEnergy(frame) {
   let sum = 0
@@ -378,6 +486,8 @@ class WhatsAppCallSession {
     this.language = "telugu"
     this.voice = null           // { provider, speaker } from the branch's AI Employee
     this.startedAt = Date.now()
+    this.connectedAt = 0        // epoch ms of the FIRST ICE connect — 0 = media never flowed
+    this.lastInboundAt = Date.now() // media-inactivity watchdog clock (see pacer)
     this.closed = false
     this.started = false
     this.endReported = false
@@ -443,6 +553,7 @@ class WhatsAppCallSession {
       if (state === "connected") {
         if (!this.connected) {
           this.connected = true
+          this.connectedAt = Date.now()
           console.log(`🔊 WhatsApp call ${this.callSid} media connected (PC connected)`)
         }
       } else if (state === "closed" || state === "failed") {
@@ -456,6 +567,7 @@ class WhatsAppCallSession {
         if (state === "connected") {
           if (!this.connected) {
             this.connected = true
+            this.connectedAt = Date.now()
             console.log(`🔊 WhatsApp call ${this.callSid} media connected (DTLS connected)`)
           }
         }
@@ -551,6 +663,15 @@ class WhatsAppCallSession {
 
     const sendOneTick = () => {
       if (this.closed) return
+      // Media-inactivity watchdog — the twin of attach()'s never-connected
+      // staleTimer. Checked on this 20 ms tick because it is already running:
+      // zero cost, and it cannot forget to fire the way a separate timer that
+      // gets cleared/recreated would.
+      if (this.connected && Date.now() - this.lastInboundAt > MEDIA_TIMEOUT_MS) {
+        console.error(`⏰ WhatsApp call ${this.callSid}: no inbound media for ${Math.round(MEDIA_TIMEOUT_MS / 1000)}s — reaping (terminate webhook was likely lost)`)
+        this.end("media-timeout")
+        return
+      }
       const isReal = this.outQueue.length > 0
       const frame = isReal ? this.outQueue.shift() : this.silenceFrame
       if (!frame) return
@@ -631,12 +752,16 @@ class WhatsAppCallSession {
     // ONE downsample per frame, shared by the recorder (always) and the STT
     // buffer (per state below) — the branches used to downsample separately.
     const pcm16k = downsampleToStt(pcm48k)
+    this.lastInboundAt = Date.now()
     // Recording captures EVERY inbound frame — including audio the endpointer
     // drops (while Priya talks, while the brain is thinking). A recording
     // that skips the caller talking over Priya would be useless in a dispute.
     if (this.recorder) this.recorder.pushInbound(pcm16k)
     const energy = avgEnergy(pcm48k)
-    const ms = 20
+    // Frame duration FROM THE DECODED PCM, not a hardcoded 20: Meta's ptime
+    // is 20 ms today but is not contractual, and a 60 ms frame used to make
+    // every silence/MAX_UTTERANCE timer tick 3× too slow (sluggish turn-taking).
+    const ms = (pcm48k.length / 2 / WA_RATE) * 1000
 
     if (this.botTalking) {
       if (!BARGE_IN) return
@@ -831,8 +956,9 @@ class WhatsAppCallSession {
           audio = await voiceProviders.sarvamTts(text, this.language, speaker)
           providerUsed = "sarvam"
         }
-        const pcm48k = await wavToPcm48k(audio)
-        console.log(`⏱ wa TTS (${providerUsed}): ${Date.now() - t0}ms (${pcm48k.length / (WA_RATE * 2)}s audio)`)
+        const pcm48k = await wavToPcm(audio)
+        const inRate = wavSampleRate(audio)
+        console.log(`⏱ wa TTS (${providerUsed}): ${Date.now() - t0}ms (in @ ${inRate || "?"} Hz → ${(pcm48k.length / (WA_RATE * 2)).toFixed(1)}s @ 48k)`)
         return pcm48k
       } catch (e) {
         console.error("wa TTS error:", e.message)
@@ -867,9 +993,11 @@ class WhatsAppCallSession {
 
   // ---- lifecycle ----
 
-  /** The consent line for the CURRENT language, or null when not recording. */
+  /** The consent line for the CURRENT language, or null when not recording.
+   *  Gates on the recorder's REAL state — a disk failure must never have
+   *  Priya announce a recording that will not exist. */
   recordingNotice() {
-    if (!this.recorder) return null
+    if (!this.recorder || !this.recorder.recording()) return null
     return RECORDING_NOTICE_TEXT || RECORDING_NOTICE_PHRASE[this.language] || RECORDING_NOTICE_PHRASE.english
   }
 
@@ -944,7 +1072,13 @@ class WhatsAppCallSession {
     if (this.endReported) return
     if (!this.callSid) return
     this.endReported = true
-    const duration = Math.round((Date.now() - this.startedAt) / 1000)
+    // Real TALK time, not wall time. startedAt counts accept → ICE connect
+    // dead air — and when media NEVER connected it counted the customer's
+    // entire frustrated wait, turning a dead-ring hang-up into a fake
+    // "completed 40s call" (wrong bubble, wrong follow-up template, wrong
+    // lead bump). Duration 0 = never talked; the finalizer then honestly
+    // treats the call as MISSED.
+    const duration = this.connectedAt ? Math.round((Date.now() - this.connectedAt) / 1000) : 0
     // Promise retained on the session: the HTTP bridge awaits it on the
     // terminate webhook so the app never finalizes before duration landed.
     this.endReportPromise = callTurnApi({ event: "end", callSid: this.callSid, duration }).catch((e) =>
@@ -1003,6 +1137,156 @@ async function waitConnectedSession(callId, timeoutMs = 2500) {
   return { ok: true, connected }
 }
 
+// ---------- Business-initiated (outbound) WhatsApp calls ----------
+//
+// Meta lets a business PLACE a WhatsApp voice call once the customer has
+// granted call permission — implicitly (they called us first; Meta allows
+// calling a user back after an inbound call) or explicitly (the
+// call-permission template flow, approved per user in WhatsApp).
+//
+// The WebRTC direction FLIPS versus inbound: we generate the SDP OFFER,
+// Next.js POSTs it to Graph (action=connect), Meta rings the customer, and
+// the "calls" webhook later delivers their ANSWER SDP — which completes the
+// negotiation HERE and goes live with the full session machinery (pacer,
+// endpointing, turns, recording — all identical to inbound).
+//
+// Loopback lifecycle (same WHATSAPP_SERVICE_KEY auth as connect):
+//   1. /whatsapp/outbound-offer    → { pendingId, offerSdp }  (offer held here)
+//   2. Next.js Graph POST /calls   → Meta returns the call_id
+//   3. /whatsapp/outbound-register { pendingId, callId }       (callId → pending)
+//   4. webhook answer → /whatsapp/outbound-accept { callId, sdp }
+//      → attachOutboundSession() → session live under the Meta call_id
+//   5. /whatsapp/outbound-cancel releases a held offer on any Graph error,
+//      and the TTL sweeper guarantees a peer connection can never leak.
+
+const OUTBOUND_OFFER_TTL_MS = Math.max(30_000,
+  parseInt(process.env.VOICEBOT_WA_OUTBOUND_TTL_MS || "180000") || 180_000)
+
+// pendingId → held offer; once Graph accepts, callId (Meta) → pendingId.
+const pendingOutbound = new Map()
+const outboundByCallId = new Map()
+
+function dropPendingOffer(pendingId, reason) {
+  const pending = pendingOutbound.get(pendingId)
+  if (!pending) return false
+  pendingOutbound.delete(pendingId)
+  if (pending.callId && outboundByCallId.get(pending.callId) === pendingId) {
+    outboundByCallId.delete(pending.callId)
+  }
+  try { pending.pc.close() } catch {}
+  console.log(`↩ WhatsApp outbound offer ${pendingId} dropped (${reason || "canceled"})`)
+  return true
+}
+
+/** Generate + hold the WebRTC offer for one business-initiated call. The
+ *  caller (Next.js dial route) MUST place it with Graph and register the
+ *  returned call_id, or the sweeper reclaims the peer connection. */
+async function createOutboundOffer({ phoneNumberId, from, to, branchId }) {
+  const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
+  const sendTrack = new MediaStreamTrack({ kind: "audio" })
+  const sender = pc.addTrack(sendTrack)
+  // werift fires onTrack inside setRemoteDescription — i.e. the moment the
+  // customer's ANSWER arrives, possibly minutes after this offer was made.
+  // Capture the track through a closure the accept path reads later.
+  let remoteTrack = null
+  pc.onTrack.subscribe((track) => { remoteTrack = track })
+
+  try {
+    const offer = await pc.createOffer()
+    await pc.setLocalDescription(offer) // ICE gathering completes inside (werift)
+  } catch (e) {
+    try { pc.close() } catch {}
+    throw new Error(`outbound offer failed: ${e.message}`)
+  }
+
+  const pendingId = `waout-${crypto.randomUUID()}`
+  const offerSdp = filterSdpForWhatsApp(pc.localDescription?.sdp || "")
+  pendingOutbound.set(pendingId, {
+    pc, sendTrack, sender,
+    getRemoteTrack: () => remoteTrack,
+    offerSdp,
+    from: from || "",        // the CUSTOMER's wa_id we are dialing
+    to: to || "",
+    phoneNumberId: phoneNumberId || "",
+    branchId: branchId || null,
+    callId: null,
+    createdAt: Date.now(),
+  })
+  console.log(`📤 WhatsApp outbound offer held ${pendingId} (branch=${branchId || "hq"}) — awaiting Graph connect + answer`)
+  return { pendingId, offerSdp }
+}
+
+/** Bind Meta's call_id to a held offer (step 3 — Graph accepted our connect). */
+function registerOutboundCallId({ pendingId, callId }) {
+  if (!pendingId || !callId) return { ok: false, error: "pendingId and callId are required" }
+  const pending = pendingOutbound.get(pendingId)
+  if (!pending) return { ok: false, error: "pending offer not found or expired" }
+  pending.callId = callId
+  outboundByCallId.set(callId, pendingId)
+  return { ok: true }
+}
+
+/** The customer answered: complete the negotiation and go live. */
+async function attachOutboundSession({ callId, sdp, from, to }) {
+  if (!callId || !sdp) throw new Error("callId and sdp are required")
+  const pendingId = outboundByCallId.get(callId)
+  if (!pendingId) throw new Error(`no pending outbound offer for callId ***${String(callId).slice(-8)} (wrong callId, or the offer expired/canceled)`)
+  const pending = pendingOutbound.get(pendingId)
+  if (!pending) {
+    outboundByCallId.delete(callId)
+    throw new Error("pending offer expired before the answer arrived")
+  }
+  pendingOutbound.delete(pendingId)
+  outboundByCallId.delete(callId)
+
+  try {
+    await pending.pc.setRemoteDescription({ type: "answer", sdp })
+  } catch (e) {
+    try { pending.pc.close() } catch {}
+    throw new Error(`outbound answer rejected: ${e.message}`)
+  }
+
+  // Negotiation completed — the codec/ssrc are final exactly like inbound.
+  const pt = pending.sendTrack.codec?.payloadType
+  if (pt === undefined || pt === null) {
+    try { pending.pc.close() } catch {}
+    throw new Error("opus payload type missing after answer negotiation — customer SDP contained no compatible audio codec")
+  }
+  const ssrc = pending.sender.ssrc || pending.sendTrack.ssrc
+
+  const session = new WhatsAppCallSession({
+    callId,
+    from: from || pending.from,   // the customer's wa_id (who we called)
+    to: to || pending.to,
+    phoneNumberId: pending.phoneNumberId,
+    branchId: pending.branchId,
+  })
+  sessions.set(callId, session.attach({
+    pc: pending.pc, sendTrack: pending.sendTrack, sender: pending.sender,
+    answerSdp: null, payloadType: pt, ssrc,
+    remoteTrack: pending.getRemoteTrack(),
+  }))
+  console.log(`📞 WhatsApp OUTBOUND call answered sid=${session.callSid} to=${maskPhone(session.from)} branch=${session.branchId || "hq"}`)
+  // Greeting fires immediately — the pacer holds frames until ICE connects,
+  // identical to the inbound path.
+  session.start().catch((e) => console.error("wa outbound session start error:", e.message))
+  return { ok: true, callSid: session.callSid }
+}
+
+function cancelOutboundOffer(pendingId, reason) {
+  return dropPendingOffer(pendingId, reason)
+}
+
+// TTL sweeper — a Graph error, a crash between offer and register, or a
+// customer who never answers must not leak a peer connection forever.
+const __outboundSweep = setInterval(() => {
+  const now = Date.now()
+  for (const [pendingId, pending] of pendingOutbound) {
+    if (now - pending.createdAt > OUTBOUND_OFFER_TTL_MS) dropPendingOffer(pendingId, "ttl expired")
+  }
+}, 30_000)
+if (__outboundSweep.unref) __outboundSweep.unref()
+
 function activeCount() {
   return sessions.size
 }
@@ -1029,12 +1313,18 @@ module.exports = {
   startSession,
   endSession,
   waitConnectedSession,
+  // outbound (business-initiated)
+  createOutboundOffer,
+  registerOutboundCallId,
+  attachOutboundSession,
+  cancelOutboundOffer,
   activeCount,
   validateConfig,
   describeConfig,
   callSidFor,
   // internals exported for tests
   filterSdpForWhatsApp, downsampleToStt, upsampleMono, pcmToWav16k, wavToPcm, avgEnergy,
+  parseWav, wavSampleRate, resamplePcmMono, jsWavToPcm48k,
   RECORDING_NOTICE_PHRASE,
 }
 

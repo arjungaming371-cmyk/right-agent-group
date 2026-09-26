@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
 import { createSessionToken, verifyOtpPendingToken, isSafeNextPath, SESSION_COOKIE, sessionCookieOptions } from "@/lib/auth"
-import { createNotification } from "@/lib/notifications"
+import { createLoginNotificationOncePerDay } from "@/lib/notifications"
 import { rateLimit, clientIp } from "@/lib/rate-limit"
 import { createHash, timingSafeEqual } from "crypto"
 
@@ -57,7 +57,8 @@ export async function POST(req: NextRequest) {
   // OTP is only ever issued to admin logins today, but guard it here too so
   // this doesn't silently start leaking if that ever changes.
   if (pending.role !== "developer") {
-    createNotification({ type: "login", title: "Team member signed in", body: `${pending.email} (${pending.role}, 2FA verified)` })
+    // Once-per-day dedupe: logins must not bury escalations in the bell.
+    createLoginNotificationOncePerDay(`${pending.email} (${pending.role}, 2FA verified)`)
   }
   query(
     `INSERT INTO audit_logs (action, performed_by, metadata) VALUES ('2FA code verified', $1, '{"source":"login"}')`,

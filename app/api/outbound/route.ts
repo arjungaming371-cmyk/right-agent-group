@@ -30,10 +30,26 @@ export async function POST(req: NextRequest) {
   // Batch mode: { contacts: [...] } — queue without calling
   if (body.contacts && Array.isArray(body.contacts)) {
     let queued = 0
+    let skipped = 0
     for (const contact of body.contacts) {
       if (!contact.phone) continue
       contact.phone = normalizePhone(contact.phone)
       try {
+        // QUEUE-LEVEL DEDUPE (2026-09-26): a pending/dialing row for the same
+        // number must not be duplicated — re-confirming a CSV (double-click,
+        // re-upload) used to create a second pending row and the batch dialer
+        // then called that person once per row. Leads stay deduped below;
+        // this guard is about not stacking CALLS.
+        const dup = await query(
+          `SELECT id FROM outbound_queue
+            WHERE right(regexp_replace(phone, '\\D', '', 'g'), 10) = NULLIF($1, '')
+              AND status IN ('pending', 'dialing')
+              AND ($2::uuid IS NULL OR branch_id = $2)
+            LIMIT 1`,
+          [phoneLast10(contact.phone), branchId]
+        )
+        if (dup.rows[0]) { skipped++; continue }
+
         // Dedupe — one lead per phone. FIX (2026-09-22): exact-match missed
         // format variants ("9876543210" vs "+919876543210") and created
         // duplicate leads for the same person — the queue PROCESSOR already
@@ -66,7 +82,7 @@ export async function POST(req: NextRequest) {
         console.error(`Failed to queue contact ${contact.phone}:`, e)
       }
     }
-    return NextResponse.json({ ok: true, queued })
+    return NextResponse.json({ ok: true, queued, skipped })
   }
 
   // Single contact mode: { name, phone, language, ... } — call immediately

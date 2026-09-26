@@ -117,6 +117,32 @@ function personalizedInboundGreeting(language: Language, name: string): string {
   return templates[language]
 }
 
+// BUSINESS-INITIATED WHATSAPP CALLBACK — the lead called US on WhatsApp
+// (that is exactly who Meta lets us dial back), so the cold pitch is the
+// wrong opener: the customer picked up a WhatsApp call from a number they
+// contacted, and the first line should CONNECT the two events. "You reached
+// out earlier, I'm calling you back" is instantly credible; "we help people
+// get loans from 20+ banks" on a callback sounds like the agent has no idea
+// who they are. Repeat calls (call_count > 1) keep RETURNING_GREETINGS —
+// by then the follow-up framing is correct on every channel.
+export const WA_CALLBACK_GREETINGS: Record<Language, string> = {
+  english:
+    "Hello! This is Priya from Right Agent Group, Hyderabad — you had reached out to us on WhatsApp earlier, so I'm calling you back. Do you have a minute? I'd love to know what you were looking for.",
+  hindi:
+    "नमस्ते! मैं प्रिया बोल रही हूं Right Agent Group, Hyderabad से — आपने पहले हमें WhatsApp पे reach out किया था, तो मैं आपको call back कर रही हूं। एक minute है? बताइए, आपको क्या चाहिए था?",
+  telugu:
+    "నమస్కారం! నేను ప్రియ, Right Agent Group, Hyderabad నుండి మాట్లాడుతున్నాను — మీరు ఇంతకుముందు మా WhatsApp కి reach out అయ్యారు కాబట్టి call back చేస్తున్నాను. కొంచెం సమయం ఉందా? మీకు ఏం కావాలో తెలుసుకోవాలనుకుంటున్నాను.",
+}
+
+function personalizedWaCallbackGreeting(language: Language, name: string): string {
+  const templates: Record<Language, string> = {
+    english: `Hello ${name}! Priya here from Right Agent Group — you had reached out to us on WhatsApp earlier, so I'm calling you back. Do you have a minute?`,
+    hindi: `नमस्ते ${name} जी! मैं प्रिया, Right Agent Group से — आपने पहले हमें WhatsApp पे contact किया था, तो मैं call back कर रही हूं। एक minute है क्या?`,
+    telugu: `నమస్కారం ${name} గారు! నేను ప్రియ, Right Agent Group నుండి — మీరు ఇంతకుముందు మా WhatsApp లో contact అయ్యారు కాబట్టి call back చేస్తున్నాను. కొంచెం time ఉందా?`,
+  }
+  return templates[language]
+}
+
 const RETRY_MSG: Record<Language, string> = {
   english: "Sorry, I had a small technical moment. Could you please share your name so I can send your loan application link?",
   hindi:   "माफ़ कीजिए, छोटी technical problem हुई। कृपया अपना नाम बताएं ताकि मैं आपका loan application link भेज सकूं।",
@@ -227,6 +253,14 @@ export async function startCall(
 
   if (direction === "inbound") {
     return hasName ? personalizedInboundGreeting(language, name!) : INBOUND_GREETINGS[language]
+  }
+  // Business-initiated WHATSAPP call: first contact on this channel is a
+  // callback ("you reached out earlier"), not a cold pitch.
+  if (callSid.startsWith("wacall-")) {
+    if (isRepeatCall) {
+      return hasName ? personalizedReturningGreeting(language, name!) : RETURNING_GREETINGS[language]
+    }
+    return hasName ? personalizedWaCallbackGreeting(language, name!) : WA_CALLBACK_GREETINGS[language]
   }
   if (isRepeatCall) {
     return hasName ? personalizedReturningGreeting(language, name!) : RETURNING_GREETINGS[language]

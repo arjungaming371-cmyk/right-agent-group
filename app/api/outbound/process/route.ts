@@ -70,6 +70,15 @@ export async function POST(req: NextRequest) {
   // Per-branch monthly cap still applies to the unattended dialer.
   const quota = await checkQuota(branchId, "call")
   if (!quota.ok) {
+    // FIX (2026-09-26): the rows were ALREADY claimed ('dialing') above —
+    // a 403 here used to leave them stranded in 'dialing' until the 10-min
+    // reaper re-claimed them, so an operator hitting the cap saw their whole
+    // queue vanish for 10 minutes. Release them back to 'pending' first.
+    // (claimed_at left as-is is fine: the claim query matches on status.)
+    await query(
+      `UPDATE outbound_queue SET status = 'pending' WHERE id = ANY($1::uuid[])`,
+      [pending.map((p) => p.id)]
+    ).catch(() => {})
     return NextResponse.json({ error: quota.reason }, { status: 403 })
   }
 

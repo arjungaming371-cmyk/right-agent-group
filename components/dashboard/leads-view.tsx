@@ -2,7 +2,7 @@
 
 type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
 import { useEffect, useState, useMemo } from "react"
-import { Users, Target, IndianRupee, BadgeCheck, Phone, MessageCircle, RotateCcw, Plus, Search, Link2, Check, Download, Brain, Pin } from "lucide-react"
+import { Users, Target, IndianRupee, BadgeCheck, Phone, MessageCircle, RotateCcw, Plus, Search, Link2, Check, Download, Brain, Pin, Sparkles } from "lucide-react"
 import { formatCurrency, timeAgo, formatDateTime } from "@/lib/utils"
 import { usePolling } from "@/lib/use-poll"
 import { useToast } from "../ui/toast"
@@ -254,18 +254,32 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
   }, 0)
   const interestedCount = leads.filter((l) => l.interested === "interested").length
 
-  async function startCall() {
+  // One dialer, one endpoint: every outbound call from this screen goes
+  // through POST /api/calls/dial (channel: phone | whatsapp | auto) so the
+  // rules are IDENTICAL for both networks — compliance, quota, comm-log,
+  // instructions, warm-up. The old split (phone → /api/calls, WhatsApp →
+  // /api/calls/dial) silently skipped the comm-log and dropped the
+  // "What should Priya talk about?" text on WhatsApp calls.
+  async function dial(channel: "phone" | "whatsapp" | "auto") {
     if (!callTarget) return
-    setCalling(callTarget.id)
+    const key = `${channel}-${callTarget.id}`
+    setCalling(key)
     try {
-      const res = await fetch("/api/calls", {
+      const res = await fetch("/api/calls/dial", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ leadId: callTarget.id, phone: callTarget.phone, language: callTarget.language || "telugu", instructions: callInstructions }),
+        body: JSON.stringify({ leadId: callTarget.id, channel, instructions: callInstructions }),
       })
       const data = await res.json()
-      if (res.ok) { toast.success("AI call started — Priya is dialing now"); load() }
-      else toast.error(data.error || "Call failed")
+      if (res.ok) {
+        const via = data.channel === "whatsapp" ? "WhatsApp" : "phone"
+        toast.success(channel === "auto"
+          ? `Smart Dial → ${via} call placed — Priya is dialing now`
+          : `${via === "WhatsApp" ? "WhatsApp" : "Phone"} call placed — Priya is dialing now. Track it in Voice Logs.`)
+        load()
+      } else {
+        toast.error(data.error || "Call failed")
+      }
     } catch {
       // Network failure — surface it, the busy spinner must not just hang.
       toast.error("Call failed — check your connection and try again")
@@ -576,8 +590,30 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
             </div>
             <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
               <button onClick={() => setCallTarget(null)} style={{ flex: 1, padding: 10, background: "transparent", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text-secondary)" }}>Cancel</button>
-              <button onClick={startCall} disabled={calling === callTarget.id} className="btn-primary" style={{ flex: 1, height: 40 }}>
-                <Phone size={14} strokeWidth={2} /> {calling === callTarget.id ? "Calling…" : "Start Call"}
+              <button onClick={() => dial("auto")} disabled={!!calling} className="btn-primary" style={{ flex: 1, height: 40 }}>
+                <Sparkles size={14} strokeWidth={2} /> {calling === `auto-${callTarget.id}` ? "Calling…" : "Smart Dial"}
+              </button>
+            </div>
+            <div style={{ fontSize: 11, color: "var(--text-muted)", margin: "6px 0 10px", textAlign: "center" }}>
+              Smart Dial picks WhatsApp when the lead called us recently (Meta allows the callback), otherwise a regular phone call.
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => dial("phone")} disabled={!!calling} style={{ flex: 1, height: 40, borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)", fontSize: 13, fontWeight: 600, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, opacity: calling ? 0.5 : 1 }}>
+                <Phone size={14} strokeWidth={2} /> {calling === `phone-${callTarget.id}` ? "Calling…" : "Phone Call"}
+              </button>
+              <button
+                onClick={() => dial("whatsapp")}
+                disabled={!!calling}
+                style={{
+                  flex: 1, height: 40, borderRadius: 8, border: "none", cursor: "pointer",
+                  display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6,
+                  fontSize: 13, fontWeight: 600,
+                  background: calling ? "#1f9d55" : "#25D366",
+                  color: "#06331d",
+                  opacity: calling ? 0.5 : 1,
+                }}
+              >
+                <Phone size={14} strokeWidth={2} /> {calling === `whatsapp-${callTarget.id}` ? "Calling…" : "WhatsApp Call"}
               </button>
             </div>
           </div>

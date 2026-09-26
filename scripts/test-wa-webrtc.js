@@ -118,8 +118,17 @@ async function testAudioMath() {
   ok("WAV RIFF header", wav.slice(0, 4).toString() === "RIFF" && wav.slice(8, 12).toString() === "WAVE")
   ok("WAV mono 16-bit", wav.readUInt16LE(22) === 1 && wav.readUInt16LE(34) === 16)
   ok("WAV sample rate 16000", wav.readUInt32LE(24) === 16000)
+  // CONTRACT (2026-09-25): wavToPcm resamples ANY input rate to the 48 kHz
+  // WebRTC clock via ffmpeg (the old pass-through + hand-×2 upsample broke
+  // pitch the moment a deployment changed SARVAM_TTS_SAMPLE_RATE). A 20 ms
+  // 16 kHz frame therefore comes back 20 ms LONG at 48 kHz = 1920 bytes,
+  // with the waveform energy preserved.
   const back = await wavToPcm(wav)
-  ok("wavToPcm roundtrip (ffmpeg)", back.equals(frame.subarray(0, 640)), `${back.length} bytes back`)
+  ok("wavToPcm resamples 16k → 48k (20 ms in, 1920 B out)", back.length === 1920, `${back.length} bytes back`)
+  ok("wavToPcm resample preserves energy", avgEnergy(back) > 0)
+  const silentWav = pcmToWav16k(Buffer.alloc(640))
+  const silentBack = await wavToPcm(silentWav)
+  ok("wavToPcm resampled silence is silent", silentBack.length === 1920 && avgEnergy(silentBack) === 0, `${silentBack.length} bytes back`)
 
   ok("avgEnergy silence == 0", avgEnergy(Buffer.alloc(FRAME_SAMPLES * 2)) === 0)
   ok("avgEnergy loud > 0", avgEnergy(frame) > 0)

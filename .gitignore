@@ -1,45 +1,37 @@
-# dependencies
-node_modules/
-server/node_modules/
-server/stt-service/venv/
 
+# STT model cache
 # builds
-.next/
-out/
-*.tsbuildinfo
-
+# call recordings (written by server/voicebot, served by the app)
+# dependencies
 # env & secrets — NEVER commit these
+# logs & OS junk
+# manual TTS/STT test output — these accumulate in the repo root every time
+# pg_dump output from BACKUP.ps1 — real customer data, never commit it
+# scratch directory for local debugging scripts & tokens
+# someone tests voice output by hand; never meant to be committed
+*.log
+*.tsbuildinfo
+.DS_Store
+.claude/settings.local.json
 .env
 .env.local
 .env.production
-.claude/settings.local.json
-
-
-# logs & OS junk
-*.log
-npm-debug.log*
-.DS_Store
-Thumbs.db
-
-# STT model cache
-server/stt-service/models/
-server/stt-service/__pycache__/
-server/tts-service/venv/
-server/tts-service/__pycache__/
-
-# manual TTS/STT test output — these accumulate in the repo root every time
-# someone tests voice output by hand; never meant to be committed
+.next/
 /*.mp3
-/*.wav
 /*.pcm
-debug-audio/
-
-# pg_dump output from BACKUP.ps1 — real customer data, never commit it
+/*.wav
+Thumbs.db
 backups/
-
-# scratch directory for local debugging scripts & tokens
-scratch/
-
-
-# call recordings (written by server/voicebot, served by the app)
+debug-audio/
+node_modules/
+npm-debug.log*
+out/
 recordings/
+scratch/
+scripts/.notif-build/
+server/node_modules/
+server/stt-service/__pycache__/
+server/stt-service/models/
+server/stt-service/venv/
+server/tts-service/__pycache__/
+server/tts-service/venv/

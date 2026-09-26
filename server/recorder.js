@@ -190,6 +190,15 @@ class CallRecorder {
     } catch { /* error handler flips streamsOk */ }
   }
 
+  /**
+   * True while capture is genuinely writing to disk. The consent notice
+   * gates on this: a disk-full/mkdir failure must never have Priya announce
+   * "this call is recorded" when no recording will exist.
+   */
+  recording() {
+    return this.started && this.streamsOk && !this.done
+  }
+
   /** Close both streams; safe to call twice. */
   async closeStreams() {
     const close = (s) => new Promise((res) => {
@@ -237,8 +246,13 @@ class CallRecorder {
       const outBuf = Buffer.alloc(CHUNK)
       while (written < totalDataBytes) {
         const want = Math.min(CHUNK, totalDataBytes - written)
-        const inRes = await inFd.read(inBuf, 0, want, 44 + written)
-        const outRes = await outFd.read(outBuf, 0, want, 44 + written)
+        // Temp files are RAW PCM (streams opened with no WAV header) — read
+        // at `written`, NOT at 44 + written: the old offset silently skipped
+        // the first 44 bytes (2.75 ms) of both sides and desynced nothing
+        // else, but it made durationSec under-report and dropped the call's
+        // very first samples from every recording.
+        const inRes = await inFd.read(inBuf, 0, want, written)
+        const outRes = await outFd.read(outBuf, 0, want, written)
         if (inRes.bytesRead === 0 && outRes.bytesRead === 0) break
         const n = Math.max(inRes.bytesRead, outRes.bytesRead)
         if (n < 2) break
