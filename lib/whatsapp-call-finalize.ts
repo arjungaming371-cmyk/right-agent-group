@@ -89,15 +89,21 @@ export async function finalizeWhatsAppCall(opts: {
   // row exists even when nobody picked up, and direction on it is how we
   // know WE placed this call (the webhook payload itself looks identical).
   let call: VoiceCallRow | null = null
-  try {
-    const res = await query(
-      `SELECT lead_id, direction, status, phone, duration, branch_id, transcript, followup_sent, ai_summary
-         FROM voice_calls WHERE twilio_call_sid = $1 LIMIT 1`,
-      [callSid]
-    )
-    call = (res.rows[0] as VoiceCallRow) || null
-  } catch (e) {
-    console.error("wa finalize: voice_calls lookup failed:", e instanceof Error ? e.message : e)
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await query(
+        `SELECT lead_id, direction, status, phone, duration, branch_id, transcript, followup_sent, ai_summary
+           FROM voice_calls WHERE twilio_call_sid = $1 LIMIT 1`,
+        [callSid]
+      )
+      call = (res.rows[0] as VoiceCallRow) || null
+      if (Number(call?.duration || 0) > 0 || (Array.isArray(call?.transcript) && call.transcript.length > 0)) {
+        break
+      }
+    } catch (e) {
+      console.error("wa finalize: voice_calls lookup failed:", e instanceof Error ? e.message : e)
+    }
+    if (attempt < 2) await new Promise((r) => setTimeout(r, 400))
   }
 
   // The caller identity is required only when we have to find/create a lead.
@@ -179,10 +185,12 @@ export async function finalizeWhatsAppCall(opts: {
   // direction 'outbound') — the old code painted every bubble as an incoming
   // call, so a business-initiated dial showed up in the lead's chat as a
   // missed call FROM the customer. Backwards.
+  const transcript = Array.isArray(call?.transcript) ? (call.transcript as TranscriptTurn[]) : []
   const duration = Number(call?.duration || 0)
-  const answered = outcome === "resolved" && duration > 0
+  const hasSpokenTurns = transcript.length > 0
+  const answered = duration > 0 || hasSpokenTurns || (outcome === "resolved" && call?.status === "completed")
   const bubbleContent = answered
-    ? `📞 Voice call · ${formatCallDuration(duration)}`
+    ? (duration > 0 ? `📞 Voice call · ${formatCallDuration(duration)}` : `📞 Voice call`)
     : outcome === "rejected"
       ? (isOutbound ? "📞 Outgoing call declined" : "📞 Declined voice call")
       : outcome === "failed"
@@ -223,7 +231,6 @@ export async function finalizeWhatsAppCall(opts: {
   if (!leadId) return
 
   // ---- 4. Transcript sentiment + lead status (same rules as Exotel) ----
-  const transcript = Array.isArray(call?.transcript) ? (call.transcript as TranscriptTurn[]) : []
   const allText = transcript.map((t) => (typeof t.text === "string" ? t.text : "")).join(" ").toLowerCase()
   const positiveWords = /yes\b|interested|please|confirm|okay|ok\b|sure|good|great/
   const negativeWords = /\bno\b|not interested|busy|later|cancel|dont|nope/

@@ -1176,6 +1176,9 @@ class WhatsAppCallSession {
     if (this.turnAbort) { try { this.turnAbort.abort() } catch {} this.turnAbort = null }
     try { this.pc && this.pc.close() } catch {}
     sessions.delete(this.callId)
+    recentlyEnded.set(this.callId, this)
+    const cleanupTimer = setTimeout(() => recentlyEnded.delete(this.callId), 60000)
+    if (cleanupTimer.unref) cleanupTimer.unref()
     console.log(`■ WhatsApp call end sid=${this.callSid} reason=${reason}  frames=${this.frameCount}  callMaxEnergy=${this.callMaxEnergy.toFixed(0)}  threshold=${ENERGY_THRESHOLD}`)
     this.reportEnd()
     // Recording finalize runs AFTER the call is torn down and fully off the
@@ -1226,6 +1229,7 @@ class WhatsAppCallSession {
 // ---------- Registry (the API the HTTP bridge talks to) ----------
 
 const sessions = new Map() // callId → session
+const recentlyEnded = new Map() // callId → session (retained 60s so terminate webhook can await endReportPromise)
 
 /**
  * Handle a "connect" webhook event: answer the SDP offer, register the
@@ -1254,16 +1258,19 @@ async function startSession({ callId, from, to, phoneNumberId, sdp, sdpType, bra
 
 /** Handle a "terminate" webhook event (customer hung up / rejected / lost). */
 async function endSession(callId, reason) {
-  const session = sessions.get(callId)
+  const session = sessions.get(callId) || recentlyEnded.get(callId)
   if (!session) return { ok: true, ended: false }
-  session.end(reason || "terminate")
+  const wasAlreadyClosed = session.closed
+  if (!wasAlreadyClosed) {
+    session.end(reason || "terminate")
+  }
   // The app's webhook finalizer (follow-ups, chat bubble, comm_logs) reads
   // voice_calls.duration — wait until the "end" report actually landed so a
   // resolved call can never be finalized as a 0-second miss.
   if (session.endReportPromise) {
     try { await session.endReportPromise } catch {}
   }
-  return { ok: true, ended: true }
+  return { ok: true, ended: !wasAlreadyClosed }
 }
 
 async function waitConnectedSession(callId, timeoutMs = 2500) {
