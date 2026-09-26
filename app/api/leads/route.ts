@@ -30,6 +30,25 @@ async function hasLeadCodeColumn(): Promise<boolean> {
   return _hasLeadCode
 }
 
+// Instagram Separation (2026-09-26): the CRM lane filter needs the
+// is_social_prospect column. Same probe-once pattern as lead_code above —
+// before migrations/2026-09-26_instagram_separation.sql runs, every scope
+// degrades to "all" instead of 500-ing the dashboard.
+let _hasSocialProspect = false
+async function hasSocialProspectColumn(): Promise<boolean> {
+  if (_hasSocialProspect) return true
+  try {
+    const r = await query(
+      `SELECT 1 FROM information_schema.columns
+       WHERE table_name = 'leads' AND column_name = 'is_social_prospect' LIMIT 1`
+    )
+    _hasSocialProspect = r.rows.length > 0
+  } catch {
+    _hasSocialProspect = false
+  }
+  return _hasSocialProspect
+}
+
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
 
@@ -45,12 +64,30 @@ export async function GET(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const branchId = sessionBranchId(session)
 
+  // Instagram Separation (2026-09-26): scope lanes. Default is "crm" —
+  // telecallers, the bulk dialer, exports and the sidebar badge must NEVER
+  // see phone-less Instagram prospects. "social" = prospects only (the
+  // Instagram Prospects tab), "all" = everything (legacy behavior).
+  //
   // FIX (2026-09-20): the count branch used to run BEFORE the auth check and
   // without any branch filter — middleware was its only protection, and
   // branch users got the whole-company count. Auth + scope come first now.
+  const laneScope = searchParams.get("scope") === "social" ? "social"
+    : searchParams.get("scope") === "all" ? "all"
+    : "crm" // default: CRM-only once the migration is in
+  const socialCol = await hasSocialProspectColumn()
   if (searchParams.get("count")) {
+    const countWhere: string[] = [`($1::uuid IS NULL OR branch_id = $1)`]
+    if (socialCol && laneScope !== "all") {
+      countWhere.push(`is_social_prospect = $2`)
+      const { rows } = await query(
+        `SELECT COUNT(*)::int AS count FROM leads WHERE ${countWhere.join(" AND ")}`,
+        laneScope === "social" ? [branchId, true] : [branchId, false]
+      )
+      return NextResponse.json({ count: rows[0]?.count ?? 0 })
+    }
     const { rows } = await query(
-      `SELECT COUNT(*)::int AS count FROM leads WHERE ($1::uuid IS NULL OR branch_id = $1)`,
+      `SELECT COUNT(*)::int AS count FROM leads WHERE ${countWhere.join(" AND ")}`,
       [branchId]
     )
     return NextResponse.json({ count: rows[0]?.count ?? 0 })
@@ -70,6 +107,15 @@ export async function GET(req: NextRequest) {
   if (branchId) {
     where.push(`leads.branch_id = $${i}`)
     params.push(branchId)
+    i++
+  }
+
+  // Lane filter — see laneScope above. Filter on the FLAG, not on
+  // "phone IS NOT NULL": the flag is the semantic truth, and a phone filter
+  // would silently hide any future phone-less-but-real CRM lead.
+  if (socialCol && laneScope !== "all") {
+    where.push(`leads.is_social_prospect = $${i}`)
+    params.push(laneScope === "social")
     i++
   }
 
@@ -209,6 +255,13 @@ export async function PATCH(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const { id, ...updates } = await req.json()
   delete updates.branch_id // branch moves are an admin action via /api/branches, not a lead edit
+  // Instagram Separation (2026-09-26): promotion state can only change
+  // through the promote path (lib/ig-promote.ts), never via a raw PATCH —
+  // otherwise any lead edit form (or crafted payload) could flip the lane
+  // flags and push a phone-less prospect into the dialer pipeline.
+  delete updates.is_social_prospect
+  delete updates.promoted_to_crm_at
+  delete updates.ig_phone_extracted
   // Branch-scoped users may only update leads inside their branch.
   const branchId = sessionBranchId(session)
   let leadQuery = db.from("leads").update({ ...updates, updated_at: new Date().toISOString() })

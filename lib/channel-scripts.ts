@@ -64,6 +64,8 @@ Instructions:
 - Keep your answer under 100 words (Instagram DM friendly).
 - Answer the customer's question directly.
 - NEVER re-ask for a detail the customer already gave earlier in the thread.
+- Qualification goal: once the user shows real loan interest, naturally ask for their phone or WhatsApp number so you can send them the exact rate breakdown — e.g. "Sure! Could you share your WhatsApp number so I can send you the exact interest rate breakdown and loan options?"
+- If Client Details already shows a phone number, never ask for it — offer to send the rate breakdown on WhatsApp instead.
 - Ask a helpful follow-up question to qualify their loan needs.`
 
 export const DEFAULT_INSTAGRAM_COMMENT: InstagramCommentScripts = {

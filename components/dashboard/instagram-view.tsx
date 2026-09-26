@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState, useCallback } from "react"
-import { Search, Send, MessageCircle, ChevronLeft, CheckCircle2, Zap, Lock, Pin, Info, X, Phone, Tag, StickyNote, Smile, Instagram, MessageSquare } from "lucide-react"
+import { Search, Send, MessageCircle, ChevronLeft, CheckCircle2, Zap, Lock, Pin, Info, X, Phone, Tag, StickyNote, Smile, Instagram, MessageSquare, UserPlus } from "lucide-react"
 import { useToast } from "../ui/toast"
 import { usePolling } from "@/lib/use-poll"
 import VoiceDictation from "../ui/voice-dictation"
@@ -18,9 +18,14 @@ type Conversation = {
   last_type?: "dm" | "comment"
   last_time?: string
   lead_name?: string
-  lead_phone?: string
+  lead_phone?: string | null
   lead_status?: string
   unread_count?: number
+  // Instagram Separation (2026-09-26): absent on a pre-migration DB (the API
+  // degrades gracefully) — the pill simply never shows.
+  is_social_prospect?: boolean
+  promoted_to_crm_at?: string | null
+  ig_phone_extracted?: string | null
 }
 
 type Msg = {
@@ -87,6 +92,13 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false)
   const [aiEnabled, setAiEnabled] = useState(true)
   const [userRole, setUserRole] = useState<Role>("viewer")
+
+  // Promote-to-CRM (Instagram Separation): the right panel's Convert flow.
+  const [promoteOpen, setPromoteOpen] = useState(false)
+  const [promotePhone, setPromotePhone] = useState("")
+  const [promoteWa, setPromoteWa] = useState(true)
+  const [promoteQueue, setPromoteQueue] = useState(false)
+  const [promoting, setPromoting] = useState(false)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const toast = useToast()
@@ -203,6 +215,39 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
     c.lead_phone,
     c.last_message,
   ])
+
+  // Convert the active conversation's prospect into a callable CRM lead.
+  // The server (lib/ig-promote.ts) enforces the hard guarantees — a number
+  // already owned by another lead is NEVER merged, it comes back as 409.
+  async function promoteToCrm() {
+    if (!activeConv?.lead_id || promoting) return
+    setPromoting(true)
+    try {
+      const res = await fetch(`/api/instagram/leads/${activeConv.lead_id}/promote`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: promotePhone, sendWhatsAppLink: promoteWa, addToCallQueue: promoteQueue }),
+      })
+      const d = await res.json().catch(() => ({}))
+      if (res.ok) {
+        toast.success(
+          `${d.lead?.name || "Prospect"} is now a CRM lead${d.lead?.lead_code ? ` (${d.lead.lead_code})` : ""}` +
+          `${d.queued ? " — added to Call Queue" : ""}` +
+          `${d.whatsappSent ? " — welcome + form link sent" : ""}`
+        )
+        setPromoteOpen(false)
+        loadConversations()
+      } else if (res.status === 409) {
+        toast.error(d.message || "That phone already belongs to another CRM lead — review it manually before converting.")
+      } else {
+        toast.error(d.message || d.error || "Promote failed")
+      }
+    } catch {
+      toast.error("Promote failed — check your connection and try again")
+    } finally {
+      setPromoting(false)
+    }
+  }
 
   return (
     <div
@@ -577,7 +622,89 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
               <span style={{ color: IG_THEME.textSecondary }}>Lead Status: </span>
               <span style={{ color: "#25d366", fontWeight: 600 }}>{activeConv.lead_status || "New"}</span>
             </div>
+            {activeConv.promoted_to_crm_at && (
+              <div>
+                <span style={{ color: IG_THEME.textSecondary }}>CRM: </span>
+                <span style={{ color: "#e1306c", fontWeight: 600 }}>Promoted from Instagram</span>
+              </div>
+            )}
           </div>
+
+          {/* Social-prospect lane (2026-09-26): this conversation's lead has no
+              phone yet — surface the status and the one-click conversion. */}
+          {activeConv.is_social_prospect && (
+            <div style={{ borderTop: `1px solid ${IG_THEME.hairline}`, paddingTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+              <span
+                style={{
+                  alignSelf: "flex-start", fontSize: 11, fontWeight: 700,
+                  color: "#f5a623", background: "rgba(245,166,35,0.12)",
+                  border: "1px solid rgba(245,166,35,0.35)", borderRadius: 20, padding: "3px 10px",
+                }}
+              >
+                Social Prospect — not in CRM yet
+              </span>
+              {activeConv.ig_phone_extracted && (
+                <div style={{ fontSize: 12, color: IG_THEME.textSecondary }}>
+                  Detected number: <span style={{ color: IG_THEME.textPrimary, fontWeight: 600 }}>{activeConv.ig_phone_extracted}</span>
+                </div>
+              )}
+              {userRole !== "viewer" && activeConv.lead_id && (
+                !promoteOpen ? (
+                  <button
+                    onClick={() => {
+                      setPromoteOpen(true)
+                      setPromotePhone(activeConv.ig_phone_extracted ? activeConv.ig_phone_extracted.replace(/\D/g, "") : "")
+                      setPromoteWa(true)
+                      setPromoteQueue(false)
+                    }}
+                    style={{
+                      display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6,
+                      height: 34, borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: "pointer",
+                      background: "rgba(37,211,102,0.12)", border: "1px solid rgba(37,211,102,0.4)", color: "#25d366",
+                    }}
+                  >
+                    <UserPlus size={13} strokeWidth={2} /> Promote to CRM Lead
+                  </button>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <input
+                      value={promotePhone}
+                      onChange={(e) => setPromotePhone(e.target.value)}
+                      placeholder="10-digit mobile"
+                      style={{
+                        height: 32, fontSize: 12.5, background: IG_THEME.bubbleIn,
+                        border: `1px solid ${IG_THEME.hairline}`, borderRadius: 8,
+                        color: IG_THEME.textPrimary, padding: "0 10px",
+                      }}
+                    />
+                    <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11.5, color: IG_THEME.textSecondary, cursor: "pointer" }}>
+                      <input type="checkbox" checked={promoteWa} onChange={(e) => setPromoteWa(e.target.checked)} style={{ accentColor: "#25d366" }} />
+                      Send WhatsApp welcome + form link
+                    </label>
+                    <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11.5, color: IG_THEME.textSecondary, cursor: "pointer" }}>
+                      <input type="checkbox" checked={promoteQueue} onChange={(e) => setPromoteQueue(e.target.checked)} style={{ accentColor: "#25d366" }} />
+                      Add to Call Queue (high priority)
+                    </label>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button
+                        onClick={() => setPromoteOpen(false)}
+                        disabled={promoting}
+                        style={{ flex: 1, height: 30, borderRadius: 8, fontSize: 11.5, background: "transparent", border: `1px solid ${IG_THEME.hairline}`, color: IG_THEME.textSecondary, cursor: "pointer" }}
+                      >Cancel</button>
+                      <button
+                        onClick={promoteToCrm}
+                        disabled={promoting || !/^\d{10}$/.test(promotePhone.replace(/\D/g, ""))}
+                        style={{
+                          flex: 1, height: 30, borderRadius: 8, fontSize: 11.5, fontWeight: 700, cursor: "pointer",
+                          background: promoting ? "rgba(37,211,102,0.25)" : "#25d366", border: "none", color: "#0d0d0d",
+                        }}
+                      >{promoting ? "Converting…" : "Convert"}</button>
+                    </div>
+                  </div>
+                )
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

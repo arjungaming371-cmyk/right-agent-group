@@ -2,7 +2,7 @@
 
 type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
 import { useEffect, useState, useMemo } from "react"
-import { Users, Target, IndianRupee, BadgeCheck, Phone, MessageCircle, RotateCcw, Plus, Search, Link2, Check, Download, Brain, Pin, Sparkles, CheckSquare, PhoneCall, X } from "lucide-react"
+import { Users, Target, IndianRupee, BadgeCheck, Phone, MessageCircle, RotateCcw, Plus, Search, Link2, Check, Download, Brain, Pin, Sparkles, CheckSquare, PhoneCall, Instagram, X } from "lucide-react"
 import { formatCurrency, timeAgo, formatDateTime } from "@/lib/utils"
 import { usePolling } from "@/lib/use-poll"
 import { useToast } from "../ui/toast"
@@ -14,7 +14,7 @@ import { smartFilter } from "@/lib/smart-search"
 import { PRODUCT_GROUPS, LOAN_TYPES } from "@/lib/products"
 
 type Lead = {
-  id: string; name: string; phone: string; address: string; whatsapp_number: string
+  id: string; name: string; phone: string | null; address: string; whatsapp_number: string
   product_interest: string; status: string; interested: string; loan_amount: number; language: string
   call_count: number; created_at: string; updated_at: string; score: number
   form_token: string | null; form_used_at: string | null; form_sent_at: string | null
@@ -23,6 +23,18 @@ type Lead = {
   // Short human-readable code (RAG-0001). Optional because a row fetched
   // before the 2026-07-31_lead_code migration has run won't carry one.
   lead_code?: string | null
+  // Instagram Separation (2026-09-26): lane fields. source/instagram_handle
+  // power the IG-origin badge in the CRM tab; the prospect fields power the
+  // Instagram Prospects tab. Optional so pre-migration rows render fine.
+  source?: string | null
+  instagram_handle?: string | null
+  ig_user_id?: string | null
+  is_social_prospect?: boolean
+  promoted_to_crm_at?: string | null
+  ig_phone_extracted?: string | null
+  last_message?: string | null
+  last_interaction_at?: string | null
+  last_type?: string | null
 }
 
 // Short lead code (RAG-0042). Monospace so the digits line up down the
@@ -171,6 +183,19 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
 
   const [memoryLeadId, setMemoryLeadId] = useState<string | null>(null)
 
+  // ── Instagram Separation lanes (2026-09-26) ──────────────────────
+  // "crm" = callable leads (telecaller default), "social" = Instagram
+  // prospects (no phone yet). The server default is crm too, so any other
+  // consumer of /api/leads (dialer, exports, badge) stays clean.
+  const [scopeTab, setScopeTab] = useState<"crm" | "social">("crm")
+  const [crmCount, setCrmCount] = useState(0)
+  const [socialCount, setSocialCount] = useState(0)
+  const [convertTarget, setConvertTarget] = useState<Lead | null>(null)
+  const [convertBusy, setConvertBusy] = useState(false)
+  const [convertForm, setConvertForm] = useState<{ phone: string; productInterest: string; notes: string; sendWa: boolean; addToQueue: boolean }>({
+    phone: "", productInterest: "", notes: "", sendWa: true, addToQueue: false,
+  })
+
   // ── Bulk call-queue selection (2026-09-26 bulk upgrade) ───────────
   // Row checkboxes + floating action bar + the Add-to-Call-Queue modal.
   // DND / duplicate / recently-called protections are enforced SERVER-side
@@ -244,9 +269,49 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
     setQueueBusy(false)
   }
 
+  async function convertProspect() {
+    if (!convertTarget) return
+    setConvertBusy(true)
+    try {
+      const res = await fetch(`/api/instagram/leads/${convertTarget.id}/promote`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          phone: convertForm.phone,
+          productInterest: convertForm.productInterest || null,
+          notes: convertForm.notes || null,
+          sendWhatsAppLink: convertForm.sendWa,
+          addToCallQueue: convertForm.addToQueue,
+        }),
+      })
+      const d = await res.json().catch(() => ({}))
+      if (res.ok) {
+        toast.success(
+          `${d.lead?.name || "Prospect"} is now a CRM lead${d.lead?.lead_code ? ` (${d.lead.lead_code})` : ""}` +
+          `${d.queued ? " — added to Call Queue" : ""}` +
+          `${d.whatsappSent ? " — WhatsApp welcome + form link sent" : ""}`
+        )
+        setConvertTarget(null)
+        load()
+      } else if (res.status === 409) {
+        // Never auto-merged — the operator decides. Point them at the other lead.
+        toast.error(d.message || "That phone already belongs to another CRM lead — review it manually before converting.")
+      } else {
+        toast.error(d.message || d.error || "Convert failed")
+      }
+    } catch {
+      toast.error("Convert failed — check your connection and try again")
+    }
+    setConvertBusy(false)
+  }
+
   async function load(silent = false) {
     if (!silent) setLoading(true)
+    // Lane tab badges — two tiny COUNT queries riding the same poll cycle.
+    fetch("/api/leads?count=1&scope=crm").then((r) => (r.ok ? r.json() : null)).then((d) => d && setCrmCount(d.count ?? 0)).catch(() => {})
+    fetch("/api/leads?count=1&scope=social").then((r) => (r.ok ? r.json() : null)).then((d) => d && setSocialCount(d.count ?? 0)).catch(() => {})
     const params = new URLSearchParams()
+    params.set("scope", scopeTab)
     if (debouncedSearch) params.set("search", debouncedSearch)
     if (ageFilter !== "all") params.set("age", ageFilter)
     if (amountFilter !== "all") params.set("amount", amountFilter)
@@ -292,7 +357,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
 
   useEffect(() => {
     load()
-  }, [debouncedSearch, ageFilter, amountFilter, loanTypeFilter, interestedFilter])
+  }, [debouncedSearch, ageFilter, amountFilter, loanTypeFilter, interestedFilter, scopeTab])
 
   useEffect(() => {
     const handler = () => load(true)
@@ -401,15 +466,45 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      {scopeTab === "crm" && (
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-4">
         <Card label="Total Leads" value={totalLeads.toLocaleString()} icon={Users} tone="var(--accent-violet)" />
         <Card label="Interested" value={interestedCount.toLocaleString()} icon={Target} tone="var(--accent-cyan)" />
         <Card label="Pipeline Value" value={formatCurrency(pipelineValue)} icon={IndianRupee} tone="var(--accent-yellow)" />
         <Card label="Qualified" value={qualified.toLocaleString()} icon={BadgeCheck} tone="var(--accent-green)" />
       </div>
+      )}
 
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12 }}>
         <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--border)" }}>
+          {/* Lane tabs — CRM leads vs Instagram prospects (2026-09-26).
+              Telecallers live in CRM; phone-less IG inquirers get their own
+              lane so they never clutter the pipeline or the dialer. */}
+          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+            {([
+              { key: "crm", label: "CRM Leads", count: crmCount, icon: Phone },
+              { key: "social", label: "Instagram Prospects", count: socialCount, icon: Instagram },
+            ] as const).map((t) => {
+              const active = scopeTab === t.key
+              return (
+                <button
+                  key={t.key}
+                  onClick={() => { setScopeTab(t.key); setSelectedIds([]) }}
+                  style={{
+                    display: "inline-flex", alignItems: "center", gap: 7,
+                    height: 34, padding: "0 14px", borderRadius: 9, fontSize: 12.5, fontWeight: 600,
+                    border: `1px solid ${active ? "rgba(139,124,255,0.5)" : "var(--border)"}`,
+                    background: active ? "rgba(139,124,255,0.12)" : "transparent",
+                    color: active ? "var(--accent-violet)" : "var(--text-secondary)",
+                    cursor: "pointer",
+                  }}
+                >
+                  <t.icon size={14} strokeWidth={2} />
+                  {t.label} ({t.count.toLocaleString()})
+                </button>
+              )
+            })}
+          </div>
           {/* Single compact filter row */}
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <div style={{ position: "relative", width: 230, display: "flex", alignItems: "center" }}>
@@ -483,7 +578,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
           <thead>
             <tr style={{ borderBottom: "1px solid var(--border)" }}>
               <th style={{ padding: "12px 8px 12px 16px", width: 40, textAlign: "left" }}>
-                {canEdit && displayLeads.length > 0 && (
+                {canEdit && scopeTab === "crm" && displayLeads.length > 0 && (
                   <input type="checkbox" checked={allSelected} onChange={toggleAll} title="Select all shown leads" style={{ width: 15, height: 15, cursor: "pointer", accentColor: "var(--accent-violet)" }} />
                 )}
               </th>
@@ -520,13 +615,17 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
               </tr>
             )}
             {!loading && !loadError && displayLeads.length === 0 && (
-              <tr><td colSpan={11} style={{ padding: 40, textAlign: "center", color: "var(--text-muted)" }}>No leads match these filters.</td></tr>
+              <tr><td colSpan={11} style={{ padding: 40, textAlign: "center", color: "var(--text-muted)" }}>
+                {scopeTab === "social"
+                  ? "No Instagram prospects — DM/comment leads without a phone number land here."
+                  : "No leads match these filters."}
+              </td></tr>
             )}
             {displayLeads.map((lead) => {
               const ist = INTERESTED_STYLES[lead.interested] ?? INTERESTED_STYLES.unknown
               return (
                 <tr key={lead.id} style={{ borderBottom: "1px solid var(--border-light)", background: selectedIds.includes(lead.id) ? "rgba(139,124,255,0.05)" : undefined }}>
-                  {canEdit && (
+                  {canEdit && scopeTab === "crm" && (
                     <td style={{ padding: "14px 8px 14px 16px" }}>
                       <input type="checkbox" checked={selectedIds.includes(lead.id)} onChange={() => toggleOne(lead.id)} title="Select for bulk call queue" style={{ width: 15, height: 15, cursor: "pointer", accentColor: "var(--accent-violet)" }} />
                     </td>
@@ -538,10 +637,24 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                         <div style={{ fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", gap: 6 }}>
                           {lead.pinned && <Pin size={12} strokeWidth={2.2} style={{ color: "var(--accent-yellow)", fill: "var(--accent-yellow)", flexShrink: 0 }} />}
                           {lead.name || "Unknown"}
+                          {lead.source?.startsWith("Instagram") && lead.instagram_handle && (
+                            <span
+                              title={`Instagram origin: @${lead.instagram_handle}${lead.promoted_to_crm_at ? " — promoted from Instagram Prospects" : ""}`}
+                              style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 10, fontWeight: 600, color: "#e1306c", background: "rgba(225,48,108,0.1)", border: "1px solid rgba(225,48,108,0.3)", borderRadius: 5, padding: "1px 6px", flexShrink: 0 }}
+                            >
+                              <Instagram size={10} strokeWidth={2.2} /> @{lead.instagram_handle}
+                            </span>
+                          )}
                         </div>
                         <div style={{ fontSize: 12, color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 6 }}>
                           {lead.lead_code && <LeadCodeBadge code={lead.lead_code} />}
-                          <span>{lead.phone}</span>
+                          {lead.phone ? (
+                            <span>{lead.phone}</span>
+                          ) : lead.ig_phone_extracted ? (
+                            <span style={{ color: "var(--accent-yellow)", fontWeight: 600 }} title="Auto-detected in their DM — click Convert to use it">Detected: {lead.ig_phone_extracted}</span>
+                          ) : scopeTab === "social" ? (
+                            <span style={{ color: "var(--text-muted)", fontStyle: "italic" }}>No phone yet</span>
+                          ) : null}
                         </div>
                       </div>
                     </div>
@@ -584,6 +697,19 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                           ><MessageCircle size={14} strokeWidth={1.9} /></button>
                         </>
                       )}
+                      {canEdit && scopeTab === "social" && (
+                        <button
+                          onClick={() => {
+                            setConvertTarget(lead)
+                            setConvertForm({
+                              phone: lead.ig_phone_extracted ? lead.ig_phone_extracted.replace(/\D/g, "") : "",
+                              productInterest: "", notes: "", sendWa: true, addToQueue: false,
+                            })
+                          }}
+                          title="Convert to a callable CRM lead"
+                          style={{ display: "inline-flex", alignItems: "center", gap: 5, background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.3)", color: "var(--accent-green)", borderRadius: 9, height: 32, padding: "0 10px", fontSize: 12, fontWeight: 600 }}
+                        ><Sparkles size={13} strokeWidth={1.9} /> Convert</button>
+                      )}
                       <button
                         onClick={() => setMemoryLeadId(lead.id)}
                         title="View Lead Memory"
@@ -600,8 +726,9 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
         </div>
       </div>
 
-      {/* Floating bulk-selection action bar */}
-      {canEdit && selectedIds.length > 0 && !showQueueModal && (
+      {/* Floating bulk-selection action bar (CRM lane only — prospects have
+          no phone to dial until they are converted) */}
+      {canEdit && scopeTab === "crm" && selectedIds.length > 0 && !showQueueModal && (
         <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", zIndex: 900, background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "10px 14px", display: "flex", alignItems: "center", gap: 12, boxShadow: "0 12px 40px rgba(0,0,0,0.25)" }}>
           <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", display: "inline-flex", alignItems: "center", gap: 7 }}>
             <CheckSquare size={15} strokeWidth={2} style={{ color: "var(--accent-violet)" }} />
@@ -655,6 +782,55 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
               <button onClick={() => setShowQueueModal(false)} disabled={queueBusy} style={{ flex: 1, padding: 10, background: "transparent", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text-secondary)" }}>Cancel</button>
               <button onClick={addSelectedToQueue} disabled={queueBusy || (queueForm.timing === "later" && !queueForm.scheduledAt)} className="btn-primary" style={{ flex: 1, height: 42 }}>
                 <PhoneCall size={14} strokeWidth={2} /> {queueBusy ? "Queueing…" : `Queue ${selectedIds.length} call${selectedIds.length === 1 ? "" : "s"}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Convert-to-CRM-Lead modal (Instagram Prospects lane) */}
+      {convertTarget && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={() => !convertBusy && setConvertTarget(null)}>
+          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, padding: 28, width: 440 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 4 }}>Convert {convertTarget.name || "prospect"} to CRM Lead</div>
+            <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16 }}>
+              {convertTarget.instagram_handle ? `@${convertTarget.instagram_handle} · ` : ""}{convertTarget.source || "Instagram prospect"} — all chat history stays attached after conversion.
+            </div>
+
+            <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Phone number</label>
+            <input
+              value={convertForm.phone}
+              onChange={(e) => setConvertForm({ ...convertForm, phone: e.target.value })}
+              placeholder={convertTarget.ig_phone_extracted ? `Detected: ${convertTarget.ig_phone_extracted}` : "10-digit mobile"}
+              style={{ width: "100%", marginBottom: 14 }}
+            />
+
+            <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Product interest (optional)</label>
+            <select value={convertForm.productInterest} onChange={(e) => setConvertForm({ ...convertForm, productInterest: e.target.value })} style={{ width: "100%", marginBottom: 14 }}>
+              <option value="">— keep as is —</option>
+              {LOAN_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+
+            <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Note (optional)</label>
+            <input value={convertForm.notes} onChange={(e) => setConvertForm({ ...convertForm, notes: e.target.value })} placeholder="e.g. Asked about home loan rates on IG" style={{ width: "100%", marginBottom: 14 }} />
+
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, marginBottom: 8, cursor: "pointer" }}>
+              <input type="checkbox" checked={convertForm.sendWa} onChange={(e) => setConvertForm({ ...convertForm, sendWa: e.target.checked })} style={{ accentColor: "var(--accent-violet)" }} />
+              Send WhatsApp welcome + loan application link
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, marginBottom: 16, cursor: "pointer" }}>
+              <input type="checkbox" checked={convertForm.addToQueue} onChange={(e) => setConvertForm({ ...convertForm, addToQueue: e.target.checked })} style={{ accentColor: "var(--accent-violet)" }} />
+              Add to Call Queue (high priority)
+            </label>
+
+            <div style={{ fontSize: 11.5, color: "var(--text-muted)", background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 8, padding: "9px 12px", marginBottom: 16, lineHeight: 1.6 }}>
+              If this number already belongs to another CRM lead, conversion is BLOCKED and nothing is merged — you review it manually. Prospects are never silently merged.
+            </div>
+
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => setConvertTarget(null)} disabled={convertBusy} style={{ flex: 1, padding: 10, background: "transparent", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text-secondary)" }}>Cancel</button>
+              <button onClick={convertProspect} disabled={convertBusy || !/^\d{10}$/.test(convertForm.phone.replace(/\D/g, ""))} className="btn-primary" style={{ flex: 1, height: 42 }}>
+                {convertBusy ? "Converting…" : "Convert to Lead"}
               </button>
             </div>
           </div>

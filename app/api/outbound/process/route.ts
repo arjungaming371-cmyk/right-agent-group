@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db, query } from "@/lib/db"
-import { makeCall } from "@/lib/exotel"
 import { normalizePhone, phoneLast10, PHONE_MATCH_SQL } from "@/lib/phone"
 import { requireModuleOrRole, requireRole } from "@/lib/auth"
 import { sessionBranchId, checkQuota, recordUsage } from "@/lib/branches"

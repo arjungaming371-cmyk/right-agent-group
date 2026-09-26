@@ -1,0 +1,14 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "target": "es2020",
+    "esModuleInterop": true,
+    "outDir": "./.ig-build",
+    "rootDir": "..",
+    "jsx": "react-jsx"
+  },
+  "include": ["../lib/phone.ts"]
+}

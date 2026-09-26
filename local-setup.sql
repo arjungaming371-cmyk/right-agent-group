@@ -28,10 +28,21 @@ CREATE TABLE IF NOT EXISTS leads (
   updated_at        TIMESTAMPTZ DEFAULT now(),
   -- WhatsApp chat settings (2026-09-22): archive + mute, real-WhatsApp parity
   wa_archived       BOOLEAN NOT NULL DEFAULT false,
-  wa_muted          BOOLEAN NOT NULL DEFAULT false
+  wa_muted          BOOLEAN NOT NULL DEFAULT false,
+  -- Instagram lead separation (2026-09-26): phone-less IG DM/comment leads
+  -- are "social prospects" living in their own tab; the CRM pipeline and the
+  -- bulk dialer only see is_social_prospect = false rows. Promotion flips the
+  -- flag in place (no row move — every FK keeps its history).
+  is_social_prospect BOOLEAN NOT NULL DEFAULT false,
+  promoted_to_crm_at TIMESTAMPTZ,
+  ig_phone_extracted TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_leads_phone  ON leads (phone);
 CREATE INDEX IF NOT EXISTS idx_leads_status ON leads (status);
+CREATE INDEX IF NOT EXISTS idx_leads_crm_pipeline
+  ON leads (branch_id, created_at DESC) WHERE is_social_prospect = false;
+CREATE INDEX IF NOT EXISTS idx_leads_social_pipeline
+  ON leads (branch_id, created_at DESC) WHERE is_social_prospect = true;
 
 -- Human-readable lead code (RAG-0001) for staff to read out and search by.
 -- leads.id stays the real primary key and the target of every foreign key;

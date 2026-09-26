@@ -13,6 +13,8 @@ import { buildLeadBrief } from "@/lib/lead-brain"
 import { searchKnowledgeBase } from "@/lib/knowledge-base"
 import { buildEmiInstruction, buildRateInstruction, detectLoanType } from "@/lib/finance"
 import { currentDateTimeInstruction } from "@/lib/compliance"
+import { extractIndianMobile } from "@/lib/phone"
+import { promoteInstagramLead } from "@/lib/ig-promote"
 import {
   getInstagramCommentTemplates,
   getInstagramDmTemplate,
@@ -263,6 +265,44 @@ async function handleInboundDM(messaging: any, igBranch: BranchInstagramCtx = nu
     try {
       if (detectFrustration(text, [])) flagFrustratedInstagram(leadId, text)
     } catch {}
+  }
+
+  // AUTO-QUALIFY (2026-09-26 Instagram Separation): a valid 10-digit Indian
+  // mobile typed in a DM is the answer to Priya's qualification ask — promote
+  // the social prospect to a full CRM lead on the spot so telecallers can
+  // work it immediately. Guards live in lib/ig-promote.ts (advisory-lock
+  // dedupe; a number already owned by another lead NEVER merges — it stays a
+  // prospect and gets a conflict note for human review, because auto-merging
+  // would recreate the cross-lead PII leak fixed here on 2026-09-20).
+  // The welcome + loan-application form link fires as part of the promotion
+  // (that is the exact deliverable the DM promised).
+  //
+  // DMs ONLY — the comment path below never auto-promotes: numbers in public
+  // comments are unreliable (tags, replies, bystanders) and public PII.
+  if (leadId) {
+    try {
+      const detected = extractIndianMobile(text)
+      if (detected) {
+        const promo = await promoteInstagramLead({
+          leadId,
+          phone: detected.phone,
+          rawMatch: detected.raw,
+          source: "auto_dm",
+          sendWelcome: true,
+        })
+        if (promo.ok) {
+          console.log(`[Instagram] prospect ***${senderId.slice(-4)} auto-promoted to CRM (phone on file)`)
+        } else if (promo.reason === "conflict") {
+          console.warn(`[Instagram] auto-promote conflict for lead ${leadId}: ${promo.error}`)
+          await query(
+            `INSERT INTO comm_logs (lead_id, type, summary, outcome) VALUES ($1, 'instagram', $2, 'pending')`,
+            [leadId, `Auto-promotion BLOCKED: the shared phone belongs to another CRM lead — needs human review in Instagram Prospects.`]
+          ).catch(() => {})
+        }
+      }
+    } catch (e: any) {
+      console.error("[Instagram] auto-promote failed (non-fatal):", e?.message)
+    }
   }
 
   // Trigger Priya AI Response
