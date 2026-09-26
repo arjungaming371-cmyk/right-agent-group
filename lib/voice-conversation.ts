@@ -191,7 +191,7 @@ const VOICEMAIL_RE =
 const GOODBYE_REPLY: Record<Language, string> = {
   english: "Thank you for your time! Have a great day. Goodbye!",
   hindi: "आपके समय के लिए धन्यवाद! आपका दिन शुभ हो। नमस्ते!",
-  telugu: "మీ సమయానికి ధన్యవాదాలు! మీకు మంచి రోజు జరగాలి. నమస్కారం!",
+  telugu: "Thank you so much sir! Have a great day, bye!",
 }
 
 /** Called on the first webhook hit of a call (before any speech). Bumps call_count once per call. */
@@ -504,36 +504,6 @@ async function buildTurnInstructions(
  * call. The caller-phone header both grounds the extractor for "same number"
  * answers AND lets mightBeComplete() pass without spoken digits.
  */
-/**
- * Cheap client-side pre-check mirroring mightBeComplete: lets the caller hear
- * the closing sentence immediately while completeLeadIfReady's extraction LLM
- * + WhatsApp round-trips run in the background of the same turn.
- *
- * FIX (2026-09-26): mirrors the full path's transcript preamble too — the
- * caller-phone line carries digits, so on a WhatsApp call (number known by
- * definition) or a phone call with a "same number" answer, the closing line
- * now fires on the same turn the real completion will pass, instead of the
- * call hanging up silently after the plain reply.
- */
-function mightBeCompleteQuick(
-  messages: { role: "user" | "model"; content: string }[],
-  reply: string,
-  callerPhone?: string,
-  isWhatsAppCall?: boolean
-): boolean {
-  const phonePreamble = callerPhone
-    ? isWhatsAppCall
-      ? `(This call is happening ON the customer's WhatsApp: the customer is calling from ${callerPhone}, and that number IS their WhatsApp number. Use it as their whatsapp_number.)\n`
-      : `(The customer is calling from: ${callerPhone}. Use this as their whatsapp_number ONLY if they EXPLICITLY said WhatsApp is on this same number — if they never mentioned their WhatsApp number, leave whatsapp_number null.)\n`
-    : ""
-  const transcriptText =
-    phonePreamble +
-    [...messages, { role: "model" as const, content: reply }]
-      .map((m) => `${m.role === "model" ? "Priya" : "Customer"}: ${m.content}`)
-      .join("\n")
-  return mightBeComplete(transcriptText)
-}
-
 async function completeLeadIfReady(opts: {
   leadId: string
   callSid: string | null
@@ -545,6 +515,13 @@ async function completeLeadIfReady(opts: {
   branchId?: string | null
 }): Promise<boolean> {
   const { leadId, callSid, callerPhone, isWhatsAppCall, messages, reply, branchId } = opts
+  if (!leadId) return false
+
+  // FAST PATH: If the lead was already completed (status is no longer 'new') before this call,
+  // do not trigger the auto-onboarding completion hangup, and skip the expensive extraction LLM call.
+  const existing = await db.from("leads").select("name, address, whatsapp_number, status").eq("id", leadId).single()
+  if (existing.data?.status && existing.data?.status !== "new") return false
+
   // FIX (2026-09-20): extraction used to receive the ENTIRE transcript (the
   // main reply is capped at 12 messages, but this LLM call fired on any
   // potentially-complete turn with everything ever said) — growing token
@@ -566,18 +543,6 @@ async function completeLeadIfReady(opts: {
 
   if (!mightBeComplete(transcriptText)) return false
   const extracted = await extractLeadInfo(transcriptText)
-  if (!leadId) return false
-
-  // extractLeadInfo only reads what was SPOKEN this call — a returning lead
-  // whose name/address is already on file correctly never gets re-asked (by
-  // design, see the script's memory rules), so extraction alone reports
-  // "incomplete" forever even though the lead genuinely has all three facts.
-  // Merge with what the lead record already knows before deciding.
-  const existing = await db.from("leads").select("name, address, whatsapp_number, status").eq("id", leadId).single()
-
-  // If the lead was already completed (status is no longer 'new') before this call,
-  // do not trigger the auto-onboarding completion hangup.
-  if (existing.data?.status && existing.data?.status !== "new") return false
 
   const knownName = existing.data?.name && !PLACEHOLDER_NAME_RE.test(existing.data.name) ? existing.data.name : null
   const effectiveName = extracted.name || knownName
@@ -871,15 +836,9 @@ export async function handleTurnStream(
   await updateTranscriptAsync(callSid, speech, reply)
   maybeProposeLoanEdit(leadId, "priya_voice", speech)
 
-  // FIX (2026-09-20): the closing sentence used to be spoken only AFTER
-  // completeLeadIfReady finished — and it runs a second LLM call + a branch
-  // WhatsApp round-trip (0.5-15s of dead air) while the caller waits. Speak
-  // first, complete after; completion only decides the hangup now.
-  if (mightBeCompleteQuick(messages, reply, callerPhone, isWhatsAppCall)) {
-    onSentence(CLOSING[language])
-  }
   const completed = await completeLeadIfReady({ leadId, callSid, callerPhone, isWhatsAppCall, messages, reply, branchId })
   if (completed) {
+    onSentence(CLOSING[language])
     return { hangup: true }
   }
 
