@@ -1,10 +1,30 @@
 "use client"
 import { useEffect, useRef, useState } from "react"
-import { ClipboardList, FolderUp, FileText, FileUp, Phone, Plus, Play } from "lucide-react"
+import { ClipboardList, FolderUp, FileText, FileUp, PhoneCall, Play, Plus, RotateCcw, Square } from "lucide-react"
 import { useToast } from "../ui/toast"
 
 type UploadedFile = { id: string; filename: string; type: string; row_count: number; processed: number; status: string; created_at: string }
 type Contact = { name: string; phone: string; language: string; product_interest: string; leadId: string }
+
+// Live snapshot of a bulk campaign — mirrors lib/bulk-dialer.ts BulkRunSnapshot.
+type BulkRun = {
+  runId: string
+  running: boolean
+  stopRequested: boolean
+  reason: string | null
+  startedAt: number
+  finishedAt: number | null
+  claimed: number
+  called: number
+  failed: number
+  skipped: number
+  waves: number
+  concurrency: number
+  current: string[]
+}
+type QueueRowView = { id: string; name: string | null; phone: string; language: string | null; status: string; created_at: string }
+
+const BULK_POLL_MS = 2500
 
 export default function UploadView() {
   const toast = useToast()
@@ -16,12 +36,20 @@ export default function UploadView() {
   const csvRef = useRef<HTMLInputElement>(null)
   const docRef = useRef<HTMLInputElement>(null)
 
-  // Batch calling controls
+  // Batch calling controls (legacy "dial exactly N" one-shot)
   const [batchMode, setBatchMode] = useState<"sequential" | "parallel">("sequential")
   const [concurrency, setConcurrency] = useState(3)
   const [callLimit, setCallLimit] = useState(10)
   const [processing, setProcessing] = useState(false)
   const [queueCount, setQueueCount] = useState<number | null>(null)
+
+  // Bulk campaign console (entire-queue runner)
+  const [bulkMode, setBulkMode] = useState<"next" | "all">("all")
+  const [bulkConcurrency, setBulkConcurrency] = useState(3)
+  const [run, setRun] = useState<BulkRun | null>(null)
+  const [queueCounts, setQueueCounts] = useState<Record<string, number>>({})
+  const [queueRows, setQueueRows] = useState<QueueRowView[]>([])
+  const [startBulk, setStartBulk] = useState(false)
 
   async function load() {
     const res = await fetch("/api/upload/list")
@@ -30,10 +58,35 @@ export default function UploadView() {
     if (qRes.ok) {
       const rows = await qRes.json()
       setQueueCount(rows.filter((r: any) => r.status === "pending").length)
+      setQueueRows(rows)
     }
+    await refreshBulkStatus()
+  }
+
+  // Live campaign status + DB queue counts + queue rows. Called on mount
+  // and on every poll tick while a campaign is running.
+  async function refreshBulkStatus() {
+    try {
+      const res = await fetch("/api/outbound/process")
+      if (res.ok) {
+        const data = await res.json()
+        setRun(data.run)
+        setQueueCounts(data.queue || {})
+      }
+      const qRes = await fetch("/api/outbound")
+      if (qRes.ok) setQueueRows(await qRes.json())
+    } catch { /* transient network blip — next poll will catch up */ }
   }
 
   useEffect(() => { load() }, [])
+
+  // While a bulk campaign is running, poll status every 2.5s so the
+  // progress bar, counters and queue table stay live.
+  useEffect(() => {
+    if (!run?.running) return
+    const t = setInterval(refreshBulkStatus, BULK_POLL_MS)
+    return () => clearInterval(t)
+  }, [run?.running, run?.runId])
 
   async function uploadFile(e: React.ChangeEvent<HTMLInputElement>, type: string) {
     const file = e.target.files?.[0]
@@ -142,9 +195,99 @@ export default function UploadView() {
     }
   }
 
+  // ---- Bulk campaign (entire queue) -------------------------------------
+  async function startBulkCampaign() {
+    setStartBulk(true)
+    try {
+      const res = await fetch("/api/outbound/process", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "start", concurrency: bulkConcurrency }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        toast.success(`Bulk campaign started — Priya is dialing the entire queue, ${data.concurrency} call${data.concurrency > 1 ? "s" : ""} at a time`)
+        await refreshBulkStatus()
+      } else {
+        toast.error(data.error || "Could not start the bulk campaign")
+      }
+    } catch {
+      toast.error("Could not start the bulk campaign — check your connection and try again")
+    } finally {
+      setStartBulk(false)
+    }
+  }
+
+  async function stopBulkCampaign() {
+    try {
+      const res = await fetch("/api/outbound/process", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "stop" }),
+      })
+      const data = await res.json()
+      if (res.ok && data.stopped) toast.success("Stopping after the current calls finish — remaining numbers stay pending")
+      else if (res.ok) toast.error("No campaign is running")
+      else toast.error(data.error || "Could not stop the campaign")
+      await refreshBulkStatus()
+    } catch {
+      toast.error("Could not stop the campaign — check your connection and try again")
+    }
+  }
+
+  async function retryFailed() {
+    try {
+      const res = await fetch("/api/outbound/process", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "reset-failed" }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        toast.success(`${data.reset} failed number${data.reset === 1 ? "" : "s"} moved back to pending — hit Call Entire Queue to dial them`)
+        await refreshBulkStatus()
+      } else toast.error(data.error || "Could not retry failed numbers")
+    } catch {
+      toast.error("Could not retry failed numbers — check your connection and try again")
+    }
+  }
+
   const STATUS_STYLE: Record<string, { color: string }> = {
     done: { color: "var(--accent-green)" }, processing: { color: "var(--accent-yellow)" }, pending: { color: "var(--accent-blue)" }, failed: { color: "var(--accent-red)" },
   }
+
+  // Queue-status pill colors — outbound_queue statuses are free-form
+  // strings (pending/dialing/called/failed/skipped_<compliance code>).
+  function queueStatusColor(status: string) {
+    if (status === "called") return "var(--accent-green)"
+    if (status === "failed") return "var(--accent-red)"
+    if (status === "pending") return "var(--accent-blue)"
+    if (status === "dialing") return "var(--accent-yellow)"
+    return "var(--text-muted)" // skipped_*
+  }
+  function queueStatusLabel(status: string) {
+    if (status.startsWith("skipped_")) return `skipped (${status.slice(8).replace(/_/g, " ")})`
+    return status
+  }
+
+  const qPending = queueCounts["pending"] ?? 0
+  const qDialing = queueCounts["dialing"] ?? 0
+  const qCalled = queueCounts["called"] ?? 0
+  const qFailed = queueCounts["failed"] ?? 0
+  const qSkipped = Object.entries(queueCounts).filter(([k]) => k.startsWith("skipped")).reduce((a, [, n]) => a + n, 0)
+
+  const bulkProcessed = run ? run.called + run.failed + run.skipped : 0
+  const bulkRemaining = qPending + qDialing
+  const bulkPct = bulkProcessed + bulkRemaining > 0 ? Math.round((bulkProcessed / (bulkProcessed + bulkRemaining)) * 100) : 0
+  const bulkElapsed = run?.startedAt ? Math.max(0, Math.floor(((run.finishedAt ?? Date.now()) - run.startedAt) / 1000)) : 0
+  const showBulkProgress = !!run && (run.running || run.reason !== null)
+  const BULK_REASON_TEXT: Record<string, string> = {
+    drained: "Queue drained — every number was dialed",
+    stopped: "Stopped — remaining numbers are still pending for the next run",
+  }
+  const bulkReason = run?.reason
+    ? BULK_REASON_TEXT[run.reason] ?? (run.reason.startsWith("quota:") ? `Branch call cap reached — ${run.reason.slice(7)}` : run.reason)
+    : null
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -172,35 +315,146 @@ export default function UploadView() {
         </div>
       </div>
 
-      {/* Batch calling controls */}
+      {/* Bulk calling console */}
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: 24 }}>
-        <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}><Phone size={16} strokeWidth={1.9} style={{ color: "var(--accent-green)" }} /> Batch Calling</div>
+        <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}><PhoneCall size={16} strokeWidth={1.9} style={{ color: "var(--accent-green)" }} /> Bulk Calling</div>
         <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16 }}>
-          {queueCount !== null ? `${queueCount} contacts pending in the queue` : "Loading queue…"}
+          {queueCounts && Object.keys(queueCounts).length > 0
+            ? <span>
+                <b style={{ color: "var(--accent-blue)" }}>{qPending}</b> pending ·{" "}
+                <b style={{ color: "var(--accent-green)" }}>{qCalled}</b> called ·{" "}
+                <b style={{ color: "var(--accent-red)" }}>{qFailed}</b> failed ·{" "}
+                <b style={{ color: "var(--text-muted)" }}>{qSkipped}</b> skipped (DND / compliance)
+              </span>
+            : queueCount !== null ? `${queueCount} contacts pending in the queue` : "Loading queue…"}
         </div>
 
-        <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-          <button onClick={() => setBatchMode("sequential")} style={{ padding: "6px 14px", borderRadius: 8, fontSize: 13, border: "1px solid var(--border)", background: batchMode === "sequential" ? "rgba(59,130,246,0.15)" : "transparent", color: batchMode === "sequential" ? "var(--accent-blue)" : "var(--text-secondary)" }}>Call One By One</button>
-          <button onClick={() => setBatchMode("parallel")} style={{ padding: "6px 14px", borderRadius: 8, fontSize: 13, border: "1px solid var(--border)", background: batchMode === "parallel" ? "rgba(59,130,246,0.15)" : "transparent", color: batchMode === "parallel" ? "var(--accent-blue)" : "var(--text-secondary)" }}>Call Multiple At A Time</button>
+        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+          <button onClick={() => setBulkMode("all")} style={{ padding: "6px 14px", borderRadius: 8, fontSize: 13, border: "1px solid var(--border)", background: bulkMode === "all" ? "rgba(59,130,246,0.15)" : "transparent", color: bulkMode === "all" ? "var(--accent-blue)" : "var(--text-secondary)" }}>Call Entire Queue</button>
+          <button onClick={() => setBulkMode("next")} style={{ padding: "6px 14px", borderRadius: 8, fontSize: 13, border: "1px solid var(--border)", background: bulkMode === "next" ? "rgba(59,130,246,0.15)" : "transparent", color: bulkMode === "next" ? "var(--accent-blue)" : "var(--text-secondary)" }}>Next N Numbers</button>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: batchMode === "parallel" ? "1fr 1fr" : "1fr", gap: 12, marginBottom: 16 }}>
-          {batchMode === "parallel" && (
-            <div>
-              <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Calls at once</label>
-              <input type="number" min={1} max={20} value={concurrency} onChange={(e) => setConcurrency(Math.max(1, Math.min(20, Number(e.target.value))))} />
+        {bulkMode === "all" ? (
+          <>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 12, alignItems: "end", marginBottom: 14 }}>
+              <div>
+                <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Calls at once (1–10)</label>
+                <input type="number" min={1} max={10} value={bulkConcurrency} onChange={(e) => setBulkConcurrency(Math.max(1, Math.min(10, Number(e.target.value) || 1)))} style={{ maxWidth: 120 }} />
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={startBulkCampaign} disabled={startBulk || !!run?.running || (Object.keys(queueCounts).length > 0 && qPending === 0)} className="btn-primary" style={{ height: 40, padding: "0 24px", fontSize: 14 }}>
+                  <Play size={14} strokeWidth={2} fill="currentColor" /> {run?.running ? "Campaign Running…" : `Call Entire Queue (${qPending})`}
+                </button>
+                {run?.running && (
+                  <button onClick={stopBulkCampaign} style={{ height: 40, padding: "0 20px", borderRadius: 8, fontSize: 14, fontWeight: 600, display: "flex", alignItems: "center", gap: 6, background: "var(--bg-secondary)", border: "1px solid var(--border)", color: "var(--accent-red)" }}>
+                    <Square size={13} strokeWidth={2} fill="currentColor" /> Stop
+                  </button>
+                )}
+                {qFailed > 0 && !run?.running && (
+                  <button onClick={retryFailed} style={{ height: 40, padding: "0 16px", borderRadius: 8, fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6, background: "var(--bg-secondary)", border: "1px solid var(--border)", color: "var(--text-secondary)" }}>
+                    <RotateCcw size={13} strokeWidth={2} /> Retry {qFailed} failed
+                  </button>
+                )}
+              </div>
             </div>
-          )}
-          <div>
-            <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Exact number of calls to dial</label>
-            <input type="number" min={1} value={callLimit} onChange={(e) => setCallLimit(Math.max(1, Number(e.target.value)))} />
+
+            {showBulkProgress && run && (
+              <div style={{ border: "1px solid var(--border)", borderRadius: 10, padding: 16, background: "var(--bg-secondary)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--text-muted)", marginBottom: 6 }}>
+                  <span>
+                    {run.running
+                      ? `Dialing${run.stopRequested ? " — stopping after current calls" : ""} · ${bulkProcessed} done · ${bulkRemaining} left`
+                      : `Finished in ${bulkElapsed}s · ${bulkProcessed} processed`}
+                  </span>
+                  <span>{bulkPct}%</span>
+                </div>
+                <div style={{ height: 8, borderRadius: 4, background: "var(--border)", overflow: "hidden" }}>
+                  <div style={{ width: `${bulkPct}%`, height: "100%", borderRadius: 4, background: "var(--accent-green)", transition: "width 0.6s ease" }} />
+                </div>
+                <div style={{ display: "flex", gap: 16, marginTop: 10, fontSize: 13, flexWrap: "wrap" }}>
+                  <span style={{ color: "var(--accent-green)", fontWeight: 600 }}>{run.called} called</span>
+                  <span style={{ color: "var(--accent-red)", fontWeight: 600 }}>{run.failed} failed</span>
+                  <span style={{ color: "var(--text-muted)", fontWeight: 600 }}>{run.skipped} skipped</span>
+                  <span style={{ color: "var(--text-muted)" }}>{bulkElapsed}s · {run.waves} wave{run.waves === 1 ? "" : "s"} · {run.concurrency} at a time</span>
+                </div>
+                {run.current.length > 0 && (
+                  <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                    <span style={{ fontSize: 11, color: "var(--text-muted)" }}>On the line now:</span>
+                    {run.current.slice(0, 6).map((p) => (
+                      <span key={p} style={{ fontSize: 12, fontFamily: "monospace", padding: "2px 8px", borderRadius: 6, background: "var(--bg-card)", border: "1px solid var(--border)" }}>{p}</span>
+                    ))}
+                    {run.current.length > 6 && <span style={{ fontSize: 11, color: "var(--text-muted)" }}>+{run.current.length - 6} more</span>}
+                  </div>
+                )}
+                {!run.running && bulkReason && (
+                  <div style={{ marginTop: 10, fontSize: 13, color: run.reason === "drained" ? "var(--accent-green)" : "var(--accent-yellow)" }}>
+                    {bulkReason}
+                  </div>
+                )}
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+              <button onClick={() => setBatchMode("sequential")} style={{ padding: "6px 14px", borderRadius: 8, fontSize: 13, border: "1px solid var(--border)", background: batchMode === "sequential" ? "rgba(59,130,246,0.15)" : "transparent", color: batchMode === "sequential" ? "var(--accent-blue)" : "var(--text-secondary)" }}>Call One By One</button>
+              <button onClick={() => setBatchMode("parallel")} style={{ padding: "6px 14px", borderRadius: 8, fontSize: 13, border: "1px solid var(--border)", background: batchMode === "parallel" ? "rgba(59,130,246,0.15)" : "transparent", color: batchMode === "parallel" ? "var(--accent-blue)" : "var(--text-secondary)" }}>Call Multiple At A Time</button>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: batchMode === "parallel" ? "1fr 1fr" : "1fr", gap: 12, marginBottom: 16 }}>
+              {batchMode === "parallel" && (
+                <div>
+                  <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Calls at once</label>
+                  <input type="number" min={1} max={20} value={concurrency} onChange={(e) => setConcurrency(Math.max(1, Math.min(20, Number(e.target.value))))} />
+                </div>
+              )}
+              <div>
+                <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Exact number of calls to dial</label>
+                <input type="number" min={1} value={callLimit} onChange={(e) => setCallLimit(Math.max(1, Number(e.target.value)))} />
+              </div>
+            </div>
+
+            <button onClick={runBatch} disabled={processing || !queueCount || !!run?.running} className="btn-primary" style={{ height: 40, padding: "0 24px", fontSize: 14 }}>
+              <Play size={14} strokeWidth={2} fill="currentColor" /> {processing ? "Dialing…" : `Start Calling (${callLimit})`}
+            </button>
+            {run?.running && <div style={{ fontSize: 12, color: "var(--accent-yellow)", marginTop: 8 }}>A bulk campaign is running — wait for it to finish or stop it first.</div>}
+          </>
+        )}
+      </div>
+
+      {/* Queue table — live status of every number waiting / dialed */}
+      {queueRows.length > 0 && (
+        <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12 }}>
+          <div style={{ padding: "18px 24px", borderBottom: "1px solid var(--border)", fontWeight: 600, fontSize: 15, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span>Outbound Queue</span>
+            <span style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 400 }}>latest {queueRows.length} · updates live during a campaign</span>
+          </div>
+          <div style={{ maxHeight: 420, overflowY: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ borderBottom: "1px solid var(--border)", position: "sticky", top: 0, background: "var(--bg-card)" }}>
+                  {["Name", "Phone", "Language", "Status", "Queued"].map((h) => (
+                    <th key={h} style={{ padding: "10px 20px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "var(--text-muted)" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {queueRows.map((r) => (
+                  <tr key={r.id} style={{ borderBottom: "1px solid var(--border-light)" }}>
+                    <td style={{ padding: "10px 20px", fontSize: 13, fontWeight: 500 }}>{r.name || "—"}</td>
+                    <td style={{ padding: "10px 20px", fontSize: 13, fontFamily: "monospace" }}>{r.phone}</td>
+                    <td style={{ padding: "10px 20px", fontSize: 13, textTransform: "capitalize", color: "var(--text-secondary)" }}>{r.language || "—"}</td>
+                    <td style={{ padding: "10px 20px" }}>
+                      <span style={{ color: queueStatusColor(r.status), fontSize: 12, fontWeight: 600, textTransform: r.status.startsWith("skipped_") ? "none" : "capitalize" }}>{queueStatusLabel(r.status)}</span>
+                    </td>
+                    <td style={{ padding: "10px 20px", fontSize: 12, color: "var(--text-muted)" }}>{new Date(r.created_at).toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
-
-        <button onClick={runBatch} disabled={processing || !queueCount} className="btn-primary" style={{ height: 40, padding: "0 24px", fontSize: 14 }}>
-          <Play size={14} strokeWidth={2} fill="currentColor" /> {processing ? "Dialing…" : `Start Calling (${callLimit})`}
-        </button>
-      </div>
+      )}
 
       {/* Manual single entry */}
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: 24 }}>

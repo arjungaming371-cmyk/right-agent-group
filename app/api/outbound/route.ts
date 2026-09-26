@@ -11,6 +11,27 @@ export async function GET(req: NextRequest) {
   const session = await requireModuleOrRole(req, "voice", ["admin", "agent", "viewer", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const branchId = sessionBranchId(session)
+
+  // ?summary=1 → status counts for the WHOLE queue (no 200-row cap).
+  // The bulk calling console shows totals like "5 pending · 120 called";
+  // counting them client-side from the capped row list would under-count
+  // any CSV bigger than the list window.
+  if (req.nextUrl.searchParams.get("summary")) {
+    const res = await query(
+      `SELECT status, count(*)::int AS n FROM outbound_queue
+       WHERE ($1::uuid IS NULL OR branch_id = $1)
+       GROUP BY status`,
+      [branchId]
+    ).catch(() => ({ rows: [] as { status: string; n: number }[] }))
+    const counts: Record<string, number> = {}
+    let total = 0
+    for (const r of res.rows as { status: string; n: number }[]) {
+      counts[r.status] = r.n
+      total += r.n
+    }
+    return NextResponse.json({ counts, total })
+  }
+
   let q = db.from("outbound_queue").select("*")
   if (branchId) q = q.eq("branch_id", branchId)
   const { data } = await q.order("created_at", { ascending: false }).limit(200)

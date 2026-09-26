@@ -2,39 +2,31 @@ import { NextRequest, NextResponse } from "next/server"
 import { db, query } from "@/lib/db"
 import { makeCall } from "@/lib/exotel"
 import { normalizePhone, phoneLast10, PHONE_MATCH_SQL } from "@/lib/phone"
-import { requireRole } from "@/lib/auth"
+import { requireModuleOrRole, requireRole } from "@/lib/auth"
 import { sessionBranchId, checkQuota, recordUsage } from "@/lib/branches"
 import { logAudit } from "@/lib/audit"
 import { checkCallCompliance } from "@/lib/compliance"
+import { getBulkDialer, BulkQueueRow, DialOutcome } from "@/lib/bulk-dialer"
 
-export async function POST(req: NextRequest) {
-  const session = await requireRole(req, ["admin", "branch_manager"])
-  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
-  const { concurrency = 1, limit = 10 } = await req.json().catch(() => ({}))
-  // The dialer only ever works the session's own branch queue (null = HQ = all).
-  const branchId = sessionBranchId(session)
+// Shape of an outbound_queue row actually used by the dialer —
+// replaces the previous untyped `item: any` without forcing `unknown`
+// narrowing noise through the whole body.
+type QueueRow = BulkQueueRow
 
-  // Shape of an outbound_queue row actually used by the dialer loop below —
-  // replaces the previous untyped `item: any` without forcing `unknown`
-  // narrowing noise through the whole body.
-  type QueueRow = {
-    id: string
-    lead_id: string | null
-    phone: string
-    name: string | null
-    language: string | null
-    product_interest: string | null
-    notes: string | null
-    branch_id: string | null
-  }
-
-  // FIX (2026-09-20): ATOMIC CLAIM. The old flow was SELECT pending rows →
-  // dial → mark 'called'. Two operators (or a double-click / two tabs / the
-  // 4s dashboard poller) could run this route simultaneously and BOTH read
-  // the same batch — every queued customer got two simultaneous sales calls.
-  // Claim rows atomically first (FOR UPDATE SKIP LOCKED); only claimed rows
-  // are dialed. Also re-claims rows stuck in 'dialing' for >10 min (crashed
-  // run), so a crash can no longer permanently orphan queue entries.
+/**
+ * Atomically claim pending rows for a dialer wave. Also re-claims rows
+ * stuck in 'dialing' for >10 min (crashed run), so a crash can no longer
+ * permanently orphan queue entries. Shared by the one-shot dialer AND the
+ * bulk campaign runner (lib/bulk-dialer.ts).
+ *
+ * FIX (2026-09-20): ATOMIC CLAIM. The old flow was SELECT pending rows →
+ * dial → mark 'called'. Two operators (or a double-click / two tabs / the
+ * 4s dashboard poller) could run this route simultaneously and BOTH read
+ * the same batch — every queued customer got two simultaneous sales calls.
+ * Claim rows atomically first (FOR UPDATE SKIP LOCKED); only claimed rows
+ * are dialed.
+ */
+async function claimPendingRows(branchId: string | null, limit: number): Promise<QueueRow[]> {
   const claim = await query(
     `UPDATE outbound_queue SET status = 'dialing', claimed_at = now()
      WHERE id IN (
@@ -45,8 +37,8 @@ export async function POST(req: NextRequest) {
        LIMIT $2
        FOR UPDATE SKIP LOCKED
      )
-     RETURNING *`,
-    [branchId, Math.min(limit, 50)]
+     RETURNING id, lead_id, phone, name, language, product_interest, notes, branch_id`,
+    [branchId, limit]
   ).catch(async (e) => {
     if (!((e as { code?: unknown })?.code === "42703")) throw e // claimed_at column not added yet → claim without reaper support
     return query(
@@ -58,11 +50,174 @@ export async function POST(req: NextRequest) {
          LIMIT $2
          FOR UPDATE SKIP LOCKED
        )
-       RETURNING *`,
-      [branchId, Math.min(limit, 50)]
+       RETURNING id, lead_id, phone, name, language, product_interest, notes, branch_id`,
+      [branchId, limit]
     )
   })
-  const pending = claim.rows as QueueRow[]
+  return claim.rows as QueueRow[]
+}
+
+/**
+ * Dial ONE claimed queue row. Returns the outcome instead of mutating
+ * counters so both the one-shot loop and the bulk campaign runner can tally
+ * independently. Business rejections are returned as "skipped"/"failed" —
+ * only an unexpected throw propagates (the campaign runner counts it as a
+ * failed row and carries on; the one-shot path catches it the same way).
+ */
+async function dialQueueRow(item: QueueRow, branchId: string | null): Promise<DialOutcome> {
+  try {
+    // Get lead details for AI context
+    let leadId = item.lead_id || null
+    const phone = normalizePhone(item.phone)
+
+    if (!leadId) {
+      // Find-or-create — match on last-10 digits so a queue row for a
+      // number already in leads (any format) reuses that lead.
+      const existing = await query(`SELECT id FROM leads WHERE ${PHONE_MATCH_SQL} LIMIT 1`, [phoneLast10(phone)])
+      leadId = existing.rows[0]?.id || null
+      if (!leadId) {
+        const { data: lead } = await db.from("leads").insert({
+          name: item.name, phone,
+          language: item.language || "telugu",
+          product_interest: item.product_interest,
+          notes: item.notes, source: "Queue", status: "new",
+          branch_id: item.branch_id || branchId,
+        }).select().single()
+        leadId = lead?.id
+      }
+    }
+
+    // Unattended dialer — this is exactly the code path a
+    // do_not_call/DND/outside-window lead must never reach. Skip
+    // (not "failed" — nothing went wrong, we're deliberately not
+    // calling), with the specific reason recorded on the queue row.
+    const compliance = await checkCallCompliance({ leadId, phone })
+    if (!compliance.allowed) {
+      await db.from("outbound_queue").update({ status: `skipped_${compliance.code}` }).eq("id", item.id)
+      return "skipped"
+    }
+
+    const call = await makeCall(phone, leadId || "", item.language || "telugu", undefined, item.branch_id || branchId)
+
+    await db.from("voice_calls").insert({
+      lead_id: leadId,
+      twilio_call_sid: call.sid,
+      direction: "outbound",
+      status: "initiated",
+      language: item.language || "telugu",
+      phone,
+      branch_id: item.branch_id || branchId,
+    })
+    const callBranch = item.branch_id || branchId
+    if (callBranch) recordUsage(callBranch, "call")
+
+    await db.from("outbound_queue")
+      .update({ status: "called", call_sid: call.sid, called_at: new Date().toISOString() })
+      .eq("id", item.id)
+
+    return "called"
+  } catch (e) {
+    console.error(`Failed to call ${item.phone}:`, e)
+    await db.from("outbound_queue")
+      .update({ status: "failed" })
+      .eq("id", item.id)
+      .catch(() => {})
+    return "failed"
+  }
+}
+
+/** Which runner instance this session talks to: its own branch, or "hq". */
+function branchKey(branchId: string | null): string {
+  return branchId || "hq"
+}
+
+/** Real deps for this app — wires the runner to DB + Exotel. */
+function bulkDialerDeps(branchId: string | null) {
+  return {
+    claimBatch: (size: number) => claimPendingRows(branchId, size),
+    dialRow: (row: QueueRow) => dialQueueRow(row, branchId),
+    quotaOk: async () => {
+      const quota = await checkQuota(branchId, "call")
+      return { ok: quota.ok, reason: quota.reason }
+    },
+    maxConcurrency: 10,
+    pauseMs: 500,
+    log: (msg: string) => console.log(`[bulk-dialer] ${msg}`),
+  }
+}
+
+/**
+ * GET — live bulk-campaign status for the caller's branch scope:
+ * the runner snapshot (running/called/failed/skipped/current phones) plus
+ * queue counts grouped by status straight from the DB (source of truth,
+ * so the dashboard can also show rows claimed by a crashed + reaped run).
+ */
+export async function GET(req: NextRequest) {
+  const session = await requireModuleOrRole(req, "voice", ["admin", "agent", "viewer", "branch_manager"])
+  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+  const branchId = sessionBranchId(session)
+
+  const run = getBulkDialer(branchKey(branchId), bulkDialerDeps(branchId)).status()
+  const counts = await query(
+    `SELECT status, count(*)::int AS n FROM outbound_queue
+     WHERE ($1::uuid IS NULL OR branch_id = $1)
+     GROUP BY status`,
+    [branchId]
+  ).catch(() => ({ rows: [] as { status: string; n: number }[] }))
+
+  const queue: Record<string, number> = {}
+  for (const r of counts.rows as { status: string; n: number }[]) queue[r.status] = r.n
+
+  return NextResponse.json({ run, queue })
+}
+
+export async function POST(req: NextRequest) {
+  const session = await requireRole(req, ["admin", "branch_manager"])
+  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+  const body = await req.json().catch(() => ({}))
+  // The dialer only ever works the session's own branch queue (null = HQ = all).
+  const branchId = sessionBranchId(session)
+  const dialer = getBulkDialer(branchKey(branchId), bulkDialerDeps(branchId))
+
+  // ---- Campaign protocol (bulk calling console) --------------------------
+  // { action: "start", concurrency? }  → drain the ENTIRE pending queue in
+  //   the background; returns immediately, progress via GET.
+  if (body.action === "start") {
+    const res = await dialer.start({ concurrency: body.concurrency })
+    if (!res.ok) return NextResponse.json({ error: res.reason }, { status: 409 })
+    logAudit("bulk campaign started", session.email, { branchId, concurrency: dialer.status().concurrency })
+    return NextResponse.json({ started: true, runId: res.runId, concurrency: dialer.status().concurrency })
+  }
+
+  // { action: "stop" } → finish the in-flight wave, leave the rest pending.
+  if (body.action === "stop") {
+    const stopped = dialer.stop()
+    if (stopped) logAudit("bulk campaign stop requested", session.email, { branchId })
+    return NextResponse.json({ ok: true, stopped })
+  }
+
+  // { action: "reset-failed" } → push failed rows back to 'pending' so a
+  // campaign (or one-shot dialer) tries them again — the "Retry failed"
+  // button. Skipped_* rows are deliberately NOT retried: DND/outside-window
+  // are compliance decisions, not glitches.
+  if (body.action === "reset-failed") {
+    const res = await query(
+      `UPDATE outbound_queue SET status = 'pending', claimed_at = NULL
+       WHERE status = 'failed' AND ($1::uuid IS NULL OR branch_id = $1)`,
+      [branchId]
+    )
+    const reset = res.rowCount ?? 0
+    if (reset > 0) logAudit("bulk queue failed rows reset", session.email, { branchId, reset })
+    return NextResponse.json({ ok: true, reset })
+  }
+
+  // ---- Legacy one-shot dial ({ concurrency, limit }) ---------------------
+  // Kept for the "dial exactly N" mode and any existing callers. Same claim
+  // + dial machinery as the campaign runner.
+  const concurrency = Math.max(1, Math.min(10, Number(body.concurrency) || 1))
+  const limit = Math.min(Number(body.limit) || 10, 50)
+
+  const pending = await claimPendingRows(branchId, limit)
 
   if (!pending || pending.length === 0) {
     return NextResponse.json({ called: 0, failed: 0, total: 0 })
@@ -85,78 +240,21 @@ export async function POST(req: NextRequest) {
   let called = 0
   let failed = 0
 
-  // Process in batches based on concurrency
-  const batchSize = Math.max(1, Math.min(concurrency, 10))
-
-  for (let i = 0; i < pending.length; i += batchSize) {
-    const batch = pending.slice(i, i + batchSize)
+  for (let i = 0; i < pending.length; i += concurrency) {
+    const batch = pending.slice(i, i + concurrency)
 
     await Promise.allSettled(
       batch.map(async (item: QueueRow) => {
-        try {
-          // Get lead details for AI context
-          let leadId = item.lead_id || null
-          let phone = normalizePhone(item.phone)
-
-          if (!leadId) {
-            // Find-or-create — match on last-10 digits so a queue row for a
-            // number already in leads (any format) reuses that lead.
-            const existing = await query(`SELECT id FROM leads WHERE ${PHONE_MATCH_SQL} LIMIT 1`, [phoneLast10(phone)])
-            leadId = existing.rows[0]?.id || null
-            if (!leadId) {
-              const { data: lead } = await db.from("leads").insert({
-                name: item.name, phone,
-                language: item.language || "telugu",
-                product_interest: item.product_interest,
-                notes: item.notes, source: "Queue", status: "new",
-                branch_id: item.branch_id || branchId,
-              }).select().single()
-              leadId = lead?.id
-            }
-          }
-
-          // Unattended bulk dialer — this is exactly the code path a
-          // do_not_call/DND/outside-window lead must never reach. Skip
-          // (not "failed" — nothing went wrong, we're deliberately not
-          // calling), with the specific reason recorded on the queue row.
-          const compliance = await checkCallCompliance({ leadId, phone })
-          if (!compliance.allowed) {
-            await db.from("outbound_queue").update({ status: `skipped_${compliance.code}` }).eq("id", item.id)
-            return
-          }
-
-          const call = await makeCall(phone, leadId || "", item.language || "telugu", undefined, item.branch_id || branchId)
-
-          await db.from("voice_calls").insert({
-            lead_id: leadId,
-            twilio_call_sid: call.sid,
-            direction: "outbound",
-            status: "initiated",
-            language: item.language || "telugu",
-            phone,
-            branch_id: item.branch_id || branchId,
-          })
-          const callBranch = item.branch_id || branchId
-          if (callBranch) recordUsage(callBranch, "call")
-
-          await db.from("outbound_queue")
-            .update({ status: "called" })
-            .eq("id", item.id)
-
-          called++
-        } catch (e) {
-          console.error(`Failed to call ${item.phone}:`, e)
-          await db.from("outbound_queue")
-            .update({ status: "failed" })
-            .eq("id", item.id)
-          failed++
-        }
+        const outcome = await dialQueueRow(item, branchId)
+        if (outcome === "called") called++
+        else if (outcome === "skipped") { /* tallied on the row, not a failure */ }
+        else failed++
       })
     )
 
     // Small delay between batches to avoid overwhelming Exotel
-    if (i + batchSize < pending.length) {
-      await new Promise(r => setTimeout(r, 500))
+    if (i + concurrency < pending.length) {
+      await new Promise((r) => setTimeout(r, 500))
     }
   }
 
