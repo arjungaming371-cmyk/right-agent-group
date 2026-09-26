@@ -389,7 +389,8 @@ async function buildTurnInstructions(
   instructions: string | undefined,
   speech: string,
   callerPhone: string | undefined,
-  contextPromise: Promise<TurnContext>
+  contextPromise: Promise<TurnContext>,
+  voiceChannel: "whatsapp" | "phone" = "phone"
 ): Promise<string> {
   // LEAD BRAIN: brief Priya with the full cross-channel picture — known
   // facts, rolling relationship summary, recent interactions, sentiment
@@ -420,7 +421,19 @@ async function buildTurnInstructions(
   // customer saying "same number / this number" left the model with nothing
   // to anchor on — observed live inventing "9888888888" out of thin air.
   // A single short line per turn; costs a handful of tokens.
-  if (callerPhone) {
+  //
+  // FIX (2026-09-26): on WHATSAPP calls the grounding now also CARRIES the
+  // channel fact. The old line told Priya the number and nothing else — so on
+  // a WhatsApp call, where the script's step 3 said "is your WhatsApp number
+  // the same as this call?", she asked a question that makes no sense when
+  // the call itself IS on the customer's WhatsApp. Observed live: every
+  // WhatsApp call re-asked it. The phone wording is unchanged.
+  if (callerPhone && voiceChannel === "whatsapp") {
+    merged = [
+      merged,
+      `THIS CALL IS HAPPENING ON THE CUSTOMER'S WHATSAPP. The customer is calling from ${callerPhone} — that number IS their WhatsApp number. NEVER ask "is this your WhatsApp number" or "same or different" — that question is WRONG on a WhatsApp call and insults the customer's intelligence. When it is time to send the loan form, simply say you are sending it to this same WhatsApp — the send happens automatically to this number. Never say or invent any other phone number.`,
+    ].filter(Boolean).join("\n\n")
+  } else if (callerPhone) {
     merged = [
       merged,
       `The customer is calling from ${callerPhone}. If they say their WhatsApp is this same number, use it — never say or invent any phone number yourself.`,
@@ -484,12 +497,26 @@ async function buildTurnInstructions(
  * Cheap client-side pre-check mirroring mightBeComplete: lets the caller hear
  * the closing sentence immediately while completeLeadIfReady's extraction LLM
  * + WhatsApp round-trips run in the background of the same turn.
+ *
+ * FIX (2026-09-26): mirrors the full path's transcript preamble too — the
+ * caller-phone line carries digits, so on a WhatsApp call (number known by
+ * definition) or a phone call with a "same number" answer, the closing line
+ * now fires on the same turn the real completion will pass, instead of the
+ * call hanging up silently after the plain reply.
  */
 function mightBeCompleteQuick(
   messages: { role: "user" | "model"; content: string }[],
-  reply: string
+  reply: string,
+  callerPhone?: string,
+  isWhatsAppCall?: boolean
 ): boolean {
+  const phonePreamble = callerPhone
+    ? isWhatsAppCall
+      ? `(This call is happening ON the customer's WhatsApp: the customer is calling from ${callerPhone}, and that number IS their WhatsApp number. Use it as their whatsapp_number.)\n`
+      : `(The customer is calling from: ${callerPhone}. Use this as their whatsapp_number ONLY if they EXPLICITLY said WhatsApp is on this same number — if they never mentioned their WhatsApp number, leave whatsapp_number null.)\n`
+    : ""
   const transcriptText =
+    phonePreamble +
     [...messages, { role: "model" as const, content: reply }]
       .map((m) => `${m.role === "model" ? "Priya" : "Customer"}: ${m.content}`)
       .join("\n")
@@ -500,19 +527,30 @@ async function completeLeadIfReady(opts: {
   leadId: string
   callSid: string | null
   callerPhone?: string
+  /** True when the callSid is a wacall-* — the call itself runs on the customer's WhatsApp. */
+  isWhatsAppCall?: boolean
   messages: { role: "user" | "model"; content: string }[]
   reply: string
   branchId?: string | null
 }): Promise<boolean> {
-  const { leadId, callSid, callerPhone, messages, reply, branchId } = opts
+  const { leadId, callSid, callerPhone, isWhatsAppCall, messages, reply, branchId } = opts
   // FIX (2026-09-20): extraction used to receive the ENTIRE transcript (the
   // main reply is capped at 12 messages, but this LLM call fired on any
   // potentially-complete turn with everything ever said) — growing token
   // cost + per-turn CPU on the hot path. Name/number surface late in calls
   // anyway; the last 12 turns are what matters.
   const allTurns = [...messages.slice(-12), { role: "model" as const, content: reply }]
+  // FIX (2026-09-26): on a WHATSAPP call the calling number IS the customer's
+  // WhatsApp — extraction no longer demands the customer "explicitly say so"
+  // (there is no other possibility to confirm against). Phone calls keep the
+  // strict explicit-confirmation rule.
+  const phonePreamble = callerPhone
+    ? isWhatsAppCall
+      ? `(This call is happening ON the customer's WhatsApp: the customer is calling from ${callerPhone}, and that number IS their WhatsApp number. Use it as their whatsapp_number.)\n`
+      : `(The customer is calling from: ${callerPhone}. Use this as their whatsapp_number ONLY if they EXPLICITLY said WhatsApp is on this same number — if they never mentioned their WhatsApp number, leave whatsapp_number null.)\n`
+    : ""
   const transcriptText =
-    (callerPhone ? `(The customer is calling from: ${callerPhone}. Use this as their whatsapp_number ONLY if they EXPLICITLY said WhatsApp is on this same number — if they never mentioned their WhatsApp number, leave whatsapp_number null.)\n` : "") +
+    phonePreamble +
     allTurns.map((m) => `${m.role === "model" ? "Priya" : "Customer"}: ${m.content}`).join("\n")
 
   if (!mightBeComplete(transcriptText)) return false
@@ -533,7 +571,9 @@ async function completeLeadIfReady(opts: {
   const knownName = existing.data?.name && !PLACEHOLDER_NAME_RE.test(existing.data.name) ? existing.data.name : null
   const effectiveName = extracted.name || knownName
   const effectiveAddress = extracted.address || existing.data?.address || null
-  const effectiveWhatsapp = extracted.whatsapp_number || existing.data?.whatsapp_number || null
+  // WhatsApp-call fallback: even if extraction somehow returned null, the
+  // calling number is definitionally the WhatsApp number on a wacall-*.
+  const effectiveWhatsapp = extracted.whatsapp_number || existing.data?.whatsapp_number || (isWhatsAppCall && callerPhone ? callerPhone : null)
 
   if (!effectiveName || !effectiveAddress || !effectiveWhatsapp) return false
 
@@ -562,14 +602,18 @@ async function completeLeadIfReady(opts: {
     const token = randomUUID()
     await db.from("form_links").insert({ token, lead_id: leadId })
 
-    const waNumber = extracted.whatsapp_number
+    // FIX (2026-09-26): send to the EFFECTIVE number (extraction → lead row →
+    // caller on WhatsApp calls), not raw extraction — the fallback above can
+    // complete the lead while this line still had null, creating a form link
+    // that was never sent.
+    const waNumber = effectiveWhatsapp
     if (waNumber) {
       // Per-branch WhatsApp: the link goes out from the BRANCH's WABA number
       // (branded with the branch's name), or the company number when the
       // branch has none.
       const { branchWhatsAppCtx } = await import("./whatsapp")
       const waBranch = await branchWhatsAppCtx(branchId)
-      const result = await sendApplicationLink(waNumber, extracted.name || "there", token, waBranch)
+      const result = await sendApplicationLink(waNumber, effectiveName || "there", token, waBranch)
       if (!result.ok) console.error("WhatsApp link send failed:", result.error)
       // Mark this call as already followed-up so the status webhook doesn't
       // ALSO send the generic post-call WhatsApp message once the call ends.
@@ -634,6 +678,9 @@ export async function handleTurn(opts: {
   branchId?: string | null
 }): Promise<{ text: string; hangup: boolean }> {
   const { leadId, callSid, speech, language, callerPhone, instructions, direction, branchId } = opts
+  // Channel fact: WhatsApp voice calls carry wacall-* sids (Meta's call id).
+  // Everything downstream (grounding, extraction, form send) keys off this.
+  const isWhatsAppCall = !!callSid?.startsWith("wacall-")
 
   // Fire the history-independent reads NOW, so they overlap the transcript
   // read instead of queueing behind it (see startTurnContext).
@@ -669,7 +716,7 @@ export async function handleTurn(opts: {
     flagHumanRequested(callSid, leadId || null, speech)
   }
 
-  const mergedInstructions = await buildTurnInstructions(leadId, history, instructions, speech, callerPhone, contextPromise)
+  const mergedInstructions = await buildTurnInstructions(leadId, history, instructions, speech, callerPhone, contextPromise, isWhatsAppCall ? "whatsapp" : "phone")
 
   let reply = ""
   let rateLimited = false
@@ -705,7 +752,7 @@ export async function handleTurn(opts: {
   updateTranscriptAsync(callSid, speech, reply)
   maybeProposeLoanEdit(leadId, "priya_voice", speech)
 
-  const completed = await completeLeadIfReady({ leadId, callSid, callerPhone, messages, reply, branchId })
+  const completed = await completeLeadIfReady({ leadId, callSid, callerPhone, isWhatsAppCall, messages, reply, branchId })
   if (completed) return { text: CLOSING[language], hangup: true }
 
   return { text: reply, hangup: GOODBYE_RE.test(reply) }
@@ -735,6 +782,8 @@ export async function handleTurnStream(
   onSentence: (sentence: string) => void
 ): Promise<{ hangup: boolean }> {
   const { leadId, callSid, speech, language, callerPhone, instructions, direction, branchId } = opts
+  // Channel fact: see handleTurn. Same wacall-* derivation, streaming twin.
+  const isWhatsAppCall = !!callSid?.startsWith("wacall-")
 
   // Fire the history-independent reads NOW, so they overlap the transcript
   // read instead of queueing behind it (see startTurnContext). This is the
@@ -765,7 +814,7 @@ export async function handleTurnStream(
     flagHumanRequested(callSid, leadId || null, speech)
   }
 
-  const mergedInstructions = await buildTurnInstructions(leadId, history, instructions, speech, callerPhone, contextPromise)
+  const mergedInstructions = await buildTurnInstructions(leadId, history, instructions, speech, callerPhone, contextPromise, isWhatsAppCall ? "whatsapp" : "phone")
 
   let reply = ""
   let pending = ""
@@ -815,10 +864,10 @@ export async function handleTurnStream(
   // completeLeadIfReady finished — and it runs a second LLM call + a branch
   // WhatsApp round-trip (0.5-15s of dead air) while the caller waits. Speak
   // first, complete after; completion only decides the hangup now.
-  if (mightBeCompleteQuick(messages, reply)) {
+  if (mightBeCompleteQuick(messages, reply, callerPhone, isWhatsAppCall)) {
     onSentence(CLOSING[language])
   }
-  const completed = await completeLeadIfReady({ leadId, callSid, callerPhone, messages, reply, branchId })
+  const completed = await completeLeadIfReady({ leadId, callSid, callerPhone, isWhatsAppCall, messages, reply, branchId })
   if (completed) {
     return { hangup: true }
   }

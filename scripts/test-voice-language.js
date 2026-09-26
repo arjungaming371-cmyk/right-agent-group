@@ -75,5 +75,18 @@ ok("wrong extension rejected", recordings.safeRecordingPath("wacall-abc.txt") ==
 ok("missing wacall- prefix rejected", recordings.safeRecordingPath("call-abc.mp3") === null)
 ok("non-string input rejected", recordings.safeRecordingPath(null) === null)
 
+console.log("── default script GOAL (WhatsApp-call number question ban) ──")
+// The base script's step 3 used to command "Is your WhatsApp number the same
+// as this call, or different?" unconditionally — Priya asked it on EVERY
+// WhatsApp call, where the call itself IS on the customer's WhatsApp. The
+// fixed script bans it on WhatsApp calls and keeps it phone-only.
+// default-scripts.ts is a direct dependency of llm.ts and lands in the same
+// build output — require it directly for the script-wording assertions.
+const defaultScripts = require("./.voicelang-build/lib/default-scripts.js")
+const baseScript = defaultScripts.DEFAULT_SCRIPTS.english || ""
+ok("script bans the number question on WhatsApp calls", baseScript.includes("on a WHATSAPP call NEVER ask"))
+ok("script keeps the question phone-only", baseScript.includes("Only on a PHONE call ask once"))
+ok("script names the wrong-question phrasing explicitly", baseScript.includes('"is this your WhatsApp number" or "same or different"'))
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)

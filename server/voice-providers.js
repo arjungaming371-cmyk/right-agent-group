@@ -53,7 +53,10 @@ const SARVAM_TTS_MODEL = process.env.SARVAM_TTS_MODEL || "bulbul:v3"
 // shruti, suhani, kavitha, rupali; males: shubh (default), aditya, rahul...
 const SARVAM_TTS_SPEAKER = process.env.SARVAM_TTS_SPEAKER || "priya"
 const SARVAM_TTS_SAMPLE_RATE = parseInt(process.env.SARVAM_TTS_SAMPLE_RATE || "24000")
-const SARVAM_TTS_PACE = parseFloat(process.env.SARVAM_TTS_PACE || "1.20")
+// FIX (2026-09-26): default back to 1.0 (NORMAL speed). daff323 had shipped
+// 1.20 — combined with the now-exactly-realtime pacer the voice audibly
+// rushed. 1.0 speaks at the provider's natural rate; tune via env only.
+const SARVAM_TTS_PACE = parseFloat(process.env.SARVAM_TTS_PACE || "1.0")
 
 const CARTESIA_API_KEY = (process.env.CARTESIA_API_KEY || "").trim()
 const CARTESIA_BASE = (process.env.CARTESIA_URL || "https://api.cartesia.ai").replace(/\/$/, "")
