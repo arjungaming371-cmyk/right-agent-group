@@ -10,5 +10,5 @@
     "rootDir": "..",
     "jsx": "react-jsx"
   },
-  "include": ["../lib/llm.ts", "../lib/recordings.ts"]
+  "include": ["../lib/llm.ts", "../lib/recordings.ts", "../lib/frustration.ts"]
 }

@@ -8,7 +8,7 @@ import { resolveBranchByWhatsAppPhoneId, type BranchRow } from "@/lib/branches"
 import { buildLeadBrief } from "@/lib/lead-brain"
 import { searchKnowledgeBase } from "@/lib/knowledge-base"
 import { buildEmiInstruction, buildEligibilityInstruction, buildRateInstruction, detectLoanType } from "@/lib/finance"
-import { detectFrustration, flagFrustratedWhatsApp } from "@/lib/frustration"
+import { detectFrustration, flagFrustratedWhatsApp, detectHumanRequest, flagHumanRequestedWhatsApp, OPERATOR_CHAT_INSTRUCTION } from "@/lib/frustration"
 import { createNotification } from "@/lib/notifications"
 import { refreshLeadScore } from "@/lib/scoring"
 import { maybeProposeLoanEdit } from "@/lib/loan-edit-requests"
@@ -436,6 +436,14 @@ async function handleInbound(msg: any, profileName: string | null, waBranch: Bra
     if (detectFrustration(text, historyRes.rows)) {
       flagFrustratedWhatsApp(lead.id, text)
     }
+    // OPERATOR RADAR (2026-09-26): a calm "I want to talk to a real person" is
+    // not frustration and was never surfaced on this channel at all — flag it
+    // for the ops queue and train THIS reply with the same callback contract
+    // the call path uses (lib/frustration.ts OPERATOR_CHAT_INSTRUCTION).
+    const operatorRequested = detectHumanRequest(text)
+    if (operatorRequested) {
+      flagHumanRequestedWhatsApp(lead.id, text)
+    }
 
     // CHANNEL OVERRIDE: the shared script is written for live phone calls —
     // without this the AI "speaks" on WhatsApp (call greetings, hold-style
@@ -456,6 +464,12 @@ async function handleInbound(msg: any, profileName: string | null, waBranch: Bra
       "is their WhatsApp number, you already have it. If the base script's goal mentions " +
       "collecting a WhatsApp number, treat that as already done on this channel — do not ask, " +
       "do not confirm it, just skip straight to name and city if those are still missing."
+
+    // OPERATOR REQUEST — shape this reply exactly like the call path does
+    // (see lib/default-scripts.ts SPEAK TO A HUMAN + lib/frustration.ts).
+    if (operatorRequested) {
+      extraContext = [extraContext, OPERATOR_CHAT_INSTRUCTION].filter(Boolean).join("\n\n")
+    }
 
     // DATE/TIME AWARENESS: same reasoning as the voice path — without this
     // the model has no idea what the real date/time is.

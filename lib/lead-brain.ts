@@ -451,7 +451,7 @@ export async function buildLeadBrief(leadId: string): Promise<string> {
     // DO/DON'T
     if (factLines.length || interactions.length || unanalyzedBrief) {
       lines.push(
-        "DO/DON'T — Do NOT re-ask known facts, CONFIRM them instead. Reference past contact naturally in ONE short phrase max, never recite this brief verbatim."
+        "DO/DON'T — Never re-ask a known fact — not even as a confirmation question. STATE known facts naturally in passing and move on. Reference past contact in ONE short phrase max, never recite this brief verbatim."
       )
     }
 

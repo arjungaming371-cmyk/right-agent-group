@@ -6,7 +6,7 @@ import { sendApplicationLink } from "./whatsapp"
 import { buildLeadBrief, runPostCallAnalysis } from "./lead-brain"
 import { searchKnowledgeBase } from "./knowledge-base"
 import { buildEmiInstruction, buildEligibilityInstruction, buildRateInstruction, detectLoanType } from "./finance"
-import { detectFrustration, flagFrustratedCall, detectHumanRequest, flagHumanRequested } from "./frustration"
+import { detectFrustration, flagFrustratedCall, detectHumanRequest, flagHumanRequested, OPERATOR_REPLY_INSTRUCTION } from "./frustration"
 import { createNotification } from "./notifications"
 import { maybeProposeLoanEdit } from "./loan-edit-requests"
 import { currentDateTimeInstruction } from "./compliance"
@@ -477,6 +477,17 @@ async function buildTurnInstructions(
       monthlyIncome: knownIncome,
     })
     if (eligibility) merged = [merged, eligibility.instruction].filter(Boolean).join("\n\n")
+  }
+
+  // OPERATOR / HUMAN HANDOFF (2026-09-26, "train the agent + call operators"):
+  // the keyword flag in handleTurn/handleTurnStream alerts the team
+  // fire-and-forget — this instruction is what trains the SPOKEN reply
+  // itself, on the exact turn it matters, with the script's callback
+  // contract (acknowledge → promise the officer callback → stop; never
+  // pitch, never ask). Lives in buildTurnInstructions so BOTH turn paths
+  // (blocking + streaming, phone + WhatsApp calls) get identical training.
+  if (detectHumanRequest(speech)) {
+    merged = [merged, OPERATOR_REPLY_INSTRUCTION].filter(Boolean).join("\n\n")
   }
 
   return merged

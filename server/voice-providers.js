@@ -75,10 +75,20 @@ const SARVAM_TTS_LOCALES = { english: "en-IN", hindi: "hi-IN", telugu: "te-IN" }
 const CARTESIA_LOCALES = { english: "en-IN", hindi: "hi-IN", telugu: "te-IN" }
 
 // Same script detection as the old tts-service (kept for behavior parity).
+//
+// WIDENED (2026-09-26, "speak natively in any language"): the old lists had
+// ~20 words each — a Tenglish/Hinglish reply whose words matched none of
+// them ("Sir meeru documents ready cheyandi, maa officer malli call chestaru")
+// fell through to the call's DECLARED language and got spoken by the wrong
+// voice when the caller had switched languages mid-call. These are now the
+// high-signal subset of detectLanguage()'s romanized keyword sets in
+// lib/llm.ts — deliberately DROPPING the ambiguous short ones ("ela", "idi",
+// "adi", "hu", "mari", "meera", "mari") so an ordinary ENGLISH sentence can
+// never trip them and get hijacked to the Indic voice.
 const _TELUGU_RE = /[\u0C00-\u0C7F]/g // ఀ-౿
 const _DEVANAGARI_RE = /[\u0900-\u097F]/g // ऀ-ॿ
-const _ROMAN_TELUGU_RE = /\b(kavali|kavala|naku|meeku|gurinchi|cheppandi|cheppanu|avunu|ledu|undhi|undi|unna|unnaru|telugu|namaskaram|enti|kosam|baga|kada|ayithe)\b/i
-const _ROMAN_HINDI_RE = /\b(chahiye|hai|hain|nahi|nahin|haan|boliye|baat|karna|naam|kya|mujhe|apna|hoga|dijiye|hoon|aap|theek|achha)\b/i
+const _ROMAN_TELUGU_RE = /\b(kavali|kavala|kavalenu|naku|naaku|maaku|meeku|meeru|neeku|gurinchi|cheppandi|cheppanu|cheppali|cheppu|chepandi|cheyandi|cheyali|endukante|avunu|ledhu|ledu|vaddhu|vaddu|undhi|undi|unna|unnaru|unnara|unnaya|istara|matladutunnanu|matladali|matladandi|matladanu|telugu|telugulo|namaskaram|garu|kaadu|kadu|kadha|telusukovadaniki|enti|ento|enta|enni|eppudu|evaru|ekkada|nenu|manaki|memu|maa|kosam|chudandi|baga|kada|chalu|ayithe|ayindi|ayipoyindi|chesanu|chesam|chesaru|chestaru|chestunna|chestunnanu|chesukondi|antundi|malli|kuda|antha|inka|konchem|mariyu)\b/i
+const _ROMAN_HINDI_RE = /\b(chahiye|chaiye|hai|hain|nahi|nahin|haan|boliye|batao|bataiye|bataye|baat|karna|karni|karein|karta|karti|mera|meri|mere|naam|kya|kyun|kaise|kaha|mujhe|humein|apna|apni|hoga|hogi|dijiye|hoon|hun|tum|aap|samjha|samjhe|theek|achha|kuch|kripya|thoda|zara|matlab|bhej|bhejna|bhejiye)\b/i
 
 /**
  * Resolve the TTS locale for a reply, letting native script or Romanized Indic
@@ -100,6 +110,34 @@ function resolveTtsLocale(text, language, locales) {
 /** True when the text carries native Indic script (exported for tests). */
 function hasIndicScript(text) {
   return _TELUGU_RE.test(text) || _DEVANAGARI_RE.test(text)
+}
+
+// ---------- TTS text hygiene (2026-09-26, "speak clearly with no errors") ----------
+//
+// The prompts tell the model to write numbers the way a person SAYS them
+// (CALL_BREVITY), but it still slips written-only artifacts into replies —
+// measured live: "7.25%", "₹15,00,000", "**Home Loan**" markdown, stray
+// emoji, "20L"/"10k" shorthand. A TTS voice pronounces "%" as "percent" at
+// best and garbles it at worst, cannot say "₹", spells out "&", and reads
+// markdown symbols as punctuation — every one of those is an audible glitch
+// mid-sentence. This is a safety net applied at the single synthesize()
+// choke point, so BOTH providers and BOTH call paths (Exotel + WhatsApp
+// calls) get identical cleanup. WhatsApp TEXT is untouched — it is read,
+// not spoken. Kept conservative: only transformations that can never change
+// the meaning of a sentence.
+function normalizeForTts(text) {
+  if (!text) return text
+  let out = String(text)
+  out = out.replace(/₹/g, " rupees ")
+  out = out.replace(/%/g, " percent ")
+  out = out.replace(/&/g, " and ")
+  out = out.replace(/\*\*([^*]+)\*\*/g, "$1") // **markdown bold** leaking from the WhatsApp rules
+  out = out.replace(/\*([^*]+)\*/g, "$1") // *single-asterisk* bold too
+  out = out.replace(/\b(\d+(?:\.\d+)?)\s*[lL]\b/g, "$1 lakh") // 20L / 20 L → 20 lakh (banned shorthand, model slips)
+  out = out.replace(/\b(\d+(?:\.\d+)?)\s*[kK]\b/g, "$1 thousand") // 10k → 10 thousand
+  out = out.replace(/\p{Extended_Pictographic}/gu, "") // emoji is never spoken
+  out = out.replace(/\s{2,}/g, " ").trim()
+  return out
 }
 
 // ---------- Small fetch helpers ----------
@@ -282,6 +320,7 @@ async function transcribe(wavBuffer, language) {
  * single-tenant behaviour is byte-identical to before.
  */
 async function synthesize(text, language, voiceOverride) {
+  text = normalizeForTts(text)
   const vo = voiceOverride || null
   // Employee explicitly wants Cartesia and it is usable.
   if (vo?.provider === "cartesia" && CARTESIA_API_KEY && (vo.speaker || CARTESIA_VOICE_ID)) {
@@ -342,5 +381,5 @@ module.exports = {
   // direct provider calls (exported for tests + reuse)
   sarvamStt, sarvamTts, cartesiaTts,
   // internals used by tests
-  resolveTtsLocale, hasIndicScript, buildMultipart, fetchWithRetry,
+  resolveTtsLocale, hasIndicScript, normalizeForTts, buildMultipart, fetchWithRetry,
 }
