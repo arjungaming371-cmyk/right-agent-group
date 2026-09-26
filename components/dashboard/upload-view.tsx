@@ -26,10 +26,11 @@ export default function UploadView() {
   async function load() {
     const res = await fetch("/api/upload/list")
     if (res.ok) setFiles(await res.json())
-    const qRes = await fetch("/api/outbound")
+    // ?count=pending — one tiny query instead of pulling 200 rows to count.
+    const qRes = await fetch("/api/outbound?count=pending")
     if (qRes.ok) {
-      const rows = await qRes.json()
-      setQueueCount(rows.filter((r: any) => r.status === "pending").length)
+      const d = await qRes.json()
+      setQueueCount(d.count ?? 0)
     }
   }
 
@@ -103,7 +104,9 @@ export default function UploadView() {
       const res = await fetch("/api/outbound/process", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ concurrency: batchMode === "sequential" ? 1 : concurrency, limit: callLimit }),
+        // Concurrency now lives in dialer settings (Call Queue slider, 1-10).
+        // The runner reads the persisted value; this only passes the batch size.
+        body: JSON.stringify({ limit: callLimit }),
       })
       const data = await res.json()
       if (res.ok) toast.success(`Dialed ${data.called}/${data.total} calls (${data.failed} failed)`)
@@ -161,8 +164,8 @@ export default function UploadView() {
         <div style={{ display: "grid", gridTemplateColumns: batchMode === "parallel" ? "1fr 1fr" : "1fr", gap: 12, marginBottom: 16 }}>
           {batchMode === "parallel" && (
             <div>
-              <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Calls at once</label>
-              <input type="number" min={1} max={20} value={concurrency} onChange={(e) => setConcurrency(Math.max(1, Math.min(20, Number(e.target.value))))} />
+              <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Calls at once (1-10 — set the live value in Call Queue)</label>
+              <input type="number" min={1} max={10} value={Math.min(concurrency, 10)} onChange={(e) => setConcurrency(Math.max(1, Math.min(10, Number(e.target.value))))} disabled />
             </div>
           )}
           <div>

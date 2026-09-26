@@ -3,58 +3,35 @@
 //
 //   POST /api/calls/dial  { leadId, channel: "whatsapp" | "phone" | "auto" }
 //
-//   phone    → Exotel click-to-call (lib/exotel makeCall): Exotel rings the
-//              lead, bridges them to the voicebot WebSocket, Priya runs the
-//              shared call script. Works today wherever Exotel works.
+//   phone    → Exotel click-to-call: Exotel rings the lead, bridges them to
+//              the voicebot WebSocket, Priya runs the shared call script.
 //   whatsapp → Business-initiated WhatsApp call (Meta Business Calling API):
-//              1. the voicebot holds a werift SDP OFFER  (/whatsapp/outbound-offer)
-//              2. we POST it to Graph action=connect         (placeWhatsAppCall)
-//              3. Meta rings the lead's WhatsApp; on answer the "calls"
-//                 webhook delivers their answer SDP, which completes the
-//                 negotiation and Priya goes live (identical session
-//                 machinery to inbound: turns, endpointing, recording).
-//
-//              META PERMISSION GATE (their rule, not ours): a lead who has
-//              called this number can be called back; otherwise the lead
-//              must accept a call-permission request. Rejections surface
-//              Meta's raw error text verbatim so the operator knows exactly
-//              which gate to fix.
+//              the voicebot holds a werift SDP offer, we POST it to Graph
+//              action=connect, Meta rings the lead's WhatsApp and the answer
+//              webhook completes the negotiation (identical session
+//              machinery to inbound: turns, endpointing, recording).
 //   auto     → whatsapp when the lead called us on WhatsApp in the last 30
 //              days (callback permission is then safe to assume), else phone.
 //
-// Gating is identical to /api/outbound: voice-module auth, compliance
-// (DND / opt-out, fail-CLOSED), branch quota, usage accounting. The
-// voice_calls row is written BEFORE the phone rings so /api/calls/turn's
-// "start" event resolves lead + language + branch with zero extra lookups.
+// 2026-09-26: the dial legs themselves moved to lib/outbound-dial.ts so the
+// BULK runner dials through the exact same code path — one place to fix, one
+// place to extend. This route keeps the operator-facing contract: auth,
+// lead branch-scoping, compliance (fail-CLOSED), branch quota, usage
+// accounting, and verbatim Meta error surfacing.
 //
 // Env: WHATSAPP_OUTBOUND_CALLS=0 hard-disables the whatsapp/auto channels
-//      (phone stays available) — for deployments that have not enabled
-//      Business Calling on their WABA number yet.
+//      (phone stays available; auto falls back to phone).
 
 import { NextRequest, NextResponse } from "next/server"
 import { apiError } from "@/lib/api-error"
 import { db } from "@/lib/db"
-import { makeCall } from "@/lib/exotel"
 import { requireModuleOrRole } from "@/lib/auth"
 import { sessionBranchId, checkQuota, recordUsage } from "@/lib/branches"
-import { branchWhatsAppCtx, placeWhatsAppCall } from "@/lib/whatsapp"
 import { checkCallCompliance } from "@/lib/compliance"
 import { normalizePhone } from "@/lib/phone"
-import { bridgeToVoicebot } from "@/lib/voicebot-bridge"
+import { placeOutboundCall, DialError, type RequestedChannel } from "@/lib/outbound-dial"
 
 export const dynamic = "force-dynamic"
-
-const WA_OUTBOUND_WINDOW_DAYS = 30
-
-type DialChannel = "whatsapp" | "phone" | "auto"
-
-/** WhatsApp id = phone digits WITH country code, no "+". Leads stored as
- *  "9908838090" (10 digits) are Indian numbers → prefix 91. */
-function toWaId(phone: string): string {
-  const digits = String(phone || "").replace(/\D/g, "")
-  if (!digits) return ""
-  return digits.length === 10 ? `91${digits}` : digits
-}
 
 export async function POST(req: NextRequest) {
   const session = await requireModuleOrRole(req, "voice", ["admin", "agent", "branch_manager"])
@@ -70,7 +47,7 @@ export async function POST(req: NextRequest) {
 
   const leadId = String(body?.leadId || "").trim()
   if (!leadId) return NextResponse.json({ error: "leadId required" }, { status: 400 })
-  const channelRaw = String(body?.channel || "auto").toLowerCase() as DialChannel
+  const channelRaw = String(body?.channel || "auto").toLowerCase() as RequestedChannel
   if (!["whatsapp", "phone", "auto"].includes(channelRaw)) {
     return NextResponse.json({ error: `unknown channel "${channelRaw}" — use whatsapp | phone | auto` }, { status: 400 })
   }
@@ -90,37 +67,7 @@ export async function POST(req: NextRequest) {
   if (!phone) return NextResponse.json({ error: "lead has no callable phone number" }, { status: 400 })
   const language = lead.language || "telugu"
 
-  // 2) Channel resolution for "auto": WhatsApp callback is only safe when
-  //    the lead recently called US (Meta's implicit callback permission).
-  let channel: Exclude<DialChannel, "auto"> = channelRaw === "auto" ? "phone" : channelRaw
-  if (channelRaw === "whatsapp" || channelRaw === "auto") {
-    if (process.env.WHATSAPP_OUTBOUND_CALLS === "0") {
-      if (channelRaw === "whatsapp") {
-        return NextResponse.json({ error: "WhatsApp outbound calling is disabled (WHATSAPP_OUTBOUND_CALLS=0) — enable Business Calling for your WABA number first" }, { status: 501 })
-      }
-    } else {
-      let calledUs = false
-      try {
-        const { data: recent } = await db
-          .from("voice_calls")
-          .select("created_at")
-          .eq("lead_id", leadId)
-          .like("twilio_call_sid", "wacall-%")
-          .eq("direction", "inbound")
-          .order("created_at", { ascending: false })
-          .limit(1)
-        const lastAt = recent?.[0]?.created_at ? new Date(recent[0].created_at).getTime() : 0
-        calledUs = lastAt > Date.now() - WA_OUTBOUND_WINDOW_DAYS * 24 * 60 * 60 * 1000
-      } catch (e) {
-        // Permission probe failure must not block dialing — Meta remains the
-        // real gate and its error is surfaced verbatim below.
-        console.error("dial: callback-permission probe failed:", e instanceof Error ? e.message : e)
-      }
-      if (channelRaw === "whatsapp" || calledUs) channel = "whatsapp"
-    }
-  }
-
-  // 3) Compliance + quota — ONE gate for every outbound channel (fail-closed
+  // 2) Compliance + quota — ONE gate for every outbound channel (fail-closed
   //    on compliance errors, per checkCallCompliance's contract).
   const compliance = await checkCallCompliance({ leadId, phone })
   if (!compliance.allowed) {
@@ -131,75 +78,22 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: quota.reason }, { status: 403 })
   }
 
-  // 4) Dial.
+  // 3) Dial through the shared leg (channel resolution + Meta/Exotel flow +
+  //    the pre-ring voice_calls row all live there now).
   try {
-    if (channel === "whatsapp") {
-      const waId = toWaId(phone)
-      if (!waId) return NextResponse.json({ error: "cannot derive a WhatsApp id from this lead's number" }, { status: 400 })
-
-      // 4a. Offer held on the voicebot (werift, ICE gathered).
-      const offer = await bridgeToVoicebot("/whatsapp/outbound-offer", {
-        from: waId,       // the customer we are dialing
-        to: "",
-        branchId: branchId || lead.branch_id || null,
-      }, 8000)
-      if (!offer.pendingId || !offer.offerSdp) {
-        return NextResponse.json({ error: "voicebot did not return a call offer — is the voicebot (pm2) running?" }, { status: 502 })
-      }
-
-      // 4b. Graph action=connect — Meta rings the lead's WhatsApp.
-      const waCtx = await branchWhatsAppCtx(branchId || lead.branch_id || null)
-      const placed = await placeWhatsAppCall(waId, offer.offerSdp, waCtx)
-      if (!placed.ok || !placed.callId) {
-        // Release the held offer — a peer connection must never leak.
-        await bridgeToVoicebot("/whatsapp/outbound-cancel", {
-          pendingId: offer.pendingId,
-          reason: "graph connect failed",
-        }, 5000).catch(() => {})
-        return NextResponse.json({
-          error: placed.error || "Meta rejected the call",
-          hint: "WhatsApp outbound calls need call permission: the lead must have called this number recently, or accepted a call-permission request. Also confirm Business Calling is enabled for the WABA number.",
-        }, { status: 502 })
-      }
-
-      // 4c. Bind Meta's call_id → held offer so the answer webhook can
-      //     complete the negotiation (bridge-local, zero migration).
-      const reg = await bridgeToVoicebot("/whatsapp/outbound-register", {
-        pendingId: offer.pendingId,
-        callId: placed.callId,
-      }, 5000)
-
-      // 4d. Log the call row BEFORE it rings — /api/calls/turn "start" then
-      //     resolves direction=outbound, lead, language and branch from it.
-      const callSid = `wacall-${placed.callId}`
-      await db.from("voice_calls").insert({
-        lead_id: leadId,
-        twilio_call_sid: callSid,
-        direction: "outbound",
-        status: "ringing",
-        language,
-        phone,
-        branch_id: branchId || lead.branch_id || null,
-      })
-      if (branchId) recordUsage(branchId, "call")
-      console.log(`📤 WhatsApp outbound dial lead=${leadId} to=***${phone.slice(-4)} callId=***${placed.callId.slice(-8)} registered=${reg.ok ? "yes" : "no"}`)
-      return NextResponse.json({ ok: true, channel: "whatsapp", callSid, status: "ringing" })
-    }
-
-    // phone — Exotel click-to-call (same flow as /api/outbound single mode).
-    const call = await makeCall(phone, leadId, language, undefined, branchId || lead.branch_id || null)
-    await db.from("voice_calls").insert({
-      lead_id: leadId,
-      twilio_call_sid: call.sid,
-      direction: "outbound",
-      status: "initiated",
-      language,
+    const placed = await placeOutboundCall({
       phone,
-      branch_id: branchId || lead.branch_id || null,
+      leadId,
+      language,
+      requested: channelRaw,
+      branchId: branchId || lead.branch_id || null,
     })
     if (branchId) recordUsage(branchId, "call")
-    return NextResponse.json({ ok: true, channel: "phone", callSid: call.sid, status: "initiated" })
+    return NextResponse.json({ ok: true, channel: placed.channel, callSid: placed.callSid, status: placed.status })
   } catch (e) {
+    if (e instanceof DialError) {
+      return NextResponse.json(e.hint ? { error: e.message, hint: e.hint } : { error: e.message }, { status: e.status })
+    }
     return apiError(e)
   }
 }

@@ -10,112 +10,46 @@ import { detectFrustration, flagFrustratedCall, detectHumanRequest, flagHumanReq
 import { createNotification } from "./notifications"
 import { maybeProposeLoanEdit } from "./loan-edit-requests"
 import { currentDateTimeInstruction } from "./compliance"
+import { getVoiceOpeners, getVoiceClosings } from "./script-lines"
+import { DEFAULT_VOICE_OPENERS } from "./default-scripts"
 
 // Permission-based opener — respect keeps people on the line.
 // Neutral/informational by design: this is an intake call, not a sales
 // pitch, so it states the purpose plainly instead of leading with benefits.
 // This is the FIRST line of every outbound call — spoken before the AI
-// conversation even starts, so it must already match the script's "have a
-// real conversation first, collect details only later" flow. It used to
-// jump straight to "may I have your full name" as the opening sentence,
-// defeating the whole discovery/convince flow before it began. Now it
-// introduces Priya + the company and opens the floor, exactly like a human
-// cold-caller would — name/city/WhatsApp come later, once there's a reason to.
-// SCRIPT MATTERS HERE — these are spoken aloud, and the TTS service picks the
-// VOICE from the script, not from the `language` argument (any run of Latin
-// letters is treated as an English loanword, by design, so English words in a
-// native sentence keep their real pronunciation).
+// conversation even starts.
 //
-// So while these lines were written in Roman Tenglish/Hinglish, every one of
-// them was spoken end to end by the ENGLISH voice — "Namaskaram" pronounced by
-// an English speaker — while the model's own replies, which CALL_LANGUAGE_STYLES
-// asks for in native script, came out of the Telugu/Hindi voice. Two different
-// women in one call, and the fixed half mispronounced.
+// SCRIPT MATTERS HERE — these lines are spoken aloud, and the TTS service
+// picks the VOICE from the script, not from the `language` argument (any run
+// of Latin letters is treated as an English loanword, by design, so English
+// words in a native sentence keep their real pronunciation). The defaults are
+// therefore written in NATIVE Telugu/Devanagari with English loanwords kept
+// Latin, so the fixed openers and the model's own replies come out of ONE
+// consistent voice instead of two different women in one call.
 //
-// Written in native script they get the native voice, matching the model's
-// replies: one consistent Priya for the whole call. English loanwords stay in
-// Latin letters on purpose — that is exactly what CALL_LANGUAGE_STYLES asks the
-// model for, and the TTS stitching handles it.
-//
-// These constants are used ONLY on the call path. WhatsApp replies stay Roman
-// (LANGUAGE_STYLES) so the ops team can read them on the dashboard.
-export const GREETINGS: Record<Language, string> = {
-  english:
-    "Hello, good morning! This is Priya calling from Right Agent Group, Hyderabad — we help people get loans from over 20 banks without the running around. Do you have a minute? I'd love to know if you have any loan or financial need right now.",
-  hindi:
-    "नमस्ते, good morning! मैं प्रिया बोल रही हूं Right Agent Group, Hyderabad से — हम बीस से ज़्यादा banks से loan दिलवाने में मदद करते हैं, बिना bank bank घूमे। एक minute है आपके पास? बताइए, आपको कोई loan या financial ज़रूरत है क्या अभी?",
-  telugu:
-    "నమస్కారం! నేను ప్రియ, Right Agent Group, Hyderabad నుండి మాట్లాడుతున్నాను — మేము ఇరవైకి పైగా banks తో కలిసి మీకు సులభంగా loan దొరికేలా help చేస్తాము, bank bank తిరగకుండా. మీకు కొంచెం సమయం ఉందా? ఇప్పుడు మీకు ఏదైనా loan లేదా financial అవసరం ఉందా అని తెలుసుకోవాలని అనుకుంటున్నాను.",
-}
+// 2026-09-26 omnichannel pass: the line text itself moved to
+// lib/default-scripts.ts (DEFAULT_VOICE_OPENERS / DEFAULT_VOICE_CLOSINGS —
+// the Reset-to-Default source of truth) and is now DB-editable from the
+// dashboard Script Manager (ai_scripts keys 'voice_openers'/'voice_closings',
+// 5-min TTL cache in lib/script-lines.ts). The LIVE call path always reads
+// through getVoiceOpeners()/getVoiceClosings(); these re-exports keep the old
+// import surface working for tests and tooling.
+export const GREETINGS = DEFAULT_VOICE_OPENERS.cold
+export const RETURNING_GREETINGS = DEFAULT_VOICE_OPENERS.returning
+export const INBOUND_GREETINGS = DEFAULT_VOICE_OPENERS.inbound
 
-// Repeat outbound calls to the same lead (call_count > 0 before this call)
-// used to replay the exact same cold-open pitch every single time —
-// "we help people get loans from 20+ banks..." on call 5 sounds exactly
-// like what it is: a script replaying, not a person who remembers them.
-// Short, warm follow-up instead — the LLM's own REAL MEMORY instructions
-// pick up the specific details once the conversation continues from here.
-export const RETURNING_GREETINGS: Record<Language, string> = {
-  english:
-    "Hello again! This is Priya from Right Agent Group, following up on your loan interest — do you have a minute?",
-  hindi:
-    "नमस्ते! मैं प्रिया, Right Agent Group से, फिर से call कर रही हूं आपके loan interest के बारे में follow-up के लिए — एक minute है क्या?",
-  telugu:
-    "నమస్కారం! నేను ప్రియ, Right Agent Group నుండి, మీ loan interest గురించి follow-up చేస్తున్నాను — కొంచెం time ఉందా?",
-}
-
-function personalizedReturningGreeting(language: Language, name: string): string {
-  const templates: Record<Language, string> = {
-    english: `Hello ${name}! Priya here again from Right Agent Group. Just following up on our last conversation about your loan — do you have a moment?`,
-    hindi: `नमस्ते ${name} जी! मैं प्रिया, Right Agent Group से, फिर से call कर रही हूं। आपके loan के बारे में follow-up करना था — एक minute है क्या?`,
-    telugu: `నమస్కారం ${name} గారు! నేను ప్రియ, Right Agent Group నుండి మళ్ళీ call చేస్తున్నాను. మీ loan గురించి follow-up చేద్దామా అనుకుంటున్నాను — కొంచెం time ఉందా?`,
-  }
-  return templates[language]
-}
-
-// Inbound calls are the customer's initiative — greet like a receptionist,
-// not a telemarketer. The pitch only comes later, if it fits.
-export const INBOUND_GREETINGS: Record<Language, string> = {
-  english:
-    "Hello! Thank you for calling Right Agent Group, Hyderabad. This is Priya. How can I help you today?",
-  hindi:
-    "नमस्ते! Right Agent Group, Hyderabad को call करने के लिए धन्यवाद। मैं प्रिया बोल रही हूं। बताइए, मैं आपकी क्या मदद कर सकती हूं?",
-  telugu:
-    "నమస్కారం! Right Agent Group, Hyderabad కి call చేసినందుకు ధన్యవాదాలు. నేను ప్రియ. చెప్పండి, మీకు ఎలా help చేయగలను?",
-}
-
-const CLOSING: Record<Language, string> = {
-  english: "Thank you! I'm sending a simple loan application on your WhatsApp right now — just fill it in, and our loan officer will personally consult you after that. Have a great day!",
-  hindi: "धन्यवाद! मैं अभी आपके WhatsApp पे एक simple loan application भेज रही हूं — बस उसको fill कर दीजिएगा, उसके बाद हमारे loan officer आपसे personally बात करके consult करेंगे। आपका दिन शुभ हो!",
-  telugu: "ధన్యవాదాలు! నేను ఇప్పుడే మీ WhatsApp కి ఒక simple loan application పంపిస్తున్నాను — దాన్ని fill చేయండి చాలు, ఆ తర్వాత మా loan officer మీతో వ్యక్తిగతంగా మాట్లాడి సలహా ఇస్తారు. మీకు మంచి రోజు జరగాలి!",
+/** Substitute the {name} token of a saved *_named opener template. */
+function fillName(template: string, name: string): string {
+  return template.replace(/\{name\}/g, name)
 }
 
 // Inbound calls auto-create a lead with a placeholder like "Caller 8090"
 // before we know the real name — never greet someone by that fake name.
 const PLACEHOLDER_NAME_RE = /^(Caller \d+|Unknown|WA \d+)$/i
 
-// Same fix as GREETINGS above, for when the lead's name is already known
-// (most outbound calls — CSV uploads, manual adds, repeat callers). This
-// used to skip straight to "confirm details and get WhatsApp" as the FIRST
-// thing said — before the AI ever got to ask what they need or make a
-// case. Now it greets by name and opens the conversation like a human
-// would; discovery/convince/collect all happen through the real script.
-function personalizedGreeting(language: Language, name: string): string {
-  const templates: Record<Language, string> = {
-    english: `Hello ${name}! This is Priya calling from Right Agent Group, Hyderabad — we help people get loans from over 20 banks without the running around. Do you have a minute? I'd love to know if you have any loan need right now.`,
-    hindi: `नमस्ते ${name} जी! मैं प्रिया बोल रही हूं, Right Agent Group, Hyderabad से — हम बीस से ज़्यादा banks से loan दिलवाने में मदद करते हैं। एक minute है आपके पास? बताइए, आपको कोई loan ज़रूरत है क्या अभी?`,
-    telugu: `నమస్కారం ${name} గారు! నేను ప్రియ, Right Agent Group, Hyderabad నుండి మాట్లాడుతున్నాను — మేము ఇరవైకి పైగా banks తో కలిసి మీకు సులభంగా loan దొరికేలా help చేస్తాము. మీకు కొంచెం సమయం ఉందా? ఇప్పుడు ఏదైనా loan అవసరం ఉందా అని తెలుసుకోవాలని అనుకుంటున్నాను.`,
-  }
-  return templates[language]
-}
-
-function personalizedInboundGreeting(language: Language, name: string): string {
-  const templates: Record<Language, string> = {
-    english: `Hello ${name}! Thank you for calling Right Agent Group, Hyderabad. This is Priya. How can I help you today?`,
-    hindi: `नमस्ते ${name} जी! Right Agent Group, Hyderabad को call करने के लिए धन्यवाद। मैं प्रिया बोल रही हूं। बताइए, मैं आपकी क्या मदद कर सकती हूं?`,
-    telugu: `నమస్కారం ${name} గారు! Right Agent Group, Hyderabad కి call చేసినందుకు ధన్యవాదాలు. నేను ప్రియ. చెప్పండి, మీకు ఎలా help చేయగలను?`,
-  }
-  return templates[language]
-}
+// (Named-lead openers are the *_named variants of the DB-editable
+// DEFAULT_VOICE_OPENERS — same behaviour as the old personalized*
+// functions, with the {name} token filled at call time.)
 
 const RETRY_MSG: Record<Language, string> = {
   english: "Sorry, I had a small technical moment. Could you please share your name so I can send your loan application link?",
@@ -160,13 +94,8 @@ const CUSTOMER_BYE_RE =
 const VOICEMAIL_RE =
   /leave (a|your) message|after the (tone|beep)|voice ?mail|mailbox( is full)?|record your message|please try your call (again )?later|message chhod|beep ke baad|message pettandi|beep tarvata/i
 
-// Short, warm sign-off — NOT the link-sending CLOSING above, which promises a
-// WhatsApp message that may not exist yet.
-const GOODBYE_REPLY: Record<Language, string> = {
-  english: "Thank you for your time! Have a great day. Goodbye!",
-  hindi: "आपके समय के लिए धन्यवाद! आपका दिन शुभ हो। नमस्ते!",
-  telugu: "మీ సమయానికి ధన్యవాదాలు! మీకు మంచి రోజు జరగాలి. నమస్కారం!",
-}
+// (The customer-bye sign-off is the DB-editable 'sign_off' closing —
+// see DEFAULT_VOICE_CLOSINGS / getVoiceClosings.)
 
 /** Called on the first webhook hit of a call (before any speech). Bumps call_count once per call. */
 export async function startCall(
@@ -225,13 +154,18 @@ export async function startCall(
 
   const hasName = name && !PLACEHOLDER_NAME_RE.test(name)
 
+  // DB-editable openers (5-min TTL cache; a cold miss costs one indexed
+  // query and can never fail the call — getVoiceOpeners falls back to the
+  // built-in defaults on any DB error).
+  const openers = await getVoiceOpeners()
+
   if (direction === "inbound") {
-    return hasName ? personalizedInboundGreeting(language, name!) : INBOUND_GREETINGS[language]
+    return hasName ? fillName(openers.inbound_named[language], name!) : openers.inbound[language]
   }
   if (isRepeatCall) {
-    return hasName ? personalizedReturningGreeting(language, name!) : RETURNING_GREETINGS[language]
+    return hasName ? fillName(openers.returning_named[language], name!) : openers.returning[language]
   }
-  return hasName ? personalizedGreeting(language, name!) : GREETINGS[language]
+  return hasName ? fillName(openers.cold_named[language], name!) : openers.cold[language]
 }
 
 async function getHistory(callSid: string): Promise<{ role: "user" | "model"; content: string }[]> {
@@ -621,7 +555,8 @@ export async function handleTurn(opts: {
   // behavior a human agent would never do. History must be non-empty so a
   // first-utterance misfire can't kill a call that just connected.
   if (history.length > 0 && CUSTOMER_BYE_RE.test(speech)) {
-    const reply = GOODBYE_REPLY[language]
+    const { sign_off } = await getVoiceClosings()
+    const reply = sign_off[language]
     updateTranscriptAsync(callSid, speech, reply)
     return { text: reply, hangup: true }
   }
@@ -641,7 +576,7 @@ export async function handleTurn(opts: {
   let rateLimited = false
   try {
     reply = (await chatWithLLM(messages, language, mergedInstructions || undefined, { channel: "call", branchId })).trim()
-    if (!reply) reply = GREETINGS[language]
+    if (!reply) reply = (await getVoiceOpeners()).cold[language]
   } catch (e) {
     console.error("LLM error:", e)
     if (isRateLimitError(e)) {
@@ -672,7 +607,7 @@ export async function handleTurn(opts: {
   maybeProposeLoanEdit(leadId, "priya_voice", speech)
 
   const completed = await completeLeadIfReady({ leadId, callSid, callerPhone, messages, reply, branchId })
-  if (completed) return { text: CLOSING[language], hangup: true }
+  if (completed) return { text: (await getVoiceClosings()).qualified[language], hangup: true }
 
   return { text: reply, hangup: GOODBYE_RE.test(reply) }
 }
@@ -716,7 +651,8 @@ export async function handleTurnStream(
   }
 
   if (history.length > 0 && CUSTOMER_BYE_RE.test(speech)) {
-    const reply = GOODBYE_REPLY[language]
+    const { sign_off } = await getVoiceClosings()
+    const reply = sign_off[language]
     updateTranscriptAsync(callSid, speech, reply)
     onSentence(reply)
     return { hangup: true }
@@ -747,7 +683,7 @@ export async function handleTurnStream(
     const tail = pending.trim()
     if (tail) onSentence(tail)
     if (!reply) {
-      reply = GREETINGS[language]
+      reply = (await getVoiceOpeners()).cold[language]
       onSentence(reply)
     }
   } catch (e) {
@@ -782,7 +718,7 @@ export async function handleTurnStream(
   // WhatsApp round-trip (0.5-15s of dead air) while the caller waits. Speak
   // first, complete after; completion only decides the hangup now.
   if (mightBeCompleteQuick(messages, reply)) {
-    onSentence(CLOSING[language])
+    onSentence((await getVoiceClosings()).qualified[language])
   }
   const completed = await completeLeadIfReady({ leadId, callSid, callerPhone, messages, reply, branchId })
   if (completed) {

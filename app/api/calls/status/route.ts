@@ -6,6 +6,7 @@ import { refreshLeadScore } from "@/lib/scoring"
 import { rateLimit, clientIp } from "@/lib/rate-limit"
 import { runPostCallAnalysis } from "@/lib/lead-brain"
 import { verifyExotelWebhookKey } from "@/lib/exotel-webhook-auth"
+import { maybeRequeueMissed } from "@/lib/auto-retry"
 
 export async function POST(req: NextRequest) {
   try {
@@ -65,6 +66,12 @@ export async function POST(req: NextRequest) {
     }
     if (!call?.lead_id) return new NextResponse("OK", { status: 200 })
     const leadId = String(call.lead_id)
+
+    // Bulk-dialer auto-retry (Feature 4 of the bulk plan): a queued call
+    // that ended busy/no-answer with zero conversation time is pushed back
+    // to pending (+2h by default, capped). Fire-and-forget — must never slow
+    // or fail the webhook; the helper swallows its own errors.
+    maybeRequeueMissed({ callSid, outcome, duration }).catch(() => {})
 
     // Transcript arrives as jsonb (array) but tolerate the string form. The
     // previous inline JSON.parse threw on malformed strings and — being

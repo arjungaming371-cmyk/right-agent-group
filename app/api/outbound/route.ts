@@ -11,10 +11,54 @@ export async function GET(req: NextRequest) {
   const session = await requireModuleOrRole(req, "voice", ["admin", "agent", "viewer", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const branchId = sessionBranchId(session)
-  let q = db.from("outbound_queue").select("*")
-  if (branchId) q = q.eq("branch_id", branchId)
-  const { data } = await q.order("created_at", { ascending: false }).limit(200)
-  return NextResponse.json(data ?? [])
+  const sp = new URL(req.url).searchParams
+
+  // Sidebar badge: ?count=pending → { count }
+  if (sp.get("count") === "pending") {
+    const res = branchId
+      ? await query(`SELECT count(*)::int AS n FROM outbound_queue WHERE status = 'pending' AND branch_id = $1`, [branchId])
+      : await query(`SELECT count(*)::int AS n FROM outbound_queue WHERE status = 'pending'`)
+    return NextResponse.json({ count: res.rows[0]?.n ?? 0 })
+  }
+
+  // Live radar: ?stats=1 → per-status counts (the Call Queue view's tab
+  // badges + progress bar read this — computing them client-side would
+  // require pulling every row).
+  if (sp.get("stats") === "1") {
+    const res = branchId
+      ? await query(`SELECT status, count(*)::int AS n FROM outbound_queue WHERE branch_id = $1 GROUP BY status`, [branchId])
+      : await query(`SELECT status, count(*)::int AS n FROM outbound_queue GROUP BY status`)
+    const counts: Record<string, number> = {}
+    for (const r of res.rows as { status: string; n: number }[]) counts[r.status] = r.n
+    return NextResponse.json({ counts })
+  }
+
+  // Queue listing with filters: ?status=pending,dialing&limit=100&offset=0
+  // (the old unfiltered last-200 shape remains the default).
+  const statusParam = (sp.get("status") || "").trim()
+  const statuses = statusParam ? statusParam.split(",").map((s) => s.trim()).filter(Boolean) : []
+  const limit = Math.min(Math.max(parseInt(sp.get("limit") || "200", 10) || 200, 1), 500)
+  const offset = Math.max(parseInt(sp.get("offset") || "0", 10) || 0, 0)
+
+  const where: string[] = []
+  const params: unknown[] = []
+  if (branchId) {
+    params.push(branchId)
+    where.push(`branch_id = $${params.length}`)
+  }
+  if (statuses.length) {
+    params.push(statuses)
+    where.push(`status = ANY($${params.length})`)
+  }
+  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : ""
+  const [rows, total] = await Promise.all([
+    query(
+      `SELECT * FROM outbound_queue ${whereSql} ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`,
+      params
+    ),
+    query(`SELECT count(*)::int AS n FROM outbound_queue ${whereSql}`, params),
+  ])
+  return NextResponse.json({ items: rows.rows ?? [], total: (total.rows[0] as { n: number } | undefined)?.n ?? 0 })
 }
 
 export async function POST(req: NextRequest) {

@@ -17,6 +17,7 @@ import { transcribeAudio } from "@/lib/stt"
 import { currentDateTimeInstruction } from "@/lib/compliance"
 import { rateLimit, clientIp } from "@/lib/rate-limit"
 import { bridgeToVoicebot } from "@/lib/voicebot-bridge"
+import { maybeRequeueMissed } from "@/lib/auto-retry"
 
 export const dynamic = "force-dynamic"
 
@@ -730,6 +731,15 @@ async function handleCallEvents(calls: WhatsAppCallEvent[], waBranch: BranchWhat
         await finalizeWhatsAppCall({ callSid: sid, callId, from, outcome, branchIdFromWebhook: waBranch?.id || null })
       } catch (e) {
         console.error("wa finalize error:", e instanceof Error ? e.message : e)
+      }
+
+      // 3) Bulk-dialer auto-retry (Feature 4): a queued outbound WhatsApp
+      //    call that ended rejected/unanswered with zero talk time goes back
+      //    to pending (+retryDelay), capped by the dialer settings.
+      try {
+        await maybeRequeueMissed({ callSid: sid, outcome, duration: 0 })
+      } catch (e) {
+        console.error("wa auto-requeue error:", e instanceof Error ? e.message : e)
       }
       continue
     }

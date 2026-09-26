@@ -14,6 +14,7 @@ import { searchKnowledgeBase } from "@/lib/knowledge-base"
 import { buildEmiInstruction, buildRateInstruction, detectLoanType } from "@/lib/finance"
 import { currentDateTimeInstruction } from "@/lib/compliance"
 import { rateLimit, clientIp } from "@/lib/rate-limit"
+import { getInstagramPrompts } from "@/lib/script-lines"
 
 export const dynamic = "force-dynamic"
 
@@ -293,26 +294,22 @@ async function handleInboundDM(messaging: any, igBranch: BranchInstagramCtx = nu
     const emiInfo = emiRes ? emiRes.instruction : ""
     const rateInfo = buildRateInstruction(text, { loanType }) || ""
 
-    const extraInstructions = `You are Priya, senior home & business loan advisor at Right Agent Group.
-You are communicating with a client via Instagram Direct Message (DM).
-Be warm, professional, helpful, and concise.
-
-Client Details:
-${brief}
-
-Knowledge Base Facts:
-${kbContext || "None"}
-
-Loan Guidance:
-${rateInfo}
-${emiInfo}
-${dtInfo}
-
-Instructions:
-- Keep your answer under 100 words (Instagram DM friendly).
-- Answer the customer's question directly.
-- NEVER re-ask for a detail the customer already gave earlier in the thread.
-- Ask a helpful follow-up question to qualify their loan needs.`
+    // DB-editable DM persona + rules (ai_scripts 'instagram_dm', 5-min TTL
+    // cache; defaults in lib/default-scripts.ts). The dynamic per-lead blocks
+    // (brief, KB, rates, EMI, date/time) stay code-assembled around it.
+    const igPrompts = await getInstagramPrompts()
+    const extraInstructions = [
+      igPrompts.dm.system_prompt,
+      `Client Details:
+${brief}`,
+      `Knowledge Base Facts:
+${kbContext || "None"}`,
+      rateInfo,
+      emiInfo,
+      dtInfo,
+      "Instructions:",
+      igPrompts.dm.reply_rules,
+    ].filter(Boolean).join("\n\n")
 
     const aiReply = await chatWithLLM(
       [...history, { role: "user", content: text }],
@@ -438,13 +435,15 @@ async function handleInboundComment(val: any, igBranch: BranchInstagramCtx = nul
   try {
     const kbContext = await searchKnowledgeBase(text).catch(() => "")
 
-    const extraInstructions = `You are Priya, senior loan advisor at Right Agent Group responding to a public Instagram post comment from @${username}.
-Be friendly, helpful, concise, and professional.
-
-Knowledge Base:
-${kbContext || "None"}
-
-Provide a short public reply (under 40 words) acknowledging their comment and offering help.`
+    // DB-editable comment prompts (ai_scripts 'instagram_comment'). The
+    // {username} token keeps the saved persona free of any hardcoded handle.
+    const igPrompts = await getInstagramPrompts()
+    const extraInstructions = [
+      igPrompts.comment.system_prompt.replace(/\{username\}/g, username),
+      `Knowledge Base:
+${kbContext || "None"}`,
+      igPrompts.comment.reply_rules,
+    ].filter(Boolean).join("\n\n")
 
     const publicAiReply = await chatWithLLM(
       [{ role: "user", content: text }],
@@ -466,7 +465,7 @@ Provide a short public reply (under 40 words) acknowledging their comment and of
       // 2. Send Private DM Reply to Commenter — branch credentials threaded
       // through (this is the DM that actually converts a commenter into a
       // lead conversation; it must come from the account they commented on).
-      const privateDmText = `Hi @${username}! Thanks for commenting on our post. I'm Priya from Right Agent Group. How can I assist you with your home or business loan enquiry today?`
+      const privateDmText = igPrompts.comment.first_dm.replace(/\{username\}/g, username)
       const privSent = await privateReplyInstagramComment(commentId, privateDmText, igBranch)
       if (privSent.ok) {
         await query(

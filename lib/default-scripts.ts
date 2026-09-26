@@ -94,3 +94,140 @@ export const DEFAULT_SCRIPTS: Record<"base" | ScriptLanguage, string> = {
   hindi: BASE_SCRIPT + LANGUAGE_STYLE.hindi,
   telugu: BASE_SCRIPT + LANGUAGE_STYLE.telugu,
 }
+
+// ============================================================================
+// CHANNEL SCRIPT EXTENSIONS (2026-09-26 omnichannel pass)
+//
+// Beyond the base script, every FIXED line Priya says is now DB-editable via
+// the Script Manager (ai_scripts keys below) with these constants as the
+// Reset-to-Default source of truth AND the code fallback when the DB is
+// unreachable (lib/script-lines.ts merges a saved row over them field by
+// field — a blank/partial/corrupt row can never silence Priya).
+//
+// SCRIPT MATTERS on the call lines — they are spoken aloud, and the TTS
+// service picks the VOICE from the script (any run of Latin letters is an
+// English loanword by design). That is why the Hindi/Telugu lines below are
+// written in NATIVE script while English loanwords stay Latin: one consistent
+// Priya voice for the whole call. WhatsApp/Instagram lines stay plain text —
+// they are READ, not spoken.
+// ============================================================================
+
+import type { VoiceOpeners, VoiceClosings, WhatsappFallbacks, InstagramPrompts } from "./script-text"
+
+// The FIRST line of every outbound call, spoken before the AI conversation
+// starts. cold = fresh lead; returning = call_count > 0; inbound = they
+// called us (receptionist, not telemarketer). *_named variants are used when
+// the lead's real name is already known — they support a {name} token.
+export const DEFAULT_VOICE_OPENERS: VoiceOpeners = {
+  cold: {
+    english:
+      "Hello, good morning! This is Priya calling from Right Agent Group, Hyderabad — we help people get loans from over 20 banks without the running around. Do you have a minute? I'd love to know if you have any loan or financial need right now.",
+    hindi:
+      "नमस्ते, good morning! मैं प्रिया बोल रही हूं Right Agent Group, Hyderabad से — हम बीस से ज़्यादा banks से loan दिलवाने में मदद करते हैं, बिना bank bank घूमे। एक minute है आपके पास? बताइए, आपको कोई loan या financial ज़रूरत है क्या अभी?",
+    telugu:
+      "నమస్కారం! నేను ప్రియ, Right Agent Group, Hyderabad నుండి మాట్లాడుతున్నాను — మేము ఇరవైకి పైగా banks తో కలిసి మీకు సులభంగా loan దొరికేలా help చేస్తాము, bank bank తిరగకుండా. మీకు కొంచెం సమయం ఉందా? ఇప్పుడు మీకు ఏదైనా loan లేదా financial అవసరం ఉందా అని తెలుసుకోవాలని అనుకుంటున్నాను.",
+  },
+  cold_named: {
+    english:
+      "Hello {name}! This is Priya calling from Right Agent Group, Hyderabad — we help people get loans from over 20 banks without the running around. Do you have a minute? I'd love to know if you have any loan need right now.",
+    hindi:
+      "नमस्ते {name} जी! मैं प्रिया बोल रही हूं, Right Agent Group, Hyderabad से — हम बीस से ज़्यादा banks से loan दिलवाने में मदद करते हैं। एक minute है आपके पास? बताइए, आपको कोई loan ज़रूरत है क्या अभी?",
+    telugu:
+      "నమస్కారం {name} గారు! నేను ప్రియ, Right Agent Group, Hyderabad నుండి మాట్లాడుతున్నాను — మేము ఇరవైకి పైగా banks తో కలిసి మీకు సులభంగా loan దొరికేలా help చేస్తాము. మీకు కొంచెం సమయం ఉందా? ఇప్పుడు ఏదైనా loan అవసరం ఉందా అని తెలుసుకోవాలని అనుకుంటున్నాను.",
+  },
+  // Repeat outbound calls used to replay the exact cold pitch every time —
+  // a short, warm follow-up instead; the LLM's REAL MEMORY rules pick up
+  // specifics once the conversation continues from here.
+  returning: {
+    english:
+      "Hello again! This is Priya from Right Agent Group, following up on your loan interest — do you have a minute?",
+    hindi:
+      "नमस्ते! मैं प्रिया, Right Agent Group से, फिर से call कर रही हूं आपके loan interest के बारे में follow-up के लिए — एक minute है क्या?",
+    telugu:
+      "నమస్కారం! నేను ప్రియ, Right Agent Group నుండి, మీ loan interest గురించి follow-up చేస్తున్నాను — కొంచెం time ఉందా?",
+  },
+  returning_named: {
+    english:
+      "Hello {name}! Priya here again from Right Agent Group. Just following up on our last conversation about your loan — do you have a moment?",
+    hindi:
+      "नमस्ते {name} जी! मैं प्रिया, Right Agent Group से, फिर से call कर रही हूं। आपके loan के बारे में follow-up करना था — एक minute है क्या?",
+    telugu:
+      "నమస్కారం {name} గారు! నేను ప్రియ, Right Agent Group నుండి మళ్ళీ call చేస్తున్నాను. మీ loan గురించి follow-up చేద్దామా అనుకుంటున్నాను — కొంచెం time ఉందా?",
+  },
+  inbound: {
+    english:
+      "Hello! Thank you for calling Right Agent Group, Hyderabad. This is Priya. How can I help you today?",
+    hindi:
+      "नमस्ते! Right Agent Group, Hyderabad को call करने के लिए धन्यवाद। मैं प्रिया बोल रही हूं। बताइए, मैं आपकी क्या मदद कर सकती हूं?",
+    telugu:
+      "నమస్కారం! Right Agent Group, Hyderabad కి call చేసినందుకు ధన్యవాదాలు. నేను ప్రియ. చెప్పండి, మీకు ఎలా help చేయగలను?",
+  },
+  inbound_named: {
+    english:
+      "Hello {name}! Thank you for calling Right Agent Group, Hyderabad. This is Priya. How can I help you today?",
+    hindi:
+      "नमस्ते {name} जी! Right Agent Group, Hyderabad को call करने के लिए धन्यवाद। मैं प्रिया बोल रही हूं। बताइए, मैं आपकी क्या मदद कर सकती हूं?",
+    telugu:
+      "నమస్కారం {name} గారు! Right Agent Group, Hyderabad కి call చేసినందుకు ధన్యవాదాలు. నేను ప్రియ. చెప్పండి, మీకు ఎలా help చేయగలను?",
+  },
+}
+
+// qualified = spoken when the lead completes (link is being sent).
+// sign_off = short goodbye when the CUSTOMER says bye first (never the
+// link line — it promises a WhatsApp message that may not exist).
+export const DEFAULT_VOICE_CLOSINGS: VoiceClosings = {
+  qualified: {
+    english:
+      "Thank you! I'm sending a simple loan application on your WhatsApp right now — just fill it in, and our loan officer will personally consult you after that. Have a great day!",
+    hindi:
+      "धन्यवाद! मैं अभी आपके WhatsApp पे एक simple loan application भेज रही हूं — बस उसको fill कर दीजिएगा, उसके बाद हमारे loan officer आपसे personally बात करके consult करेंगे। आपका दिन शुभ हो!",
+    telugu:
+      "ధన్యవాదాలు! నేను ఇప్పుడే మీ WhatsApp కి ఒక simple loan application పంపిస్తున్నాను — దాన్ని fill చేయండి చాలు, ఆ తర్వాత మా loan officer మీతో వ్యక్తిగతంగా మాట్లాడి సలహా ఇస్తారు. మీకు మంచి రోజు జరగాలి!",
+  },
+  sign_off: {
+    english: "Thank you for your time! Have a great day. Goodbye!",
+    hindi: "आपके समय के लिए धन्यवाद! आपका दिन शुभ हो। नमस्ते!",
+    telugu: "మీ సమయానికి ధన్యవాదాలు! మీకు మంచి రోజు జరగాలి. నమస్కారం!",
+  },
+}
+
+// Free-form fallback texts used when the WhatsApp TEMPLATE names are not yet
+// approved by Meta (sendApplicationLink / sendCallFollowUp /
+// sendMissedCallFollowUp). Tokens: {name} {brand} {link}.
+export const DEFAULT_WHATSAPP_FALLBACKS: WhatsappFallbacks = {
+  form_link:
+    "Hi {name}! Thanks for speaking with Priya from {brand}. Please complete your loan application here: {link}\n\nWe never ask for OTP, PIN, or any payment. — {brand}",
+  call_followup:
+    "Hi {name}! Thanks for speaking with Priya from {brand}. Feel free to message us here anytime with questions.\n\nWe never ask for OTP, PIN, or any payment. — {brand}",
+  missed_call:
+    "Hi {name}! We tried calling you from {brand} about a loan offer but couldn't reach you. Reply here or call us back anytime.\n\nWe never ask for OTP, PIN, or any payment. — {brand}",
+}
+
+// Instagram: DM persona + rules, comment public-reply persona + rules, and
+// the private first-DM sent to commenters. Tokens: {username}.
+export const DEFAULT_INSTAGRAM_PROMPTS: InstagramPrompts = {
+  dm: {
+    system_prompt:
+      "You are Priya, senior home & business loan advisor at Right Agent Group.\nYou are communicating with a client via Instagram Direct Message (DM).\nBe warm, professional, helpful, and concise.",
+    reply_rules:
+      "- Keep your answer under 100 words (Instagram DM friendly).\n- Answer the customer's question directly.\n- NEVER re-ask for a detail the customer already gave earlier in the thread.\n- Ask a helpful follow-up question to qualify their loan needs.",
+  },
+  comment: {
+    system_prompt:
+      "You are Priya, senior loan advisor at Right Agent Group responding to a public Instagram post comment from @{username}.\nBe friendly, helpful, concise, and professional.",
+    reply_rules:
+      "Provide a short public reply (under 40 words) acknowledging their comment and offering help.",
+    first_dm:
+      "Hi @{username}! Thanks for commenting on our post. I'm Priya from Right Agent Group. How can I assist you with your home or business loan enquiry today?",
+  },
+}
+
+// ai_scripts keys that hold JSON (everything else in DEFAULT_SCRIPTS is a
+// plain prompt string). Used by /api/script for validation + Reset-to-Default.
+export const SCRIPT_JSON_DEFAULTS: Record<string, string> = {
+  voice_openers: JSON.stringify(DEFAULT_VOICE_OPENERS, null, 2),
+  voice_closings: JSON.stringify(DEFAULT_VOICE_CLOSINGS, null, 2),
+  whatsapp_fallbacks: JSON.stringify(DEFAULT_WHATSAPP_FALLBACKS, null, 2),
+  instagram_dm: JSON.stringify(DEFAULT_INSTAGRAM_PROMPTS.dm, null, 2),
+  instagram_comment: JSON.stringify(DEFAULT_INSTAGRAM_PROMPTS.comment, null, 2),
+}

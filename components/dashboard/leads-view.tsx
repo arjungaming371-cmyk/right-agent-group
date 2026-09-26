@@ -2,7 +2,7 @@
 
 type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
 import { useEffect, useState, useMemo } from "react"
-import { Users, Target, IndianRupee, BadgeCheck, Phone, MessageCircle, RotateCcw, Plus, Search, Link2, Check, Download, Brain, Pin } from "lucide-react"
+import { Users, Target, IndianRupee, BadgeCheck, Phone, MessageCircle, RotateCcw, Plus, Search, Link2, Check, Download, Brain, Pin, Square, CheckSquare, PhoneCall, X } from "lucide-react"
 import { formatCurrency, timeAgo, formatDateTime } from "@/lib/utils"
 import { usePolling } from "@/lib/use-poll"
 import { useToast } from "../ui/toast"
@@ -171,6 +171,28 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
 
   const [memoryLeadId, setMemoryLeadId] = useState<string | null>(null)
 
+  // ── Bulk call-queue selection (2026-09-26 bulk upgrade) ─────────────
+  // Row checkboxes + floating action bar + the Add-to-Call-Queue modal.
+  // DND / duplicate / recently-called protections are enforced SERVER-side
+  // by /api/outbound/queue — the modal only states them, it doesn't
+  // pre-filter (the server is the source of truth).
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [showQueueModal, setShowQueueModal] = useState(false)
+  const [queueBusy, setQueueBusy] = useState(false)
+  const [queueForm, setQueueForm] = useState<{ channel: string; timing: "now" | "later"; scheduledAt: string; language: string }>({
+    channel: "phone", timing: "now", scheduledAt: "", language: "auto",
+  })
+
+  // Prune selections that no longer exist (lead deleted / filter changed) —
+  // keeps the action-bar count honest without blocking cross-filter batch picks.
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      const alive = new Set(leads.map((l) => l.id))
+      const next = prev.filter((id) => alive.has(id))
+      return next.length === prev.length ? prev : next
+    })
+  }, [leads])
+
   const displayLeads = useMemo(() => {
     return smartFilter(leads, search, (l) => [
       l.name,
@@ -182,6 +204,47 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
       l.status,
     ])
   }, [leads, search])
+
+  // Derived AFTER displayLeads (it reads the filtered list).
+  const allSelected = displayLeads.length > 0 && displayLeads.every((l) => selectedIds.includes(l.id))
+  function toggleAll() {
+    setSelectedIds((prev) => (allSelected ? prev.filter((id) => !displayLeads.some((l) => l.id === id)) : [...new Set([...prev, ...displayLeads.map((l) => l.id)])]))
+  }
+  function toggleOne(id: string) {
+    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
+  }
+
+  async function addSelectedToQueue() {
+    setQueueBusy(true)
+    try {
+      const res = await fetch("/api/outbound/queue", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          leadIds: selectedIds,
+          channel: queueForm.channel,
+          scheduledAt: queueForm.timing === "later" && queueForm.scheduledAt ? new Date(queueForm.scheduledAt).toISOString() : null,
+          language: queueForm.language,
+        }),
+      })
+      const d = await res.json()
+      if (res.ok) {
+        const skips = [
+          d.skippedDnd ? `${d.skippedDnd} DND/do-not-call` : "",
+          d.skippedRecent ? `${d.skippedRecent} recently-called` : "",
+          d.skippedDuplicate ? `${d.skippedDuplicate} duplicate` : "",
+        ].filter(Boolean).join(", ")
+        toast.success(`Queued ${d.queuedCount} call${d.queuedCount === 1 ? "" : "s"}${skips ? ` — skipped: ${skips}` : ""}. Manage them in Call Queue.`)
+        setShowQueueModal(false)
+        setSelectedIds([])
+      } else {
+        toast.error(d.error || "Queueing failed")
+      }
+    } catch {
+      toast.error("Queueing failed — check your connection and try again")
+    }
+    setQueueBusy(false)
+  }
 
   async function load(silent = false) {
     if (!silent) setLoading(true)
@@ -427,9 +490,14 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
             screen; this keeps the overflow contained to the table itself
             instead of the whole page scrolling sideways. */}
         <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", minWidth: 780, borderCollapse: "collapse" }}>
+        <table style={{ width: "100%", minWidth: 820, borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ borderBottom: "1px solid var(--border)" }}>
+              <th style={{ padding: "12px 8px 12px 16px", width: 40, textAlign: "left" }}>
+                {canEdit && displayLeads.length > 0 && (
+                  <input type="checkbox" checked={allSelected} onChange={toggleAll} title="Select all shown leads" style={{ width: 15, height: 15, cursor: "pointer", accentColor: "var(--accent-violet)" }} />
+                )}
+              </th>
               {["LEAD", "SCORE", "ADDRESS", "LOAN TYPE", "VALUE", "STATUS", "FORM", "CALLS", "UPDATED", "ACTIONS"].map((h) => (
                 <th key={h} style={{ padding: "12px 16px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "var(--text-muted)", letterSpacing: "0.05em" }}>{h}</th>
               ))}
@@ -447,6 +515,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                     </div>
                   </div>
                 </td>
+                <td style={{ padding: "14px 16px" }}><Skeleton w={16} h={16} r={4} /></td>
                 {Array.from({ length: 9 }).map((_, j) => (
                   <td key={j} style={{ padding: "14px 16px" }}><Skeleton w={j === 8 ? 68 : 52} h={12} /></td>
                 ))}
@@ -454,7 +523,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
             ))}
             {!loading && loadError && (
               <tr>
-                <td colSpan={10} style={{ padding: 32, textAlign: "center" }}>
+                <td colSpan={11} style={{ padding: 32, textAlign: "center" }}>
                   <div style={{ color: "var(--accent-red)", fontSize: 13, fontWeight: 600, marginBottom: 12 }}>{loadError}</div>
                   <button onClick={() => load()} className="btn-ghost" style={{ height: 32, padding: "0 14px", fontSize: 12.5 }}>
                     <RotateCcw size={12.5} strokeWidth={1.9} /> Try again
@@ -463,12 +532,17 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
               </tr>
             )}
             {!loading && !loadError && displayLeads.length === 0 && (
-              <tr><td colSpan={10} style={{ padding: 40, textAlign: "center", color: "var(--text-muted)" }}>No leads match these filters.</td></tr>
+              <tr><td colSpan={11} style={{ padding: 40, textAlign: "center", color: "var(--text-muted)" }}>No leads match these filters.</td></tr>
             )}
             {displayLeads.map((lead) => {
               const ist = INTERESTED_STYLES[lead.interested] ?? INTERESTED_STYLES.unknown
               return (
-                <tr key={lead.id} style={{ borderBottom: "1px solid var(--border-light)" }}>
+                <tr key={lead.id} style={{ borderBottom: "1px solid var(--border-light)", background: selectedIds.includes(lead.id) ? "rgba(139,124,255,0.05)" : undefined }}>
+                  {canEdit && (
+                    <td style={{ padding: "14px 8px 14px 16px" }}>
+                      <input type="checkbox" checked={selectedIds.includes(lead.id)} onChange={() => toggleOne(lead.id)} title="Select for bulk call queue" style={{ width: 15, height: 15, cursor: "pointer", accentColor: "var(--accent-violet)" }} />
+                    </td>
+                  )}
                   <td style={{ padding: "14px 16px" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                       <Avatar name={lead.name} />
@@ -537,6 +611,67 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
         </table>
         </div>
       </div>
+
+      {/* Floating bulk-selection action bar */}
+      {canEdit && selectedIds.length > 0 && !showQueueModal && (
+        <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", zIndex: 900, background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "10px 14px", display: "flex", alignItems: "center", gap: 12, boxShadow: "0 12px 40px rgba(0,0,0,0.25)" }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", display: "inline-flex", alignItems: "center", gap: 7 }}>
+            <CheckSquare size={15} strokeWidth={2} style={{ color: "var(--accent-violet)" }} />
+            {selectedIds.length} lead{selectedIds.length === 1 ? "" : "s"} selected
+          </span>
+          <button onClick={() => setShowQueueModal(true)} className="btn-primary" style={{ height: 36 }}>
+            <PhoneCall size={14} strokeWidth={2} /> Add to Call Queue
+          </button>
+          <button onClick={() => setSelectedIds([])} className="btn-ghost" style={{ height: 36 }}>
+            <X size={14} strokeWidth={2} /> Clear
+          </button>
+        </div>
+      )}
+
+      {/* Add-to-Call-Queue modal */}
+      {showQueueModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={() => !queueBusy && setShowQueueModal(false)}>
+          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, padding: 28, width: 460 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 4 }}>Add {selectedIds.length} lead{selectedIds.length === 1 ? "" : "s"} to Call Queue</div>
+            <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 18 }}>Priya dials them through the bulk dialer — nothing is dialed until someone starts the queue.</div>
+
+            <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Dialing channel</label>
+            <select value={queueForm.channel} onChange={(e) => setQueueForm({ ...queueForm, channel: e.target.value })} style={{ width: "100%", marginBottom: 14 }}>
+              <option value="phone">📞 Standard Phone Call (Exotel)</option>
+              <option value="whatsapp_voice">🟢 WhatsApp Voice Call (Meta)</option>
+              <option value="auto">⚡ Auto — WhatsApp for recent callbacks, else phone</option>
+            </select>
+
+            <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Preferred language</label>
+            <select value={queueForm.language} onChange={(e) => setQueueForm({ ...queueForm, language: e.target.value })} style={{ width: "100%", marginBottom: 14 }}>
+              <option value="auto">Auto-detect from lead profile</option>
+              <option value="telugu">Force Telugu</option>
+              <option value="hindi">Force Hindi</option>
+              <option value="english">Force English</option>
+            </select>
+
+            <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Execution timing</label>
+            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+              <button onClick={() => setQueueForm({ ...queueForm, timing: "now" })} style={{ flex: 1, padding: "8px 0", borderRadius: 8, fontSize: 12.5, border: "1px solid " + (queueForm.timing === "now" ? "rgba(139,124,255,0.5)" : "var(--border)"), background: queueForm.timing === "now" ? "rgba(139,124,255,0.12)" : "transparent", color: queueForm.timing === "now" ? "var(--accent-violet)" : "var(--text-secondary)", fontWeight: 600, cursor: "pointer" }}>⚡ Call immediately</button>
+              <button onClick={() => setQueueForm({ ...queueForm, timing: "later" })} style={{ flex: 1, padding: "8px 0", borderRadius: 8, fontSize: 12.5, border: "1px solid " + (queueForm.timing === "later" ? "rgba(139,124,255,0.5)" : "var(--border)"), background: queueForm.timing === "later" ? "rgba(139,124,255,0.12)" : "transparent", color: queueForm.timing === "later" ? "var(--accent-violet)" : "var(--text-secondary)", fontWeight: 600, cursor: "pointer" }}>🕒 Schedule for later</button>
+            </div>
+            {queueForm.timing === "later" && (
+              <input type="datetime-local" value={queueForm.scheduledAt} onChange={(e) => setQueueForm({ ...queueForm, scheduledAt: e.target.value })} style={{ width: "100%", marginBottom: 14 }} />
+            )}
+
+            <div style={{ fontSize: 11.5, color: "var(--text-muted)", background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 8, padding: "9px 12px", marginBottom: 16, lineHeight: 1.6 }}>
+              Automatic protections (always on): DND / do-not-call leads are skipped · numbers already pending in the queue are not stacked · numbers called in the last 24h are skipped · calling-window rules are enforced at dial time.
+            </div>
+
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => setShowQueueModal(false)} disabled={queueBusy} style={{ flex: 1, padding: 10, background: "transparent", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text-secondary)" }}>Cancel</button>
+              <button onClick={addSelectedToQueue} disabled={queueBusy || (queueForm.timing === "later" && !queueForm.scheduledAt)} className="btn-primary" style={{ flex: 1, height: 42 }}>
+                <PhoneCall size={14} strokeWidth={2} /> {queueBusy ? "Queueing…" : `Queue ${selectedIds.length} call${selectedIds.length === 1 ? "" : "s"}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add Lead modal */}
       {showAdd && (

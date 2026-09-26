@@ -104,23 +104,11 @@ const ICE_SERVERS = (process.env.VOICEBOT_WA_ICE_SERVERS ||
   "stun:stun.l.google.com:19302")
   .split(",").map((s) => s.trim()).filter(Boolean).map((urls) => ({ urls }))
 
-// Fixed lines (mirrored from voicebot-server.js — kept local so this module
-// stays dependency-free from it; voicebot-server owns the Exotel path).
-const CLARIFY_PHRASE = {
-  english: "Sorry, I didn't quite catch that — could you say that again?",
-  telugu: "Sorry అండి, నాకు సరిగా వినిపించలేదు. మళ్ళీ ఒకసారి చెప్పగలరా?",
-  hindi: "Sorry, मुझे थोड़ा clear सुनाई नहीं दिया। क्या आप दोबारा बोल सकते हैं?",
-}
-const FALLBACK_PHRASE = {
-  english: "Sorry, one moment please — I'm checking on something.",
-  telugu: "క్షమించండి, ఒక నిమిషం. నేను చెక్ చేస్తున్నాను.",
-  hindi: "क्षमा कीजिए, एक पल रुकिए — मैं जाँच रही हूँ।",
-}
-const START_FALLBACK_PHRASE = {
-  english: "Hello! This is Priya from Right Agent Group.",
-  telugu: "నమస్కారం! నేను రైట్ ఏజెంట్ గ్రూప్ నుంచి మాట్లాడుతున్నాను.",
-  hindi: "नमस्ते! मैं राइट एजेंट ग्रुप से बोल रही हूँ।",
-}
+// Fixed lines (2026-09-26: previously mirrored from voicebot-server.js here —
+// two byte-identical copies that could drift. Now BOTH paths require the one
+// shared, dependency-free module; it stays code-constant on purpose because
+// these are last-resort lines for when the app/DB is unreachable).
+const { CLARIFY_PHRASE, FALLBACK_PHRASE, START_FALLBACK_PHRASE } = require("./priya-lines")
 
 const TURN_TIMEOUT_MS = parseInt(process.env.VOICEBOT_TURN_TIMEOUT_MS || "20000")
 const TURN_STREAM_TIMEOUT_MS = parseInt(process.env.VOICEBOT_TURN_STREAM_TIMEOUT_MS || "90000")

@@ -4,7 +4,7 @@ import dynamic from "next/dynamic"
 import {
   Users, FileText, Phone, MessageCircle, Activity, ShieldCheck, UploadCloud,
   ScrollText, LogOut, Mic, BarChart3, UserCog, Search, Menu, X, BookOpen,
-  Building2, Sparkles, Instagram, type LucideIcon,
+  Building2, Sparkles, Instagram, PhoneCall, type LucideIcon,
 } from "lucide-react"
 import { ToastProvider } from "../ui/toast"
 import CommandPalette from "../ui/command-palette"
@@ -18,6 +18,10 @@ import LeadsView    from "./leads-view"
 const LoanAppsView = dynamic(() => import("./loan-apps-view"), {
   ssr: false,
   loading: () => <ViewFallback label="Loan Applications" />,
+})
+const QueueView = dynamic(() => import("./queue-view"), {
+  ssr: false,
+  loading: () => <ViewFallback label="Call Queue" />,
 })
 const VoiceLogsView = dynamic(() => import("./voice-logs-view"), {
   ssr: false,
@@ -81,7 +85,7 @@ function ViewFallback({ label }: { label: string }) {
   return <div style={{ padding: 24, color: "var(--text-muted)" }}>Loading {label}…</div>
 }
 
-export type ViewKey = "leads" | "loans" | "voice" | "whatsapp" | "instagram" | "comms" | "calendar" | "security" | "upload" | "script" | "knowledge" | "analytics" | "branches" | "dev-logs"
+export type ViewKey = "leads" | "loans" | "queue" | "voice" | "whatsapp" | "instagram" | "comms" | "calendar" | "security" | "upload" | "script" | "knowledge" | "analytics" | "branches" | "dev-logs"
 export type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
 
 const ROLE_LABEL: Record<Role, string> = { admin: "Administrator", agent: "Loan Officer", viewer: "Viewer", developer: "Administrator", branch_manager: "Branch Manager" }
@@ -98,6 +102,7 @@ const NAV_SECTIONS: NavSection[] = [
       { key: "analytics", label: "Analytics",        icon: BarChart3, roles: ["admin", "agent", "viewer", "branch_manager"] },
       { key: "leads",     label: "Leads",             icon: Users,     roles: ["admin", "agent", "viewer", "branch_manager"] },
       { key: "loans",     label: "Loan Applications", icon: FileText,  roles: ["admin", "agent", "viewer", "branch_manager"] },
+      { key: "queue",     label: "Call Queue",        icon: PhoneCall, roles: ["admin", "agent", "viewer", "branch_manager"] },
     ],
   },
   {
@@ -130,6 +135,7 @@ const VIEW_TITLES: Record<ViewKey, { title: string; sub: string }> = {
   analytics: { title: "Analytics",         sub: "Performance across calls, leads, and WhatsApp" },
   leads:    { title: "Leads",              sub: "Pipeline and qualified prospects" },
   loans:    { title: "Loan Applications",  sub: "Incoming home & business loan enquiries" },
+  queue:    { title: "Call Queue",         sub: "Bulk outbound calling — queue, radar, and controls" },
   voice:    { title: "Voice Logs",         sub: "Voice bot call activity and outcomes" },
   whatsapp: { title: "WhatsApp Chat",      sub: "Live customer conversations" },
   instagram:{ title: "Instagram Chat",     sub: "Direct messages and post comment auto-replies" },
@@ -158,7 +164,7 @@ function StatusPill({ icon: Icon, label }: { icon: LucideIcon; label: string }) 
 
 export default function DashboardShell() {
   const [view, setView] = useState<ViewKey>("leads")
-  const [counts, setCounts] = useState({ leads: 0, loans: 0, whatsapp: 0 })
+  const [counts, setCounts] = useState({ leads: 0, loans: 0, whatsapp: 0, queue: 0 })
   const [userEmail, setUserEmail] = useState("")
   const [role, setRole] = useState<Role>("viewer") // safest default until the real role loads
   const [roleTitle, setRoleTitle] = useState("")
@@ -203,12 +209,13 @@ export default function DashboardShell() {
 
   async function loadCounts() {
     try {
-      const [l, lo, w] = await Promise.all([
+      const [l, lo, w, q] = await Promise.all([
         fetch("/api/leads?count=1").then(r => r.json()),
         fetch("/api/loans?count=1").then(r => r.json()),
         fetch("/api/whatsapp/unread").then(r => r.json()),
+        fetch("/api/outbound?count=pending").then(r => r.json()),
       ])
-      setCounts({ leads: l.count ?? 0, loans: lo.count ?? 0, whatsapp: w.count ?? 0 })
+      setCounts({ leads: l.count ?? 0, loans: lo.count ?? 0, whatsapp: w.count ?? 0, queue: q.count ?? 0 })
     } catch {}
   }
 
@@ -280,7 +287,7 @@ export default function DashboardShell() {
   }
 
   const badgeFor = (key: ViewKey) =>
-    key === "leads" ? counts.leads : key === "loans" ? counts.loans : key === "whatsapp" ? counts.whatsapp : 0
+    key === "leads" ? counts.leads : key === "loans" ? counts.loans : key === "whatsapp" ? counts.whatsapp : key === "queue" ? counts.queue : 0
 
   // Full-access role sees every nav item unless specific allowedModules list is set.
   const canSee = (key: ViewKey, itemRoles: Role[]) => {
@@ -535,6 +542,7 @@ export default function DashboardShell() {
           {view === "analytics" && <AnalyticsView />}
           {view === "leads"    && <LeadsView role={role} initialSearch={seedSearch?.view === "leads" ? seedSearch.q : undefined} />}
           {view === "loans"    && <LoanAppsView role={role} initialSearch={seedSearch?.view === "loans" ? seedSearch.q : undefined} />}
+          {view === "queue"    && <QueueView role={role} />}
           {view === "voice"    && <VoiceLogsView role={role} />}
           {view === "whatsapp" && <WhatsAppView role={role} />}
           {view === "instagram" && <InstagramView initialSearch={seedSearch?.view === "instagram" ? seedSearch.q : undefined} />}

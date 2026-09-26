@@ -842,3 +842,28 @@ CREATE INDEX IF NOT EXISTS idx_wa_messages_unread
 CREATE INDEX IF NOT EXISTS idx_ig_messages_unread
   ON instagram_messages (ig_user_id, created_at DESC)
   WHERE direction = 'inbound' AND status <> 'read';
+
+-- ============================================================
+-- Bulk calling queue upgrade (2026-09-26_bulk_queue_upgrade)
+-- Mirrors migrations/2026-09-26_bulk_queue_upgrade.sql — safe to re-run.
+-- ============================================================
+ALTER TABLE outbound_queue ADD COLUMN IF NOT EXISTS channel      TEXT NOT NULL DEFAULT 'phone';
+ALTER TABLE outbound_queue ADD COLUMN IF NOT EXISTS priority     INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE outbound_queue ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ;
+ALTER TABLE outbound_queue ADD COLUMN IF NOT EXISTS cancelled_by TEXT;
+ALTER TABLE outbound_queue ADD COLUMN IF NOT EXISTS retry_count  INTEGER NOT NULL DEFAULT 0;
+
+CREATE INDEX IF NOT EXISTS idx_outbound_queue_claim
+  ON outbound_queue (branch_id, status, priority DESC, scheduled_at ASC)
+  WHERE status = 'pending';
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_outbound_queue_active_phone
+  ON outbound_queue (right(regexp_replace(phone, '\D', '', 'g'), 10))
+  WHERE status IN ('pending', 'dialing');
+
+CREATE TABLE IF NOT EXISTS dialer_settings (
+  key        TEXT PRIMARY KEY,
+  value      TEXT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_by TEXT
+);

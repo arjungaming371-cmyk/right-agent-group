@@ -19,6 +19,8 @@
 
 import fs from "fs"
 import path from "path"
+import { getWhatsappFallbacks } from "./script-lines"
+import { renderTemplate } from "./script-text"
 
 const GRAPH = "https://graph.facebook.com/v21.0"
 const FORM_TEMPLATE = process.env.WHATSAPP_FORM_TEMPLATE || "loan_application_form"
@@ -585,7 +587,14 @@ export async function sendApplicationLink(
     return { ok: false, error: `Template failed (${result.error}) and NEXT_PUBLIC_APP_URL not set for fallback` }
   }
   const formBase = (process.env.APPLICATION_FORM_URL || `${appUrl}/form`).replace(/\/$/, "")
-  const message = `Hi ${name || "there"}! Thanks for speaking with Priya from ${brand}. Please complete your loan application here: ${formBase}/${token}\n\nWe never ask for OTP, PIN, or any payment. — ${brand}`
+  const link = `${formBase}/${token}`
+  // DB-editable fallback copy (ai_scripts 'whatsapp_fallbacks', 5-min TTL
+  // cache in lib/script-lines.ts; defaults in lib/default-scripts.ts).
+  const templates = await getWhatsappFallbacks()
+  let message = renderTemplate(templates.form_link, { name: name || "there", brand, link })
+  // A form-link fallback WITHOUT the link is useless — append it if a saved
+  // template dropped the {link} token.
+  if (!message.includes(link)) message = `${message.trimEnd()}\n${link}`
   const fallback = await sendWhatsAppText(number, message, branch)
   if (fallback.ok) return { ok: true }
   return { ok: false, error: `Template: ${result.error} | Fallback: ${fallback.error}` }
@@ -634,7 +643,9 @@ export async function sendCallFollowUp(to: string, name: string, branch?: Branch
   if (!isDefinitiveTemplateError(result.status)) {
     return { ok: false, error: `Template failed ambiguously (${result.error}) — fallback suppressed to avoid a double send` }
   }
-  const message = `Hi ${name || "there"}! Thanks for speaking with Priya from ${brand}. Feel free to message us here anytime with questions.\n\nWe never ask for OTP, PIN, or any payment. — ${brand}`
+  // DB-editable fallback copy — see sendApplicationLink above.
+  const templates = await getWhatsappFallbacks()
+  const message = renderTemplate(templates.call_followup, { name: name || "there", brand })
   const fallback = await sendWhatsAppText(number, message, branch)
   if (fallback.ok) return { ok: true }
   return { ok: false, error: `Template: ${result.error} | Fallback: ${fallback.error}` }
@@ -680,7 +691,9 @@ export async function sendMissedCallFollowUp(to: string, name: string, branch?: 
     return { ok: false, error: `Template failed ambiguously (${result.error}) — fallback suppressed to avoid a double send` }
   }
 
-  const message = `Hi ${name || "there"}! We tried calling you from ${brand} about a loan offer but couldn't reach you. Reply here or call us back anytime.\n\nWe never ask for OTP, PIN, or any payment. — ${brand}`
+  // DB-editable fallback copy — see sendApplicationLink above.
+  const templates = await getWhatsappFallbacks()
+  const message = renderTemplate(templates.missed_call, { name: name || "there", brand })
   const fallback = await sendWhatsAppText(number, message, branch)
   if (fallback.ok) return { ok: true }
   return { ok: false, error: `Template: ${result.error} | Fallback: ${fallback.error}` }
