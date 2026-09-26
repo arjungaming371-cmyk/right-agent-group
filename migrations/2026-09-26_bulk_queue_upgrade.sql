@@ -30,7 +30,7 @@ UPDATE outbound_queue
    SET status = 'cancelled', cancelled_at = now(), cancelled_by = 'migration:dedupe'
  WHERE status = 'pending'
    AND id NOT IN (
-     SELECT MIN(id) FROM outbound_queue
+     SELECT MIN(id::text)::uuid FROM outbound_queue
       WHERE status IN ('pending', 'dialing')
       GROUP BY right(regexp_replace(phone, '\D', '', 'g'), 10)
    );
