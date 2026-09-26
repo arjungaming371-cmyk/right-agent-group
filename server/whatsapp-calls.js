@@ -65,6 +65,9 @@ const {
 const { OpusEncoder } = require("@discordjs/opus")
 const voiceProviders = require("./voice-providers")
 const recorder = require("./recorder")
+// Last-resort spoken lines (clarify / hold / can't-reach-app) shared with
+// voicebot-server.js — code constants on purpose, see server/fallback-speech.js.
+const { CLARIFY_PHRASE, FALLBACK_PHRASE, START_FALLBACK_PHRASE } = require("./fallback-speech")
 
 // ---------- Configuration ----------
 
@@ -168,23 +171,11 @@ const ICE_SERVERS = (process.env.VOICEBOT_WA_ICE_SERVERS ||
   "stun:stun.l.google.com:19302")
   .split(",").map((s) => s.trim()).filter(Boolean).map((urls) => ({ urls }))
 
-// Fixed lines (mirrored from voicebot-server.js — kept local so this module
-// stays dependency-free from it; voicebot-server owns the Exotel path).
-const CLARIFY_PHRASE = {
-  english: "Sorry, I didn't quite catch that — could you say that again?",
-  telugu: "Sorry అండి, నాకు సరిగా వినిపించలేదు. మళ్ళీ ఒకసారి చెప్పగలరా?",
-  hindi: "Sorry, मुझे थोड़ा clear सुनाई नहीं दिया। क्या आप दोबारा बोल सकते हैं?",
-}
-const FALLBACK_PHRASE = {
-  english: "Sorry, one moment please — I'm checking on something.",
-  telugu: "క్షమించండి, ఒక నిమిషం. నేను చెక్ చేస్తున్నాను.",
-  hindi: "क्षमा कीजिए, एक पल रुकिए — मैं जाँच रही हूँ।",
-}
-const START_FALLBACK_PHRASE = {
-  english: "Hello! This is Priya from Right Agent Group.",
-  telugu: "నమస్కారం! నేను రైట్ ఏజెంట్ గ్రూప్ నుంచి మాట్లాడుతున్నాను.",
-  hindi: "नमस्ते! मैं राइट एजेंट ग्रुप से बोल रही हूँ।",
-}
+// Fixed last-resort lines (clarify / hold / can't-reach-app) now come from
+// server/fallback-speech.js — shared with voicebot-server.js so the two
+// transports can never drift apart. Kept local from the app's editable
+// channel scripts ON PURPOSE: they must still work when the app AND the
+// database are unreachable, which is exactly the scenario they cover.
 
 const TURN_TIMEOUT_MS = parseInt(process.env.VOICEBOT_TURN_TIMEOUT_MS || "20000")
 const TURN_STREAM_TIMEOUT_MS = parseInt(process.env.VOICEBOT_TURN_STREAM_TIMEOUT_MS || "90000")

@@ -10,6 +10,14 @@ import { detectFrustration, flagFrustratedCall, detectHumanRequest, flagHumanReq
 import { createNotification } from "./notifications"
 import { maybeProposeLoanEdit } from "./loan-edit-requests"
 import { currentDateTimeInstruction } from "./compliance"
+import {
+  DEFAULT_VOICE_CLOSINGS,
+  DEFAULT_VOICE_OPENERS,
+  getVoiceClosingsSnapshot,
+  getVoiceOpenersSnapshot,
+  refreshChannelScriptsIfStale,
+  type VoiceOpenerFamily,
+} from "./channel-scripts"
 
 // Permission-based opener — respect keeps people on the line.
 // Neutral/informational by design: this is an intake call, not a sales
@@ -39,14 +47,11 @@ import { currentDateTimeInstruction } from "./compliance"
 //
 // These constants are used ONLY on the call path. WhatsApp replies stay Roman
 // (LANGUAGE_STYLES) so the ops team can read them on the dashboard.
-export const GREETINGS: Record<Language, string> = {
-  english:
-    "Hello, good morning! This is Priya calling from Right Agent Group, Hyderabad — we help people get loans from over 20 banks without the running around. Do you have a minute? I'd love to know if you have any loan or financial need right now.",
-  hindi:
-    "नमस्ते, good morning! मैं प्रिया बोल रही हूं Right Agent Group, Hyderabad से — हम बीस से ज़्यादा banks से loan दिलवाने में मदद करते हैं, बिना bank bank घूमे। एक minute है आपके पास? बताइए, आपको कोई loan या financial ज़रूरत है क्या अभी?",
-  telugu:
-    "నమస్కారం! నేను Priya, Right Agent Group, Hyderabad నుండి call చేస్తున్నాను, మేము 20 plus banks తో మీకు best loan help చేస్తాం. ఒక్క minute time ఉందా sir, మీకేమైనా loan requirement ఉందా?",
-}
+// Openers/closings are now EDITABLE from the dashboard (Script Manager →
+// Voice tab → ai_scripts rows 'voice_openers' / 'voice_closings', 5-min
+// stale-while-revalidate cache in lib/channel-scripts.ts). The exported
+// constants below are the code defaults used when no DB row exists.
+export const GREETINGS = DEFAULT_VOICE_OPENERS.cold
 
 // Repeat outbound calls to the same lead (call_count > 0 before this call)
 // used to replay the exact same cold-open pitch every single time —
@@ -54,67 +59,27 @@ export const GREETINGS: Record<Language, string> = {
 // like what it is: a script replaying, not a person who remembers them.
 // Short, warm follow-up instead — the LLM's own REAL MEMORY instructions
 // pick up the specific details once the conversation continues from here.
-export const RETURNING_GREETINGS: Record<Language, string> = {
-  english:
-    "Hello again! This is Priya from Right Agent Group, following up on your loan interest — do you have a minute?",
-  hindi:
-    "नमस्ते! मैं प्रिया, Right Agent Group से, फिर से call कर रही हूं आपके loan interest के बारे में follow-up के लिए — एक minute है क्या?",
-  telugu:
-    "నమస్కారం! నేను Priya, Right Agent Group నుండి మీ loan గురించి follow-up చేస్తున్నాను, ఒక్క minute time ఉందా sir?",
-}
-
-function personalizedReturningGreeting(language: Language, name: string): string {
-  const templates: Record<Language, string> = {
-    english: `Hello ${name}! Priya here again from Right Agent Group. Just following up on our last conversation about your loan — do you have a moment?`,
-    hindi: `नमस्ते ${name} जी! मैं प्रिया, Right Agent Group से, फिर से call कर रही हूं। आपके loan के बारे में follow-up करना था — एक minute है क्या?`,
-    telugu: `నమస్కారం ${name} గారు! నేను Priya, Right Agent Group నుండి మళ్ళీ call చేస్తున్నాను, మీ loan గురించి follow-up చేద్దామని, ఒక్క minute time ఉందా sir?`,
-  }
-  return templates[language]
-}
+export const RETURNING_GREETINGS = DEFAULT_VOICE_OPENERS.returning
 
 // Inbound calls are the customer's initiative — greet like a receptionist,
 // not a telemarketer. The pitch only comes later, if it fits.
-export const INBOUND_GREETINGS: Record<Language, string> = {
-  english:
-    "Hello! Thank you for calling Right Agent Group, Hyderabad. This is Priya. How can I help you today?",
-  hindi:
-    "नमस्ते! Right Agent Group, Hyderabad को call करने के लिए धन्यवाद। मैं प्रिया बोल रही हूं। बताइए, मैं आपकी क्या मदद कर सकती हूं?",
-  telugu:
-    "నమస్కారం! Right Agent Group, Hyderabad కి call చేసినందుకు thanks sir. నేను Priya. చెప్పండి, మీకు ఎలా help చేయగలను?",
-}
-
-const CLOSING: Record<Language, string> = {
-  english: "Thank you! I'm sending a simple loan application on your WhatsApp right now — just fill it in, and our loan officer will personally consult you after that. Have a great day!",
-  hindi: "धन्यवाद! मैं अभी आपके WhatsApp पे एक simple loan application भेज रही हूं — बस उसको fill कर दीजिएगा, उसके बाद हमारे loan officer आपसे personally बात करके consult करेंगे। आपका दिन शुभ हो!",
-  telugu: "Thank you sir! నేను మీ WhatsApp కి simple loan application link పంపిస్తున్నాను, fill చేయండి. మా loan officer మీకు call చేసి discuss చేస్తారు. Have a great day sir, bye!",
-}
+export const INBOUND_GREETINGS = DEFAULT_VOICE_OPENERS.inbound
 
 // Inbound calls auto-create a lead with a placeholder like "Caller 8090"
 // before we know the real name — never greet someone by that fake name.
 const PLACEHOLDER_NAME_RE = /^(Caller \d+|Unknown|WA \d+)$/i
 
-// Same fix as GREETINGS above, for when the lead's name is already known
-// (most outbound calls — CSV uploads, manual adds, repeat callers). This
-// used to skip straight to "confirm details and get WhatsApp" as the FIRST
-// thing said — before the AI ever got to ask what they need or make a
-// case. Now it greets by name and opens the conversation like a human
-// would; discovery/convince/collect all happen through the real script.
-function personalizedGreeting(language: Language, name: string): string {
-  const templates: Record<Language, string> = {
-    english: `Hello ${name}! This is Priya calling from Right Agent Group, Hyderabad — we help people get loans from over 20 banks without the running around. Do you have a minute? I'd love to know if you have any loan need right now.`,
-    hindi: `नमस्ते ${name} जी! मैं प्रिया बोल रही हूं, Right Agent Group, Hyderabad से — हम बीस से ज़्यादा banks से loan दिलवाने में मदद करते हैं। एक minute है आपके पास? बताइए, आपको कोई loan ज़रूरत है क्या अभी?`,
-    telugu: `నమస్కారం ${name} గారు! నేను Priya, Right Agent Group, Hyderabad నుండి call చేస్తున్నాను, మేము 20 plus banks తో మీకు best loan help చేస్తాం. ఒక్క minute time ఉందా sir, ఏదైనా loan requirement ఉందా?`,
-  }
-  return templates[language]
-}
-
-function personalizedInboundGreeting(language: Language, name: string): string {
-  const templates: Record<Language, string> = {
-    english: `Hello ${name}! Thank you for calling Right Agent Group, Hyderabad. This is Priya. How can I help you today?`,
-    hindi: `नमस्ते ${name} जी! Right Agent Group, Hyderabad को call करने के लिए धन्यवाद। मैं प्रिया बोल रही हूं। बताइए, मैं आपकी क्या मदद कर सकती हूं?`,
-    telugu: `నమస్కారం ${name} గారు! Right Agent Group, Hyderabad కి call చేసినందుకు thanks. నేను Priya. చెప్పండి, మీకు ఎలా help చేయగలను?`,
-  }
-  return templates[language]
+/**
+ * Pick the opener for a call: the "{name}" personalized variant when we know
+ * the lead's real name, the plain opener otherwise. Both come from the live
+ * channel-scripts snapshot (dashboard-editable), falling back to the code
+ * defaults per language.
+ */
+function greetingFor(language: Language, family: VoiceOpenerFamily, name?: string): string {
+  const openers = getVoiceOpenersSnapshot()
+  const withName = openers[`${family}WithName`]
+  if (name && withName?.[language]) return withName[language].replace(/\{name\}/g, name)
+  return openers[family][language]
 }
 
 // BUSINESS-INITIATED WHATSAPP CALLBACK — the lead called US on WhatsApp
@@ -125,40 +90,12 @@ function personalizedInboundGreeting(language: Language, name: string): string {
 // get loans from 20+ banks" on a callback sounds like the agent has no idea
 // who they are. Repeat calls (call_count > 1) keep RETURNING_GREETINGS —
 // by then the follow-up framing is correct on every channel.
-export const WA_CALLBACK_GREETINGS: Record<Language, string> = {
-  english:
-    "Hello! This is Priya from Right Agent Group, Hyderabad — you had reached out to us on WhatsApp earlier, so I'm calling you back. Do you have a minute? I'd love to know what you were looking for.",
-  hindi:
-    "नमस्ते! मैं प्रिया बोल रही हूं Right Agent Group, Hyderabad से — आपने पहले हमें WhatsApp पे reach out किया था, तो मैं आपको call back कर रही हूं। एक minute है? बताइए, आपको क्या चाहिए था?",
-  telugu:
-    "నమస్కారం! నేను Priya, Right Agent Group, Hyderabad నుండి — మీరు ఇంతకుముందు మా WhatsApp లో contact అయ్యారు కాబట్టి call back చేస్తున్నాను. 1 minute time ఉందా sir?",
-}
+export const WA_CALLBACK_GREETINGS = DEFAULT_VOICE_OPENERS.whatsappCallback
 
-function personalizedWaCallbackGreeting(language: Language, name: string): string {
-  const templates: Record<Language, string> = {
-    english: `Hello ${name}! Priya here from Right Agent Group — you had reached out to us on WhatsApp earlier, so I'm calling you back. Do you have a minute?`,
-    hindi: `नमस्ते ${name} जी! मैं प्रिया, Right Agent Group से — आपने पहले हमें WhatsApp पे contact किया था, तो मैं call back कर रही हूं। एक minute है क्या?`,
-    telugu: `నమస్కారం ${name} గారు! నేను Priya, Right Agent Group నుండి — మీరు ఇంతకుముందు మా WhatsApp లో contact అయ్యారు కాబట్టి call back చేస్తున్నాను. కొంచెం time ఉందా sir?`,
-  }
-  return templates[language]
-}
-
-const RETRY_MSG: Record<Language, string> = {
-  english: "Sorry, I had a small technical moment. Could you please share your name so I can send your loan application link?",
-  hindi:   "माफ़ कीजिए, छोटी technical problem हुई। कृपया अपना नाम बताएं ताकि मैं आपका loan application link भेज सकूं।",
-  telugu:  "Sorry sir, చిన్న technical issue వచ్చింది. దయచేసి మీ పేరు చెప్తారా, loan application link పంపిస్తాను.",
-}
-
-// Used ONLY when the LLM backend is genuinely out of capacity (Groq 429) —
-// retrying won't help mid-call since the rate window doesn't clear in the
-// next few seconds, so stringing the customer along with repeated
-// "technical moment" replies is worse than ending politely and calling
-// back once things clear.
-const RATE_LIMIT_REPLY: Record<Language, string> = {
-  english: "Sorry sir, we're having a brief network issue on our end. I'll have someone call you back in a few minutes to continue — thank you for your patience!",
-  hindi:   "Sorry sir, हमारी तरफ से थोड़ी network problem आ रही है। कुछ minute में हम आपको वापस call करेंगे — धन्यवाद!",
-  telugu:  "Sorry sir, కొంచెం network issue వచ్చింది. మేము 2 minutes లో మళ్ళీ call చేస్తాము — thank you sir!",
-}
+// RETRY_MSG / RATE_LIMIT_REPLY / CLOSING / GOODBYE_REPLY moved to the
+// editable channel-scripts snapshot as 'voice_closings' (keys: retry,
+// rateLimit, qualified, goodbye) — same texts as defaults, now editable
+// from the dashboard with per-language fallback to these defaults.
 
 // FIXED: only real goodbye phrases end the call.
 // Plain "thank you" / "धन्यवाद" / "ధన్యవాదాలు" must NOT hang up —
@@ -186,13 +123,8 @@ const CUSTOMER_BYE_RE =
 const VOICEMAIL_RE =
   /leave (a|your) message|after the (tone|beep)|voice ?mail|mailbox( is full)?|record your message|please try your call (again )?later|message chhod|beep ke baad|message pettandi|beep tarvata/i
 
-// Short, warm sign-off — NOT the link-sending CLOSING above, which promises a
-// WhatsApp message that may not exist yet.
-const GOODBYE_REPLY: Record<Language, string> = {
-  english: "Thank you for your time! Have a great day. Goodbye!",
-  hindi: "आपके समय के लिए धन्यवाद! आपका दिन शुभ हो। नमस्ते!",
-  telugu: "Thank you so much sir! Have a great day, bye!",
-}
+// Short, warm sign-off — NOT the link-sending 'qualified' closing, which
+// promises a WhatsApp message that may not exist yet. Text: voice_closings.goodbye.
 
 /** Called on the first webhook hit of a call (before any speech). Bumps call_count once per call. */
 export async function startCall(
@@ -201,6 +133,9 @@ export async function startCall(
   language: Language,
   direction: "inbound" | "outbound" = "outbound"
 ): Promise<string> {
+  // Pull the freshest dashboard-edited openers/closings (no-op when the
+  // 5-min cache is warm; backs off silently if the DB is unreachable).
+  await refreshChannelScriptsIfStale().catch(() => {})
   // Read name + call_count BEFORE bumping call_count below, so "is this a
   // repeat call" reflects the count going INTO this call, not after it.
   let name: string | undefined
@@ -252,20 +187,20 @@ export async function startCall(
   const hasName = name && !PLACEHOLDER_NAME_RE.test(name)
 
   if (direction === "inbound") {
-    return hasName ? personalizedInboundGreeting(language, name!) : INBOUND_GREETINGS[language]
+    return greetingFor(language, "inbound", hasName ? name! : undefined)
   }
   // Business-initiated WHATSAPP call: first contact on this channel is a
   // callback ("you reached out earlier"), not a cold pitch.
   if (callSid.startsWith("wacall-")) {
     if (isRepeatCall) {
-      return hasName ? personalizedReturningGreeting(language, name!) : RETURNING_GREETINGS[language]
+      return greetingFor(language, "returning", hasName ? name! : undefined)
     }
-    return hasName ? personalizedWaCallbackGreeting(language, name!) : WA_CALLBACK_GREETINGS[language]
+    return greetingFor(language, "whatsappCallback", hasName ? name! : undefined)
   }
   if (isRepeatCall) {
-    return hasName ? personalizedReturningGreeting(language, name!) : RETURNING_GREETINGS[language]
+    return greetingFor(language, "returning", hasName ? name! : undefined)
   }
-  return hasName ? personalizedGreeting(language, name!) : GREETINGS[language]
+  return greetingFor(language, "cold", hasName ? name! : undefined)
 }
 
 async function getHistory(callSid: string): Promise<{ role: "user" | "model"; content: string }[]> {
@@ -678,7 +613,7 @@ export async function handleTurn(opts: {
   // behavior a human agent would never do. History must be non-empty so a
   // first-utterance misfire can't kill a call that just connected.
   if (history.length > 0 && CUSTOMER_BYE_RE.test(speech)) {
-    const reply = GOODBYE_REPLY[language]
+    const reply = getVoiceClosingsSnapshot().goodbye[language]
     updateTranscriptAsync(callSid, speech, reply)
     return { text: reply, hangup: true }
   }
@@ -698,14 +633,15 @@ export async function handleTurn(opts: {
   let rateLimited = false
   try {
     reply = (await chatWithLLM(messages, language, mergedInstructions || undefined, { channel: "call", branchId })).trim()
-    if (!reply) reply = GREETINGS[language]
+    if (!reply) reply = getVoiceOpenersSnapshot().cold[language]
   } catch (e) {
     console.error("LLM error:", e)
+    const closings = getVoiceClosingsSnapshot()
     if (isRateLimitError(e)) {
       rateLimited = true
-      reply = RATE_LIMIT_REPLY[language]
+      reply = closings.rateLimit[language]
     } else {
-      reply = RETRY_MSG[language]
+      reply = closings.retry[language]
     }
   }
 
@@ -729,7 +665,7 @@ export async function handleTurn(opts: {
   maybeProposeLoanEdit(leadId, "priya_voice", speech)
 
   const completed = await completeLeadIfReady({ leadId, callSid, callerPhone, isWhatsAppCall, messages, reply, branchId })
-  if (completed) return { text: CLOSING[language], hangup: true }
+  if (completed) return { text: getVoiceClosingsSnapshot().qualified[language], hangup: true }
 
   return { text: reply, hangup: GOODBYE_RE.test(reply) }
 }
@@ -775,7 +711,7 @@ export async function handleTurnStream(
   }
 
   if (history.length > 0 && CUSTOMER_BYE_RE.test(speech)) {
-    const reply = GOODBYE_REPLY[language]
+    const reply = getVoiceClosingsSnapshot().goodbye[language]
     updateTranscriptAsync(callSid, speech, reply)
     onSentence(reply)
     return { hangup: true }
@@ -806,13 +742,14 @@ export async function handleTurnStream(
     const tail = pending.trim()
     if (tail) onSentence(tail)
     if (!reply) {
-      reply = GREETINGS[language]
+      reply = getVoiceOpenersSnapshot().cold[language]
       onSentence(reply)
     }
   } catch (e) {
     console.error("LLM error:", e)
+    const closings = getVoiceClosingsSnapshot()
     if (isRateLimitError(e)) {
-      const msg = RATE_LIMIT_REPLY[language]
+      const msg = closings.rateLimit[language]
       await updateTranscriptAsync(callSid, speech, msg)
       onSentence(msg)
       if (callSid) {
@@ -821,7 +758,7 @@ export async function handleTurnStream(
       }
       return { hangup: true }
     }
-    const msg = RETRY_MSG[language]
+    const msg = closings.retry[language]
     await updateTranscriptAsync(callSid, speech, msg)
     onSentence(msg)
     return { hangup: false }
@@ -838,7 +775,7 @@ export async function handleTurnStream(
 
   const completed = await completeLeadIfReady({ leadId, callSid, callerPhone, isWhatsAppCall, messages, reply, branchId })
   if (completed) {
-    onSentence(CLOSING[language])
+    onSentence(getVoiceClosingsSnapshot().qualified[language])
     return { hangup: true }
   }
 

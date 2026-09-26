@@ -37,3 +37,4 @@ server/stt-service/models/
 server/stt-service/venv/
 server/tts-service/__pycache__/
 server/tts-service/venv/
+scripts/.channel-build/
