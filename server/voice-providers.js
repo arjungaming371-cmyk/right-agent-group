@@ -53,10 +53,10 @@ const SARVAM_TTS_MODEL = process.env.SARVAM_TTS_MODEL || "bulbul:v3"
 // shruti, suhani, kavitha, rupali; males: shubh (default), aditya, rahul...
 const SARVAM_TTS_SPEAKER = process.env.SARVAM_TTS_SPEAKER || "priya"
 const SARVAM_TTS_SAMPLE_RATE = parseInt(process.env.SARVAM_TTS_SAMPLE_RATE || "24000")
-// FIX (2026-09-26): default back to 1.0 (NORMAL speed). daff323 had shipped
-// 1.20 — combined with the now-exactly-realtime pacer the voice audibly
-// rushed. 1.0 speaks at the provider's natural rate; tune via env only.
-const SARVAM_TTS_PACE = parseFloat(process.env.SARVAM_TTS_PACE || "1.0")
+// Pace 1.15 provides natural human conversational speed without dragging or slow motion
+const SARVAM_TTS_PACE = parseFloat(process.env.SARVAM_TTS_PACE || "1.15")
+// Temperature 0.65 for natural, warm expressive vocal inflections
+const SARVAM_TTS_TEMPERATURE = parseFloat(process.env.SARVAM_TTS_TEMPERATURE || "0.65")
 
 const CARTESIA_API_KEY = (process.env.CARTESIA_API_KEY || "").trim()
 const CARTESIA_BASE = (process.env.CARTESIA_URL || "https://api.cartesia.ai").replace(/\/$/, "")
@@ -136,6 +136,13 @@ function normalizeForTts(text) {
   out = out.replace(/\b(\d+(?:\.\d+)?)\s*[lL]\b/g, "$1 lakh") // 20L / 20 L → 20 lakh (banned shorthand, model slips)
   out = out.replace(/\b(\d+(?:\.\d+)?)\s*[kK]\b/g, "$1 thousand") // 10k → 10 thousand
   out = out.replace(/\p{Extended_Pictographic}/gu, "") // emoji is never spoken
+  // Native conversational flow improvements:
+  out = out.replace(/[—–]/g, ", ") // dashes to gentle commas to prevent long dead pauses
+  out = out.replace(/\b1\s*minute\b/gi, (match, offset, str) => /[\u0C00-\u0C7F]/.test(str) ? "ఒక్క minute" : match) // "1 minute" -> "ఒక్క minute" in Telugu for native pronunciation
+  out = out.replace(/\b(\d+)\s*,\s*(\d{3})\b/g, "$1$2") // remove comma inside numbers like 14,500 -> 14500
+  out = out.replace(/\b(\d+)\s*-\s*(\d+)\b/g, "$1 to $2") // 15-20 -> 15 to 20
+  out = out.replace(/Rs\.?\s*(\d+)/gi, "$1 rupees") // Rs. 5000 -> 5000 rupees
+  out = out.replace(/(\.{2,}|…)/g, ".") // ellipses to single period
   out = out.replace(/\s{2,}/g, " ").trim()
   return out
 }
@@ -226,6 +233,7 @@ async function sarvamStt(wavBuffer, language) {
 // falsy → the deployment default (SARVAM_TTS_SPEAKER).
 async function sarvamTts(text, language, speakerOverride) {
   if (!SARVAM_API_KEY) throw new Error("SARVAM_API_KEY is not set — cannot use TTS_CALL_PROVIDER=sarvam")
+  text = normalizeForTts(text)
   const speaker = speakerOverride || SARVAM_TTS_SPEAKER
   const locale = resolveTtsLocale(text, language, SARVAM_TTS_LOCALES)
   const body = {
@@ -237,6 +245,7 @@ async function sarvamTts(text, language, speakerOverride) {
     output_audio_codec: "wav",
   }
   if (typeof SARVAM_TTS_PACE === "number" && !isNaN(SARVAM_TTS_PACE)) body.pace = SARVAM_TTS_PACE
+  if (typeof SARVAM_TTS_TEMPERATURE === "number" && !isNaN(SARVAM_TTS_TEMPERATURE)) body.temperature = SARVAM_TTS_TEMPERATURE
   const t0 = Date.now()
   const res = await fetchWithRetry(`${SARVAM_BASE}/text-to-speech`, {
     method: "POST",
@@ -262,6 +271,7 @@ async function sarvamTts(text, language, speakerOverride) {
 // when voice_provider=cartesia); falsy → the deployment default.
 async function cartesiaTts(text, language, voiceIdOverride) {
   if (!CARTESIA_API_KEY) throw new Error("CARTESIA_API_KEY is not set — cannot use TTS_CALL_PROVIDER=cartesia")
+  text = normalizeForTts(text)
   const voiceId = voiceIdOverride || CARTESIA_VOICE_ID
   if (!voiceId) throw new Error("CARTESIA_VOICE_ID is not set — pick a voice at https://play.cartesia.ai/voices")
   const locale = resolveTtsLocale(text, language, CARTESIA_LOCALES)

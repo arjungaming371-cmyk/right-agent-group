@@ -45,7 +45,7 @@ export const GREETINGS: Record<Language, string> = {
   hindi:
     "नमस्ते, good morning! मैं प्रिया बोल रही हूं Right Agent Group, Hyderabad से — हम बीस से ज़्यादा banks से loan दिलवाने में मदद करते हैं, बिना bank bank घूमे। एक minute है आपके पास? बताइए, आपको कोई loan या financial ज़रूरत है क्या अभी?",
   telugu:
-    "నమస్కారం! నేను Priya, Right Agent Group, Hyderabad నుండి call చేస్తున్నాను — మేము 20 plus banks తో మీకు best loan help చేస్తాం. 1 minute time ఉందా sir, మీకేమైనా loan requirement ఉందా?",
+    "నమస్కారం! నేను Priya, Right Agent Group, Hyderabad నుండి call చేస్తున్నాను, మేము 20 plus banks తో మీకు best loan help చేస్తాం. ఒక్క minute time ఉందా sir, మీకేమైనా loan requirement ఉందా?",
 }
 
 // Repeat outbound calls to the same lead (call_count > 0 before this call)
@@ -60,14 +60,14 @@ export const RETURNING_GREETINGS: Record<Language, string> = {
   hindi:
     "नमस्ते! मैं प्रिया, Right Agent Group से, फिर से call कर रही हूं आपके loan interest के बारे में follow-up के लिए — एक minute है क्या?",
   telugu:
-    "నమస్కారం! నేను Priya, Right Agent Group నుండి మీ loan గురించి follow-up చేస్తున్నాను — 1 minute time ఉందా sir?",
+    "నమస్కారం! నేను Priya, Right Agent Group నుండి మీ loan గురించి follow-up చేస్తున్నాను, ఒక్క minute time ఉందా sir?",
 }
 
 function personalizedReturningGreeting(language: Language, name: string): string {
   const templates: Record<Language, string> = {
     english: `Hello ${name}! Priya here again from Right Agent Group. Just following up on our last conversation about your loan — do you have a moment?`,
     hindi: `नमस्ते ${name} जी! मैं प्रिया, Right Agent Group से, फिर से call कर रही हूं। आपके loan के बारे में follow-up करना था — एक minute है क्या?`,
-    telugu: `నమస్కారం ${name} గారు! నేను Priya, Right Agent Group నుండి మళ్ళీ call చేస్తున్నాను — మీ loan గురించి follow-up చేద్దామని, కొంచెం time ఉందా sir?`,
+    telugu: `నమస్కారం ${name} గారు! నేను Priya, Right Agent Group నుండి మళ్ళీ call చేస్తున్నాను, మీ loan గురించి follow-up చేద్దామని, ఒక్క minute time ఉందా sir?`,
   }
   return templates[language]
 }
@@ -103,7 +103,7 @@ function personalizedGreeting(language: Language, name: string): string {
   const templates: Record<Language, string> = {
     english: `Hello ${name}! This is Priya calling from Right Agent Group, Hyderabad — we help people get loans from over 20 banks without the running around. Do you have a minute? I'd love to know if you have any loan need right now.`,
     hindi: `नमस्ते ${name} जी! मैं प्रिया बोल रही हूं, Right Agent Group, Hyderabad से — हम बीस से ज़्यादा banks से loan दिलवाने में मदद करते हैं। एक minute है आपके पास? बताइए, आपको कोई loan ज़रूरत है क्या अभी?`,
-    telugu: `నమస్కారం ${name} గారు! నేను Priya, Right Agent Group, Hyderabad నుండి call చేస్తున్నాను — మేము 20 plus banks తో మీకు best loan help చేస్తాం. 1 minute time ఉందా sir, ఏదైనా loan requirement ఉందా?`,
+    telugu: `నమస్కారం ${name} గారు! నేను Priya, Right Agent Group, Hyderabad నుండి call చేస్తున్నాను, మేము 20 plus banks తో మీకు best loan help చేస్తాం. ఒక్క minute time ఉందా sir, ఏదైనా loan requirement ఉందా?`,
   }
   return templates[language]
 }
