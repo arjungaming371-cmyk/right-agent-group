@@ -79,11 +79,9 @@ const SILENCE_END_MS = 600
 const MIN_SPEECH_MS = 250
 const MAX_UTTERANCE_MS = 15000
 
-// Barge-in defaults ON for WhatsApp: the client does its own echo
-// cancellation on IP audio, so sustained loud input while Priya talks is a
-// real interruption, not line echo (the Exotel path needs a manual echo
-// probe before enabling this — see voicebot-server.js).
-const BARGE_IN = (process.env.VOICEBOT_WA_BARGE_IN || "1").trim() === "1"
+// Barge-in disabled by default so Priya finishes speaking without mid-call interruptions.
+// Can be re-enabled by setting VOICEBOT_WA_BARGE_IN=1 in .env if desired.
+const BARGE_IN = (process.env.VOICEBOT_WA_BARGE_IN || "0").trim() === "1"
 const BARGE_MIN_MS = parseInt(process.env.VOICEBOT_WA_BARGE_MIN_MS || "300")
 
 // Dead-peer backstop while CONNECTED: Meta's "terminate" webhook can be lost

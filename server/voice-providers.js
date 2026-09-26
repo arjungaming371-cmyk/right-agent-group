@@ -53,7 +53,7 @@ const SARVAM_TTS_MODEL = process.env.SARVAM_TTS_MODEL || "bulbul:v3"
 // shruti, suhani, kavitha, rupali; males: shubh (default), aditya, rahul...
 const SARVAM_TTS_SPEAKER = process.env.SARVAM_TTS_SPEAKER || "priya"
 const SARVAM_TTS_SAMPLE_RATE = parseInt(process.env.SARVAM_TTS_SAMPLE_RATE || "24000")
-const SARVAM_TTS_PACE = parseFloat(process.env.SARVAM_TTS_PACE || "1.0")
+const SARVAM_TTS_PACE = parseFloat(process.env.SARVAM_TTS_PACE || "1.20")
 
 const CARTESIA_API_KEY = (process.env.CARTESIA_API_KEY || "").trim()
 const CARTESIA_BASE = (process.env.CARTESIA_URL || "https://api.cartesia.ai").replace(/\/$/, "")
@@ -195,7 +195,7 @@ async function sarvamTts(text, language, speakerOverride) {
     speech_sample_rate: SARVAM_TTS_SAMPLE_RATE,
     output_audio_codec: "wav",
   }
-  if (SARVAM_TTS_PACE !== 1.0) body.pace = SARVAM_TTS_PACE
+  if (typeof SARVAM_TTS_PACE === "number" && !isNaN(SARVAM_TTS_PACE)) body.pace = SARVAM_TTS_PACE
   const t0 = Date.now()
   const res = await fetchWithRetry(`${SARVAM_BASE}/text-to-speech`, {
     method: "POST",

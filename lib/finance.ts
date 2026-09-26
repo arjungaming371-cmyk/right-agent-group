@@ -238,11 +238,9 @@ export function buildEmiInstruction(customerMessage: string, fallback: { loanAmo
   const totalInt = totalInterest(principal, emi, tenureMonths)
 
   const instruction =
-    `EXACT EMI CALCULATION (use this precise number, do NOT calculate your own — you are bad at arithmetic): ` +
-    `For a ${loanType} of ${formatINR(principal)} at ${rateInfo.ratePct}% p.a. (${rateInfo.lender}) over ${tenureMonths / 12} years, ` +
-    `the EMI is ${formatINR(emi)} per month (total interest over the loan: ${formatINR(totalInt)}). ` +
-    `State this exact EMI figure directly and confidently — it is a real calculation, not a guess. ` +
-    `Still remind them the FINAL rate depends on their credit profile, so this is an illustrative estimate.`
+    `EXACT EMI CALCULATION (use this precise number, do NOT calculate your own): ` +
+    `For a ${loanType} of ${formatINR(principal)} at ${rateInfo.ratePct}% p.a. over ${tenureMonths / 12} years, ` +
+    `the EMI is ${formatINR(emi)} per month. State this exact EMI figure in 1 short sentence.`
 
   return { instruction, principal, ratePct: rateInfo.ratePct, tenureMonths, emi }
 }

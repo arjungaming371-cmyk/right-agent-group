@@ -45,7 +45,7 @@ export const GREETINGS: Record<Language, string> = {
   hindi:
     "नमस्ते, good morning! मैं प्रिया बोल रही हूं Right Agent Group, Hyderabad से — हम बीस से ज़्यादा banks से loan दिलवाने में मदद करते हैं, बिना bank bank घूमे। एक minute है आपके पास? बताइए, आपको कोई loan या financial ज़रूरत है क्या अभी?",
   telugu:
-    "నమస్కారం! నేను ప్రియ, Right Agent Group, Hyderabad నుండి మాట్లాడుతున్నాను — మేము ఇరవైకి పైగా banks తో కలిసి మీకు సులభంగా loan దొరికేలా help చేస్తాము, bank bank తిరగకుండా. మీకు కొంచెం సమయం ఉందా? ఇప్పుడు మీకు ఏదైనా loan లేదా financial అవసరం ఉందా అని తెలుసుకోవాలని అనుకుంటున్నాను.",
+    "నమస్కారం! నేను Priya, Right Agent Group, Hyderabad నుండి call చేస్తున్నాను — మేము 20 plus banks తో మీకు best loan help చేస్తాం. 1 minute time ఉందా sir, మీకేమైనా loan requirement ఉందా?",
 }
 
 // Repeat outbound calls to the same lead (call_count > 0 before this call)
@@ -60,14 +60,14 @@ export const RETURNING_GREETINGS: Record<Language, string> = {
   hindi:
     "नमस्ते! मैं प्रिया, Right Agent Group से, फिर से call कर रही हूं आपके loan interest के बारे में follow-up के लिए — एक minute है क्या?",
   telugu:
-    "నమస్కారం! నేను ప్రియ, Right Agent Group నుండి, మీ loan interest గురించి follow-up చేస్తున్నాను — కొంచెం time ఉందా?",
+    "నమస్కారం! నేను Priya, Right Agent Group నుండి మీ loan గురించి follow-up చేస్తున్నాను — 1 minute time ఉందా sir?",
 }
 
 function personalizedReturningGreeting(language: Language, name: string): string {
   const templates: Record<Language, string> = {
     english: `Hello ${name}! Priya here again from Right Agent Group. Just following up on our last conversation about your loan — do you have a moment?`,
     hindi: `नमस्ते ${name} जी! मैं प्रिया, Right Agent Group से, फिर से call कर रही हूं। आपके loan के बारे में follow-up करना था — एक minute है क्या?`,
-    telugu: `నమస్కారం ${name} గారు! నేను ప్రియ, Right Agent Group నుండి మళ్ళీ call చేస్తున్నాను. మీ loan గురించి follow-up చేద్దామా అనుకుంటున్నాను — కొంచెం time ఉందా?`,
+    telugu: `నమస్కారం ${name} గారు! నేను Priya, Right Agent Group నుండి మళ్ళీ call చేస్తున్నాను — మీ loan గురించి follow-up చేద్దామని, కొంచెం time ఉందా sir?`,
   }
   return templates[language]
 }
@@ -80,13 +80,13 @@ export const INBOUND_GREETINGS: Record<Language, string> = {
   hindi:
     "नमस्ते! Right Agent Group, Hyderabad को call करने के लिए धन्यवाद। मैं प्रिया बोल रही हूं। बताइए, मैं आपकी क्या मदद कर सकती हूं?",
   telugu:
-    "నమస్కారం! Right Agent Group, Hyderabad కి call చేసినందుకు ధన్యవాదాలు. నేను ప్రియ. చెప్పండి, మీకు ఎలా help చేయగలను?",
+    "నమస్కారం! Right Agent Group, Hyderabad కి call చేసినందుకు thanks sir. నేను Priya. చెప్పండి, మీకు ఎలా help చేయగలను?",
 }
 
 const CLOSING: Record<Language, string> = {
   english: "Thank you! I'm sending a simple loan application on your WhatsApp right now — just fill it in, and our loan officer will personally consult you after that. Have a great day!",
   hindi: "धन्यवाद! मैं अभी आपके WhatsApp पे एक simple loan application भेज रही हूं — बस उसको fill कर दीजिएगा, उसके बाद हमारे loan officer आपसे personally बात करके consult करेंगे। आपका दिन शुभ हो!",
-  telugu: "ధన్యవాదాలు! నేను ఇప్పుడే మీ WhatsApp కి ఒక simple loan application పంపిస్తున్నాను — దాన్ని fill చేయండి చాలు, ఆ తర్వాత మా loan officer మీతో వ్యక్తిగతంగా మాట్లాడి సలహా ఇస్తారు. మీకు మంచి రోజు జరగాలి!",
+  telugu: "Thank you sir! నేను మీ WhatsApp కి simple loan application link పంపిస్తున్నాను, fill చేయండి. మా loan officer మీకు call చేసి discuss చేస్తారు. Have a great day sir, bye!",
 }
 
 // Inbound calls auto-create a lead with a placeholder like "Caller 8090"
@@ -103,7 +103,7 @@ function personalizedGreeting(language: Language, name: string): string {
   const templates: Record<Language, string> = {
     english: `Hello ${name}! This is Priya calling from Right Agent Group, Hyderabad — we help people get loans from over 20 banks without the running around. Do you have a minute? I'd love to know if you have any loan need right now.`,
     hindi: `नमस्ते ${name} जी! मैं प्रिया बोल रही हूं, Right Agent Group, Hyderabad से — हम बीस से ज़्यादा banks से loan दिलवाने में मदद करते हैं। एक minute है आपके पास? बताइए, आपको कोई loan ज़रूरत है क्या अभी?`,
-    telugu: `నమస్కారం ${name} గారు! నేను ప్రియ, Right Agent Group, Hyderabad నుండి మాట్లాడుతున్నాను — మేము ఇరవైకి పైగా banks తో కలిసి మీకు సులభంగా loan దొరికేలా help చేస్తాము. మీకు కొంచెం సమయం ఉందా? ఇప్పుడు ఏదైనా loan అవసరం ఉందా అని తెలుసుకోవాలని అనుకుంటున్నాను.`,
+    telugu: `నమస్కారం ${name} గారు! నేను Priya, Right Agent Group, Hyderabad నుండి call చేస్తున్నాను — మేము 20 plus banks తో మీకు best loan help చేస్తాం. 1 minute time ఉందా sir, ఏదైనా loan requirement ఉందా?`,
   }
   return templates[language]
 }
@@ -112,7 +112,7 @@ function personalizedInboundGreeting(language: Language, name: string): string {
   const templates: Record<Language, string> = {
     english: `Hello ${name}! Thank you for calling Right Agent Group, Hyderabad. This is Priya. How can I help you today?`,
     hindi: `नमस्ते ${name} जी! Right Agent Group, Hyderabad को call करने के लिए धन्यवाद। मैं प्रिया बोल रही हूं। बताइए, मैं आपकी क्या मदद कर सकती हूं?`,
-    telugu: `నమస్కారం ${name} గారు! Right Agent Group, Hyderabad కి call చేసినందుకు ధన్యవాదాలు. నేను ప్రియ. చెప్పండి, మీకు ఎలా help చేయగలను?`,
+    telugu: `నమస్కారం ${name} గారు! Right Agent Group, Hyderabad కి call చేసినందుకు thanks. నేను Priya. చెప్పండి, మీకు ఎలా help చేయగలను?`,
   }
   return templates[language]
 }
@@ -131,14 +131,14 @@ export const WA_CALLBACK_GREETINGS: Record<Language, string> = {
   hindi:
     "नमस्ते! मैं प्रिया बोल रही हूं Right Agent Group, Hyderabad से — आपने पहले हमें WhatsApp पे reach out किया था, तो मैं आपको call back कर रही हूं। एक minute है? बताइए, आपको क्या चाहिए था?",
   telugu:
-    "నమస్కారం! నేను ప్రియ, Right Agent Group, Hyderabad నుండి మాట్లాడుతున్నాను — మీరు ఇంతకుముందు మా WhatsApp కి reach out అయ్యారు కాబట్టి call back చేస్తున్నాను. కొంచెం సమయం ఉందా? మీకు ఏం కావాలో తెలుసుకోవాలనుకుంటున్నాను.",
+    "నమస్కారం! నేను Priya, Right Agent Group, Hyderabad నుండి — మీరు ఇంతకుముందు మా WhatsApp లో contact అయ్యారు కాబట్టి call back చేస్తున్నాను. 1 minute time ఉందా sir?",
 }
 
 function personalizedWaCallbackGreeting(language: Language, name: string): string {
   const templates: Record<Language, string> = {
     english: `Hello ${name}! Priya here from Right Agent Group — you had reached out to us on WhatsApp earlier, so I'm calling you back. Do you have a minute?`,
     hindi: `नमस्ते ${name} जी! मैं प्रिया, Right Agent Group से — आपने पहले हमें WhatsApp पे contact किया था, तो मैं call back कर रही हूं। एक minute है क्या?`,
-    telugu: `నమస్కారం ${name} గారు! నేను ప్రియ, Right Agent Group నుండి — మీరు ఇంతకుముందు మా WhatsApp లో contact అయ్యారు కాబట్టి call back చేస్తున్నాను. కొంచెం time ఉందా?`,
+    telugu: `నమస్కారం ${name} గారు! నేను Priya, Right Agent Group నుండి — మీరు ఇంతకుముందు మా WhatsApp లో contact అయ్యారు కాబట్టి call back చేస్తున్నాను. కొంచెం time ఉందా sir?`,
   }
   return templates[language]
 }
@@ -146,7 +146,7 @@ function personalizedWaCallbackGreeting(language: Language, name: string): strin
 const RETRY_MSG: Record<Language, string> = {
   english: "Sorry, I had a small technical moment. Could you please share your name so I can send your loan application link?",
   hindi:   "माफ़ कीजिए, छोटी technical problem हुई। कृपया अपना नाम बताएं ताकि मैं आपका loan application link भेज सकूं।",
-  telugu:  "Sorry, చిన్న technical problem వచ్చింది. దయచేసి మీ పేరు చెప్పండి, మీ loan application link పంపిస్తాను.",
+  telugu:  "Sorry sir, చిన్న technical issue వచ్చింది. దయచేసి మీ పేరు చెప్తారా, loan application link పంపిస్తాను.",
 }
 
 // Used ONLY when the LLM backend is genuinely out of capacity (Groq 429) —
@@ -157,7 +157,7 @@ const RETRY_MSG: Record<Language, string> = {
 const RATE_LIMIT_REPLY: Record<Language, string> = {
   english: "Sorry sir, we're having a brief network issue on our end. I'll have someone call you back in a few minutes to continue — thank you for your patience!",
   hindi:   "Sorry sir, हमारी तरफ से थोड़ी network problem आ रही है। कुछ minute में हम आपको वापस call करेंगे — धन्यवाद!",
-  telugu:  "Sorry sir, మా వైపు నుండి కొంచెం network problem వచ్చింది. కొన్ని నిమిషాల్లో మేము మళ్ళీ call చేస్తాము — ధన్యవాదాలు!",
+  telugu:  "Sorry sir, కొంచెం network issue వచ్చింది. మేము 2 minutes లో మళ్ళీ call చేస్తాము — thank you sir!",
 }
 
 // FIXED: only real goodbye phrases end the call.
