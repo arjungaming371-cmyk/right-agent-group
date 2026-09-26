@@ -43,12 +43,13 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const res = await terminateWhatsAppCall(callId, branch)
+  const cleanCallId = callId.replace(/^wacall-/, "").trim()
+  const res = await terminateWhatsAppCall(cleanCallId, branch)
   if (res.ok) {
-    console.log(`⏹ wa hangup: Graph terminate accepted for ${callId}${branch?.id ? ` (branch ${branch.id})` : ""}`)
+    console.log(`⏹ wa hangup: Graph terminate accepted for ${cleanCallId}${branch?.id ? ` (branch ${branch.id})` : ""}`)
   } else {
     // Expected when the customer already hung up first — log, don't alarm.
-    console.warn(`wa hangup: Graph terminate rejected for ${callId}: ${res.error}`)
+    console.warn(`wa hangup: Graph terminate rejected for ${cleanCallId}: ${res.error}`)
   }
-  return NextResponse.json({ ok: res.ok, error: res.error ?? null })
+  return NextResponse.json({ ok: res.ok, error: res.error ?? null }, { status: res.ok ? 200 : (res.status || 400) })
 }

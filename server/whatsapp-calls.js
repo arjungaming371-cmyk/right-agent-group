@@ -156,7 +156,7 @@ const MEDIA_TIMEOUT_MS = Math.max(30_000, parseInt(process.env.VOICEBOT_WA_MEDIA
 // never left on open-mic dead air. end() is idempotent; whichever lands
 // first wins. VOICEBOT_WA_BUSINESS_HANGUP=0 restores the old behaviour.
 const BUSINESS_HANGUP = (process.env.VOICEBOT_WA_BUSINESS_HANGUP || "1").trim() !== "0"
-const HANGUP_FALLBACK_MS = Math.max(3_000, parseInt(process.env.VOICEBOT_WA_HANGUP_FALLBACK_MS || "8000") || 8_000)
+const HANGUP_FALLBACK_MS = Math.max(2_000, parseInt(process.env.VOICEBOT_WA_HANGUP_FALLBACK_MS || "4000") || 4_000)
 
 // TTS: WhatsApp calls default to Sarvam or Cartesia if specified.
 // Automatic Sarvam fallback is always active if Cartesia fails or runs out of credits.
@@ -1142,7 +1142,11 @@ class WhatsAppCallSession {
             signal: AbortSignal.timeout(6000),
           })
           const data = await res.json().catch(() => ({}))
-          if (res.ok && data?.ok) { lastErr = null; break }
+          if (res.ok && data?.ok) {
+            lastErr = null
+            console.log(`⏹ wa hangup: Graph terminate accepted by Meta for ${this.callSid}`)
+            break
+          }
           lastErr = new Error(data?.error || `HTTP ${res.status}`)
           // A Graph "call already terminated" style rejection is FINAL — the
           // call is ending regardless; retrying just burns the fallback window.
@@ -1150,9 +1154,11 @@ class WhatsAppCallSession {
         } catch (e) {
           lastErr = e
         }
-        if (attempt < 2) await new Promise((r) => setTimeout(r, 1000))
+        if (attempt < 2 && !this.closed) await new Promise((r) => setTimeout(r, 1000))
       }
-      if (lastErr) console.error(`⏹ wa hangup: Graph terminate did not confirm for ${this.callSid}: ${lastErr.message} — fallback timer will end the session`)
+      if (lastErr) {
+        console.error(`⏹ wa hangup: Graph terminate did not confirm for ${this.callSid}: ${lastErr.message} — fallback timer will end the session`)
+      }
     })()
     // Twin of the terminate webhook. If Meta's webhook arrives first this is
     // a no-op (end() is idempotent); if it never arrives, this reaps the call.

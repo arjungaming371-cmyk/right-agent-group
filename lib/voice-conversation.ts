@@ -164,7 +164,7 @@ const RATE_LIMIT_REPLY: Record<Language, string> = {
 // Plain "thank you" / "धन्यवाद" / "ధన్యవాదాలు" must NOT hang up —
 // Priya says thanks naturally in the middle of a conversation.
 const GOODBYE_RE =
-  /goodbye|bye[- ]?bye|have a (great|good|nice) day|din shubh ho|phir milenge|alvida|manchi roju|selavu|veedkolu|अलविदा|फिर मिलेंगे|दिन शुभ हो|వీడ్కోలు|సెలవు|మంచి రోజు జరగాలి/i
+  /\b(goodbye|bye|bye[- ]?bye|take care)\b|have a (great|good|nice|wonderful) day|din shubh ho|phir milenge|alvida|manchi roju|selavu|veedkolu|अलविदा|फिर मिलेंगे|दिन शुभ हो|వీడ్కోలు|సెలవు|మంచి రోజు జరగాలి/i
 
 // CUSTOMER-side goodbye: when the CALLER says bye, the call is over — full
 // stop. Observed live: customer said "Thank you. Bye." and Priya kept
@@ -172,7 +172,7 @@ const GOODBYE_RE =
 // \b keeps "bye" from matching inside other words; Telugu/Hindi phrases are
 // the common phone sign-offs ("I'll hang up now", "I'll take leave").
 const CUSTOMER_BYE_RE =
-  /\b(bye|goodbye|bye[- ]?bye)\b|రేపు మాట్లాడుదాం|సెలవు|ఉంటాను మరి|పెట్టేస్తున్నాను|फोन रखत[ाी] हूँ?|रखत[ाी] हूँ?|अलविदा|बाय/i
+  /\b(bye|goodbye|bye[- ]?bye|call you later|talk to you later|later bye|take care)\b|రేపు మాట్లాడుదాం|సెలవు|ఉంటాను మరి|పెట్టేస్తున్నాను|తర్వాత మాట్లాడుదాం|फोन रखत[ाी] हूँ?|रखत[ाी] हूँ?|बाद में बात करत[ाी] हूँ|अलविदा|बाय/i
 
 // VOICEMAIL / ANSWERING MACHINE detection — checked ONLY on the very first
 // thing heard after an OUTBOUND greeting (history.length === 0). Deliberately

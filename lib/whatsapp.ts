@@ -161,10 +161,11 @@ export async function answerWhatsAppCall(
   branch?: BranchWhatsAppCtx
 ): Promise<{ ok: boolean; error?: string; status?: number }> {
   if (!callId || !answerSdp) return { ok: false, error: "callId and answerSdp are required" }
+  const cleanId = callId.replace(/^wacall-/, "").trim()
   return callPost({
     to,
     action,
-    call_id: callId,
+    call_id: cleanId,
     session: { sdp: answerSdp, sdp_type: "answer" },
   }, branch)
 }
@@ -172,13 +173,15 @@ export async function answerWhatsAppCall(
 /** Decline an incoming call before answering (caller sees "declined"). */
 export async function rejectWhatsAppCall(callId: string, branch?: BranchWhatsAppCtx): Promise<{ ok: boolean; error?: string }> {
   if (!callId) return { ok: false, error: "callId required" }
-  return callPost({ action: "reject", call_id: callId }, branch)
+  const cleanId = callId.replace(/^wacall-/, "").trim()
+  return callPost({ action: "reject", call_id: cleanId }, branch)
 }
 
 /** End an active call (only valid after accept — reject is for pre-accept). */
-export async function terminateWhatsAppCall(callId: string, branch?: BranchWhatsAppCtx): Promise<{ ok: boolean; error?: string }> {
+export async function terminateWhatsAppCall(callId: string, branch?: BranchWhatsAppCtx): Promise<{ ok: boolean; error?: string; status?: number }> {
   if (!callId) return { ok: false, error: "callId required" }
-  return callPost({ action: "terminate", call_id: callId }, branch)
+  const cleanId = callId.replace(/^wacall-/, "").trim()
+  return callPost({ action: "terminate", call_id: cleanId }, branch)
 }
 
 /**
