@@ -29,6 +29,7 @@ out/
 recordings/
 scratch/
 scripts/.notif-build/
+scripts/.voicelang-build/
 server/node_modules/
 server/stt-service/__pycache__/
 server/stt-service/models/

@@ -628,8 +628,11 @@ class WhatsAppCallSession {
         if (settled) return
         settled = true
         clearTimeout(timer)
-        try { dtlsSub?.unsubscribe?.() } catch {}
-        try { pcSub?.unsubscribe?.() } catch {}
+        // werift's Event.subscribe returns { unSubscribe } (capital S) — the
+        // old `unsubscribe?.()` spelling silently no-opped and leaked both
+        // listeners on every resolution.
+        try { dtlsSub?.unSubscribe?.() } catch {}
+        try { pcSub?.unSubscribe?.() } catch {}
         resolve(val)
       }
       const timer = setTimeout(() => done(this.sender?.dtlsTransport?.state === "connected" || this.connected), timeoutMs)

@@ -14,7 +14,15 @@ export function recordingsDir(): string {
 // The voicebot only ever produces <callSid>.mp3|wav and the file route only
 // ever serves these — a strict allowlist instead of trying to sanitize
 // arbitrary input. (callSid itself is `wacall-` + Meta's call id.)
-const RECORDING_NAME_RE = /^wacall-[A-Za-z0-9_.-]{1,200}\.(mp3|wav)$/
+//
+// FIX (2026-09-26): keep this charset IN SYNC with CALL_SID_RE in
+// app/api/calls/recording/upload/route.ts — that route was widened to accept
+// Meta call ids containing `+ = : @` (base64-style padding etc.), but this
+// regex was not, so such a recording uploaded fine and then 404'd forever in
+// the dashboard player. No slashes are allowed either way, and
+// safeRecordingPath re-checks containment below, so the wider charset cannot
+// escape the recordings directory.
+const RECORDING_NAME_RE = /^wacall-[A-Za-z0-9_.\-+=:@]{1,200}\.(mp3|wav)$/
 
 /**
  * Resolve a recording filename to a path INSIDE the recordings directory.

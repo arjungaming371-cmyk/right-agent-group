@@ -184,13 +184,20 @@ const CHANNEL_BREVITY: Record<Channel, string> = {
 /**
  * Output token ceiling for one customer-facing reply.
  *
- * For CALLS, capped tightly at 150 tokens so replies stay strictly within
- * 1-2 spoken sentences (under 25 words), avoiding slow, drawn-out audio
- * monologues. WhatsApp keeps 450 tokens.
+ * FIX (2026-09-26): the daff323 edit flattened ALL calls to 150 tokens. The
+ * same two spoken sentences cost several times more tokens in Telugu/
+ * Devanagari script than in Roman letters (measured on llama-3.3-70b: a
+ * 150-token cap yields ~22 Telugu words but ~110 English ones) — at a flat
+ * 150 the native-script CALL replies amputate mid-word and the TTS then
+ * speaks the fragment. Calls keep the tight 150 brevity cap for English
+ * (Roman) and get 400 for telugu/hindi; the "1-2 sentences" prompt rule
+ * stays the real limiter — this is a ceiling, not a spend. WhatsApp keeps
+ * 450 (its replies are forced to Roman letters and are skim-read, not
+ * spoken aloud).
  */
-function replyTokenBudget(language: Language, channel: Channel): number {
-  if (channel === "call") return 150
-  return 450
+export function replyTokenBudget(language: Language, channel: Channel): number {
+  if (channel !== "call") return 450
+  return language === "english" ? 150 : 400
 }
 
 // Script cache — refreshed every 5 minutes so dashboard changes take
