@@ -11,54 +11,63 @@ export async function GET(req: NextRequest) {
   const session = await requireModuleOrRole(req, "voice", ["admin", "agent", "viewer", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const branchId = sessionBranchId(session)
-  const sp = new URL(req.url).searchParams
 
-  // Sidebar badge: ?count=pending → { count }
-  if (sp.get("count") === "pending") {
-    const res = branchId
-      ? await query(`SELECT count(*)::int AS n FROM outbound_queue WHERE status = 'pending' AND branch_id = $1`, [branchId])
-      : await query(`SELECT count(*)::int AS n FROM outbound_queue WHERE status = 'pending'`)
-    return NextResponse.json({ count: res.rows[0]?.n ?? 0 })
-  }
-
-  // Live radar: ?stats=1 → per-status counts (the Call Queue view's tab
-  // badges + progress bar read this — computing them client-side would
-  // require pulling every row).
-  if (sp.get("stats") === "1") {
-    const res = branchId
-      ? await query(`SELECT status, count(*)::int AS n FROM outbound_queue WHERE branch_id = $1 GROUP BY status`, [branchId])
-      : await query(`SELECT status, count(*)::int AS n FROM outbound_queue GROUP BY status`)
+  // ?summary=1 → status counts for the WHOLE queue (no 200-row cap).
+  // The bulk calling console shows totals like "5 pending · 120 called";
+  // counting them client-side from the capped row list would under-count
+  // any CSV bigger than the list window.
+  if (req.nextUrl.searchParams.get("summary")) {
+    const res = await query(
+      `SELECT status, count(*)::int AS n FROM outbound_queue
+       WHERE ($1::uuid IS NULL OR branch_id = $1)
+       GROUP BY status`,
+      [branchId]
+    ).catch(() => ({ rows: [] as { status: number | string; n: number }[] }))
     const counts: Record<string, number> = {}
-    for (const r of res.rows as { status: string; n: number }[]) counts[r.status] = r.n
-    return NextResponse.json({ counts })
+    let total = 0
+    for (const r of res.rows as { status: number | string; n: number }[]) {
+      counts[r.status] = r.n
+      total += r.n
+    }
+    return NextResponse.json({ counts, total })
   }
 
-  // Queue listing with filters: ?status=pending,dialing&limit=100&offset=0
-  // (the old unfiltered last-200 shape remains the default).
+  // ?count=pending → sidebar badge (one tiny query, no rows pulled).
+  if (req.nextUrl.searchParams.get("count") === "pending") {
+    const res = await query(
+      `SELECT count(*)::int AS n FROM outbound_queue WHERE status = 'pending' AND ($1::uuid IS NULL OR branch_id = $1)`,
+      [branchId]
+    ).catch(() => ({ rows: [{ n: 0 }] }))
+    return NextResponse.json({ count: (res.rows[0] as { n: number } | undefined)?.n ?? 0 })
+  }
+
+  // ?status=pending,dialing&limit=100&offset=0 → filtered, paginated
+  // listing for the Call Queue manager. With NO status filter the response
+  // stays the historical bare array (the Upload console consumes it as
+  // rows[]) — the { items, total } envelope only applies to filtered calls.
+  const sp = req.nextUrl.searchParams
   const statusParam = (sp.get("status") || "").trim()
   const statuses = statusParam ? statusParam.split(",").map((s) => s.trim()).filter(Boolean) : []
   const limit = Math.min(Math.max(parseInt(sp.get("limit") || "200", 10) || 200, 1), 500)
   const offset = Math.max(parseInt(sp.get("offset") || "0", 10) || 0, 0)
 
-  const where: string[] = []
-  const params: unknown[] = []
-  if (branchId) {
-    params.push(branchId)
-    where.push(`branch_id = $${params.length}`)
-  }
+  const where: string[] = ["($1::uuid IS NULL OR branch_id = $1)"]
+  const params: unknown[] = [branchId]
   if (statuses.length) {
     params.push(statuses)
     where.push(`status = ANY($${params.length})`)
   }
-  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : ""
-  const [rows, total] = await Promise.all([
-    query(
-      `SELECT * FROM outbound_queue ${whereSql} ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`,
-      params
-    ),
-    query(`SELECT count(*)::int AS n FROM outbound_queue ${whereSql}`, params),
-  ])
-  return NextResponse.json({ items: rows.rows ?? [], total: (total.rows[0] as { n: number } | undefined)?.n ?? 0 })
+  const whereSql = `WHERE ${where.join(" AND ")}`
+  const rows = await query(
+    `SELECT * FROM outbound_queue ${whereSql} ORDER BY priority DESC, created_at DESC LIMIT ${limit} OFFSET ${offset}`,
+    params
+  )
+  if (!statuses.length) return NextResponse.json(rows.rows ?? [])
+  const totalRes = await query(`SELECT count(*)::int AS n FROM outbound_queue ${whereSql}`, params)
+  return NextResponse.json({
+    items: rows.rows ?? [],
+    total: (totalRes.rows[0] as { n: number } | undefined)?.n ?? 0,
+  })
 }
 
 export async function POST(req: NextRequest) {
@@ -74,10 +83,26 @@ export async function POST(req: NextRequest) {
   // Batch mode: { contacts: [...] } — queue without calling
   if (body.contacts && Array.isArray(body.contacts)) {
     let queued = 0
+    let skipped = 0
     for (const contact of body.contacts) {
       if (!contact.phone) continue
       contact.phone = normalizePhone(contact.phone)
       try {
+        // QUEUE-LEVEL DEDUPE (2026-09-26): a pending/dialing row for the same
+        // number must not be duplicated — re-confirming a CSV (double-click,
+        // re-upload) used to create a second pending row and the batch dialer
+        // then called that person once per row. Leads stay deduped below;
+        // this guard is about not stacking CALLS.
+        const dup = await query(
+          `SELECT id FROM outbound_queue
+            WHERE right(regexp_replace(phone, '\\D', '', 'g'), 10) = NULLIF($1, '')
+              AND status IN ('pending', 'dialing')
+              AND ($2::uuid IS NULL OR branch_id = $2)
+            LIMIT 1`,
+          [phoneLast10(contact.phone), branchId]
+        )
+        if (dup.rows[0]) { skipped++; continue }
+
         // Dedupe — one lead per phone. FIX (2026-09-22): exact-match missed
         // format variants ("9876543210" vs "+919876543210") and created
         // duplicate leads for the same person — the queue PROCESSOR already
@@ -110,7 +135,7 @@ export async function POST(req: NextRequest) {
         console.error(`Failed to queue contact ${contact.phone}:`, e)
       }
     }
-    return NextResponse.json({ ok: true, queued })
+    return NextResponse.json({ ok: true, queued, skipped })
   }
 
   // Single contact mode: { name, phone, language, ... } — call immediately

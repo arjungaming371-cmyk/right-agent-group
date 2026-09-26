@@ -13,8 +13,12 @@ import { buildLeadBrief } from "@/lib/lead-brain"
 import { searchKnowledgeBase } from "@/lib/knowledge-base"
 import { buildEmiInstruction, buildRateInstruction, detectLoanType } from "@/lib/finance"
 import { currentDateTimeInstruction } from "@/lib/compliance"
+import {
+  getInstagramCommentTemplates,
+  getInstagramDmTemplate,
+  renderTemplate,
+} from "@/lib/channel-scripts"
 import { rateLimit, clientIp } from "@/lib/rate-limit"
-import { getInstagramPrompts } from "@/lib/script-lines"
 
 export const dynamic = "force-dynamic"
 
@@ -294,22 +298,15 @@ async function handleInboundDM(messaging: any, igBranch: BranchInstagramCtx = nu
     const emiInfo = emiRes ? emiRes.instruction : ""
     const rateInfo = buildRateInstruction(text, { loanType }) || ""
 
-    // DB-editable DM persona + rules (ai_scripts 'instagram_dm', 5-min TTL
-    // cache; defaults in lib/default-scripts.ts). The dynamic per-lead blocks
-    // (brief, KB, rates, EMI, date/time) stay code-assembled around it.
-    const igPrompts = await getInstagramPrompts()
-    const extraInstructions = [
-      igPrompts.dm.system_prompt,
-      `Client Details:
-${brief}`,
-      `Knowledge Base Facts:
-${kbContext || "None"}`,
+    // DM persona is dashboard-editable (Script Manager → Instagram tab),
+    // with {brief} {kbContext} {rateInfo} {emiInfo} {dtInfo} placeholders.
+    const extraInstructions = renderTemplate(getInstagramDmTemplate(), {
+      brief,
+      kbContext: kbContext || "None",
       rateInfo,
       emiInfo,
       dtInfo,
-      "Instructions:",
-      igPrompts.dm.reply_rules,
-    ].filter(Boolean).join("\n\n")
+    })
 
     const aiReply = await chatWithLLM(
       [...history, { role: "user", content: text }],
@@ -435,15 +432,13 @@ async function handleInboundComment(val: any, igBranch: BranchInstagramCtx = nul
   try {
     const kbContext = await searchKnowledgeBase(text).catch(() => "")
 
-    // DB-editable comment prompts (ai_scripts 'instagram_comment'). The
-    // {username} token keeps the saved persona free of any hardcoded handle.
-    const igPrompts = await getInstagramPrompts()
-    const extraInstructions = [
-      igPrompts.comment.system_prompt.replace(/\{username\}/g, username),
-      `Knowledge Base:
-${kbContext || "None"}`,
-      igPrompts.comment.reply_rules,
-    ].filter(Boolean).join("\n\n")
+    // Public reply + private DM opener are dashboard-editable (Script
+    // Manager → Instagram tab) with {username} {kbContext} placeholders.
+    const igTemplates = getInstagramCommentTemplates()
+    const extraInstructions = renderTemplate(igTemplates.publicReply, {
+      username,
+      kbContext: kbContext || "None",
+    })
 
     const publicAiReply = await chatWithLLM(
       [{ role: "user", content: text }],
@@ -465,7 +460,7 @@ ${kbContext || "None"}`,
       // 2. Send Private DM Reply to Commenter — branch credentials threaded
       // through (this is the DM that actually converts a commenter into a
       // lead conversation; it must come from the account they commented on).
-      const privateDmText = igPrompts.comment.first_dm.replace(/\{username\}/g, username)
+      const privateDmText = renderTemplate(igTemplates.privateDm, { username })
       const privSent = await privateReplyInstagramComment(commentId, privateDmText, igBranch)
       if (privSent.ok) {
         await query(

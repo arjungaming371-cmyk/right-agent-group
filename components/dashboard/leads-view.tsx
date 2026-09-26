@@ -2,7 +2,7 @@
 
 type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
 import { useEffect, useState, useMemo } from "react"
-import { Users, Target, IndianRupee, BadgeCheck, Phone, MessageCircle, RotateCcw, Plus, Search, Link2, Check, Download, Brain, Pin, Square, CheckSquare, PhoneCall, X } from "lucide-react"
+import { Users, Target, IndianRupee, BadgeCheck, Phone, MessageCircle, RotateCcw, Plus, Search, Link2, Check, Download, Brain, Pin, Sparkles, CheckSquare, PhoneCall, X } from "lucide-react"
 import { formatCurrency, timeAgo, formatDateTime } from "@/lib/utils"
 import { usePolling } from "@/lib/use-poll"
 import { useToast } from "../ui/toast"
@@ -171,11 +171,10 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
 
   const [memoryLeadId, setMemoryLeadId] = useState<string | null>(null)
 
-  // ── Bulk call-queue selection (2026-09-26 bulk upgrade) ─────────────
+  // ── Bulk call-queue selection (2026-09-26 bulk upgrade) ───────────
   // Row checkboxes + floating action bar + the Add-to-Call-Queue modal.
   // DND / duplicate / recently-called protections are enforced SERVER-side
-  // by /api/outbound/queue — the modal only states them, it doesn't
-  // pre-filter (the server is the source of truth).
+  // by /api/outbound/queue — the modal only states them.
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [showQueueModal, setShowQueueModal] = useState(false)
   const [queueBusy, setQueueBusy] = useState(false)
@@ -183,8 +182,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
     channel: "phone", timing: "now", scheduledAt: "", language: "auto",
   })
 
-  // Prune selections that no longer exist (lead deleted / filter changed) —
-  // keeps the action-bar count honest without blocking cross-filter batch picks.
+  // Prune selections that no longer exist (lead deleted / filter changed).
   useEffect(() => {
     setSelectedIds((prev) => {
       const alive = new Set(leads.map((l) => l.id))
@@ -317,44 +315,35 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
   }, 0)
   const interestedCount = leads.filter((l) => l.interested === "interested").length
 
-  async function startCall() {
+  // One dialer, one endpoint: every outbound call from this screen goes
+  // through POST /api/calls/dial (channel: phone | whatsapp | auto) so the
+  // rules are IDENTICAL for both networks — compliance, quota, comm-log,
+  // instructions, warm-up. The old split (phone → /api/calls, WhatsApp →
+  // /api/calls/dial) silently skipped the comm-log and dropped the
+  // "What should Priya talk about?" text on WhatsApp calls.
+  async function dial(channel: "phone" | "whatsapp" | "auto") {
     if (!callTarget) return
-    setCalling(callTarget.id)
-    try {
-      const res = await fetch("/api/calls", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ leadId: callTarget.id, phone: callTarget.phone, language: callTarget.language || "telugu", instructions: callInstructions }),
-      })
-      const data = await res.json()
-      if (res.ok) { toast.success("AI call started — Priya is dialing now"); load() }
-      else toast.error(data.error || "Call failed")
-    } catch {
-      // Network failure — surface it, the busy spinner must not just hang.
-      toast.error("Call failed — check your connection and try again")
-    } finally {
-      setCalling(null)
-      setCallTarget(null)
-      setCallInstructions("")
-    }
-  }
-
-  // Business-initiated WhatsApp call — Meta rings the lead's WhatsApp app;
-  // the voicebot's WebRTC leg is identical to an inbound WhatsApp call.
-  async function startWaCall() {
-    if (!callTarget) return
-    setCalling(`wa-${callTarget.id}`)
+    const key = `${channel}-${callTarget.id}`
+    setCalling(key)
     try {
       const res = await fetch("/api/calls/dial", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ leadId: callTarget.id, channel: "whatsapp" }),
+        body: JSON.stringify({ leadId: callTarget.id, channel, instructions: callInstructions }),
       })
       const data = await res.json()
-      if (res.ok) toast.success("WhatsApp call placed — ringing on the lead's WhatsApp now")
-      else toast.error(data.error || "WhatsApp call failed")
+      if (res.ok) {
+        const via = data.channel === "whatsapp" ? "WhatsApp" : "phone"
+        toast.success(channel === "auto"
+          ? `Smart Dial → ${via} call placed — Priya is dialing now`
+          : `${via === "WhatsApp" ? "WhatsApp" : "Phone"} call placed — Priya is dialing now. Track it in Voice Logs.`)
+        load()
+      } else {
+        toast.error(data.error || "Call failed")
+      }
     } catch {
-      toast.error("WhatsApp call failed — check your connection and try again")
+      // Network failure — surface it, the busy spinner must not just hang.
+      toast.error("Call failed — check your connection and try again")
     } finally {
       setCalling(null)
       setCallTarget(null)
@@ -515,7 +504,6 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                     </div>
                   </div>
                 </td>
-                <td style={{ padding: "14px 16px" }}><Skeleton w={16} h={16} r={4} /></td>
                 {Array.from({ length: 9 }).map((_, j) => (
                   <td key={j} style={{ padding: "14px 16px" }}><Skeleton w={j === 8 ? 68 : 52} h={12} /></td>
                 ))}
@@ -633,7 +621,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={() => !queueBusy && setShowQueueModal(false)}>
           <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, padding: 28, width: 460 }} onClick={(e) => e.stopPropagation()}>
             <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 4 }}>Add {selectedIds.length} lead{selectedIds.length === 1 ? "" : "s"} to Call Queue</div>
-            <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 18 }}>Priya dials them through the bulk dialer — nothing is dialed until someone starts the queue.</div>
+            <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 18 }}>Priya dials them through the bulk dialer — nothing is dialed until a campaign is started.</div>
 
             <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Dialing channel</label>
             <select value={queueForm.channel} onChange={(e) => setQueueForm({ ...queueForm, channel: e.target.value })} style={{ width: "100%", marginBottom: 14 }}>
@@ -660,7 +648,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
             )}
 
             <div style={{ fontSize: 11.5, color: "var(--text-muted)", background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 8, padding: "9px 12px", marginBottom: 16, lineHeight: 1.6 }}>
-              Automatic protections (always on): DND / do-not-call leads are skipped · numbers already pending in the queue are not stacked · numbers called in the last 24h are skipped · calling-window rules are enforced at dial time.
+              Automatic protections (always on): DND / do-not-call leads are skipped · numbers already pending in the queue are not stacked · numbers called in the last 24h are skipped · calling-window rules pause and resume automatically.
             </div>
 
             <div style={{ display: "flex", gap: 10 }}>
@@ -734,24 +722,32 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
             </div>
             <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
               <button onClick={() => setCallTarget(null)} style={{ flex: 1, padding: 10, background: "transparent", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text-secondary)" }}>Cancel</button>
-              <button onClick={startCall} disabled={calling === callTarget.id} className="btn-primary" style={{ flex: 1, height: 40 }}>
-                <Phone size={14} strokeWidth={2} /> {calling === callTarget.id ? "Calling…" : "Phone Call"}
+              <button onClick={() => dial("auto")} disabled={!!calling} className="btn-primary" style={{ flex: 1, height: 40 }}>
+                <Sparkles size={14} strokeWidth={2} /> {calling === `auto-${callTarget.id}` ? "Calling…" : "Smart Dial"}
               </button>
             </div>
-            <button
-              onClick={startWaCall}
-              disabled={calling === `wa-${callTarget.id}` || calling === callTarget.id}
-              style={{
-                width: "100%", marginTop: 10, height: 40, borderRadius: 8,
-                border: "1px solid var(--border)", cursor: "pointer",
-                display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6,
-                fontSize: 13, fontWeight: 600,
-                background: calling === `wa-${callTarget.id}` ? "var(--bg-card)" : "#25D366",
-                color: calling === `wa-${callTarget.id}` ? "var(--text-muted)" : "#06331d",
-              }}
-            >
-              <Phone size={14} strokeWidth={2} /> {calling === `wa-${callTarget.id}` ? "Calling…" : "WhatsApp Call"}
-            </button>
+            <div style={{ fontSize: 11, color: "var(--text-muted)", margin: "6px 0 10px", textAlign: "center" }}>
+              Smart Dial picks WhatsApp when the lead called us recently (Meta allows the callback), otherwise a regular phone call.
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => dial("phone")} disabled={!!calling} style={{ flex: 1, height: 40, borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)", fontSize: 13, fontWeight: 600, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, opacity: calling ? 0.5 : 1 }}>
+                <Phone size={14} strokeWidth={2} /> {calling === `phone-${callTarget.id}` ? "Calling…" : "Phone Call"}
+              </button>
+              <button
+                onClick={() => dial("whatsapp")}
+                disabled={!!calling}
+                style={{
+                  flex: 1, height: 40, borderRadius: 8, border: "none", cursor: "pointer",
+                  display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6,
+                  fontSize: 13, fontWeight: 600,
+                  background: calling ? "#1f9d55" : "#25D366",
+                  color: "#06331d",
+                  opacity: calling ? 0.5 : 1,
+                }}
+              >
+                <Phone size={14} strokeWidth={2} /> {calling === `whatsapp-${callTarget.id}` ? "Calling…" : "WhatsApp Call"}
+              </button>
+            </div>
           </div>
         </div>
       )}

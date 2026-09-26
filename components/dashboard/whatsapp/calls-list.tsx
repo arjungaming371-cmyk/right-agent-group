@@ -40,7 +40,10 @@ export type CallRow = {
 
 const isWhatsAppCall = (sid?: string | null) => !!sid && String(sid).startsWith("wacall-")
 
-const MISSED_STATUSES = ["missed", "failed", "no-answer", "cancelled", "busy"]
+// 'rejected' = the lead explicitly declined our business-initiated call —
+// a miss (red), not a normal completion. 'no-answer'/'cancelled'/'busy' are
+// written by the WhatsApp finalizer and Exotel's status webhook.
+const MISSED_STATUSES = ["missed", "failed", "no-answer", "cancelled", "busy", "rejected"]
 
 function isMissed(c: CallRow) {
   const s = (c.status || "").toLowerCase()
@@ -157,13 +160,32 @@ export default function CallsList({
     } as Lead)
   }
 
+  // AI call back over the phone line (Meta gates business-initiated
+  // WhatsApp calls) — through the UNIFIED dialer so this path gets the same
+  // compliance/quota/comm-log treatment as every other outbound dial.
+  // The dialer is lead-scoped; a rare row with no lead (unmatched missed-call
+  // bubble) falls back to the legacy phone endpoint, which matches/creates
+  // the lead from the number itself.
   async function callBack(c: CallRow) {
     const phone = c.phone || c.leads?.phone
     if (!phone) return
-    await fetch("/api/calls", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ phone, language: c.language || "telugu" }),
-    })
+    try {
+      const res = c.lead_id
+        ? await fetch("/api/calls/dial", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ leadId: c.lead_id, channel: "phone" }),
+          })
+        : await fetch("/api/calls", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ phone, language: c.language || "telugu" }),
+          })
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}))
+        console.error("call back failed:", d?.error || res.status)
+      }
+    } catch {
+      console.error("call back failed: network error")
+    }
   }
 
   return (

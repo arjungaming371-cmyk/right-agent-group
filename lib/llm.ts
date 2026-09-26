@@ -114,23 +114,29 @@ CRITICAL OUTPUT FORMAT RULE — HINDI:
 - Mix in everyday English words the way people actually talk, written in plain English letters right inside the Devanagari sentence (e.g. "loan", "WhatsApp", "sir"). Example: "नमस्ते sir! मैं प्रिया बोल रही हूं Right Agent Group, Hyderabad से। आपका WhatsApp number मिल सकता है?"`,
   telugu: `
 
-CRITICAL OUTPUT FORMAT RULE — TELUGU (HYDERABAD TENGLISH):
-- The customer speaks Telugu. Your reply MUST be written in natural, spoken Telugu script mixed with English words, the way people actually talk in Hyderabad.
-- DO NOT use formal or literary Telugu words. They sound highly robotic. Follow this vocabulary table:
-  * BAN: "రుణం" (runam) or "రుణాలు" (runalu) -> USE: "loan" or "loans" (in English letters: e.g. "loan", "home loan").
-  * BAN: "ధన్యవాదాలు" (dhanyavadalu) -> USE: "thank you" or "thanks" (in English letters: e.g. "thank you sir").
-  * BAN: "సమయం" (samayam) -> USE: "time" (in English letters).
-  * BAN: "శుభోదయం" (shubhodayam) -> USE: "good morning" (in English letters).
-  * BAN: "కార్యాలయం" (karyalayam) or "శాఖ" (shakha) -> USE: "office" or "branch" (in English letters).
-  * BAN: "వివరాలు" (vivaralu) -> USE: "details" (in English letters).
-  * BAN: "వెబ్‌సైట్" (website in Telugu characters) -> USE: "website" (in English letters).
-  * BAN: "లింక్" (link in Telugu characters) -> USE: "link" (in English letters).
-- Write all Telugu words in native Telugu script (తెలుగు). Write all English words in plain English/Latin letters (e.g., "loan", "WhatsApp", "sir", "office", "link", "thank you").
+CRITICAL OUTPUT FORMAT RULE — TELUGU (NATIVE CONVERSATIONAL):
+- The customer speaks Telugu. Your reply MUST be written in natural, spoken Telugu script (తెలుగు లిపి) mixed with English loanwords, the way people talk in Hyderabad.
+- MANDATORY SCRIPT RULE: You MUST write Telugu words in real Telugu script (e.g. అవును, గుర్తుంది, కావాలా, చేస్తాము, చెప్పండి). NEVER write Telugu words in English/Latin letters (do NOT write 'kavali', 'gurthundi', 'cheppandi').
+- Mix in common English words in English letters (e.g. 'loan', 'education loan', 'home loan', 'EMI', 'WhatsApp', 'sir', 'link', 'office', 'thank you').
+- FLUENT CONVERSATIONAL RHYTHM & PRONUNCIATION:
+  * Speak smoothly and confidently like a friendly loan advisor from Hyderabad.
+  * Use natural spoken phrases: "అవును sir", "ఖచ్చితంగా sir", "అయ్యో tension పడకండి sir", "ఒక్క minute sir".
+  * For numbers, write them simply with words: "16 lakhs", "14 thousand 500", "20 plus banks", "15 years". Avoid commas inside numbers.
+  * Keep each sentence short, crisp, and complete so the voice sounds fluent and native.
+- DO NOT use bookish, robotic, or literal translation words:
+  * BAN: "గుర్తుంచుకోండి", "remember కదా" -> USE: "గుర్తుంది sir!" or "గుర్తుంది కదా sir!"
+  * BAN: "రుణం", "రుణాలు" -> USE: "loan" or "loans" (in English letters)
+  * BAN: "ధన్యవాదాలు" -> USE: "thank you sir" or "thanks" (in English letters)
+  * BAN: "సమయం" -> USE: "time" (in English letters)
+  * BAN: "శుభోదయం" -> USE: "good morning" (in English letters)
+  * BAN: "కార్యాలయం", "శాఖ" -> USE: "office" or "branch" (in English letters)
+  * BAN: "వివరాలు" -> USE: "details" (in English letters)
+  * BAN: "సరేనా?" in the middle of sentences or asking multiple questions in one turn -> Ask ONLY ONE clear question at the end!
 - Examples of natural responses:
-  * "నమస్కారం sir! మీకు home loan కావాలా sir?"
+  * "అవును Ajay sir, గుర్తుంది! 16 lakhs education loan కి 15 years plan లో దాదాపు 14 thousand 500 rupees EMI వస్తుంది. దీని గురించి ఇంకేమైనా డౌట్స్ ఉన్నాయా sir?"
   * "Sure sir! నేను link మీ WhatsApp కి పంపిస్తాను, details fill చేయండి."
   * "Okay sir, thank you so much! Have a nice day, bye!"
-  * "చిన్న technical problem వచ్చింది sir, మళ్ళీ చెప్పగలరా?"`,
+  * "Sorry sir, చిన్న technical issue వచ్చింది, మళ్ళీ చెప్పగలరా?"`,
 }
 
 // Brevity rules, keyed by CHANNEL rather than language, and appended in
@@ -153,6 +159,7 @@ KEEP IT SHORT (WhatsApp):
 - Prefer the simple everyday word over the formal one, in whatever language you are replying in.
 - Short forms are fine here because this is READ, not spoken: EMI, KYC, PAN, ID, docs, a/c, no., approx, min/max, and number shorthand like 5L or 10k.
 - One question per message, at the end. Never stack two asks.
+- KNOW WHAT YOU ARE SPEAKING: scan the conversation AND the context provided below BEFORE asking anything. If the customer already gave a detail in this chat (name, city, loan need, anything — or it is already in the KNOWN FACTS above), NEVER ask for it again — not even as a confirmation question. State it in passing and move on. Ask each question at most once per chat.
 - Skip anything they did not ask for. If the answer is a number, send the number.
 - The REPLY LANGUAGE rule above still wins over everything here. Being brief NEVER means switching to a different language or script.`
 
@@ -164,14 +171,20 @@ KEEP IT SHORT (WhatsApp):
 // script; every rule here is written to describe form, never content.
 const CALL_BREVITY = `
 
+KNOW WHAT YOU ARE SPEAKING (CRITICAL — check silently before every reply):
+- Scan the conversation AND the context provided below BEFORE asking anything. If a detail (name, area, loan need, number, anything) is already known — said by the customer earlier in this call, or present in the provided context — NEVER ask for it again. Not even as a confirmation question. At most, STATE it naturally in passing while moving forward.
+- Ask each question AT MOST ONCE per call. If the customer already answered it, that item is DONE — react briefly and go to the NEXT unknown item.
+- If the customer's last message already answers a question you were about to ask, do NOT ask it — acknowledge what they said and continue the flow.
+- Speak like you know exactly what you are doing: clear, confident, one idea per sentence, facts consistent with everything said before, nothing invented.
+
 KEEP IT SHORT (SPOKEN CALL):
-- Maximum 2 short sentences. Every extra sentence is time the customer waits — they will talk over you.
-- Lead with the answer. No preamble, no restating their question, no summarising what you just said.
-- Simple everyday words the customer can follow first time, without thinking.
+- STRICT LIMIT: Maximum 1 to 2 short sentences ONLY (under 25 words total). Every extra sentence is time the customer waits — long monologues cause callers to hang up or get frustrated.
+- Lead directly with the answer. No preamble, no restating their question, no summarizing what you just said.
+- Simple, energetic, everyday spoken words the customer can follow first time without thinking.
+- Never ask more than ONE question, placed at the very end of your reply. Never say "okay?" or "సరేనా?" in the middle of sentences.
 - Everything you write here is SPOKEN ALOUD by a voice, so write only what a person would actually SAY. Never use written-only shorthand (slashes, ampersands, abbreviations like "a/c" or "approx", or number shorthand like "5L" or "10k") — write those out as full spoken words.
 - Write numbers the way a person says them out loud, in the SAME language and script as the rest of your reply — never switch language just to write a number.
 - Letter-by-letter acronyms people genuinely say aloud are fine: EMI, KYC, PAN, ID.
-- One question, then STOP and let them answer.
 - The REPLY LANGUAGE / OUTPUT FORMAT rule above still wins over everything here. Being brief NEVER means switching to a different language or script.`
 
 const CHANNEL_BREVITY: Record<Channel, string> = {
@@ -182,22 +195,20 @@ const CHANNEL_BREVITY: Record<Channel, string> = {
 /**
  * Output token ceiling for one customer-facing reply.
  *
- * Native-script text is far more token-expensive than the same sentence in
- * Roman letters — measured against llama-3.3-70b, a 150-token cap yields
- * ~22 Telugu words but ~110 English ones. That made every Telugu and Hindi
- * CALL reply truncate mid-word (the TTS then speaks the fragment), because
- * CALL_LANGUAGE_STYLES deliberately asks for real Telugu/Devanagari script.
- *
- * Only that combination is affected. English calls are Roman, and ALL
- * WhatsApp replies are Roman too (LANGUAGE_STYLES forces Hinglish/Tenglish
- * in Latin letters), so those keep the tighter cap.
- *
- * This is a ceiling, not a spend — with the brevity rules above the model
- * stops well before it, and a reply that ends on its own costs the same
- * whatever the cap was.
+ * FIX (2026-09-26): the daff323 edit flattened ALL calls to 150 tokens. The
+ * same two spoken sentences cost several times more tokens in Telugu/
+ * Devanagari script than in Roman letters (measured on llama-3.3-70b: a
+ * 150-token cap yields ~22 Telugu words but ~110 English ones) — at a flat
+ * 150 the native-script CALL replies amputate mid-word and the TTS then
+ * speaks the fragment. Calls keep the tight 150 brevity cap for English
+ * (Roman) and get 400 for telugu/hindi; the "1-2 sentences" prompt rule
+ * stays the real limiter — this is a ceiling, not a spend. WhatsApp keeps
+ * 450 (its replies are forced to Roman letters and are skim-read, not
+ * spoken aloud).
  */
-function replyTokenBudget(language: Language, channel: Channel): number {
-  return 450
+export function replyTokenBudget(language: Language, channel: Channel): number {
+  if (channel !== "call") return 450
+  return language === "english" ? 150 : 400
 }
 
 // Script cache — refreshed every 5 minutes so dashboard changes take
@@ -1094,12 +1105,12 @@ export function detectLanguage(text: string): Language {
   if (/[ऀ-ॿ]/.test(text)) return "hindi"
   
   const lower = text.toLowerCase()
-  // Telugu romanized keywords
-  const teluguKeywords = /\b(kavali|naku|gurinchi|cheppandi|chepandi|avunu|ledhu|ledu|vaddhu|vaddu|undhi|undi|istara|matladutunnanu|telugu|namaskaram|garu|kaadu|kadu|telusukovadaniki|unnaya|unda)\b/i;
+  // Telugu romanized keywords and common spoken verb forms/pronouns
+  const teluguKeywords = /\b(kavali|kavala|kavalenu|naku|maaku|meeku|neeku|gurinchi|cheppandi|chepandi|cheppanu|cheppali|cheppu|endukante|avunu|ledhu|ledu|vaddhu|vaddu|undhi|undi|unna|unnaru|unnara|unnaya|unnaayi|istara|matladutunnanu|matladali|matladandi|telugu|telugulo|namaskaram|garu|kaadu|kadu|telusukovadaniki|enti|ento|enta|enni|eppudu|ela|evaru|ekkada|motham|nenu|manaki|kosam|chudandi|baga|kadha|kada|chalu|leka|patte|mari|mariyu|ayithe|kuda|antha|inka|koddiga|konchem|idi|adi|eedi|aadi|meera|ayindi|ayipoyindi|chesanu|chesam|chesaru)\b/i;
   if (teluguKeywords.test(lower)) return "telugu"
   
-  // Hindi romanized keywords
-  const hindiKeywords = /\b(chahiye|hai|nahi|nahin|haan|boliye|baat|karna|mera|naam|kya|mujhe|apna|hoga|dijiye|hoon|hu|tum|aap)\b/i;
+  // Hindi romanized keywords and common spoken verb forms/pronouns
+  const hindiKeywords = /\b(chahiye|hai|hain|nahi|nahin|haan|boliye|baat|karna|karni|karein|mera|meri|mere|naam|kya|kyun|kaise|kaha|mujhe|humein|apna|apni|hoga|hogi|dijiye|hoon|hu|tum|aap|samjha|samjhe|theek|achha|batao|bataiye|kuch|kripya)\b/i;
   if (hindiKeywords.test(lower)) return "hindi"
   
   return "english"

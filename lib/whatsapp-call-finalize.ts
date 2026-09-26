@@ -63,6 +63,9 @@ type TranscriptTurn = { role?: unknown; text?: unknown }
 
 type VoiceCallRow = {
   lead_id: string | null
+  direction: string | null
+  status: string | null
+  phone: string | null
   duration: unknown
   branch_id: string | null
   transcript: unknown
@@ -78,24 +81,72 @@ export async function finalizeWhatsAppCall(opts: {
   branchIdFromWebhook?: string | null
 }): Promise<void> {
   const { callSid, callId, from, outcome } = opts
-  if (!callId || !from) return
+  if (!callId) return
 
-  // ---- 1. The call's own row (turn start created it for ANSWERED calls) ----
+  // ---- 1. The call's own row ----
+  // ANSWERED calls: created by /api/calls/turn "start".
+  // OUTBOUND calls: created by /api/calls/dial BEFORE the phone rang — the
+  // row exists even when nobody picked up, and direction on it is how we
+  // know WE placed this call (the webhook payload itself looks identical).
   let call: VoiceCallRow | null = null
-  try {
-    const res = await query(
-      `SELECT lead_id, duration, branch_id, transcript, followup_sent, ai_summary
-         FROM voice_calls WHERE twilio_call_sid = $1 LIMIT 1`,
-      [callSid]
-    )
-    call = (res.rows[0] as VoiceCallRow) || null
-  } catch (e) {
-    console.error("wa finalize: voice_calls lookup failed:", e instanceof Error ? e.message : e)
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await query(
+        `SELECT lead_id, direction, status, phone, duration, branch_id, transcript, followup_sent, ai_summary
+           FROM voice_calls WHERE twilio_call_sid = $1 LIMIT 1`,
+        [callSid]
+      )
+      call = (res.rows[0] as VoiceCallRow) || null
+      if (Number(call?.duration || 0) > 0 || (Array.isArray(call?.transcript) && call.transcript.length > 0)) {
+        break
+      }
+    } catch (e) {
+      console.error("wa finalize: voice_calls lookup failed:", e instanceof Error ? e.message : e)
+    }
+    if (attempt < 2) await new Promise((r) => setTimeout(r, 400))
+  }
+
+  // The caller identity is required only when we have to find/create a lead.
+  // A business-initiated call always has its row (→ lead_id), so a terminate
+  // event with a missing/odd `from` must still finalize it instead of
+  // silently returning and leaving the row stuck in "ringing" forever.
+  const isOutbound = call?.direction === "outbound"
+  if (!from && !call) return
+
+  // ---- 1b. TERMINAL STATUS — the anti-"Ringing forever" fix ----
+  // The dial route writes status='ringing' before Meta even dials. Only two
+  // things ever moved it: the session's turn-start ('in-progress', answered
+  // calls) and the voicebot's end report ('completed'). A call the customer
+  // never answered had NOTHING to update it — it showed "Ringing" in Voice
+  // Logs and the Calls tab forever. Write the real outcome here, guarded so
+  // a fast end-report is never downgraded:
+  //   resolved → completed · rejected → rejected · failed → failed ·
+  //   missed   → no-answer
+  // and NEVER overwrite a row that already has a transcript/talk-time (the
+  // conversation happened even if Meta's terminate status says otherwise).
+  if (isOutbound && call && outcome !== "resolved") {
+    const talked = Number(call.duration || 0) > 0 || (Array.isArray(call.transcript) && call.transcript.length > 0)
+    if (!talked) {
+      const nextStatus = outcome === "rejected" ? "rejected" : outcome === "failed" ? "failed" : "no-answer"
+      try {
+        await query(
+          `UPDATE voice_calls
+              SET status = $2, outcome = $3, updated_at = now()
+            WHERE twilio_call_sid = $1
+              AND status NOT IN ('completed')`,
+          [callSid, nextStatus, outcome]
+        )
+      } catch (e) {
+        console.error("wa finalize: outbound status write failed:", e instanceof Error ? e.message : e)
+      }
+    }
   }
 
   // ---- 2. Resolve the lead (answered: from the call row; missed: by phone) ----
   let leadId: string | null = call?.lead_id || null
-  const digits = String(from).replace(/\D/g, "")
+  // Outbound terminate events may not carry the customer's wa_id — fall back
+  // to the number the dial route stored on the row.
+  const digits = String(from || call?.phone || "").replace(/\D/g, "")
   const last10 = digits.slice(-10)
   if (!leadId && last10.length === 10) {
     try {
@@ -128,25 +179,36 @@ export async function finalizeWhatsAppCall(opts: {
 
   // ---- 3. Call-history bubble in the WhatsApp chat (dedupe = Meta retries) ----
   // Answered calls → status 'logged' (do NOT bump the unread badge — real
-  // WhatsApp doesn't either). Missed/rejected/failed → 'received' so the
-  // chat list shows the badge, exactly like a missed call on the real app.
+  // WhatsApp doesn't either). Missed/rejected/failed INBOUND → 'received' so
+  // the chat list shows the badge, exactly like a missed call on the real
+  // app. A call WE placed is recorded as OUR outgoing attempt ('logged',
+  // direction 'outbound') — the old code painted every bubble as an incoming
+  // call, so a business-initiated dial showed up in the lead's chat as a
+  // missed call FROM the customer. Backwards.
+  const transcript = Array.isArray(call?.transcript) ? (call.transcript as TranscriptTurn[]) : []
   const duration = Number(call?.duration || 0)
-  const answered = outcome === "resolved" && duration > 0
+  const hasSpokenTurns = transcript.length > 0
+  const answered = duration > 0 || hasSpokenTurns || (outcome === "resolved" && call?.status === "completed")
   const bubbleContent = answered
-    ? `📞 Voice call · ${formatCallDuration(duration)}`
+    ? (duration > 0 ? `📞 Voice call · ${formatCallDuration(duration)}` : `📞 Voice call`)
     : outcome === "rejected"
-      ? "📞 Declined voice call"
+      ? (isOutbound ? "📞 Outgoing call declined" : "📞 Declined voice call")
       : outcome === "failed"
-        ? "📞 Voice call failed"
-        : "📞 Missed voice call"
+        ? (isOutbound ? "📞 Outgoing call failed" : "📞 Voice call failed")
+        : (isOutbound ? "📞 Outgoing call — no answer" : "📞 Missed voice call")
+  const bubbleDirection = isOutbound ? "outbound" : "inbound"
+  const bubbleStatus = answered || isOutbound ? "logged" : "received"
+  // Outbound terminate events may not carry the wa_id — the number the dial
+  // route stored on the row keeps the bubble attributed correctly.
+  const bubblePhone = digits ? `+${digits}` : (call?.phone || "")
   const waCallRowId = `wacall-${callId}`
   try {
     const claim = await query(
       `INSERT INTO whatsapp_messages
          (wa_message_id, lead_id, phone_number, direction, content, status, msg_type, branch_id)
-       VALUES ($1, $2, $3, 'inbound', $4, $5, 'call', $6)
+       VALUES ($1, $2, $3, $4, $5, $6, 'call', $7)
        ON CONFLICT (wa_message_id) WHERE wa_message_id IS NOT NULL DO NOTHING`,
-      [waCallRowId, leadId, `+${digits}`, bubbleContent, answered ? "logged" : "received", call?.branch_id || opts.branchIdFromWebhook || null]
+      [waCallRowId, leadId, bubblePhone, bubbleDirection, bubbleContent, bubbleStatus, call?.branch_id || opts.branchIdFromWebhook || null]
     )
     // A duplicate bubble means this call was already finalized — stop here
     // so Meta webhook retries can't double-send follow-up templates.
@@ -157,9 +219,9 @@ export async function finalizeWhatsAppCall(opts: {
       await query(
         `INSERT INTO whatsapp_messages
            (wa_message_id, lead_id, phone_number, direction, content, status)
-         VALUES ($1, $2, $3, 'inbound', $4, $5)
+         VALUES ($1, $2, $3, $4, $5, $6)
          ON CONFLICT (wa_message_id) WHERE wa_message_id IS NOT NULL DO NOTHING`,
-        [waCallRowId, leadId, `+${digits}`, bubbleContent, answered ? "logged" : "received"]
+        [waCallRowId, leadId, bubblePhone, bubbleDirection, bubbleContent, bubbleStatus]
       ).catch(() => {})
     } else {
       console.error("wa finalize: bubble insert failed:", e instanceof Error ? e.message : e)
@@ -169,7 +231,6 @@ export async function finalizeWhatsAppCall(opts: {
   if (!leadId) return
 
   // ---- 4. Transcript sentiment + lead status (same rules as Exotel) ----
-  const transcript = Array.isArray(call?.transcript) ? (call.transcript as TranscriptTurn[]) : []
   const allText = transcript.map((t) => (typeof t.text === "string" ? t.text : "")).join(" ").toLowerCase()
   const positiveWords = /yes\b|interested|please|confirm|okay|ok\b|sure|good|great/
   const negativeWords = /\bno\b|not interested|busy|later|cancel|dont|nope/
@@ -265,5 +326,23 @@ export async function finalizeWhatsAppCall(opts: {
     // Lead Brain analysis — synchronous fire-and-forget (it spins its own
     // async body), never allowed to affect this webhook's response.
     runPostCallAnalysis(callSid)
+  }
+
+  // ---- 7. Outbound attempt trail (the operator's "what happened to my dial?" answer) ----
+  // The dial route logs "initiated"; the completed case above logs the result.
+  // A never-answered / declined / failed business-initiated call had NO
+  // comm_logs row at all — the lead's timeline showed a dial that went
+  // nowhere. One row per attempt, every non-answered outcome.
+  if (isOutbound && !answered && outcome !== "resolved") {
+    const trailText =
+      outcome === "rejected" ? "Outbound WhatsApp call declined by the lead"
+      : outcome === "failed" ? "Outbound WhatsApp call failed (network/carrier)"
+      : "Outbound WhatsApp call not answered"
+    await db.from("comm_logs").insert({
+      lead_id: leadId,
+      type: "call",
+      summary: trailText,
+      outcome: outcome === "failed" ? "failed" : "missed",
+    }).catch(() => {})
   }
 }

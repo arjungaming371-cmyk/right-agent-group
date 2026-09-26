@@ -45,9 +45,9 @@ function normalizeLanguage(input: unknown): Language {
 function resolveSpokenLanguage(speech: string, current: Language): Language {
   const text = speech.toLowerCase()
   // Explicit keyword shift requests
-  if (/\b(telugu|telgu|tenglish|telug|telegu)\b|తెలుగు/i.test(text)) return "telugu"
-  if (/\b(hindi|hinglish|hind|hnd)\b|हिंदी|हिन्दी/i.test(text)) return "hindi"
-  if (/\b(english|eng|inglish)\b/i.test(text)) return "english"
+  if (/\b(telugu|telgu|tenglish|telegu)\b|తెలుగు|telugulo|telugula/i.test(text)) return "telugu"
+  if (/\b(hindi|hinglish|hind)\b|हिंदी|हिन्दी|hindimein|hindime/i.test(text)) return "hindi"
+  if (/\b(english|eng|inglish)\b|englishlo|englishmein/i.test(text)) return "english"
 
   const detected = detectLanguage(speech)
   if (detected === current) return current
@@ -180,7 +180,8 @@ export async function POST(req: NextRequest) {
         .eq("twilio_call_sid", callSid)
         .single()
 
-      const current = normalizeLanguage(body?.language || call?.language)
+      // Prefer call row's language if already recorded/switched (prevents stale client state from reverting)
+      const current = normalizeLanguage(call?.language || body?.language)
       const language = resolveSpokenLanguage(speech, current)
       if (language !== current) {
         // Persist the switch — on the call row (so later turns and history stay
@@ -210,7 +211,7 @@ export async function POST(req: NextRequest) {
       }
 
       // STREAMING MODE (body.stream === true): NDJSON, one object per line.
-      //   {"type":"sentence","text":"..."}   — speak this NOW
+      //   {"type":"sentence","text":"...","language":"..."} — speak this NOW
       //   {"type":"done","language","hangup"} — turn finished
       // The voicebot starts TTS on sentence 1 while the model is still
       // writing sentence 2 — this is what makes Priya feel instant instead
@@ -233,7 +234,7 @@ export async function POST(req: NextRequest) {
               }
             }
             try {
-              const result = await handleTurnStream(turnOpts, (sentence) => emit({ type: "sentence", text: sentence }))
+              const result = await handleTurnStream(turnOpts, (sentence) => emit({ type: "sentence", text: sentence, language }))
               emit({ type: "done", language, hangup: result.hangup })
             } catch (e) {
               console.error("turn stream error:", e instanceof Error ? e.message : e)

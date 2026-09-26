@@ -6,73 +6,102 @@ import { sendApplicationLink } from "./whatsapp"
 import { buildLeadBrief, runPostCallAnalysis } from "./lead-brain"
 import { searchKnowledgeBase } from "./knowledge-base"
 import { buildEmiInstruction, buildEligibilityInstruction, buildRateInstruction, detectLoanType } from "./finance"
-import { detectFrustration, flagFrustratedCall, detectHumanRequest, flagHumanRequested } from "./frustration"
+import { detectFrustration, flagFrustratedCall, detectHumanRequest, flagHumanRequested, OPERATOR_REPLY_INSTRUCTION } from "./frustration"
 import { createNotification } from "./notifications"
 import { maybeProposeLoanEdit } from "./loan-edit-requests"
 import { currentDateTimeInstruction } from "./compliance"
-import { getVoiceOpeners, getVoiceClosings } from "./script-lines"
-import { DEFAULT_VOICE_OPENERS } from "./default-scripts"
+import {
+  DEFAULT_VOICE_CLOSINGS,
+  DEFAULT_VOICE_OPENERS,
+  getVoiceClosingsSnapshot,
+  getVoiceOpenersSnapshot,
+  refreshChannelScriptsIfStale,
+  type VoiceOpenerFamily,
+} from "./channel-scripts"
 
 // Permission-based opener — respect keeps people on the line.
 // Neutral/informational by design: this is an intake call, not a sales
 // pitch, so it states the purpose plainly instead of leading with benefits.
 // This is the FIRST line of every outbound call — spoken before the AI
-// conversation even starts.
+// conversation even starts, so it must already match the script's "have a
+// real conversation first, collect details only later" flow. It used to
+// jump straight to "may I have your full name" as the opening sentence,
+// defeating the whole discovery/convince flow before it began. Now it
+// introduces Priya + the company and opens the floor, exactly like a human
+// cold-caller would — name/city/WhatsApp come later, once there's a reason to.
+// SCRIPT MATTERS HERE — these are spoken aloud, and the TTS service picks the
+// VOICE from the script, not from the `language` argument (any run of Latin
+// letters is treated as an English loanword, by design, so English words in a
+// native sentence keep their real pronunciation).
 //
-// SCRIPT MATTERS HERE — these lines are spoken aloud, and the TTS service
-// picks the VOICE from the script, not from the `language` argument (any run
-// of Latin letters is treated as an English loanword, by design, so English
-// words in a native sentence keep their real pronunciation). The defaults are
-// therefore written in NATIVE Telugu/Devanagari with English loanwords kept
-// Latin, so the fixed openers and the model's own replies come out of ONE
-// consistent voice instead of two different women in one call.
+// So while these lines were written in Roman Tenglish/Hinglish, every one of
+// them was spoken end to end by the ENGLISH voice — "Namaskaram" pronounced by
+// an English speaker — while the model's own replies, which CALL_LANGUAGE_STYLES
+// asks for in native script, came out of the Telugu/Hindi voice. Two different
+// women in one call, and the fixed half mispronounced.
 //
-// 2026-09-26 omnichannel pass: the line text itself moved to
-// lib/default-scripts.ts (DEFAULT_VOICE_OPENERS / DEFAULT_VOICE_CLOSINGS —
-// the Reset-to-Default source of truth) and is now DB-editable from the
-// dashboard Script Manager (ai_scripts keys 'voice_openers'/'voice_closings',
-// 5-min TTL cache in lib/script-lines.ts). The LIVE call path always reads
-// through getVoiceOpeners()/getVoiceClosings(); these re-exports keep the old
-// import surface working for tests and tooling.
+// Written in native script they get the native voice, matching the model's
+// replies: one consistent Priya for the whole call. English loanwords stay in
+// Latin letters on purpose — that is exactly what CALL_LANGUAGE_STYLES asks the
+// model for, and the TTS stitching handles it.
+//
+// These constants are used ONLY on the call path. WhatsApp replies stay Roman
+// (LANGUAGE_STYLES) so the ops team can read them on the dashboard.
+// Openers/closings are now EDITABLE from the dashboard (Script Manager →
+// Voice tab → ai_scripts rows 'voice_openers' / 'voice_closings', 5-min
+// stale-while-revalidate cache in lib/channel-scripts.ts). The exported
+// constants below are the code defaults used when no DB row exists.
 export const GREETINGS = DEFAULT_VOICE_OPENERS.cold
-export const RETURNING_GREETINGS = DEFAULT_VOICE_OPENERS.returning
-export const INBOUND_GREETINGS = DEFAULT_VOICE_OPENERS.inbound
 
-/** Substitute the {name} token of a saved *_named opener template. */
-function fillName(template: string, name: string): string {
-  return template.replace(/\{name\}/g, name)
-}
+// Repeat outbound calls to the same lead (call_count > 0 before this call)
+// used to replay the exact same cold-open pitch every single time —
+// "we help people get loans from 20+ banks..." on call 5 sounds exactly
+// like what it is: a script replaying, not a person who remembers them.
+// Short, warm follow-up instead — the LLM's own REAL MEMORY instructions
+// pick up the specific details once the conversation continues from here.
+export const RETURNING_GREETINGS = DEFAULT_VOICE_OPENERS.returning
+
+// Inbound calls are the customer's initiative — greet like a receptionist,
+// not a telemarketer. The pitch only comes later, if it fits.
+export const INBOUND_GREETINGS = DEFAULT_VOICE_OPENERS.inbound
 
 // Inbound calls auto-create a lead with a placeholder like "Caller 8090"
 // before we know the real name — never greet someone by that fake name.
 const PLACEHOLDER_NAME_RE = /^(Caller \d+|Unknown|WA \d+)$/i
 
-// (Named-lead openers are the *_named variants of the DB-editable
-// DEFAULT_VOICE_OPENERS — same behaviour as the old personalized*
-// functions, with the {name} token filled at call time.)
-
-const RETRY_MSG: Record<Language, string> = {
-  english: "Sorry, I had a small technical moment. Could you please share your name so I can send your loan application link?",
-  hindi:   "माफ़ कीजिए, छोटी technical problem हुई। कृपया अपना नाम बताएं ताकि मैं आपका loan application link भेज सकूं।",
-  telugu:  "Sorry, చిన్న technical problem వచ్చింది. దయచేసి మీ పేరు చెప్పండి, మీ loan application link పంపిస్తాను.",
+/**
+ * Pick the opener for a call: the "{name}" personalized variant when we know
+ * the lead's real name, the plain opener otherwise. Both come from the live
+ * channel-scripts snapshot (dashboard-editable), falling back to the code
+ * defaults per language.
+ */
+function greetingFor(language: Language, family: VoiceOpenerFamily, name?: string): string {
+  const openers = getVoiceOpenersSnapshot()
+  const withName = openers[`${family}WithName`]
+  if (name && withName?.[language]) return withName[language].replace(/\{name\}/g, name)
+  return openers[family][language]
 }
 
-// Used ONLY when the LLM backend is genuinely out of capacity (Groq 429) —
-// retrying won't help mid-call since the rate window doesn't clear in the
-// next few seconds, so stringing the customer along with repeated
-// "technical moment" replies is worse than ending politely and calling
-// back once things clear.
-const RATE_LIMIT_REPLY: Record<Language, string> = {
-  english: "Sorry sir, we're having a brief network issue on our end. I'll have someone call you back in a few minutes to continue — thank you for your patience!",
-  hindi:   "Sorry sir, हमारी तरफ से थोड़ी network problem आ रही है। कुछ minute में हम आपको वापस call करेंगे — धन्यवाद!",
-  telugu:  "Sorry sir, మా వైపు నుండి కొంచెం network problem వచ్చింది. కొన్ని నిమిషాల్లో మేము మళ్ళీ call చేస్తాము — ధన్యవాదాలు!",
-}
+// BUSINESS-INITIATED WHATSAPP CALLBACK — the lead called US on WhatsApp
+// (that is exactly who Meta lets us dial back), so the cold pitch is the
+// wrong opener: the customer picked up a WhatsApp call from a number they
+// contacted, and the first line should CONNECT the two events. "You reached
+// out earlier, I'm calling you back" is instantly credible; "we help people
+// get loans from 20+ banks" on a callback sounds like the agent has no idea
+// who they are. Repeat calls (call_count > 1) keep RETURNING_GREETINGS —
+// by then the follow-up framing is correct on every channel.
+export const WA_CALLBACK_GREETINGS = DEFAULT_VOICE_OPENERS.whatsappCallback
+
+// RETRY_MSG / RATE_LIMIT_REPLY / CLOSING / GOODBYE_REPLY moved to the
+// editable channel-scripts snapshot as 'voice_closings' (keys: retry,
+// rateLimit, qualified, goodbye) — same texts as defaults, now editable
+// from the dashboard with per-language fallback to these defaults.
 
 // FIXED: only real goodbye phrases end the call.
 // Plain "thank you" / "धन्यवाद" / "ధన్యవాదాలు" must NOT hang up —
 // Priya says thanks naturally in the middle of a conversation.
 const GOODBYE_RE =
-  /goodbye|bye[- ]?bye|have a (great|good|nice) day|din shubh ho|phir milenge|alvida|manchi roju|selavu|veedkolu|अलविदा|फिर मिलेंगे|दिन शुभ हो|వీడ్కోలు|సెలవు|మంచి రోజు జరగాలి/i
+  /\b(goodbye|bye|bye[- ]?bye|take care)\b|have a (great|good|nice|wonderful) day|din shubh ho|phir milenge|alvida|manchi roju|selavu|veedkolu|अलविदा|फिर मिलेंगे|दिन शुभ हो|వీడ్కోలు|సెలవు|మంచి రోజు జరగాలి/i
 
 // CUSTOMER-side goodbye: when the CALLER says bye, the call is over — full
 // stop. Observed live: customer said "Thank you. Bye." and Priya kept
@@ -80,7 +109,7 @@ const GOODBYE_RE =
 // \b keeps "bye" from matching inside other words; Telugu/Hindi phrases are
 // the common phone sign-offs ("I'll hang up now", "I'll take leave").
 const CUSTOMER_BYE_RE =
-  /\b(bye|goodbye|bye[- ]?bye)\b|రేపు మాట్లాడుదాం|సెలవు|ఉంటాను మరి|పెట్టేస్తున్నాను|फोन रखत[ाी] हूँ?|रखत[ाी] हूँ?|अलविदा|बाय/i
+  /\b(bye|goodbye|bye[- ]?bye|call you later|talk to you later|later bye|take care)\b|రేపు మాట్లాడుదాం|సెలవు|ఉంటాను మరి|పెట్టేస్తున్నాను|తర్వాత మాట్లాడుదాం|फोन रखत[ाी] हूँ?|रखत[ाी] हूँ?|बाद में बात करत[ाी] हूँ|अलविदा|बाय/i
 
 // VOICEMAIL / ANSWERING MACHINE detection — checked ONLY on the very first
 // thing heard after an OUTBOUND greeting (history.length === 0). Deliberately
@@ -94,8 +123,8 @@ const CUSTOMER_BYE_RE =
 const VOICEMAIL_RE =
   /leave (a|your) message|after the (tone|beep)|voice ?mail|mailbox( is full)?|record your message|please try your call (again )?later|message chhod|beep ke baad|message pettandi|beep tarvata/i
 
-// (The customer-bye sign-off is the DB-editable 'sign_off' closing —
-// see DEFAULT_VOICE_CLOSINGS / getVoiceClosings.)
+// Short, warm sign-off — NOT the link-sending 'qualified' closing, which
+// promises a WhatsApp message that may not exist yet. Text: voice_closings.goodbye.
 
 /** Called on the first webhook hit of a call (before any speech). Bumps call_count once per call. */
 export async function startCall(
@@ -104,6 +133,9 @@ export async function startCall(
   language: Language,
   direction: "inbound" | "outbound" = "outbound"
 ): Promise<string> {
+  // Pull the freshest dashboard-edited openers/closings (no-op when the
+  // 5-min cache is warm; backs off silently if the DB is unreachable).
+  await refreshChannelScriptsIfStale().catch(() => {})
   // Read name + call_count BEFORE bumping call_count below, so "is this a
   // repeat call" reflects the count going INTO this call, not after it.
   let name: string | undefined
@@ -154,18 +186,21 @@ export async function startCall(
 
   const hasName = name && !PLACEHOLDER_NAME_RE.test(name)
 
-  // DB-editable openers (5-min TTL cache; a cold miss costs one indexed
-  // query and can never fail the call — getVoiceOpeners falls back to the
-  // built-in defaults on any DB error).
-  const openers = await getVoiceOpeners()
-
   if (direction === "inbound") {
-    return hasName ? fillName(openers.inbound_named[language], name!) : openers.inbound[language]
+    return greetingFor(language, "inbound", hasName ? name! : undefined)
+  }
+  // Business-initiated WHATSAPP call: first contact on this channel is a
+  // callback ("you reached out earlier"), not a cold pitch.
+  if (callSid.startsWith("wacall-")) {
+    if (isRepeatCall) {
+      return greetingFor(language, "returning", hasName ? name! : undefined)
+    }
+    return greetingFor(language, "whatsappCallback", hasName ? name! : undefined)
   }
   if (isRepeatCall) {
-    return hasName ? fillName(openers.returning_named[language], name!) : openers.returning[language]
+    return greetingFor(language, "returning", hasName ? name! : undefined)
   }
-  return hasName ? fillName(openers.cold_named[language], name!) : openers.cold[language]
+  return greetingFor(language, "cold", hasName ? name! : undefined)
 }
 
 async function getHistory(callSid: string): Promise<{ role: "user" | "model"; content: string }[]> {
@@ -289,7 +324,8 @@ async function buildTurnInstructions(
   instructions: string | undefined,
   speech: string,
   callerPhone: string | undefined,
-  contextPromise: Promise<TurnContext>
+  contextPromise: Promise<TurnContext>,
+  voiceChannel: "whatsapp" | "phone" = "phone"
 ): Promise<string> {
   // LEAD BRAIN: brief Priya with the full cross-channel picture — known
   // facts, rolling relationship summary, recent interactions, sentiment
@@ -320,7 +356,19 @@ async function buildTurnInstructions(
   // customer saying "same number / this number" left the model with nothing
   // to anchor on — observed live inventing "9888888888" out of thin air.
   // A single short line per turn; costs a handful of tokens.
-  if (callerPhone) {
+  //
+  // FIX (2026-09-26): on WHATSAPP calls the grounding now also CARRIES the
+  // channel fact. The old line told Priya the number and nothing else — so on
+  // a WhatsApp call, where the script's step 3 said "is your WhatsApp number
+  // the same as this call?", she asked a question that makes no sense when
+  // the call itself IS on the customer's WhatsApp. Observed live: every
+  // WhatsApp call re-asked it. The phone wording is unchanged.
+  if (callerPhone && voiceChannel === "whatsapp") {
+    merged = [
+      merged,
+      `THIS CALL IS HAPPENING ON THE CUSTOMER'S WHATSAPP. The customer is calling from ${callerPhone} — that number IS their WhatsApp number. NEVER ask "is this your WhatsApp number" or "same or different" — that question is WRONG on a WhatsApp call and insults the customer's intelligence. When it is time to send the loan form, simply say you are sending it to this same WhatsApp — the send happens automatically to this number. Never say or invent any other phone number.`,
+    ].filter(Boolean).join("\n\n")
+  } else if (callerPhone) {
     merged = [
       merged,
       `The customer is calling from ${callerPhone}. If they say their WhatsApp is this same number, use it — never say or invent any phone number yourself.`,
@@ -366,6 +414,17 @@ async function buildTurnInstructions(
     if (eligibility) merged = [merged, eligibility.instruction].filter(Boolean).join("\n\n")
   }
 
+  // OPERATOR / HUMAN HANDOFF (2026-09-26, "train the agent + call operators"):
+  // the keyword flag in handleTurn/handleTurnStream alerts the team
+  // fire-and-forget — this instruction is what trains the SPOKEN reply
+  // itself, on the exact turn it matters, with the script's callback
+  // contract (acknowledge → promise the officer callback → stop; never
+  // pitch, never ask). Lives in buildTurnInstructions so BOTH turn paths
+  // (blocking + streaming, phone + WhatsApp calls) get identical training.
+  if (detectHumanRequest(speech)) {
+    merged = [merged, OPERATOR_REPLY_INSTRUCTION].filter(Boolean).join("\n\n")
+  }
+
   return merged
 }
 
@@ -380,60 +439,52 @@ async function buildTurnInstructions(
  * call. The caller-phone header both grounds the extractor for "same number"
  * answers AND lets mightBeComplete() pass without spoken digits.
  */
-/**
- * Cheap client-side pre-check mirroring mightBeComplete: lets the caller hear
- * the closing sentence immediately while completeLeadIfReady's extraction LLM
- * + WhatsApp round-trips run in the background of the same turn.
- */
-function mightBeCompleteQuick(
-  messages: { role: "user" | "model"; content: string }[],
-  reply: string
-): boolean {
-  const transcriptText =
-    [...messages, { role: "model" as const, content: reply }]
-      .map((m) => `${m.role === "model" ? "Priya" : "Customer"}: ${m.content}`)
-      .join("\n")
-  return mightBeComplete(transcriptText)
-}
-
 async function completeLeadIfReady(opts: {
   leadId: string
   callSid: string | null
   callerPhone?: string
+  /** True when the callSid is a wacall-* — the call itself runs on the customer's WhatsApp. */
+  isWhatsAppCall?: boolean
   messages: { role: "user" | "model"; content: string }[]
   reply: string
   branchId?: string | null
 }): Promise<boolean> {
-  const { leadId, callSid, callerPhone, messages, reply, branchId } = opts
+  const { leadId, callSid, callerPhone, isWhatsAppCall, messages, reply, branchId } = opts
+  if (!leadId) return false
+
+  // FAST PATH: If the lead was already completed (status is no longer 'new') before this call,
+  // do not trigger the auto-onboarding completion hangup, and skip the expensive extraction LLM call.
+  const existing = await db.from("leads").select("name, address, whatsapp_number, status").eq("id", leadId).single()
+  if (existing.data?.status && existing.data?.status !== "new") return false
+
   // FIX (2026-09-20): extraction used to receive the ENTIRE transcript (the
   // main reply is capped at 12 messages, but this LLM call fired on any
   // potentially-complete turn with everything ever said) — growing token
   // cost + per-turn CPU on the hot path. Name/number surface late in calls
   // anyway; the last 12 turns are what matters.
   const allTurns = [...messages.slice(-12), { role: "model" as const, content: reply }]
+  // FIX (2026-09-26): on a WHATSAPP call the calling number IS the customer's
+  // WhatsApp — extraction no longer demands the customer "explicitly say so"
+  // (there is no other possibility to confirm against). Phone calls keep the
+  // strict explicit-confirmation rule.
+  const phonePreamble = callerPhone
+    ? isWhatsAppCall
+      ? `(This call is happening ON the customer's WhatsApp: the customer is calling from ${callerPhone}, and that number IS their WhatsApp number. Use it as their whatsapp_number.)\n`
+      : `(The customer is calling from: ${callerPhone}. Use this as their whatsapp_number ONLY if they EXPLICITLY said WhatsApp is on this same number — if they never mentioned their WhatsApp number, leave whatsapp_number null.)\n`
+    : ""
   const transcriptText =
-    (callerPhone ? `(The customer is calling from: ${callerPhone}. Use this as their whatsapp_number ONLY if they EXPLICITLY said WhatsApp is on this same number — if they never mentioned their WhatsApp number, leave whatsapp_number null.)\n` : "") +
+    phonePreamble +
     allTurns.map((m) => `${m.role === "model" ? "Priya" : "Customer"}: ${m.content}`).join("\n")
 
   if (!mightBeComplete(transcriptText)) return false
   const extracted = await extractLeadInfo(transcriptText)
-  if (!leadId) return false
-
-  // extractLeadInfo only reads what was SPOKEN this call — a returning lead
-  // whose name/address is already on file correctly never gets re-asked (by
-  // design, see the script's memory rules), so extraction alone reports
-  // "incomplete" forever even though the lead genuinely has all three facts.
-  // Merge with what the lead record already knows before deciding.
-  const existing = await db.from("leads").select("name, address, whatsapp_number, status").eq("id", leadId).single()
-
-  // If the lead was already completed (status is no longer 'new') before this call,
-  // do not trigger the auto-onboarding completion hangup.
-  if (existing.data?.status && existing.data?.status !== "new") return false
 
   const knownName = existing.data?.name && !PLACEHOLDER_NAME_RE.test(existing.data.name) ? existing.data.name : null
   const effectiveName = extracted.name || knownName
   const effectiveAddress = extracted.address || existing.data?.address || null
-  const effectiveWhatsapp = extracted.whatsapp_number || existing.data?.whatsapp_number || null
+  // WhatsApp-call fallback: even if extraction somehow returned null, the
+  // calling number is definitionally the WhatsApp number on a wacall-*.
+  const effectiveWhatsapp = extracted.whatsapp_number || existing.data?.whatsapp_number || (isWhatsAppCall && callerPhone ? callerPhone : null)
 
   if (!effectiveName || !effectiveAddress || !effectiveWhatsapp) return false
 
@@ -462,14 +513,18 @@ async function completeLeadIfReady(opts: {
     const token = randomUUID()
     await db.from("form_links").insert({ token, lead_id: leadId })
 
-    const waNumber = extracted.whatsapp_number
+    // FIX (2026-09-26): send to the EFFECTIVE number (extraction → lead row →
+    // caller on WhatsApp calls), not raw extraction — the fallback above can
+    // complete the lead while this line still had null, creating a form link
+    // that was never sent.
+    const waNumber = effectiveWhatsapp
     if (waNumber) {
       // Per-branch WhatsApp: the link goes out from the BRANCH's WABA number
       // (branded with the branch's name), or the company number when the
       // branch has none.
       const { branchWhatsAppCtx } = await import("./whatsapp")
       const waBranch = await branchWhatsAppCtx(branchId)
-      const result = await sendApplicationLink(waNumber, extracted.name || "there", token, waBranch)
+      const result = await sendApplicationLink(waNumber, effectiveName || "there", token, waBranch)
       if (!result.ok) console.error("WhatsApp link send failed:", result.error)
       // Mark this call as already followed-up so the status webhook doesn't
       // ALSO send the generic post-call WhatsApp message once the call ends.
@@ -534,6 +589,9 @@ export async function handleTurn(opts: {
   branchId?: string | null
 }): Promise<{ text: string; hangup: boolean }> {
   const { leadId, callSid, speech, language, callerPhone, instructions, direction, branchId } = opts
+  // Channel fact: WhatsApp voice calls carry wacall-* sids (Meta's call id).
+  // Everything downstream (grounding, extraction, form send) keys off this.
+  const isWhatsAppCall = !!callSid?.startsWith("wacall-")
 
   // Fire the history-independent reads NOW, so they overlap the transcript
   // read instead of queueing behind it (see startTurnContext).
@@ -555,8 +613,7 @@ export async function handleTurn(opts: {
   // behavior a human agent would never do. History must be non-empty so a
   // first-utterance misfire can't kill a call that just connected.
   if (history.length > 0 && CUSTOMER_BYE_RE.test(speech)) {
-    const { sign_off } = await getVoiceClosings()
-    const reply = sign_off[language]
+    const reply = getVoiceClosingsSnapshot().goodbye[language]
     updateTranscriptAsync(callSid, speech, reply)
     return { text: reply, hangup: true }
   }
@@ -570,20 +627,21 @@ export async function handleTurn(opts: {
     flagHumanRequested(callSid, leadId || null, speech)
   }
 
-  const mergedInstructions = await buildTurnInstructions(leadId, history, instructions, speech, callerPhone, contextPromise)
+  const mergedInstructions = await buildTurnInstructions(leadId, history, instructions, speech, callerPhone, contextPromise, isWhatsAppCall ? "whatsapp" : "phone")
 
   let reply = ""
   let rateLimited = false
   try {
     reply = (await chatWithLLM(messages, language, mergedInstructions || undefined, { channel: "call", branchId })).trim()
-    if (!reply) reply = (await getVoiceOpeners()).cold[language]
+    if (!reply) reply = getVoiceOpenersSnapshot().cold[language]
   } catch (e) {
     console.error("LLM error:", e)
+    const closings = getVoiceClosingsSnapshot()
     if (isRateLimitError(e)) {
       rateLimited = true
-      reply = RATE_LIMIT_REPLY[language]
+      reply = closings.rateLimit[language]
     } else {
-      reply = RETRY_MSG[language]
+      reply = closings.retry[language]
     }
   }
 
@@ -606,8 +664,8 @@ export async function handleTurn(opts: {
   updateTranscriptAsync(callSid, speech, reply)
   maybeProposeLoanEdit(leadId, "priya_voice", speech)
 
-  const completed = await completeLeadIfReady({ leadId, callSid, callerPhone, messages, reply, branchId })
-  if (completed) return { text: (await getVoiceClosings()).qualified[language], hangup: true }
+  const completed = await completeLeadIfReady({ leadId, callSid, callerPhone, isWhatsAppCall, messages, reply, branchId })
+  if (completed) return { text: getVoiceClosingsSnapshot().qualified[language], hangup: true }
 
   return { text: reply, hangup: GOODBYE_RE.test(reply) }
 }
@@ -636,6 +694,8 @@ export async function handleTurnStream(
   onSentence: (sentence: string) => void
 ): Promise<{ hangup: boolean }> {
   const { leadId, callSid, speech, language, callerPhone, instructions, direction, branchId } = opts
+  // Channel fact: see handleTurn. Same wacall-* derivation, streaming twin.
+  const isWhatsAppCall = !!callSid?.startsWith("wacall-")
 
   // Fire the history-independent reads NOW, so they overlap the transcript
   // read instead of queueing behind it (see startTurnContext). This is the
@@ -651,8 +711,7 @@ export async function handleTurnStream(
   }
 
   if (history.length > 0 && CUSTOMER_BYE_RE.test(speech)) {
-    const { sign_off } = await getVoiceClosings()
-    const reply = sign_off[language]
+    const reply = getVoiceClosingsSnapshot().goodbye[language]
     updateTranscriptAsync(callSid, speech, reply)
     onSentence(reply)
     return { hangup: true }
@@ -667,7 +726,7 @@ export async function handleTurnStream(
     flagHumanRequested(callSid, leadId || null, speech)
   }
 
-  const mergedInstructions = await buildTurnInstructions(leadId, history, instructions, speech, callerPhone, contextPromise)
+  const mergedInstructions = await buildTurnInstructions(leadId, history, instructions, speech, callerPhone, contextPromise, isWhatsAppCall ? "whatsapp" : "phone")
 
   let reply = ""
   let pending = ""
@@ -683,13 +742,14 @@ export async function handleTurnStream(
     const tail = pending.trim()
     if (tail) onSentence(tail)
     if (!reply) {
-      reply = (await getVoiceOpeners()).cold[language]
+      reply = getVoiceOpenersSnapshot().cold[language]
       onSentence(reply)
     }
   } catch (e) {
     console.error("LLM error:", e)
+    const closings = getVoiceClosingsSnapshot()
     if (isRateLimitError(e)) {
-      const msg = RATE_LIMIT_REPLY[language]
+      const msg = closings.rateLimit[language]
       await updateTranscriptAsync(callSid, speech, msg)
       onSentence(msg)
       if (callSid) {
@@ -698,7 +758,7 @@ export async function handleTurnStream(
       }
       return { hangup: true }
     }
-    const msg = RETRY_MSG[language]
+    const msg = closings.retry[language]
     await updateTranscriptAsync(callSid, speech, msg)
     onSentence(msg)
     return { hangup: false }
@@ -713,15 +773,9 @@ export async function handleTurnStream(
   await updateTranscriptAsync(callSid, speech, reply)
   maybeProposeLoanEdit(leadId, "priya_voice", speech)
 
-  // FIX (2026-09-20): the closing sentence used to be spoken only AFTER
-  // completeLeadIfReady finished — and it runs a second LLM call + a branch
-  // WhatsApp round-trip (0.5-15s of dead air) while the caller waits. Speak
-  // first, complete after; completion only decides the hangup now.
-  if (mightBeCompleteQuick(messages, reply)) {
-    onSentence((await getVoiceClosings()).qualified[language])
-  }
-  const completed = await completeLeadIfReady({ leadId, callSid, callerPhone, messages, reply, branchId })
+  const completed = await completeLeadIfReady({ leadId, callSid, callerPhone, isWhatsAppCall, messages, reply, branchId })
   if (completed) {
+    onSentence(getVoiceClosingsSnapshot().qualified[language])
     return { hangup: true }
   }
 

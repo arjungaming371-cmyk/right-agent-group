@@ -35,6 +35,9 @@ const { WebSocketServer } = require("ws")
 const { spawn } = require("child_process")
 const voiceProviders = require("./voice-providers")
 const waCalls = require("./whatsapp-calls")
+// Last-resort spoken lines (clarify / hold / can't-reach-app) shared with
+// whatsapp-calls.js — code constants on purpose, see server/fallback-speech.js.
+const { CLARIFY_PHRASE, FALLBACK_PHRASE, START_FALLBACK_PHRASE } = require("./fallback-speech")
 
 const PORT = parseInt(process.env.VOICEBOT_PORT || "3002")
 // HTTP bridge for the WhatsApp Business Calling integration (see
@@ -178,12 +181,9 @@ async function speechToText(pcm, language) {
 // Said when the STT provider flags its own transcript as unreliable — asking
 // the caller to repeat beats sending a best guess at noise into the LLM, which
 // otherwise confidently replies to words the caller never said.
-// (2026-09-26: the three fixed line sets below were byte-identical in
-// whatsapp-calls.js — now ONE shared module, server/priya-lines.js, owns
-// them. They stay code constants on purpose: they are the last-resort lines
-// for exactly the moments the app/DB is unreachable, so they must never
-// depend on a DB read. See that file's header.)
-const { CLARIFY_PHRASE, FALLBACK_PHRASE, START_FALLBACK_PHRASE } = require("./priya-lines")
+// (CLARIFY_PHRASE / FALLBACK_PHRASE / START_FALLBACK_PHRASE now come from
+// server/fallback-speech.js — shared with whatsapp-calls.js so the two
+// transports can never drift apart.)
 
 // ---------- TTS: Sarvam / Cartesia cloud ----------
 
@@ -881,12 +881,13 @@ class CallSession {
         (ev) => {
           if (turnAbort.signal.aborted || epoch !== this.speechEpoch) return // turn abandoned — stop consuming
           if (ev.type === "sentence" && ev.text) {
+            if (ev.language) this.language = ev.language
             if (!firstSentenceAt) {
               firstSentenceAt = Date.now()
               console.log(`⏱ brain (time to first sentence): ${firstSentenceAt - brainT0}ms`)
             }
             console.log(`🗣 reply sentence (${ev.text.length} chars)`)
-            this.queueSentence(ev.text, epoch, spoken)
+            this.queueSentence(ev.text, epoch, spoken, ev.language || this.language)
           } else if (ev.type === "done") {
             if (ev.language) this.language = ev.language
             hangup = !!ev.hangup
@@ -996,7 +997,7 @@ class CallSession {
    * `spoken`, when passed, collects the sentences whose playback actually
    * started, so the transcript can be corrected to what the caller heard.
    */
-  queueSentence(text, turnEpoch, spoken) {
+  queueSentence(text, turnEpoch, spoken, sentenceLang) {
     const clean = (text || "").trim()
     if (!clean || this.closed) return
     // undefined => "whatever is current", so a missed call site degrades to
@@ -1005,7 +1006,8 @@ class CallSession {
     if (epoch !== this.speechEpoch) return // this turn was abandoned
     if (ECHO_PROBE && !this.botTalking) this.echoReplyOpen = true
     this.botTalking = true
-    const synth = this.synth(clean, epoch)
+    const lang = sentenceLang || this.language || "english"
+    const synth = this.synth(clean, epoch, lang)
     this.synthChain = synth
     // FIX (2026-09-20): the chain used to be `sendChain.then(...)` with no
     // catch — one rejected link (any ws.send throw, a synth bug) poisoned the
@@ -1027,8 +1029,8 @@ class CallSession {
         // fallback line was prewarmed into the TTS cache at boot, play it
         // from cache; if even that isn't cached (TTS was down before boot),
         // there is genuinely nothing we can say, so log and move on.
-        const fbText = FALLBACK_PHRASE[this.language] || FALLBACK_PHRASE.english
-        const fbPcm = ttsCache.get(ttsCacheKey(fbText, this.language, this.voice))
+        const fbText = FALLBACK_PHRASE[lang] || FALLBACK_PHRASE.english
+        const fbPcm = ttsCache.get(ttsCacheKey(fbText, lang, this.voice))
         if (fbPcm && clean !== fbText) {
           console.log("🗣 (tts-failed fallback)")
           await this.playPcm(fbPcm, epoch)
@@ -1038,11 +1040,12 @@ class CallSession {
   }
 
   /** Extracted verbatim so tests can replace it without a TTS service. */
-  synth(text, epoch) {
+  synth(text, epoch, sentenceLang) {
+    const lang = sentenceLang || this.language || "english"
     return this.synthChain.then(() =>
       this.closed || epoch !== this.speechEpoch
         ? null
-        : textToSpeechPcm8k(text, this.language, this.voice).catch((e) => {
+        : textToSpeechPcm8k(text, lang, this.voice).catch((e) => {
             console.error("TTS error:", e.message)
             return null
           })
@@ -1288,7 +1291,7 @@ const httpServer = http.createServer((req, res) => {
   if (req.method === "GET" && url === "/health") return json(200, { ok: true, activeCalls: waCalls.activeCount() })
 
   if (req.method !== "POST" || ![
-    "/whatsapp/connect", "/whatsapp/terminated",
+    "/whatsapp/connect", "/whatsapp/terminated", "/whatsapp/wait-connected",
     "/whatsapp/outbound-offer", "/whatsapp/outbound-register",
     "/whatsapp/outbound-accept", "/whatsapp/outbound-cancel",
   ].includes(url)) {
@@ -1323,6 +1326,10 @@ const httpServer = http.createServer((req, res) => {
           console.error("wa connect error:", e.message)
           json(502, { ok: false, error: e.message })
         })
+    } else if (url === "/whatsapp/wait-connected") {
+      waCalls.waitConnectedSession(str(body.callId, 128), Number(body.timeoutMs) || 2500)
+        .then((r) => json(200, r))
+        .catch((e) => json(200, { ok: false, connected: false, error: e.message }))
     } else if (url === "/whatsapp/outbound-offer") {
       Promise.resolve()
         .then(() => waCalls.createOutboundOffer({

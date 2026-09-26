@@ -105,9 +105,10 @@ New-Item -ItemType Directory -Force -Path $logsDir | Out-Null
 #    There are no Python services to start — no Whisper model, no GPU, no venv.
 Write-Host "[4/6] Voice pipeline: cloud (STT: Sarvam Saaras | TTS: $ttsCallProvider) - no local services" -ForegroundColor Green
 
-# 4. Voicebot Server (port 3002) - the phone call brain
+# 4. Voicebot Server (port 3002 ws, port 3003 http) - the phone call brain
 Write-Host "[5/6] Starting Voicebot..." -ForegroundColor Yellow
 Stop-Port 3002
+Stop-Port 3003
 $vbProcess = Start-Process "node" -ArgumentList "server\voicebot-server.js" -WorkingDirectory $ProjectDir -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logsDir "voicebot.log") -RedirectStandardError (Join-Path $logsDir "voicebot.err.log")
 Start-Sleep -Seconds 1
 Write-Host "      OK Voicebot started (PID: $($vbProcess.Id)) - logs: logs\voicebot.log" -ForegroundColor Green

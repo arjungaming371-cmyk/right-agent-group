@@ -2,10 +2,10 @@
 
 import { useEffect, useState, useCallback } from "react"
 import {
-  PhoneCall, Phone, MessageCircle, Zap, XCircle, RotateCcw, Download, Play, Pause,
-  ListChecks, Clock, ShieldAlert, RefreshCw,
+  PhoneCall, Phone, MessageCircle, Zap, XCircle, RotateCcw, Download, Play,
+  Pause, ListChecks, Clock, ShieldAlert, RefreshCw,
 } from "lucide-react"
-import { timeAgo, formatDateTime } from "@/lib/utils"
+import { formatDateTime } from "@/lib/utils"
 import { usePolling } from "@/lib/use-poll"
 import { useToast } from "../ui/toast"
 import { statusGroup, isRequeueable, STATUS_GROUP_COLORS, type QueueStatusGroup } from "@/lib/dialer-logic"
@@ -29,6 +29,20 @@ type QueueItem = {
   cancelled_by: string | null
   call_sid: string | null
   created_at: string
+}
+
+// Live runner snapshot — GET /api/outbound/process { run, queue }
+type RunStatus = {
+  runId: string
+  running: boolean
+  reason: string | null
+  claimed: number
+  called: number
+  failed: number
+  skipped: number
+  waves: number
+  concurrency: number
+  current: string[]
 }
 
 type TabId = "all" | QueueStatusGroup
@@ -67,45 +81,46 @@ export default function QueueView({ role }: { role: Role }) {
   const [items, setItems] = useState<QueueItem[]>([])
   const [total, setTotal] = useState(0)
   const [counts, setCounts] = useState<Record<string, number>>({})
+  const [run, setRun] = useState<RunStatus | null>(null)
   const [settings, setSettings] = useState<{ concurrency: number; autoRetry: boolean; retryDelayMinutes: number; maxRetries: number } | null>(null)
   const [tab, setTab] = useState<TabId>("all")
   const [loading, setLoading] = useState(true)
   const [acting, setActing] = useState(false)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
-  const [autoDialing, setAutoDialing] = useState(false)
 
-  const groupOf = useCallback((s: string) => statusGroup(s), [])
-  const shown = tab === "all" ? items : items.filter((i) => groupOf(i.status) === tab)
-
+  const shown = tab === "all" ? items : items.filter((i) => statusGroup(i.status) === tab)
   const g = (k: QueueStatusGroup) => counts[k] || 0
   const done = g("called") + g("failed") + g("skipped") + g("cancelled")
   const planned = done + g("pending")
   const pct = planned > 0 ? Math.round((done / planned) * 100) : 0
+  const running = !!run?.running
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
     try {
-      const [listRes, statsRes] = await Promise.all([
-        fetch("/api/outbound?limit=200"),
-        fetch("/api/outbound?stats=1"),
+      // Runner snapshot + authoritative per-status counts in ONE call;
+      // rows come filtered from the paginated listing.
+      const [runRes, listRes] = await Promise.all([
+        fetch("/api/outbound/process"),
+        fetch(`/api/outbound?status=${tab === "all" ? "" : tab}&limit=200`),
       ])
+      if (runRes.ok) {
+        const d = await runRes.json()
+        setRun(d.run || null)
+        setCounts(d.queue || {})
+      }
       if (listRes.ok) {
         const d = await listRes.json()
         setItems(d.items || [])
         setTotal(d.total || 0)
       }
-      if (statsRes.ok) {
-        const d = await statsRes.json()
-        setCounts(d.counts || {})
-      }
-    } catch {}
+    } catch { /* transient — next poll catches up */ }
     if (!silent) setLoading(false)
-  }, [])
+  }, [tab])
 
   useEffect(() => { load() }, [load])
-  // While a campaign is live (dialing rows exist) refresh fast — the radar
-  // and status chips are the operator's eyes during a run.
-  usePolling(() => load(true), autoDialing ? 4000 : 10000)
+  // While a campaign is live the radar IS the operator's eyes — fast poll.
+  usePolling(() => load(true), running ? 4000 : 12000)
 
   async function loadSettings() {
     try {
@@ -134,57 +149,33 @@ export default function QueueView({ role }: { role: Role }) {
     }
   }
 
-  // One runner invocation = claim + dial up to `limit` DUE rows. The runner
-  // itself PAUSES (paused: true) when the calling window is closed — the
-  // rows stay pending and resume by themselves later.
-  async function runBatch(): Promise<{ paused?: boolean } | null> {
+  // Campaign protocol on the background runner: start drains the ENTIRE
+  // pending queue wave-by-wave (progress via the 4s poll); stop lets the
+  // in-flight wave finish and leaves the rest pending. Outside the calling
+  // window the server refuses to start — { paused: true } — and the rows
+  // stay pending, resuming automatically at 8:00 IST.
+  async function campaign(action: "start" | "stop") {
     try {
       const res = await fetch("/api/outbound/process", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ limit: 25 }),
+        body: JSON.stringify(action === "start" ? { action, concurrency: settings?.concurrency } : { action }),
       })
       const d = await res.json()
       if (!res.ok) {
-        toast.error(d.error || "Batch calling failed")
-        return null
+        toast.error(d.error || "Campaign command failed")
+        return
       }
-      if (d.paused) return { paused: true }
-      return d
-    } catch {
-      toast.error("Batch calling failed — check your connection and try again")
-      return null
-    }
-  }
-
-  async function startCalling() {
-    setActing(true)
-    const r = await runBatch()
-    await load(true)
-    setActing(false)
-    if (r?.paused) toast.info("Paused — outside the calling window. Rows stay pending and resume automatically.")
-    else if (r && !r.paused) toast.success("Batch dialed — refresh below or keep Auto-dial on")
-  }
-
-  async function toggleAutoDial() {
-    const next = !autoDialing
-    setAutoDialing(next)
-    if (!next) return
-    toast.info("Auto-dial on — the queue keeps dialing until it's empty or the window closes")
-    // Client-driven campaign loop: each cycle triggers one runner batch and
-    // refreshes; rows the runner deferred (outside window) end the loop.
-    while (true) {
-      const r = await runBatch()
+      if (d.paused) {
+        toast.info(d.reason || "Paused — outside the calling window. Rows stay pending and resume automatically.")
+        return
+      }
+      if (action === "start") toast.success(`Campaign started — ${d.concurrency} call${d.concurrency === 1 ? "" : "s"} at a time`)
+      else toast.info("Stop requested — the current wave finishes, the rest stay pending")
       await load(true)
-      if (!r || r.paused) break
-      const pendingLeft = g("pending")
-      if (pendingLeft === 0) {
-        toast.success("Queue drained — every due call has been dialed")
-        break
-      }
-      await new Promise((res) => setTimeout(res, 1500))
+    } catch {
+      toast.error("Campaign command failed — check your connection")
     }
-    setAutoDialing(false)
   }
 
   async function cancelSelected() {
@@ -301,17 +292,24 @@ export default function QueueView({ role }: { role: Role }) {
   }
 
   const allShownSelected = shown.length > 0 && shown.every((i) => selectedIds.includes(i.id))
-  const hasSelection = selectedIds.length > 0
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
-      {/* ── Live campaign radar ─────────────────────────────────────────── */}
+      {/* ── Live campaign radar ─────────────────────────────────────── */}
       <div style={{ display: "grid", gridTemplateColumns: "1.6fr 1fr", gap: 16 }}>
         <div className="card" style={{ padding: "20px 24px" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
             <div style={{ fontWeight: 700, fontSize: 15, display: "flex", alignItems: "center", gap: 8 }}>
               <ListChecks size={16} strokeWidth={2} style={{ color: "var(--accent-violet)" }} /> Campaign Radar
+              {running && (
+                <span style={{ fontSize: 11, fontWeight: 700, color: "var(--accent-green)", background: "rgba(34,197,94,0.12)", border: "1px solid rgba(34,197,94,0.3)", borderRadius: 6, padding: "2px 8px", textTransform: "uppercase", letterSpacing: "0.04em", animation: "pulse-dot 1.6s infinite" }}>
+                  ● RUNNING · wave {run?.waves ?? 0} · ×{run?.concurrency ?? 0}
+                </span>
+              )}
+              {!running && run?.reason && run.reason !== "drained" && (
+                <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)" }}>{run.reason}</span>
+              )}
             </div>
             <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{done.toLocaleString()} / {planned.toLocaleString()} processed ({pct}%)</div>
           </div>
@@ -320,8 +318,8 @@ export default function QueueView({ role }: { role: Role }) {
           </div>
           <div style={{ display: "flex", gap: 18, flexWrap: "wrap", fontSize: 12.5 }}>
             <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <span className={g("dialing") > 0 ? "pulse-dot" : ""} style={{ width: 8, height: 8, borderRadius: 4, background: g("dialing") > 0 ? "var(--accent-blue)" : "var(--text-muted)", display: "inline-block", animation: g("dialing") > 0 ? "pulse-dot 1.4s infinite" : "none" }} />
-              <strong style={{ color: "var(--text-primary)" }}>{g("dialing")}</strong> dialing now
+              <span style={{ width: 8, height: 8, borderRadius: 4, background: g("dialing") > 0 || running ? "var(--accent-blue)" : "var(--text-muted)", display: "inline-block", animation: g("dialing") > 0 || running ? "pulse-dot 1.4s infinite" : "none" }} />
+              <strong style={{ color: "var(--text-primary)" }}>{g("dialing")}</strong> <span style={{ color: "var(--text-muted)" }}>dialing now</span>
             </span>
             <span><strong style={{ color: "var(--accent-green)" }}>{g("called")}</strong> <span style={{ color: "var(--text-muted)" }}>completed</span></span>
             <span><strong style={{ color: "var(--accent-yellow)" }}>{g("pending")}</strong> <span style={{ color: "var(--text-muted)" }}>pending</span></span>
@@ -329,29 +327,31 @@ export default function QueueView({ role }: { role: Role }) {
             <span><strong style={{ color: "var(--accent-violet)" }}>{g("skipped")}</strong> <span style={{ color: "var(--text-muted)" }}>skipped</span></span>
             <span><strong style={{ color: "var(--text-muted)" }}>{g("cancelled")}</strong> <span style={{ color: "var(--text-muted)" }}>cancelled</span></span>
           </div>
+          {(run?.current?.length ?? 0) > 0 && (
+            <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {run!.current.slice(0, 6).map((p) => (
+                <span key={p} style={{ fontSize: 11, fontFamily: "ui-monospace, monospace", color: "var(--accent-blue)", background: "rgba(56,189,248,0.1)", border: "1px solid rgba(56,189,248,0.25)", borderRadius: 6, padding: "2px 8px", animation: "pulse-dot 1.4s infinite" }}>
+                  ●●● {p.replace(/\d(?=\d{4})/g, "•")}
+                </span>
+              ))}
+            </div>
+          )}
           <div style={{ marginTop: 14, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
             {canOperate && (
-              <>
-                <button onClick={startCalling} disabled={acting || autoDialing || g("pending") === 0} className="btn-primary" style={{ height: 38 }}>
-                  <Play size={14} strokeWidth={2} fill="currentColor" /> {acting ? "Dialing…" : `Dial Next Batch (×${settings?.concurrency ?? 1})`}
+              running ? (
+                <button onClick={() => campaign("stop")} className="btn-ghost" style={{ height: 38, color: "var(--accent-red)" }}>
+                  <Pause size={14} strokeWidth={2} /> Stop Campaign
                 </button>
-                <button
-                  onClick={toggleAutoDial}
-                  disabled={acting}
-                  style={{
-                    height: 38, padding: "0 16px", borderRadius: 10, display: "inline-flex", alignItems: "center", gap: 7,
-                    fontSize: 13, fontWeight: 600, cursor: "pointer",
-                    border: `1px solid ${autoDialing ? "rgba(239,68,68,0.4)" : "var(--border)"}`,
-                    background: autoDialing ? "rgba(239,68,68,0.1)" : "var(--bg-secondary)",
-                    color: autoDialing ? "var(--accent-red)" : "var(--text-secondary)",
-                  }}
-                >
-                  {autoDialing ? <><Pause size={14} strokeWidth={2} /> Stop Auto-dial</> : <><RefreshCw size={14} strokeWidth={2} /> Auto-dial until empty</>}
+              ) : (
+                <button onClick={() => campaign("start")} disabled={acting || g("pending") === 0} className="btn-primary" style={{ height: 38 }}>
+                  <Play size={14} strokeWidth={2} fill="currentColor" /> Start Campaign (×{settings?.concurrency ?? 1})
                 </button>
-                <button onClick={cancelAllPending} disabled={acting || g("pending") === 0} className="btn-ghost" style={{ height: 38, color: "var(--accent-red)" }} title="Emergency stop — cancels every pending call">
-                  <ShieldAlert size={14} strokeWidth={2} /> Cancel All Pending ({g("pending")})
-                </button>
-              </>
+              )
+            )}
+            {canOperate && (
+              <button onClick={cancelAllPending} disabled={acting || g("pending") === 0} className="btn-ghost" style={{ height: 38, color: "var(--accent-red)" }} title="Emergency stop — cancels every pending call">
+                <ShieldAlert size={14} strokeWidth={2} /> Cancel All Pending ({g("pending")})
+              </button>
             )}
             <div style={{ flex: 1 }} />
             <a href="/api/outbound/export" className="btn-ghost" style={{ height: 38, textDecoration: "none" }}>
@@ -360,7 +360,7 @@ export default function QueueView({ role }: { role: Role }) {
           </div>
         </div>
 
-        {/* Concurrency + retry policy (live — the runner reads it every batch) */}
+        {/* Dialer engine — persisted settings, read live by the runner */}
         <div className="card" style={{ padding: "20px 24px" }}>
           <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
             <Zap size={16} strokeWidth={2} style={{ color: "var(--accent-yellow)" }} /> Dialer Engine
@@ -392,7 +392,7 @@ export default function QueueView({ role }: { role: Role }) {
         </div>
       </div>
 
-      {/* ── Queue table ─────────────────────────────────────────────────── */}
+      {/* ── Queue table ─────────────────────────────────────────────── */}
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12 }}>
         <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
           {TABS.map((t) => {
@@ -419,7 +419,7 @@ export default function QueueView({ role }: { role: Role }) {
           <div style={{ fontSize: 11.5, color: "var(--text-muted)" }}>showing {shown.length} of {total.toLocaleString()}</div>
         </div>
 
-        {hasSelection && canOperate && (
+        {selectedIds.length > 0 && canOperate && (
           <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--border)", display: "flex", gap: 10, alignItems: "center", background: "rgba(139,124,255,0.05)" }}>
             <span style={{ fontSize: 12.5, fontWeight: 700 }}>{selectedIds.length} selected</span>
             <button onClick={cancelSelected} disabled={acting} className="btn-ghost" style={{ height: 30, fontSize: 12, color: "var(--accent-red)" }}>
@@ -452,18 +452,16 @@ export default function QueueView({ role }: { role: Role }) {
               </tr>
             </thead>
             <tbody>
-              {loading && Array.from({ length: 5 }).map((_, i) => (
-                <tr key={`sk-${i}`} style={{ borderBottom: "1px solid var(--border-light)" }}>
-                  <td colSpan={8} style={{ padding: "14px 16px", color: "var(--text-muted)", fontSize: 12 }}>Loading queue…</td>
-                </tr>
-              ))}
+              {loading && (
+                <tr><td colSpan={8} style={{ padding: "14px 16px", color: "var(--text-muted)", fontSize: 12 }}>Loading queue…</td></tr>
+              )}
               {!loading && shown.length === 0 && (
                 <tr><td colSpan={8} style={{ padding: 40, textAlign: "center", color: "var(--text-muted)" }}>
-                  Nothing here yet — select leads in the Leads view and click "Add to Call Queue".
+                  Nothing here yet — select leads in the Leads view and click "Add to Call Queue", or upload a CSV in Upload & Data.
                 </td></tr>
               )}
               {shown.map((item) => {
-                const group = groupOf(item.status)
+                const group = statusGroup(item.status)
                 const color = STATUS_GROUP_COLORS[group]
                 const ch = channelMeta(item.channel)
                 const ChIcon = ch.icon
@@ -506,7 +504,7 @@ export default function QueueView({ role }: { role: Role }) {
                         textTransform: "uppercase", letterSpacing: "0.04em",
                         animation: isDialing ? "pulse-dot 1.4s infinite" : undefined,
                       }}>
-                        {isDialing && <span className="pulse-dot" style={{ width: 6, height: 6, borderRadius: 3, background: color, display: "inline-block" }} />}
+                        {isDialing && <span style={{ width: 6, height: 6, borderRadius: 3, background: color, display: "inline-block" }} />}
                         {group}
                       </span>
                       {group === "skipped" && item.status !== "skipped" && (

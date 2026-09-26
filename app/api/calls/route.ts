@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { apiError } from "@/lib/api-error"
-import { db } from "@/lib/db"
+import { db, query } from "@/lib/db"
 import { makeCall } from "@/lib/exotel"
 import { requireModuleOrRole } from "@/lib/auth"
 import { sessionBranchId, checkQuota, recordUsage } from "@/lib/branches"
@@ -25,9 +25,32 @@ type CallRow = {
 
 const CALL_LANGUAGES = new Set(["english", "hindi", "telugu"])
 
+// Backstop for LOST Meta terminate webhooks: a business-initiated call is
+// written status='ringing' BEFORE the dial; the finalizer moves it to a
+// terminal status when the terminate event arrives. If that webhook is
+// never delivered (server restart, Meta outage), the row would sit in
+// "Ringing" forever — exactly the ambiguity this file is here to kill.
+// Once a minute, at most, promote stale ringing/initiated outbound rows to
+// no-answer. Meta rings for ~60s, so anything still "ringing" after 15
+// minutes is dead by definition. Fire-and-forget — never blocks the read.
+let lastOutboundSweepAt = 0
+function sweepStuckOutboundCalls() {
+  if (Date.now() - lastOutboundSweepAt < 60_000) return
+  lastOutboundSweepAt = Date.now()
+  query(
+    `UPDATE voice_calls
+        SET status = 'no-answer', outcome = 'missed', updated_at = now()
+      WHERE direction = 'outbound'
+        AND twilio_call_sid LIKE 'wacall-%'
+        AND status IN ('ringing', 'initiated')
+        AND created_at < now() - interval '15 minutes'`
+  ).catch((e) => console.error("stuck outbound sweep failed:", e instanceof Error ? e.message : e))
+}
+
 export async function GET(req: NextRequest) {
   const session = await requireModuleOrRole(req, "voice", ["admin", "agent", "viewer", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+  sweepStuckOutboundCalls()
   // Branch-scoped users only see their branch's calls (admin sees all).
   const branchId = sessionBranchId(session)
   // channel=whatsapp → WhatsApp Calls tab ONLY (twilio_call_sid = wacall-*).

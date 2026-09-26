@@ -23,8 +23,12 @@ process.env.VOICEBOT_WA_TTS_PROVIDER = "cartesia"
 process.env.CARTESIA_API_KEY = "test-cartesia-key"
 process.env.CARTESIA_VOICE_ID = "test-voice-id"
 process.env.VOICEBOT_WA_STT_SAMPLE_RATE = "16000"
+// Fast-but-clamped fallback for the hangup tests (module clamps at 3000 ms).
+process.env.VOICEBOT_WA_HANGUP_FALLBACK_MS = "3000"
 
 const calls = [] // turn API event log
+const waTerminateCalls = [] // /api/whatsapp/terminate request log
+let terminateMode = "up" // "up" | "down" (drives the retry/fallback test)
 let ttsHits = 0
 
 function wavFor(samples) {
@@ -77,6 +81,21 @@ async function startMocks() {
         ttsHits++
         res.writeHead(200, { "Content-Type": "audio/wav" })
         res.end(wavFor(9600)) // 400 ms of 24 kHz audio
+        return
+      }
+      if (req.url === "/api/whatsapp/terminate" && req.method === "POST") {
+        if (req.headers["x-api-key"] !== "test-service-key") {
+          res.writeHead(401).end()
+          return
+        }
+        waTerminateCalls.push(JSON.parse(body || "{}"))
+        if (terminateMode === "down") {
+          res.writeHead(500, { "Content-Type": "application/json" })
+          res.end(JSON.stringify({ error: "mock terminate down" }))
+          return
+        }
+        res.writeHead(200, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ ok: true }))
         return
       }
       res.writeHead(404).end()
@@ -141,6 +160,13 @@ const until = async (fn, ms) => {
     validateConfig,
     describeConfig,
     callSidFor,
+    WhatsAppCallSession,
+    createWaEncoder,
+    WA_OPUS_BITRATE,
+    OPUS_CTL_SET_APPLICATION,
+    OPUS_APPLICATION_VOIP,
+    WA_AUDIO_FILTER_CHAIN,
+    BUSINESS_HANGUP,
   } = require("../server/whatsapp-calls")
 
   console.log("-- connect --")
@@ -196,6 +222,52 @@ const until = async (fn, ms) => {
   console.log("-- config helpers --")
   ok("validateConfig clean with key set", validateConfig().length === 0)
   ok("describeConfig names Cartesia", describeConfig().includes("Cartesia"))
+
+  console.log("-- speech clarity (opus tuning + loudness chain) --")
+  ok("opus CTL constants locked (SET_APPLICATION=4000, VOIP=2048)",
+    OPUS_CTL_SET_APPLICATION === 4000 && OPUS_APPLICATION_VOIP === 2048)
+  ok("business hangup default ON", BUSINESS_HANGUP === true)
+  const enc = createWaEncoder()
+  ok("encoder pinned to 64 kbps (was libopus AUTO in MUSIC mode — smeared consonants)",
+    enc.getBitrate() === 64000 && WA_OPUS_BITRATE === 64000, `bitrate=${enc.getBitrate()}`)
+  ok("loudness chain is fullband + leveled (highpass, compressor, limiter — NO phone-line 3400 lowpass)",
+    WA_AUDIO_FILTER_CHAIN.includes("highpass=f=70")
+    && WA_AUDIO_FILTER_CHAIN.includes("acompressor=")
+    && WA_AUDIO_FILTER_CHAIN.includes("alimiter=")
+    && !WA_AUDIO_FILTER_CHAIN.includes("3400"))
+
+  console.log("-- business-side hangup (Graph terminate) --")
+  // A bare session (no WebRTC attach) exercises the hangup machinery end to
+  // end against the mocked app: terminate POST → grace window → fallback end.
+  const hangupSession = new WhatsAppCallSession({
+    callId: "wa-test-hangup", from: "919999922222", to: "918000800080",
+    phoneNumberId: "pnid-test", branchId: null,
+  })
+  hangupSession.requestBusinessHangup()
+  ok("terminate POST hits the app with service key + callId + phoneNumberId",
+    await until(() => waTerminateCalls.some((t) =>
+      t.callId === callSidFor("wa-test-hangup") && t.phoneNumberId === "pnid-test"), 5000))
+  ok("session stays open during the grace window (webhook may still land)", hangupSession.closed === false)
+  ok("fallback timer ends the call when the terminate webhook is lost",
+    await until(() => hangupSession.closed, 10000))
+  ok("end report still fired through the turn API",
+    await until(() => calls.some((c) => c.event === "end" && c.callSid === callSidFor("wa-test-hangup")), 5000))
+  const beforeNoop = waTerminateCalls.length
+  hangupSession.requestBusinessHangup()
+  ok("hangup after close is a clean no-op", waTerminateCalls.length === beforeNoop)
+
+  console.log("-- hangup retry + fallback when the app is down --")
+  terminateMode = "down"
+  const retrySession = new WhatsAppCallSession({
+    callId: "wa-test-hangup2", from: "919999933333", to: "918000800080",
+    phoneNumberId: "pnid-test", branchId: null,
+  })
+  retrySession.requestBusinessHangup()
+  ok("failed terminate is retried once",
+    await until(() => waTerminateCalls.filter((t) => t.callId === callSidFor("wa-test-hangup2")).length >= 2, 8000))
+  ok("fallback still ends the session when the app is unreachable",
+    await until(() => retrySession.closed, 10000))
+  terminateMode = "up"
 
   mock.close()
   console.log(`\n${failures.length === 0 ? "PASS" : "FAIL"} — ${passed} passed, ${failures.length} failed`)

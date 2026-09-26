@@ -50,16 +50,45 @@ export function detectFrustration(speech: string, history: { role: string; conte
 // script's job is to acknowledge it and promise a real callback (see
 // lib/default-scripts.ts's "SPEAK TO A HUMAN" rule), and this flag is what
 // makes that callback actually happen.
+//
+// SCRIPT FIX (2026-09-26, "train the agent + call operators"): STT runs
+// Sarvam Saaras with mode=translit — EVERY caller sentence arrives as
+// ROMANIZED text ("manager tho matladali", "insaan se baat karao"), never
+// native script. The old pattern list covered English + native-script
+// Telugu/Hindi, so a Telugu or Hindi caller asking for an operator was
+// silently never detected and never got the callback the script promised.
+// The romanized patterns below close that gap; native-script forms stay
+// for WhatsApp messages typed in Indic keyboards (mode=codemix STT too).
 const HUMAN_REQUEST_RE = new RegExp(
   [
-    // English
+    // English (extended: agent / supervisor / operator / human being)
+    // NOTE: "customer care" is deliberately phrase-level ("talk to customer
+    // care", "customer care number") — a bare mention also matches praise
+    // like "your customer care service is good".
     "speak to a human", "talk to a human", "talk to a person", "speak to a person",
-    "real person", "human agent", "speak to someone", "talk to someone",
-    "connect me to", "transfer me", "speak to (your |the |a )?manager", "talk to (your |the |a )?manager",
-    "speak to (your |the |an )?officer", "talk to (your |the |an )?officer",
-    // Hindi
+    "real person", "human agent", "human being", "want a human", "need a human",
+    "is there a person", "live agent", "talk to customer care", "customer care number",
+    "reach customer care", "speak to someone", "talk to someone",
+    "talk to someone else", "speak to someone else", "connect me to", "transfer me", "escalate",
+    "speak to (your |the |a |an )?(manager|supervisor|officer|agent|operator)",
+    "talk to (your |the |a |an )?(manager|supervisor|officer|agent|operator)",
+    // Hindi romanized (what mode=translit STT actually produces)
+    "manager se baat", "manager se milo", "manager bula", "manager ko bol",
+    "officer se baat", "insaan se baat", "insan se baat", "aadmi se baat",
+    "kisi se baat kara", "baat kara do", "baat karwao", "human se baat",
+    "agent se baat", "supervisor se\\b", "customer care se\\b", "real person",
+    // Hindi native script (typed WhatsApp messages)
     "इंसान से बात", "किसी आदमी से", "मैनेजर से बात", "असली आदमी", "ऑफिसर से बात",
-    // Telugu
+    // Telugu romanized — phrase-level postposition forms, not bare words,
+    // so ordinary speech never false-positives ("manager" inside a story
+    // about their own office manager doesn't match; "manager tho" does).
+    // Short postposition endings carry a trailing \b so they can't bleed
+    // into English words ("manager nicely", "customer care service").
+    "manager tho\\b", "manager ni\\b", "manager ki\\b", "manager unte\\b", "naaku manager", "naku manager",
+    "officer tho\\b", "manishi tho\\b", "manishini", "human tho\\b", "agent tho\\b",
+    "supervisor tho\\b", "customer care ki\\b", "customer care tho\\b", "connect cheyandi", "connect chey\\b",
+    "real person ki\\b",
+    // Telugu native script (typed WhatsApp messages)
     "మనిషితో మాట్లాడ", "నిజమైన వ్యక్తి", "మేనేజర్ తో మాట్లాడ", "ఆఫీసర్ తో మాట్లాడ",
   ].join("|"),
   "i"
@@ -68,6 +97,21 @@ const HUMAN_REQUEST_RE = new RegExp(
 export function detectHumanRequest(speech: string): boolean {
   return HUMAN_REQUEST_RE.test(speech)
 }
+
+// The exact reply contract the agent must follow on the turn an operator
+// request is detected. Exported so the call path (lib/voice-conversation.ts)
+// and the WhatsApp chat path (app/api/whatsapp/route.ts) inject the SAME
+// training, and the regression tests can lock the wording. Language-neutral
+// on purpose: WHAT language Priya replies in is decided by the REPLY LANGUAGE
+// rule — this only fixes WHAT she says (never pitch, never ask, promise the
+// callback once, stop).
+export const OPERATOR_REPLY_INSTRUCTION =
+  "OPERATOR REQUEST — THIS TURN: the customer just asked to speak with a human being (a manager, officer, agent or operator). Follow the script's SPEAK TO A HUMAN rule exactly: acknowledge warmly, say clearly that one of our loan officers will call them back personally very soon, then STOP. Do NOT keep pitching, do NOT ask any new question, do NOT promise an instant live transfer, do NOT give any phone number, and do NOT repeat details already known. One short reply is enough."
+
+// Same contract for the WhatsApp TEXT channel, where "call them back" alone
+// would sound odd — the human follows up on the same chat.
+export const OPERATOR_CHAT_INSTRUCTION =
+  "OPERATOR REQUEST: the customer just asked to speak with a human being (a manager, officer, agent or operator). Acknowledge warmly and tell them a real person from the team will reply to them right here on this same WhatsApp chat very soon — our loan officer may also call them directly. Do NOT keep pitching and do NOT ask any new question in this reply."
 
 /** Emails ADMIN_EMAIL the moment a caller/chatter is flagged. No-op if SMTP isn't configured. */
 async function sendEscalationEmail(channel: "Phone call" | "WhatsApp" | "Instagram", leadId: string | null, snippet: string): Promise<void> {
@@ -152,6 +196,32 @@ export function flagHumanRequested(callSid: string | null, leadId: string | null
       })
     } catch (e: any) {
       console.error("flagHumanRequested error:", e.message)
+    }
+  })()
+}
+
+/** Calm "let me talk to a human" on the WhatsApp TEXT channel — same alert
+ * channel as flagFrustratedWhatsApp, but distinct wording/sentiment so the
+ * ops queue doesn't conflate "asked for a human" with "angry customer".
+ * (2026-09-26: WhatsApp chat never ran detectHumanRequest at all — a customer
+ * typing "I want to talk to a real person" never surfaced anywhere.) */
+export function flagHumanRequestedWhatsApp(leadId: string | null, message: string): void {
+  ;(async () => {
+    try {
+      await query(
+        `INSERT INTO comm_logs (lead_id, type, summary, outcome)
+         VALUES ($1, 'alert', $2, 'needs_human')`,
+        [leadId, `📞 ASKED FOR A HUMAN — said: "${message.slice(0, 120)}" — reply to them directly on this chat`]
+      )
+      await sendEscalationEmail("WhatsApp", leadId, message)
+      createNotification({
+        type: "escalation",
+        title: `${await leadDisplayName(leadId)} asked to speak with a human`,
+        body: `WhatsApp — "${message.slice(0, 120)}"`,
+        linkView: "whatsapp",
+      })
+    } catch (e: any) {
+      console.error("flagHumanRequestedWhatsApp error:", e.message)
     }
   })()
 }

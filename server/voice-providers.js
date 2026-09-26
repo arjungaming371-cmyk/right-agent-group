@@ -53,7 +53,10 @@ const SARVAM_TTS_MODEL = process.env.SARVAM_TTS_MODEL || "bulbul:v3"
 // shruti, suhani, kavitha, rupali; males: shubh (default), aditya, rahul...
 const SARVAM_TTS_SPEAKER = process.env.SARVAM_TTS_SPEAKER || "priya"
 const SARVAM_TTS_SAMPLE_RATE = parseInt(process.env.SARVAM_TTS_SAMPLE_RATE || "24000")
-const SARVAM_TTS_PACE = parseFloat(process.env.SARVAM_TTS_PACE || "1.0")
+// Pace 1.15 provides natural human conversational speed without dragging or slow motion
+const SARVAM_TTS_PACE = parseFloat(process.env.SARVAM_TTS_PACE || "1.15")
+// Temperature 0.65 for natural, warm expressive vocal inflections
+const SARVAM_TTS_TEMPERATURE = parseFloat(process.env.SARVAM_TTS_TEMPERATURE || "0.65")
 
 const CARTESIA_API_KEY = (process.env.CARTESIA_API_KEY || "").trim()
 const CARTESIA_BASE = (process.env.CARTESIA_URL || "https://api.cartesia.ai").replace(/\/$/, "")
@@ -72,14 +75,25 @@ const SARVAM_TTS_LOCALES = { english: "en-IN", hindi: "hi-IN", telugu: "te-IN" }
 const CARTESIA_LOCALES = { english: "en-IN", hindi: "hi-IN", telugu: "te-IN" }
 
 // Same script detection as the old tts-service (kept for behavior parity).
+//
+// WIDENED (2026-09-26, "speak natively in any language"): the old lists had
+// ~20 words each — a Tenglish/Hinglish reply whose words matched none of
+// them ("Sir meeru documents ready cheyandi, maa officer malli call chestaru")
+// fell through to the call's DECLARED language and got spoken by the wrong
+// voice when the caller had switched languages mid-call. These are now the
+// high-signal subset of detectLanguage()'s romanized keyword sets in
+// lib/llm.ts — deliberately DROPPING the ambiguous short ones ("ela", "idi",
+// "adi", "hu", "mari", "meera", "mari") so an ordinary ENGLISH sentence can
+// never trip them and get hijacked to the Indic voice.
 const _TELUGU_RE = /[\u0C00-\u0C7F]/g // ఀ-౿
 const _DEVANAGARI_RE = /[\u0900-\u097F]/g // ऀ-ॿ
+const _ROMAN_TELUGU_RE = /\b(kavali|kavala|kavalenu|naku|naaku|maaku|meeku|meeru|neeku|gurinchi|cheppandi|cheppanu|cheppali|cheppu|chepandi|cheyandi|cheyali|endukante|avunu|ledhu|ledu|vaddhu|vaddu|undhi|undi|unna|unnaru|unnara|unnaya|istara|matladutunnanu|matladali|matladandi|matladanu|telugu|telugulo|namaskaram|garu|kaadu|kadu|kadha|telusukovadaniki|enti|ento|enta|enni|eppudu|evaru|ekkada|nenu|manaki|memu|maa|kosam|chudandi|baga|kada|chalu|ayithe|ayindi|ayipoyindi|chesanu|chesam|chesaru|chestaru|chestunna|chestunnanu|chesukondi|antundi|malli|kuda|antha|inka|konchem|mariyu)\b/i
+const _ROMAN_HINDI_RE = /\b(chahiye|chaiye|hai|hain|nahi|nahin|haan|boliye|batao|bataiye|bataye|baat|karna|karni|karein|karta|karti|mera|meri|mere|naam|kya|kyun|kaise|kaha|mujhe|humein|apna|apni|hoga|hogi|dijiye|hoon|hun|tum|aap|samjha|samjhe|theek|achha|kuch|kripya|thoda|zara|matlab|bhej|bhejna|bhejiye)\b/i
 
 /**
- * Resolve the TTS locale for a reply, letting native script overrule the
- * declared language (a Hindi sentence must never come out of the Telugu
- * voice). Latin-only text keeps the declared language — English replies and
- * the loanwords inside Indic-script replies are handled by the model itself.
+ * Resolve the TTS locale for a reply, letting native script or Romanized Indic
+ * words overrule a stale declared language (a Telugu sentence must never come out
+ * of the English voice with a Western accent).
  */
 function resolveTtsLocale(text, language, locales) {
   const teluguChars = (text.match(_TELUGU_RE) || []).length
@@ -88,12 +102,49 @@ function resolveTtsLocale(text, language, locales) {
     // Mixed scripts shouldn't happen, but the dominant script wins.
     return teluguChars >= devanagariChars ? locales.telugu : locales.hindi
   }
+  if (_ROMAN_TELUGU_RE.test(text)) return locales.telugu
+  if (_ROMAN_HINDI_RE.test(text)) return locales.hindi
   return locales[language] || locales.english
 }
 
 /** True when the text carries native Indic script (exported for tests). */
 function hasIndicScript(text) {
   return _TELUGU_RE.test(text) || _DEVANAGARI_RE.test(text)
+}
+
+// ---------- TTS text hygiene (2026-09-26, "speak clearly with no errors") ----------
+//
+// The prompts tell the model to write numbers the way a person SAYS them
+// (CALL_BREVITY), but it still slips written-only artifacts into replies —
+// measured live: "7.25%", "₹15,00,000", "**Home Loan**" markdown, stray
+// emoji, "20L"/"10k" shorthand. A TTS voice pronounces "%" as "percent" at
+// best and garbles it at worst, cannot say "₹", spells out "&", and reads
+// markdown symbols as punctuation — every one of those is an audible glitch
+// mid-sentence. This is a safety net applied at the single synthesize()
+// choke point, so BOTH providers and BOTH call paths (Exotel + WhatsApp
+// calls) get identical cleanup. WhatsApp TEXT is untouched — it is read,
+// not spoken. Kept conservative: only transformations that can never change
+// the meaning of a sentence.
+function normalizeForTts(text) {
+  if (!text) return text
+  let out = String(text)
+  out = out.replace(/₹/g, " rupees ")
+  out = out.replace(/%/g, " percent ")
+  out = out.replace(/&/g, " and ")
+  out = out.replace(/\*\*([^*]+)\*\*/g, "$1") // **markdown bold** leaking from the WhatsApp rules
+  out = out.replace(/\*([^*]+)\*/g, "$1") // *single-asterisk* bold too
+  out = out.replace(/\b(\d+(?:\.\d+)?)\s*[lL]\b/g, "$1 lakh") // 20L / 20 L → 20 lakh (banned shorthand, model slips)
+  out = out.replace(/\b(\d+(?:\.\d+)?)\s*[kK]\b/g, "$1 thousand") // 10k → 10 thousand
+  out = out.replace(/\p{Extended_Pictographic}/gu, "") // emoji is never spoken
+  // Native conversational flow improvements:
+  out = out.replace(/[—–]/g, ", ") // dashes to gentle commas to prevent long dead pauses
+  out = out.replace(/\b1\s*minute\b/gi, (match, offset, str) => /[\u0C00-\u0C7F]/.test(str) ? "ఒక్క minute" : match) // "1 minute" -> "ఒక్క minute" in Telugu for native pronunciation
+  out = out.replace(/\b(\d+)\s*,\s*(\d{3})\b/g, "$1$2") // remove comma inside numbers like 14,500 -> 14500
+  out = out.replace(/\b(\d+)\s*-\s*(\d+)\b/g, "$1 to $2") // 15-20 -> 15 to 20
+  out = out.replace(/Rs\.?\s*(\d+)/gi, "$1 rupees") // Rs. 5000 -> 5000 rupees
+  out = out.replace(/(\.{2,}|…)/g, ".") // ellipses to single period
+  out = out.replace(/\s{2,}/g, " ").trim()
+  return out
 }
 
 // ---------- Small fetch helpers ----------
@@ -182,6 +233,7 @@ async function sarvamStt(wavBuffer, language) {
 // falsy → the deployment default (SARVAM_TTS_SPEAKER).
 async function sarvamTts(text, language, speakerOverride) {
   if (!SARVAM_API_KEY) throw new Error("SARVAM_API_KEY is not set — cannot use TTS_CALL_PROVIDER=sarvam")
+  text = normalizeForTts(text)
   const speaker = speakerOverride || SARVAM_TTS_SPEAKER
   const locale = resolveTtsLocale(text, language, SARVAM_TTS_LOCALES)
   const body = {
@@ -192,7 +244,8 @@ async function sarvamTts(text, language, speakerOverride) {
     speech_sample_rate: SARVAM_TTS_SAMPLE_RATE,
     output_audio_codec: "wav",
   }
-  if (SARVAM_TTS_PACE !== 1.0) body.pace = SARVAM_TTS_PACE
+  if (typeof SARVAM_TTS_PACE === "number" && !isNaN(SARVAM_TTS_PACE)) body.pace = SARVAM_TTS_PACE
+  if (typeof SARVAM_TTS_TEMPERATURE === "number" && !isNaN(SARVAM_TTS_TEMPERATURE)) body.temperature = SARVAM_TTS_TEMPERATURE
   const t0 = Date.now()
   const res = await fetchWithRetry(`${SARVAM_BASE}/text-to-speech`, {
     method: "POST",
@@ -218,6 +271,7 @@ async function sarvamTts(text, language, speakerOverride) {
 // when voice_provider=cartesia); falsy → the deployment default.
 async function cartesiaTts(text, language, voiceIdOverride) {
   if (!CARTESIA_API_KEY) throw new Error("CARTESIA_API_KEY is not set — cannot use TTS_CALL_PROVIDER=cartesia")
+  text = normalizeForTts(text)
   const voiceId = voiceIdOverride || CARTESIA_VOICE_ID
   if (!voiceId) throw new Error("CARTESIA_VOICE_ID is not set — pick a voice at https://play.cartesia.ai/voices")
   const locale = resolveTtsLocale(text, language, CARTESIA_LOCALES)
@@ -276,10 +330,16 @@ async function transcribe(wavBuffer, language) {
  * single-tenant behaviour is byte-identical to before.
  */
 async function synthesize(text, language, voiceOverride) {
+  text = normalizeForTts(text)
   const vo = voiceOverride || null
   // Employee explicitly wants Cartesia and it is usable.
   if (vo?.provider === "cartesia" && CARTESIA_API_KEY && (vo.speaker || CARTESIA_VOICE_ID)) {
-    return cartesiaTts(text, language, vo.speaker)
+    try {
+      return await cartesiaTts(text, language, vo.speaker)
+    } catch (e) {
+      console.warn(`[synthesize] Cartesia failed (${e.message}), falling back to Sarvam TTS`)
+      return sarvamTts(text, language, vo?.provider === "sarvam" ? vo.speaker : undefined)
+    }
   }
   // Employee explicitly wants Sarvam (always usable — the key is mandatory).
   if (vo?.provider === "sarvam" && SARVAM_API_KEY) {
@@ -288,7 +348,12 @@ async function synthesize(text, language, voiceOverride) {
   // No usable override — default dispatch, threading through a same-provider
   // speaker override if the employee's provider happens to match.
   if (TTS_CALL_PROVIDER === "cartesia") {
-    return cartesiaTts(text, language, vo?.provider === "cartesia" ? vo.speaker : undefined)
+    try {
+      return await cartesiaTts(text, language, vo?.provider === "cartesia" ? vo.speaker : undefined)
+    } catch (e) {
+      console.warn(`[synthesize] Cartesia failed (${e.message}), falling back to Sarvam TTS`)
+      return sarvamTts(text, language, vo?.provider === "sarvam" ? vo.speaker : undefined)
+    }
   }
   return sarvamTts(text, language, vo?.provider === "sarvam" ? vo.speaker : undefined)
 }
@@ -326,5 +391,5 @@ module.exports = {
   // direct provider calls (exported for tests + reuse)
   sarvamStt, sarvamTts, cartesiaTts,
   // internals used by tests
-  resolveTtsLocale, hasIndicScript, buildMultipart, fetchWithRetry,
+  resolveTtsLocale, hasIndicScript, normalizeForTts, buildMultipart, fetchWithRetry,
 }
