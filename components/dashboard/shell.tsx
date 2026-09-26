@@ -209,11 +209,22 @@ export default function DashboardShell() {
     function onOpenVoice() {
       setVoiceAssistantOpen(true)
     }
+    function onNavigate(e: Event) {
+      const ce = e as CustomEvent<{ view: ViewKey; search?: string }>
+      if (ce.detail?.view) {
+        setView(ce.detail.view)
+        if (ce.detail.search) {
+          setSeedSearch({ view: ce.detail.view, q: ce.detail.search })
+        }
+      }
+    }
     window.addEventListener("keydown", onKey)
     window.addEventListener("rag:open-voice-assistant", onOpenVoice)
+    window.addEventListener("rag:navigate", onNavigate)
     return () => {
       window.removeEventListener("keydown", onKey)
       window.removeEventListener("rag:open-voice-assistant", onOpenVoice)
+      window.removeEventListener("rag:navigate", onNavigate)
     }
   }, [])
 

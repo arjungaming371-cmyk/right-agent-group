@@ -218,6 +218,27 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
     loadConversations()
   }, [loadConversations])
 
+  useEffect(() => {
+    if (initialSearch) {
+      setSearch(initialSearch)
+    }
+  }, [initialSearch])
+
+  useEffect(() => {
+    if (initialSearch && conversations.length > 0) {
+      const q = initialSearch.toLowerCase().replace(/^@/, "").trim()
+      const match = conversations.find(
+        (c) =>
+          c.ig_user_id === initialSearch ||
+          (c.ig_username && c.ig_username.toLowerCase() === q) ||
+          (c.lead_name && c.lead_name.toLowerCase().includes(q))
+      )
+      if (match) {
+        setActiveIgUserId(match.ig_user_id)
+      }
+    }
+  }, [initialSearch, conversations])
+
   usePolling(loadConversations, 5000)
 
   // Load message history for selected user

@@ -131,7 +131,7 @@ export async function GET(req: NextRequest) {
     // not type the prefix or the zero padding.
     const codeClause = (await hasLeadCodeColumn()) ? ` OR lead_code ILIKE $${i}` : ""
     where.push(
-      `(name ILIKE $${i} OR phone ILIKE $${i}${codeClause} OR search_vector @@ websearch_to_tsquery('english', $${i + 1}) OR word_similarity($${i + 1}, COALESCE(name, '')) > 0.28 OR word_similarity($${i + 1}, COALESCE(address, '')) > 0.28 OR word_similarity($${i + 1}, COALESCE(product_interest, '')) > 0.28)`
+      `(name ILIKE $${i} OR phone ILIKE $${i}${codeClause} OR instagram_handle ILIKE $${i} OR ig_phone_extracted ILIKE $${i} OR search_vector @@ websearch_to_tsquery('english', $${i + 1}) OR word_similarity($${i + 1}, COALESCE(name, '')) > 0.28 OR word_similarity($${i + 1}, COALESCE(address, '')) > 0.28 OR word_similarity($${i + 1}, COALESCE(product_interest, '')) > 0.28)`
     )
     params.push(`%${search}%`, search)
     i += 2
@@ -153,16 +153,15 @@ export async function GET(req: NextRequest) {
 
   const whereClause = where.length ? `WHERE ${where.join(" AND ")}` : ""
   try {
-    // Latest form link per lead rides along so the dashboard can show
-    // exactly what was WhatsApped after a call — and whether it was used.
+    // Latest form link and IG message per lead ride along so the dashboard
+    // can show exactly what was sent or inquired, and whether it was used.
     //
     // SORT: pinned leads always first (most recently pinned first), then by
-    // last real activity — a call, a WhatsApp message, or creation, whichever
-    // is newest — NOT score. Score-first sorting buried brand-new leads
-    // (score starts at 0) and returning callers/WhatsApp senders behind old
-    // high-score leads that hadn't been touched in weeks.
+    // last real activity — a call, WhatsApp message, IG interaction, or creation,
+    // whichever is newest — NOT score.
     const res = await query(
-      `SELECT leads.*, fl.form_token, fl.form_used_at, fl.form_sent_at
+      `SELECT leads.*, fl.form_token, fl.form_used_at, fl.form_sent_at,
+              igm.last_message, igm.last_direction, igm.last_type, igm.last_interaction_at
        FROM leads
        LEFT JOIN LATERAL (
          SELECT token AS form_token, used_at AS form_used_at, created_at AS form_sent_at
@@ -175,11 +174,17 @@ export async function GET(req: NextRequest) {
          FROM whatsapp_messages
          WHERE whatsapp_messages.lead_id = leads.id
        ) wa ON true
+       LEFT JOIN LATERAL (
+         SELECT content AS last_message, direction AS last_direction, type AS last_type, created_at AS last_interaction_at
+         FROM instagram_messages
+         WHERE instagram_messages.lead_id = leads.id
+         ORDER BY created_at DESC LIMIT 1
+       ) igm ON true
        ${whereClause}
        ORDER BY
          leads.pinned DESC,
          leads.pinned_at DESC NULLS LAST,
-         GREATEST(leads.created_at, COALESCE(leads.last_called_at, leads.created_at), COALESCE(wa.last_wa_at, leads.created_at)) DESC
+         GREATEST(leads.created_at, COALESCE(leads.last_called_at, leads.created_at), COALESCE(wa.last_wa_at, leads.created_at), COALESCE(igm.last_interaction_at, leads.created_at)) DESC
        LIMIT $${i}`,
       [...params, limit]
     )

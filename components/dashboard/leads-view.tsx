@@ -2,7 +2,11 @@
 
 type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
 import { useEffect, useState, useMemo } from "react"
-import { Users, Target, IndianRupee, BadgeCheck, Phone, MessageCircle, RotateCcw, Plus, Search, Link2, Check, Download, Brain, Pin, Sparkles, CheckSquare, PhoneCall, Instagram, X } from "lucide-react"
+import {
+  Users, Target, IndianRupee, BadgeCheck, Phone, MessageCircle, MessageSquare, RotateCcw,
+  Plus, Search, Link2, Check, Download, Brain, Pin, Sparkles, CheckSquare,
+  PhoneCall, Instagram, X, ExternalLink, Clock, CheckCircle2, ArrowRight
+} from "lucide-react"
 import { formatCurrency, timeAgo, formatDateTime } from "@/lib/utils"
 import { usePolling } from "@/lib/use-poll"
 import { useToast } from "../ui/toast"
@@ -35,6 +39,34 @@ type Lead = {
   last_message?: string | null
   last_interaction_at?: string | null
   last_type?: string | null
+  last_direction?: string | null
+  notes?: string | null
+}
+
+function SocialAvatar({ name, handle }: { name?: string; handle?: string | null }) {
+  const label = (handle || name || "IG").replace(/^@/, "")
+  const initials = label.slice(0, 2).toUpperCase()
+  return (
+    <div
+      style={{
+        width: 36,
+        height: 36,
+        borderRadius: "50%",
+        background: "linear-gradient(135deg, #fd1d1d, #833ab4)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        color: "#fff",
+        fontSize: 12,
+        fontWeight: 700,
+        flexShrink: 0,
+        boxShadow: "0 2px 6px rgba(225,48,108,0.25)",
+        border: "1.5px solid rgba(255,255,255,0.15)",
+      }}
+    >
+      {initials}
+    </div>
+  )
 }
 
 // Short lead code (RAG-0042). Monospace so the digits line up down the
@@ -190,6 +222,8 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
   const [scopeTab, setScopeTab] = useState<"crm" | "social">("crm")
   const [crmCount, setCrmCount] = useState(0)
   const [socialCount, setSocialCount] = useState(0)
+  const [socialPhoneFilter, setSocialPhoneFilter] = useState<"all" | "detected" | "missing">("all")
+  const [socialChannelFilter, setSocialChannelFilter] = useState<"all" | "dm" | "comment">("all")
   const [convertTarget, setConvertTarget] = useState<Lead | null>(null)
   const [convertBusy, setConvertBusy] = useState(false)
   const [convertForm, setConvertForm] = useState<{ phone: string; productInterest: string; notes: string; sendWa: boolean; addToQueue: boolean }>({
@@ -217,7 +251,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
   }, [leads])
 
   const displayLeads = useMemo(() => {
-    return smartFilter(leads, search, (l) => [
+    const filtered = smartFilter(leads, search, (l) => [
       l.name,
       l.phone,
       l.whatsapp_number,
@@ -225,8 +259,23 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
       l.address,
       l.lead_code,
       l.status,
+      l.instagram_handle,
+      l.ig_phone_extracted,
+      l.last_message,
+      l.source,
     ])
-  }, [leads, search])
+
+    if (scopeTab === "social") {
+      return filtered.filter((l) => {
+        if (socialPhoneFilter === "detected" && !l.ig_phone_extracted) return false
+        if (socialPhoneFilter === "missing" && !!l.ig_phone_extracted) return false
+        if (socialChannelFilter === "dm" && !l.source?.toLowerCase().includes("dm")) return false
+        if (socialChannelFilter === "comment" && !l.source?.toLowerCase().includes("comment")) return false
+        return true
+      })
+    }
+    return filtered
+  }, [leads, search, scopeTab, socialPhoneFilter, socialChannelFilter])
 
   // Derived AFTER displayLeads (it reads the filtered list).
   const allSelected = displayLeads.length > 0 && displayLeads.every((l) => selectedIds.includes(l.id))
@@ -380,6 +429,11 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
   }, 0)
   const interestedCount = leads.filter((l) => l.interested === "interested").length
 
+  // Instagram prospect metrics:
+  const socialDetectedCount = leads.filter((l) => !!l.ig_phone_extracted).length
+  const socialAwaitingCount = Math.max(0, leads.length - socialDetectedCount)
+  const socialProductCount = leads.filter((l) => !!l.product_interest && l.product_interest !== "General").length
+
   // One dialer, one endpoint: every outbound call from this screen goes
   // through POST /api/calls/dial (channel: phone | whatsapp | auto) so the
   // rules are IDENTICAL for both networks — compliance, quota, comm-log,
@@ -466,13 +520,40 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      {scopeTab === "crm" && (
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-4">
-        <Card label="Total Leads" value={totalLeads.toLocaleString()} icon={Users} tone="var(--accent-violet)" />
-        <Card label="Interested" value={interestedCount.toLocaleString()} icon={Target} tone="var(--accent-cyan)" />
-        <Card label="Pipeline Value" value={formatCurrency(pipelineValue)} icon={IndianRupee} tone="var(--accent-yellow)" />
-        <Card label="Qualified" value={qualified.toLocaleString()} icon={BadgeCheck} tone="var(--accent-green)" />
-      </div>
+      {scopeTab === "social" ? (
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-4">
+          <Card
+            label="Total Prospects"
+            value={socialCount.toLocaleString()}
+            icon={Instagram}
+            tone="#e1306c"
+          />
+          <Card
+            label="Phone Detected (Ready)"
+            value={socialDetectedCount.toLocaleString()}
+            icon={PhoneCall}
+            tone="var(--accent-green)"
+          />
+          <Card
+            label="Awaiting Phone"
+            value={socialAwaitingCount.toLocaleString()}
+            icon={MessageSquare}
+            tone="var(--accent-yellow)"
+          />
+          <Card
+            label="Loan Inquiries"
+            value={socialProductCount.toLocaleString()}
+            icon={Target}
+            tone="var(--accent-cyan)"
+          />
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-4">
+          <Card label="Total Leads" value={totalLeads.toLocaleString()} icon={Users} tone="var(--accent-violet)" />
+          <Card label="Interested" value={interestedCount.toLocaleString()} icon={Target} tone="var(--accent-cyan)" />
+          <Card label="Pipeline Value" value={formatCurrency(pipelineValue)} icon={IndianRupee} tone="var(--accent-yellow)" />
+          <Card label="Qualified" value={qualified.toLocaleString()} icon={BadgeCheck} tone="var(--accent-green)" />
+        </div>
       )}
 
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12 }}>
@@ -507,10 +588,10 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
           </div>
           {/* Single compact filter row */}
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <div style={{ position: "relative", width: 230, display: "flex", alignItems: "center" }}>
+            <div style={{ position: "relative", width: scopeTab === "social" ? 260 : 230, display: "flex", alignItems: "center" }}>
               <Search size={13} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
               <input
-                placeholder="Smart search name, phone, code (typo-tolerant)…"
+                placeholder={scopeTab === "social" ? "Search @handle, name, detected phone, message…" : "Smart search name, phone, code (typo-tolerant)…"}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 style={{ width: "100%", height: 34, fontSize: 12.5, paddingLeft: 30, paddingRight: 34 }}
@@ -524,26 +605,49 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                 />
               </div>
             </div>
-            <select value={ageFilter} onChange={(e) => setAgeFilter(e.target.value)} style={{ height: 34, fontSize: 12, width: 110 }}>
-              <option value="all">All Ages</option>
-              <option value="new">New (7d)</option>
-              <option value="old">Older</option>
-            </select>
-            <select value={amountFilter} onChange={(e) => setAmountFilter(e.target.value)} style={{ height: 34, fontSize: 12, width: 130 }}>
-              <option value="all">All Amounts</option>
-              <option value="high">High (≥ ₹10L)</option>
-              <option value="low">Low (&lt; ₹10L)</option>
-            </select>
-            <select value={loanTypeFilter} onChange={(e) => setLoanTypeFilter(e.target.value)} style={{ height: 34, fontSize: 12, width: 140 }}>
-              <option value="all">All Loan Types</option>
-              {LOAN_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-            </select>
-            <select value={interestedFilter} onChange={(e) => setInterestedFilter(e.target.value)} style={{ height: 34, fontSize: 12, width: 130 }}>
-              <option value="all">All Statuses</option>
-              <option value="interested">Interested</option>
-              <option value="not_interested">Not Interested</option>
-              <option value="unknown">Unknown</option>
-            </select>
+
+            {scopeTab === "social" ? (
+              <>
+                <select value={socialPhoneFilter} onChange={(e) => setSocialPhoneFilter(e.target.value as any)} style={{ height: 34, fontSize: 12, width: 175 }}>
+                  <option value="all">All Phone Statuses</option>
+                  <option value="detected">🟢 Phone Detected (Ready)</option>
+                  <option value="missing">⏳ Awaiting Phone</option>
+                </select>
+                <select value={socialChannelFilter} onChange={(e) => setSocialChannelFilter(e.target.value as any)} style={{ height: 34, fontSize: 12, width: 145 }}>
+                  <option value="all">All Channels</option>
+                  <option value="dm">💬 Direct Messages</option>
+                  <option value="comment">💬 Post Comments</option>
+                </select>
+                <select value={loanTypeFilter} onChange={(e) => setLoanTypeFilter(e.target.value)} style={{ height: 34, fontSize: 12, width: 140 }}>
+                  <option value="all">All Products</option>
+                  {LOAN_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </>
+            ) : (
+              <>
+                <select value={ageFilter} onChange={(e) => setAgeFilter(e.target.value)} style={{ height: 34, fontSize: 12, width: 110 }}>
+                  <option value="all">All Ages</option>
+                  <option value="new">New (7d)</option>
+                  <option value="old">Older</option>
+                </select>
+                <select value={amountFilter} onChange={(e) => setAmountFilter(e.target.value)} style={{ height: 34, fontSize: 12, width: 130 }}>
+                  <option value="all">All Amounts</option>
+                  <option value="high">High (≥ ₹10L)</option>
+                  <option value="low">Low (&lt; ₹10L)</option>
+                </select>
+                <select value={loanTypeFilter} onChange={(e) => setLoanTypeFilter(e.target.value)} style={{ height: 34, fontSize: 12, width: 140 }}>
+                  <option value="all">All Loan Types</option>
+                  {LOAN_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
+                <select value={interestedFilter} onChange={(e) => setInterestedFilter(e.target.value)} style={{ height: 34, fontSize: 12, width: 130 }}>
+                  <option value="all">All Statuses</option>
+                  <option value="interested">Interested</option>
+                  <option value="not_interested">Not Interested</option>
+                  <option value="unknown">Unknown</option>
+                </select>
+              </>
+            )}
+
             {/* Refresh — resets all filters and reloads */}
             <button
               onClick={() => {
@@ -552,17 +656,41 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                 setAmountFilter("all")
                 setLoanTypeFilter("all")
                 setInterestedFilter("all")
+                setSocialPhoneFilter("all")
+                setSocialChannelFilter("all")
               }}
               title="Reset filters"
               className="icon-btn"
             ><RotateCcw size={14} strokeWidth={1.9} /></button>
+
+            {scopeTab === "social" && (
+              <button
+                onClick={() => window.dispatchEvent(new CustomEvent("rag:navigate", { detail: { view: "instagram" } }))}
+                className="btn-ghost"
+                style={{
+                  height: 34,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: "#e1306c",
+                  borderColor: "rgba(225,48,108,0.3)",
+                  background: "rgba(225,48,108,0.06)",
+                }}
+                title="Open Instagram Chat engagement hub"
+              >
+                <Instagram size={14} strokeWidth={2.2} /> Live IG Chat
+              </button>
+            )}
+
             {/* Spacer */}
             <div style={{ flex: 1 }} />
             <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{displayLeads.length} shown</div>
             <a href="/api/leads/export" className="btn-ghost" style={{ height: 34, textDecoration: "none" }} title="Export all leads as CSV">
               <Download size={14} strokeWidth={2} /> Export
             </a>
-            {canEdit && (
+            {canEdit && scopeTab === "crm" && (
               <button onClick={() => setShowAdd(true)} className="btn-primary" style={{ height: 34 }}>
                 <Plus size={15} strokeWidth={2.2} /> Add Lead
               </button>
@@ -570,21 +698,27 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
           </div>
         </div>
 
-        {/* Horizontal scroll container — a 10-column table can't fit a phone
-            screen; this keeps the overflow contained to the table itself
-            instead of the whole page scrolling sideways. */}
+        {/* Horizontal scroll container */}
         <div style={{ overflowX: "auto" }}>
         <table style={{ width: "100%", minWidth: 820, borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ borderBottom: "1px solid var(--border)" }}>
-              <th style={{ padding: "12px 8px 12px 16px", width: 40, textAlign: "left" }}>
-                {canEdit && scopeTab === "crm" && displayLeads.length > 0 && (
-                  <input type="checkbox" checked={allSelected} onChange={toggleAll} title="Select all shown leads" style={{ width: 15, height: 15, cursor: "pointer", accentColor: "var(--accent-violet)" }} />
-                )}
-              </th>
-              {["LEAD", "SCORE", "ADDRESS", "LOAN TYPE", "VALUE", "STATUS", "FORM", "CALLS", "UPDATED", "ACTIONS"].map((h) => (
-                <th key={h} style={{ padding: "12px 16px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "var(--text-muted)", letterSpacing: "0.05em" }}>{h}</th>
-              ))}
+              {scopeTab === "crm" ? (
+                <>
+                  <th style={{ padding: "12px 8px 12px 16px", width: 40, textAlign: "left" }}>
+                    {canEdit && displayLeads.length > 0 && (
+                      <input type="checkbox" checked={allSelected} onChange={toggleAll} title="Select all shown leads" style={{ width: 15, height: 15, cursor: "pointer", accentColor: "var(--accent-violet)" }} />
+                    )}
+                  </th>
+                  {["LEAD", "SCORE", "ADDRESS", "LOAN TYPE", "VALUE", "STATUS", "FORM", "CALLS", "UPDATED", "ACTIONS"].map((h) => (
+                    <th key={h} style={{ padding: "12px 16px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "var(--text-muted)", letterSpacing: "0.05em" }}>{h}</th>
+                  ))}
+                </>
+              ) : (
+                ["PROSPECT / HANDLE", "CHANNEL", "DETECTED PHONE", "PRODUCT INTEREST", "LATEST INQUIRY", "LAST ACTIVE", "ACTIONS"].map((h) => (
+                  <th key={h} style={{ padding: "12px 16px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "var(--text-muted)", letterSpacing: "0.05em" }}>{h}</th>
+                ))
+              )}
             </tr>
           </thead>
           <tbody>
@@ -599,14 +733,14 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                     </div>
                   </div>
                 </td>
-                {Array.from({ length: 9 }).map((_, j) => (
-                  <td key={j} style={{ padding: "14px 16px" }}><Skeleton w={j === 8 ? 68 : 52} h={12} /></td>
+                {Array.from({ length: scopeTab === "social" ? 6 : 9 }).map((_, j) => (
+                  <td key={j} style={{ padding: "14px 16px" }}><Skeleton w={j === (scopeTab === "social" ? 5 : 8) ? 68 : 52} h={12} /></td>
                 ))}
               </tr>
             ))}
             {!loading && loadError && (
               <tr>
-                <td colSpan={11} style={{ padding: 32, textAlign: "center" }}>
+                <td colSpan={scopeTab === "social" ? 7 : 11} style={{ padding: 32, textAlign: "center" }}>
                   <div style={{ color: "var(--accent-red)", fontSize: 13, fontWeight: 600, marginBottom: 12 }}>{loadError}</div>
                   <button onClick={() => load()} className="btn-ghost" style={{ height: 32, padding: "0 14px", fontSize: 12.5 }}>
                     <RotateCcw size={12.5} strokeWidth={1.9} /> Try again
@@ -615,13 +749,231 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
               </tr>
             )}
             {!loading && !loadError && displayLeads.length === 0 && (
-              <tr><td colSpan={11} style={{ padding: 40, textAlign: "center", color: "var(--text-muted)" }}>
-                {scopeTab === "social"
-                  ? "No Instagram prospects — DM/comment leads without a phone number land here."
-                  : "No leads match these filters."}
-              </td></tr>
+              <tr>
+                <td colSpan={scopeTab === "social" ? 7 : 11} style={{ padding: 40, textAlign: "center", color: "var(--text-muted)" }}>
+                  {scopeTab === "social" ? (
+                    <div style={{ maxWidth: 460, margin: "0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: 12, padding: "20px 0" }}>
+                      <div style={{ width: 52, height: 52, borderRadius: 16, background: "rgba(225,48,108,0.1)", border: "1px solid rgba(225,48,108,0.25)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <Instagram size={26} strokeWidth={1.8} style={{ color: "#e1306c" }} />
+                      </div>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-primary)" }}>No Instagram prospects found</div>
+                      <div style={{ fontSize: 12.5, color: "var(--text-muted)", lineHeight: 1.5 }}>
+                        No Instagram prospects — DM/comment leads without a phone number land here. When they share their mobile, Priya auto-qualifies them into the CRM.
+                      </div>
+                      <button
+                        onClick={() => window.dispatchEvent(new CustomEvent("rag:navigate", { detail: { view: "instagram" } }))}
+                        className="btn-primary"
+                        style={{ marginTop: 4, height: 34, fontSize: 12.5, display: "inline-flex", alignItems: "center", gap: 6 }}
+                      >
+                        <Instagram size={14} strokeWidth={2} /> Open Instagram Chat
+                      </button>
+                    </div>
+                  ) : (
+                    "No leads match these filters."
+                  )}
+                </td>
+              </tr>
             )}
             {displayLeads.map((lead) => {
+              if (scopeTab === "social") {
+                return (
+                  <tr key={lead.id} style={{ borderBottom: "1px solid var(--border-light)" }}>
+                    <td style={{ padding: "14px 16px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <SocialAvatar name={lead.name} handle={lead.instagram_handle} />
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", gap: 6 }}>
+                            {lead.pinned && <Pin size={12} strokeWidth={2.2} style={{ color: "var(--accent-yellow)", fill: "var(--accent-yellow)", flexShrink: 0 }} />}
+                            {lead.name || "Instagram Inquirer"}
+                            {lead.instagram_handle && (
+                              <a
+                                href={`https://instagram.com/${lead.instagram_handle.replace(/^@/, "")}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                title={`Open @${lead.instagram_handle.replace(/^@/, "")} on Instagram`}
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: 3,
+                                  fontSize: 10.5,
+                                  fontWeight: 600,
+                                  color: "#e1306c",
+                                  background: "rgba(225,48,108,0.1)",
+                                  border: "1px solid rgba(225,48,108,0.28)",
+                                  borderRadius: 5,
+                                  padding: "1px 6px",
+                                  textDecoration: "none",
+                                  flexShrink: 0,
+                                }}
+                              >
+                                <Instagram size={10} strokeWidth={2.2} /> @{lead.instagram_handle.replace(/^@/, "")}
+                                <ExternalLink size={9} style={{ opacity: 0.6 }} />
+                              </a>
+                            )}
+                          </div>
+                          <div style={{ fontSize: 12, color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 6, marginTop: 2 }}>
+                            {lead.lead_code && <LeadCodeBadge code={lead.lead_code} />}
+                            {lead.ig_user_id && <span style={{ fontFamily: "monospace", fontSize: 11, opacity: 0.7 }}>ID: {lead.ig_user_id.slice(-6)}</span>}
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+                    <td style={{ padding: "14px 16px" }}>
+                      {lead.source?.toLowerCase().includes("comment") ? (
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: "#e1306c", background: "rgba(225,48,108,0.1)", border: "1px solid rgba(225,48,108,0.25)", borderRadius: 6, padding: "3px 8px" }}>
+                          <MessageSquare size={12} strokeWidth={2.2} /> Comment
+                        </span>
+                      ) : (
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: "#0095f6", background: "rgba(0,149,246,0.1)", border: "1px solid rgba(0,149,246,0.25)", borderRadius: 6, padding: "3px 8px" }}>
+                          <MessageCircle size={12} strokeWidth={2.2} /> DM
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ padding: "14px 16px" }}>
+                      {lead.phone ? (
+                        <span style={{ fontWeight: 600, fontSize: 13, color: "var(--accent-green)" }}>{lead.phone}</span>
+                      ) : lead.ig_phone_extracted ? (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                          <span
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 5,
+                              fontSize: 12,
+                              fontWeight: 700,
+                              color: "var(--accent-green)",
+                              background: "rgba(34,197,94,0.12)",
+                              border: "1px solid rgba(34,197,94,0.3)",
+                              borderRadius: 6,
+                              padding: "2px 8px",
+                              fontFamily: "ui-monospace, monospace",
+                            }}
+                            title="Auto-detected from Instagram DM — ready to convert to CRM lead"
+                          >
+                            <Phone size={11} strokeWidth={2.2} />
+                            Detected: {lead.ig_phone_extracted}
+                          </span>
+                          <span style={{ fontSize: 10.5, color: "var(--accent-green)", fontWeight: 600 }}>Ready to convert</span>
+                        </div>
+                      ) : (
+                        <div style={{ display: "flex", alignItems: "center", gap: 5, color: "var(--text-muted)", fontSize: 12 }}>
+                          <Clock size={12} />
+                          <span>Awaiting number</span>
+                        </div>
+                      )}
+                    </td>
+                    <td style={{ padding: "14px 16px" }}>
+                      <span style={{ background: "rgba(59,130,246,0.12)", color: "var(--text-secondary)", borderRadius: 6, padding: "4px 10px", fontSize: 12, fontWeight: 500 }}>
+                        {lead.product_interest || "General Inquiry"}
+                      </span>
+                      {lead.loan_amount ? <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-muted)", marginTop: 2 }}>{formatCurrency(lead.loan_amount)}</div> : null}
+                    </td>
+                    <td style={{ padding: "14px 16px", maxWidth: 260 }}>
+                      <div style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.4 }} title={lead.last_message || lead.notes || ""}>
+                        {lead.last_message ? (
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <span style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 700, textTransform: "uppercase", padding: "1px 5px", borderRadius: 4, background: "var(--overlay-hover)", flexShrink: 0 }}>
+                              {lead.last_direction === "inbound" ? "User" : "Priya"}
+                            </span>
+                            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {lead.last_message}
+                            </span>
+                          </div>
+                        ) : lead.notes ? (
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>
+                            {lead.notes}
+                          </span>
+                        ) : (
+                          <span style={{ color: "var(--text-muted)", fontStyle: "italic", fontSize: 12 }}>No messages recorded</span>
+                        )}
+                      </div>
+                    </td>
+                    <td style={{ padding: "14px 16px", color: "var(--text-muted)", fontSize: 12 }}>
+                      <div>{timeAgo(lead.last_interaction_at || lead.updated_at || lead.created_at)}</div>
+                      <div style={{ fontSize: 10.5, marginTop: 1 }}>{formatDateTime(lead.last_interaction_at || lead.updated_at || lead.created_at)}</div>
+                    </td>
+                    <td style={{ padding: "14px 16px" }}>
+                      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                        {canEdit && (
+                          <>
+                            <button
+                              onClick={() => {
+                                setConvertTarget(lead)
+                                setConvertForm({
+                                  phone: lead.ig_phone_extracted ? lead.ig_phone_extracted.replace(/\D/g, "") : "",
+                                  productInterest: lead.product_interest || "",
+                                  notes: lead.notes || "",
+                                  sendWa: true,
+                                  addToQueue: !!lead.ig_phone_extracted,
+                                })
+                              }}
+                              title={lead.ig_phone_extracted ? "Phone detected — convert to CRM lead now" : "Convert to a callable CRM lead"}
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 5,
+                                background: lead.ig_phone_extracted ? "linear-gradient(135deg, #10b981, #059669)" : "rgba(34,197,94,0.1)",
+                                border: lead.ig_phone_extracted ? "none" : "1px solid rgba(34,197,94,0.3)",
+                                color: lead.ig_phone_extracted ? "#fff" : "var(--accent-green)",
+                                borderRadius: 8,
+                                height: 32,
+                                padding: "0 11px",
+                                fontSize: 12,
+                                fontWeight: 600,
+                                cursor: "pointer",
+                                boxShadow: lead.ig_phone_extracted ? "0 2px 8px rgba(16,185,129,0.3)" : undefined,
+                              }}
+                            >
+                              <Sparkles size={13} strokeWidth={2} /> Convert
+                            </button>
+                            <button
+                              onClick={() => {
+                                const targetId = lead.instagram_handle || lead.ig_user_id || lead.name
+                                window.dispatchEvent(new CustomEvent("rag:navigate", { detail: { view: "instagram", search: targetId } }))
+                              }}
+                              title="Open in Instagram Chat"
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 5,
+                                background: "rgba(225,48,108,0.1)",
+                                border: "1px solid rgba(225,48,108,0.3)",
+                                color: "#e1306c",
+                                borderRadius: 8,
+                                height: 32,
+                                padding: "0 10px",
+                                fontSize: 12,
+                                fontWeight: 600,
+                                cursor: "pointer",
+                              }}
+                            >
+                              <Instagram size={13} strokeWidth={2} /> Chat
+                            </button>
+                            <button
+                              onClick={() => togglePin(lead)}
+                              title={lead.pinned ? "Unpin" : "Pin to top"}
+                              style={{ background: lead.pinned ? "rgba(247,183,49,0.15)" : "var(--overlay-hover)", border: `1px solid ${lead.pinned ? "rgba(247,183,49,0.35)" : "var(--border)"}`, color: lead.pinned ? "var(--accent-yellow)" : "var(--text-muted)", borderRadius: 8, width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+                            >
+                              <Pin size={13} strokeWidth={1.9} style={lead.pinned ? { fill: "var(--accent-yellow)" } : undefined} />
+                            </button>
+                            <button
+                              onClick={() => setMemoryLeadId(lead.id)}
+                              title="View Lead Memory"
+                              style={{ background: "rgba(247,183,49,0.1)", border: "1px solid rgba(247,183,49,0.28)", color: "var(--accent-yellow)", borderRadius: 8, width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+                            >
+                              <Brain size={14} strokeWidth={1.9} />
+                            </button>
+                          </>
+                        )}
+                        {!canEdit && <span style={{ fontSize: 12, color: "var(--text-muted)" }}>View only</span>}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              }
+
+              // CRM row
               const ist = INTERESTED_STYLES[lead.interested] ?? INTERESTED_STYLES.unknown
               return (
                 <tr key={lead.id} style={{ borderBottom: "1px solid var(--border-light)", background: selectedIds.includes(lead.id) ? "rgba(139,124,255,0.05)" : undefined }}>
@@ -652,8 +1004,6 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                             <span>{lead.phone}</span>
                           ) : lead.ig_phone_extracted ? (
                             <span style={{ color: "var(--accent-yellow)", fontWeight: 600 }} title="Auto-detected in their DM — click Convert to use it">Detected: {lead.ig_phone_extracted}</span>
-                          ) : scopeTab === "social" ? (
-                            <span style={{ color: "var(--text-muted)", fontStyle: "italic" }}>No phone yet</span>
                           ) : null}
                         </div>
                       </div>
@@ -696,19 +1046,6 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                             style={{ background: "rgba(45,212,160,0.1)", border: "1px solid rgba(45,212,160,0.28)", color: "var(--accent-green)", borderRadius: 9, width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
                           ><MessageCircle size={14} strokeWidth={1.9} /></button>
                         </>
-                      )}
-                      {canEdit && scopeTab === "social" && (
-                        <button
-                          onClick={() => {
-                            setConvertTarget(lead)
-                            setConvertForm({
-                              phone: lead.ig_phone_extracted ? lead.ig_phone_extracted.replace(/\D/g, "") : "",
-                              productInterest: "", notes: "", sendWa: true, addToQueue: false,
-                            })
-                          }}
-                          title="Convert to a callable CRM lead"
-                          style={{ display: "inline-flex", alignItems: "center", gap: 5, background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.3)", color: "var(--accent-green)", borderRadius: 9, height: 32, padding: "0 10px", fontSize: 12, fontWeight: 600 }}
-                        ><Sparkles size={13} strokeWidth={1.9} /> Convert</button>
                       )}
                       <button
                         onClick={() => setMemoryLeadId(lead.id)}
@@ -791,37 +1128,59 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
       {/* Convert-to-CRM-Lead modal (Instagram Prospects lane) */}
       {convertTarget && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={() => !convertBusy && setConvertTarget(null)}>
-          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, padding: 28, width: 440 }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 4 }}>Convert {convertTarget.name || "prospect"} to CRM Lead</div>
-            <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16 }}>
-              {convertTarget.instagram_handle ? `@${convertTarget.instagram_handle} · ` : ""}{convertTarget.source || "Instagram prospect"} — all chat history stays attached after conversion.
+          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, padding: 28, width: 450 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
+              <SocialAvatar name={convertTarget.name} handle={convertTarget.instagram_handle} />
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 16 }}>Convert {convertTarget.name || "prospect"} to CRM Lead</div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                  {convertTarget.instagram_handle ? `@${convertTarget.instagram_handle} · ` : ""}{convertTarget.source || "Instagram prospect"} — all chat history stays attached after conversion.
+                </div>
+              </div>
             </div>
 
-            <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Phone number</label>
-            <input
-              value={convertForm.phone}
-              onChange={(e) => setConvertForm({ ...convertForm, phone: e.target.value })}
-              placeholder={convertTarget.ig_phone_extracted ? `Detected: ${convertTarget.ig_phone_extracted}` : "10-digit mobile"}
-              style={{ width: "100%", marginBottom: 14 }}
-            />
+            {convertTarget.ig_phone_extracted && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.25)", borderRadius: 8, margin: "14px 0" }}>
+                <CheckCircle2 size={16} style={{ color: "var(--accent-green)", flexShrink: 0 }} />
+                <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                  Auto-detected from DM: <strong style={{ color: "var(--accent-green)", fontFamily: "monospace" }}>{convertTarget.ig_phone_extracted}</strong> (pre-filled)
+                </div>
+              </div>
+            )}
 
-            <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Product interest (optional)</label>
-            <select value={convertForm.productInterest} onChange={(e) => setConvertForm({ ...convertForm, productInterest: e.target.value })} style={{ width: "100%", marginBottom: 14 }}>
-              <option value="">— keep as is —</option>
-              {LOAN_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-            </select>
+            <div style={{ margin: "14px 0" }}>
+              <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Phone number *</label>
+              <input
+                value={convertForm.phone}
+                onChange={(e) => setConvertForm({ ...convertForm, phone: e.target.value })}
+                placeholder={convertTarget.ig_phone_extracted ? `Detected: ${convertTarget.ig_phone_extracted}` : "10-digit mobile"}
+                style={{ width: "100%", height: 38, fontSize: 13, fontFamily: "ui-monospace, monospace" }}
+              />
+            </div>
 
-            <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Note (optional)</label>
-            <input value={convertForm.notes} onChange={(e) => setConvertForm({ ...convertForm, notes: e.target.value })} placeholder="e.g. Asked about home loan rates on IG" style={{ width: "100%", marginBottom: 14 }} />
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Product interest (optional)</label>
+              <select value={convertForm.productInterest} onChange={(e) => setConvertForm({ ...convertForm, productInterest: e.target.value })} style={{ width: "100%", height: 38, fontSize: 13 }}>
+                <option value="">— keep as {convertTarget.product_interest || "is"} —</option>
+                {LOAN_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
 
-            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, marginBottom: 8, cursor: "pointer" }}>
-              <input type="checkbox" checked={convertForm.sendWa} onChange={(e) => setConvertForm({ ...convertForm, sendWa: e.target.checked })} style={{ accentColor: "var(--accent-violet)" }} />
-              Send WhatsApp welcome + loan application link
-            </label>
-            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, marginBottom: 16, cursor: "pointer" }}>
-              <input type="checkbox" checked={convertForm.addToQueue} onChange={(e) => setConvertForm({ ...convertForm, addToQueue: e.target.checked })} style={{ accentColor: "var(--accent-violet)" }} />
-              Add to Call Queue (high priority)
-            </label>
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Note (optional)</label>
+              <input value={convertForm.notes} onChange={(e) => setConvertForm({ ...convertForm, notes: e.target.value })} placeholder="e.g. Asked about home loan rates on IG" style={{ width: "100%", height: 38, fontSize: 13 }} />
+            </div>
+
+            <div style={{ background: "var(--bg-secondary)", borderRadius: 10, padding: 12, border: "1px solid var(--border)", marginBottom: 16 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, marginBottom: 8, cursor: "pointer" }}>
+                <input type="checkbox" checked={convertForm.sendWa} onChange={(e) => setConvertForm({ ...convertForm, sendWa: e.target.checked })} style={{ accentColor: "var(--accent-violet)" }} />
+                Send WhatsApp welcome + loan application link
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, cursor: "pointer" }}>
+                <input type="checkbox" checked={convertForm.addToQueue} onChange={(e) => setConvertForm({ ...convertForm, addToQueue: e.target.checked })} style={{ accentColor: "var(--accent-violet)" }} />
+                Add to Call Queue (high priority)
+              </label>
+            </div>
 
             <div style={{ fontSize: 11.5, color: "var(--text-muted)", background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 8, padding: "9px 12px", marginBottom: 16, lineHeight: 1.6 }}>
               If this number already belongs to another CRM lead, conversion is BLOCKED and nothing is merged — you review it manually. Prospects are never silently merged.
