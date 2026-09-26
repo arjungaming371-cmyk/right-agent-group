@@ -45,6 +45,11 @@
 //     below (pacer, endpointing, turns, recording) — only the SDP direction
 //     flips.
 //
+// When the conversation is DONE, the session hangs up BUSINESS-side via
+// Graph terminate (requestBusinessHangup → /api/whatsapp/terminate); the
+// customer hanging up first still ends everything through the terminate
+// webhook. Both paths funnel into the same idempotent end().
+//
 // Dependencies (server/package.json): werift, @discordjs/opus.
 
 require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") })
@@ -84,6 +89,54 @@ const MAX_UTTERANCE_MS = 15000
 const BARGE_IN = (process.env.VOICEBOT_WA_BARGE_IN || "0").trim() === "1"
 const BARGE_MIN_MS = parseInt(process.env.VOICEBOT_WA_BARGE_MIN_MS || "300")
 
+// SPEECH CLARITY ("Priya is not speaking the words clearly like a human"):
+// @discordjs/opus hardcodes OPUS_APPLICATION_AUDIO (MUSIC mode) and never
+// sets a bitrate, so libopus AUTO lands well below what fullband voice
+// needs — consonants smear and the voice sounds synthetic/muffled. We
+// re-tune every encoder at construction: VOIP application mode (2048) + a
+// pinned 64 kbps (Discord's own voice bitrate). Exported for the test
+// suite so the values are locked, not magic numbers in a try/catch.
+const OPUS_CTL_SET_APPLICATION = 4000   // opus_defines.h OPUS_SET_APPLICATION_REQUEST
+const OPUS_APPLICATION_VOIP = 2048      // opus_defines.h OPUS_APPLICATION_VOIP
+const WA_OPUS_BITRATE = parseInt(process.env.VOICEBOT_WA_OPUS_BITRATE || "64000") || 64000
+
+function createWaEncoder() {
+  const enc = new OpusEncoder(WA_RATE, 1)
+  try { enc.applyEncoderCTL(OPUS_CTL_SET_APPLICATION, OPUS_APPLICATION_VOIP) } catch (e) {
+    console.warn("wa opus: could not switch to VOIP application mode:", e.message)
+  }
+  try { enc.setBitrate(WA_OPUS_BITRATE) } catch (e) {
+    console.warn("wa opus: could not set bitrate:", e.message)
+  }
+  return enc
+}
+
+// TTS loudness shaping for the WebRTC leg (mirrors the measured Exotel
+// chain, MINUS the telephony band-limit). Unlike the 8kHz phone line, the
+// WhatsApp/WebRTC leg carries fullband audio — a 3400 Hz lowpass here would
+// THROTTLE clarity, not help. What does help: a highpass to drop inaudible
+// rumble, a compressor so sentence-to-sentence TTS level swings stop being
+// audible ("sometimes quiet, sometimes loud"), and a limiter so the makeup
+// gain can never clip into distortion. VOICEBOT_WA_TTS_VOLUME adds plain
+// gain ON TOP (default 1 = none; the Exotel leg needs 2.0 because the phone
+// carrier strips energy — WebRTC does not). VOICEBOT_WA_AUDIO_FILTER=0
+// restores the old unshaped passthrough.
+const WA_TTS_VOLUME = Math.max(0.5, Math.min(4, parseFloat(process.env.VOICEBOT_WA_TTS_VOLUME || "1") || 1))
+const WA_AUDIO_FILTER = (process.env.VOICEBOT_WA_AUDIO_FILTER || "1").trim() !== "0"
+
+function buildWaAudioFilter() {
+  const parts = []
+  if (WA_AUDIO_FILTER) {
+    parts.push("highpass=f=70")
+    parts.push("acompressor=threshold=-18dB:ratio=3:attack=5:release=120:makeup=2")
+  }
+  if (WA_TTS_VOLUME !== 1) parts.push(`volume=${WA_TTS_VOLUME}`)
+  if (parts.length) parts.push("alimiter=limit=0.95")
+  return parts.join(",")
+}
+
+const WA_AUDIO_FILTER_CHAIN = buildWaAudioFilter()
+
 // Dead-peer backstop while CONNECTED: Meta's "terminate" webhook can be lost
 // (webhook outage, Next.js pm2 restart at call end) and werift does not run
 // ICE consent-freshness for us. A connected session whose inbound RTP goes
@@ -91,6 +144,19 @@ const BARGE_MIN_MS = parseInt(process.env.VOICEBOT_WA_BARGE_MIN_MS || "300")
 // and the recorder temp files cannot leak forever. Opus DTX still emits
 // frames every ~400 ms, so 120 s of TRUE silence only ever means a corpse.
 const MEDIA_TIMEOUT_MS = Math.max(30_000, parseInt(process.env.VOICEBOT_WA_MEDIA_TIMEOUT_MS || "120000") || 120_000)
+
+// BUSINESS-SIDE HANGUP: when the turn API says the conversation is done
+// (hangup=true — lead completed or an explicit goodbye), Priya used to
+// finish her goodbye and then leave the line open in silence until the
+// CUSTOMER hung up. The Graph terminate existed in lib/whatsapp.ts but was
+// never wired. Now: goodbye plays out → app /api/whatsapp/terminate →
+// Meta action=terminate → Meta drops the call and sends the terminate
+// webhook (→ bridge /whatsapp/terminated → end()). If that webhook is
+// lost, a local fallback timer ends the session anyway — the customer is
+// never left on open-mic dead air. end() is idempotent; whichever lands
+// first wins. VOICEBOT_WA_BUSINESS_HANGUP=0 restores the old behaviour.
+const BUSINESS_HANGUP = (process.env.VOICEBOT_WA_BUSINESS_HANGUP || "1").trim() !== "0"
+const HANGUP_FALLBACK_MS = Math.max(3_000, parseInt(process.env.VOICEBOT_WA_HANGUP_FALLBACK_MS || "8000") || 8_000)
 
 // TTS: WhatsApp calls default to Sarvam or Cartesia if specified.
 // Automatic Sarvam fallback is always active if Cartesia fails or runs out of credits.
@@ -372,7 +438,13 @@ let _warnedNoFfmpeg = false
  *  One ffmpeg spawn per sentence either way — the resample is free. */
 function wavToPcm(wav) {
   return new Promise((resolve, reject) => {
-    const ff = spawn("ffmpeg", ["-hide_banner", "-loglevel", "error", "-f", "wav", "-i", "pipe:0", "-f", "s16le", "-ac", "1", "-ar", String(WA_RATE), "pipe:1"])
+    const args = ["-hide_banner", "-loglevel", "error", "-f", "wav", "-i", "pipe:0"]
+    // Loudness shaping (highpass + compressor + limiter) BEFORE the resample
+    // — same order as the Exotel chain, fullband (no 3400 Hz lowpass) since
+    // this leg is WebRTC. See the buildWaAudioFilter comment.
+    if (WA_AUDIO_FILTER_CHAIN) args.push("-af", WA_AUDIO_FILTER_CHAIN)
+    args.push("-f", "s16le", "-ac", "1", "-ar", String(WA_RATE), "pipe:1")
+    const ff = spawn("ffmpeg", args)
     const chunks = []
     let ffError = null
     ff.stdout.on("data", (c) => chunks.push(c))
@@ -536,7 +608,10 @@ class WhatsAppCallSession {
     this.answerSdp = answerSdp
     this.pt = payloadType
     this.ssrc = ssrc
-    this.encoder = new OpusEncoder(WA_RATE, 1)
+    // SPEECH CLARITY: VOIP application mode + pinned 64 kbps — see the
+    // createWaEncoder comment. The old bare `new OpusEncoder(WA_RATE, 1)`
+    // ran libopus in MUSIC mode at an AUTO bitrate that smears consonants.
+    this.encoder = createWaEncoder()
     this.decoder = new OpusEncoder(WA_RATE, 1)
     this.silenceFrame = this.encoder.encode(Buffer.alloc(WA_FRAME_BYTES))
 
@@ -874,11 +949,13 @@ class WhatsAppCallSession {
       await this.drainSpeech(epoch)
       if (epoch !== this.speechEpoch && !this.closed) await this.reportSpoken(spoken)
       console.log(`⏱ wa TOTAL turn (silence → reply fully sent): ${Date.now() - turnT0}ms`)
-      // A WhatsApp hangup is always the CUSTOMER's action (we never hang up
-      // first — there is no server-side "hang up" RTP signal; that would be
-      // Graph terminate). The app's hangup flag is logged, not acted on.
+      // The conversation is DONE (lead completed, or the reply was a
+      // goodbye). Hang the call up business-side: Graph terminate via the
+      // app. Used to be a log-only no-op — the line stayed open in silence
+      // until the customer hung up (the exact "it is not cutting the call
+      // after the call finished" report).
       if (hangup && epoch === this.speechEpoch) {
-        console.log(`ℹ turn requested hangup on ${this.callSid} — WhatsApp hangs up customer-side; Priya's goodbye plays out and the terminate webhook ends the call`)
+        this.requestBusinessHangup()
       }
     } catch (e) {
       console.error("wa turn error:", e.message)
@@ -1034,6 +1111,55 @@ class WhatsAppCallSession {
       const line = START_FALLBACK_PHRASE[this.language] || START_FALLBACK_PHRASE.english
       await this.speak(notice ? `${notice} ${line}` : line).catch(() => {})
     }
+  }
+
+  /**
+   * Hang the call up business-side: POST the app's /api/whatsapp/terminate
+   * (shared WHATSAPP_SERVICE_KEY auth) → lib/whatsapp.terminateWhatsAppCall
+   * → Meta Graph action=terminate. Meta then drops the media and fires the
+   * terminate webhook, which reaches us through the bridge and calls
+   * end("remote-hangup" / whatever the app reports). If that webhook is
+   * lost, HANGUP_FALLBACK_MS later we end locally — the customer is never
+   * left listening to open-mic silence after Priya's goodbye.
+   *
+   * Fire-and-forget on purpose: the turn handler must not block on Meta.
+   */
+  requestBusinessHangup() {
+    if (this.closed) return
+    if (!BUSINESS_HANGUP) {
+      console.log(`ℹ turn requested hangup on ${this.callSid} — VOICEBOT_WA_BUSINESS_HANGUP=0, leaving the line open (customer hangs up)`)
+      return
+    }
+    console.log(`⏹ turn requested hangup on ${this.callSid} — goodbye played, terminating business-side (Graph terminate)`)
+    void (async () => {
+      let lastErr = null
+      for (let attempt = 1; attempt <= 2 && !this.closed; attempt++) {
+        try {
+          const res = await fetch(`${APP_URL}/api/whatsapp/terminate`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+            body: JSON.stringify({ callId: this.callSid, phoneNumberId: this.phoneNumberId }),
+            signal: AbortSignal.timeout(6000),
+          })
+          const data = await res.json().catch(() => ({}))
+          if (res.ok && data?.ok) { lastErr = null; break }
+          lastErr = new Error(data?.error || `HTTP ${res.status}`)
+          // A Graph "call already terminated" style rejection is FINAL — the
+          // call is ending regardless; retrying just burns the fallback window.
+          if (res.status === 400 || res.status === 403 || res.status === 404) break
+        } catch (e) {
+          lastErr = e
+        }
+        if (attempt < 2) await new Promise((r) => setTimeout(r, 1000))
+      }
+      if (lastErr) console.error(`⏹ wa hangup: Graph terminate did not confirm for ${this.callSid}: ${lastErr.message} — fallback timer will end the session`)
+    })()
+    // Twin of the terminate webhook. If Meta's webhook arrives first this is
+    // a no-op (end() is idempotent); if it never arrives, this reaps the call.
+    const fallback = setTimeout(() => {
+      if (!this.closed) this.end("hangup-fallback")
+    }, HANGUP_FALLBACK_MS)
+    if (fallback.unref) fallback.unref()
   }
 
   end(reason) {
@@ -1330,6 +1456,9 @@ module.exports = {
   filterSdpForWhatsApp, downsampleToStt, upsampleMono, pcmToWav16k, wavToPcm, avgEnergy,
   parseWav, wavSampleRate, resamplePcmMono, jsWavToPcm48k,
   RECORDING_NOTICE_PHRASE,
+  // speech-clarity + hangup tuning (test-locked, see constants above)
+  createWaEncoder, WA_OPUS_BITRATE, OPUS_CTL_SET_APPLICATION, OPUS_APPLICATION_VOIP,
+  WA_AUDIO_FILTER_CHAIN, BUSINESS_HANGUP,
 }
 
 // Sweep orphaned recording files (crash mid-call / lost finalize) once at
