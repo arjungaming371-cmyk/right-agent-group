@@ -904,12 +904,13 @@ class CallSession {
         (ev) => {
           if (turnAbort.signal.aborted || epoch !== this.speechEpoch) return // turn abandoned — stop consuming
           if (ev.type === "sentence" && ev.text) {
+            if (ev.language) this.language = ev.language
             if (!firstSentenceAt) {
               firstSentenceAt = Date.now()
               console.log(`⏱ brain (time to first sentence): ${firstSentenceAt - brainT0}ms`)
             }
             console.log(`🗣 reply sentence (${ev.text.length} chars)`)
-            this.queueSentence(ev.text, epoch, spoken)
+            this.queueSentence(ev.text, epoch, spoken, ev.language || this.language)
           } else if (ev.type === "done") {
             if (ev.language) this.language = ev.language
             hangup = !!ev.hangup
@@ -1019,7 +1020,7 @@ class CallSession {
    * `spoken`, when passed, collects the sentences whose playback actually
    * started, so the transcript can be corrected to what the caller heard.
    */
-  queueSentence(text, turnEpoch, spoken) {
+  queueSentence(text, turnEpoch, spoken, sentenceLang) {
     const clean = (text || "").trim()
     if (!clean || this.closed) return
     // undefined => "whatever is current", so a missed call site degrades to
@@ -1028,7 +1029,8 @@ class CallSession {
     if (epoch !== this.speechEpoch) return // this turn was abandoned
     if (ECHO_PROBE && !this.botTalking) this.echoReplyOpen = true
     this.botTalking = true
-    const synth = this.synth(clean, epoch)
+    const lang = sentenceLang || this.language || "english"
+    const synth = this.synth(clean, epoch, lang)
     this.synthChain = synth
     // FIX (2026-09-20): the chain used to be `sendChain.then(...)` with no
     // catch — one rejected link (any ws.send throw, a synth bug) poisoned the
@@ -1050,8 +1052,8 @@ class CallSession {
         // fallback line was prewarmed into the TTS cache at boot, play it
         // from cache; if even that isn't cached (TTS was down before boot),
         // there is genuinely nothing we can say, so log and move on.
-        const fbText = FALLBACK_PHRASE[this.language] || FALLBACK_PHRASE.english
-        const fbPcm = ttsCache.get(ttsCacheKey(fbText, this.language, this.voice))
+        const fbText = FALLBACK_PHRASE[lang] || FALLBACK_PHRASE.english
+        const fbPcm = ttsCache.get(ttsCacheKey(fbText, lang, this.voice))
         if (fbPcm && clean !== fbText) {
           console.log("🗣 (tts-failed fallback)")
           await this.playPcm(fbPcm, epoch)
@@ -1061,11 +1063,12 @@ class CallSession {
   }
 
   /** Extracted verbatim so tests can replace it without a TTS service. */
-  synth(text, epoch) {
+  synth(text, epoch, sentenceLang) {
+    const lang = sentenceLang || this.language || "english"
     return this.synthChain.then(() =>
       this.closed || epoch !== this.speechEpoch
         ? null
-        : textToSpeechPcm8k(text, this.language, this.voice).catch((e) => {
+        : textToSpeechPcm8k(text, lang, this.voice).catch((e) => {
             console.error("TTS error:", e.message)
             return null
           })

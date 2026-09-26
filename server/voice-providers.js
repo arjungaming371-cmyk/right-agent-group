@@ -74,12 +74,13 @@ const CARTESIA_LOCALES = { english: "en-IN", hindi: "hi-IN", telugu: "te-IN" }
 // Same script detection as the old tts-service (kept for behavior parity).
 const _TELUGU_RE = /[\u0C00-\u0C7F]/g // ఀ-౿
 const _DEVANAGARI_RE = /[\u0900-\u097F]/g // ऀ-ॿ
+const _ROMAN_TELUGU_RE = /\b(kavali|kavala|naku|meeku|gurinchi|cheppandi|cheppanu|avunu|ledu|undhi|undi|unna|unnaru|telugu|namaskaram|enti|kosam|baga|kada|ayithe)\b/i
+const _ROMAN_HINDI_RE = /\b(chahiye|hai|hain|nahi|nahin|haan|boliye|baat|karna|naam|kya|mujhe|apna|hoga|dijiye|hoon|aap|theek|achha)\b/i
 
 /**
- * Resolve the TTS locale for a reply, letting native script overrule the
- * declared language (a Hindi sentence must never come out of the Telugu
- * voice). Latin-only text keeps the declared language — English replies and
- * the loanwords inside Indic-script replies are handled by the model itself.
+ * Resolve the TTS locale for a reply, letting native script or Romanized Indic
+ * words overrule a stale declared language (a Telugu sentence must never come out
+ * of the English voice with a Western accent).
  */
 function resolveTtsLocale(text, language, locales) {
   const teluguChars = (text.match(_TELUGU_RE) || []).length
@@ -88,6 +89,8 @@ function resolveTtsLocale(text, language, locales) {
     // Mixed scripts shouldn't happen, but the dominant script wins.
     return teluguChars >= devanagariChars ? locales.telugu : locales.hindi
   }
+  if (_ROMAN_TELUGU_RE.test(text)) return locales.telugu
+  if (_ROMAN_HINDI_RE.test(text)) return locales.hindi
   return locales[language] || locales.english
 }
 

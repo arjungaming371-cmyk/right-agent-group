@@ -856,11 +856,12 @@ class WhatsAppCallSession {
         (ev) => {
           if (turnAbort.signal.aborted || epoch !== this.speechEpoch) return
           if (ev.type === "sentence" && ev.text) {
+            if (ev.language) this.language = ev.language
             if (!firstSentenceAt) {
               firstSentenceAt = Date.now()
               console.log(`⏱ wa brain (time to first sentence): ${firstSentenceAt - brainT0}ms`)
             }
-            this.queueSentence(ev.text, epoch, spoken)
+            this.queueSentence(ev.text, epoch, spoken, ev.language || this.language)
           } else if (ev.type === "done") {
             if (ev.language) this.language = ev.language
             hangup = !!ev.hangup
@@ -896,13 +897,14 @@ class WhatsAppCallSession {
 
   // ---- speech pipeline ----
 
-  queueSentence(text, turnEpoch, spoken) {
+  queueSentence(text, turnEpoch, spoken, sentenceLang) {
     const clean = (text || "").trim()
     if (!clean || this.closed) return
     const epoch = turnEpoch === undefined ? this.speechEpoch : turnEpoch
     if (epoch !== this.speechEpoch) return
     this.botTalking = true
-    const synth = this.synth(clean, epoch)
+    const lang = sentenceLang || this.language || "english"
+    const synth = this.synth(clean, epoch, lang)
     this.synthChain = synth
     this.sendChain = this.sendChain.catch(() => {}).then(async () => {
       const frames = await synth
@@ -932,7 +934,7 @@ class WhatsAppCallSession {
    * not configured. The branch voice override's speaker is honoured when it
    * belongs to the same provider.
    */
-  synth(text, epoch) {
+  synth(text, epoch, sentenceLang) {
     return this.synthChain.then(async () => {
       if (this.closed || epoch !== this.speechEpoch) return null
       try {
@@ -940,20 +942,21 @@ class WhatsAppCallSession {
         let override = this.voice || null
         let audio
         let providerUsed = WA_TTS_PROVIDER
+        const activeLang = sentenceLang || this.language || "english"
         if (WA_TTS_PROVIDER === "cartesia" && process.env.CARTESIA_API_KEY) {
           const speaker = override?.provider === "cartesia" ? override.speaker : (process.env.CARTESIA_VOICE_ID || undefined)
           try {
-            audio = await voiceProviders.cartesiaTts(text, this.language, speaker)
+            audio = await voiceProviders.cartesiaTts(text, activeLang, speaker)
             providerUsed = "cartesia"
           } catch (cartesiaErr) {
             console.warn(`[WA] Cartesia TTS failed (${cartesiaErr.message}), falling back to Sarvam TTS`)
             const sarvamSpeaker = override?.provider === "sarvam" ? override.speaker : undefined
-            audio = await voiceProviders.sarvamTts(text, this.language, sarvamSpeaker)
+            audio = await voiceProviders.sarvamTts(text, activeLang, sarvamSpeaker)
             providerUsed = "sarvam (fallback)"
           }
         } else {
           const speaker = override?.provider === "sarvam" ? override.speaker : undefined
-          audio = await voiceProviders.sarvamTts(text, this.language, speaker)
+          audio = await voiceProviders.sarvamTts(text, activeLang, speaker)
           providerUsed = "sarvam"
         }
         const pcm48k = await wavToPcm(audio)

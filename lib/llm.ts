@@ -1094,12 +1094,12 @@ export function detectLanguage(text: string): Language {
   if (/[ऀ-ॿ]/.test(text)) return "hindi"
   
   const lower = text.toLowerCase()
-  // Telugu romanized keywords
-  const teluguKeywords = /\b(kavali|naku|gurinchi|cheppandi|chepandi|avunu|ledhu|ledu|vaddhu|vaddu|undhi|undi|istara|matladutunnanu|telugu|namaskaram|garu|kaadu|kadu|telusukovadaniki|unnaya|unda)\b/i;
+  // Telugu romanized keywords and common spoken verb forms/pronouns
+  const teluguKeywords = /\b(kavali|kavala|kavalenu|naku|maaku|meeku|neeku|gurinchi|cheppandi|chepandi|cheppanu|cheppali|cheppu|endukante|avunu|ledhu|ledu|vaddhu|vaddu|undhi|undi|unna|unnaru|unnara|unnaya|unnaayi|istara|matladutunnanu|matladali|matladandi|telugu|telugulo|namaskaram|garu|kaadu|kadu|telusukovadaniki|enti|ento|enta|enni|eppudu|ela|evaru|ekkada|motham|nenu|manaki|kosam|chudandi|baga|kadha|kada|chalu|leka|patte|mari|mariyu|ayithe|kuda|antha|inka|koddiga|konchem|idi|adi|eedi|aadi|meera|ayindi|ayipoyindi|chesanu|chesam|chesaru)\b/i;
   if (teluguKeywords.test(lower)) return "telugu"
   
-  // Hindi romanized keywords
-  const hindiKeywords = /\b(chahiye|hai|nahi|nahin|haan|boliye|baat|karna|mera|naam|kya|mujhe|apna|hoga|dijiye|hoon|hu|tum|aap)\b/i;
+  // Hindi romanized keywords and common spoken verb forms/pronouns
+  const hindiKeywords = /\b(chahiye|hai|hain|nahi|nahin|haan|boliye|baat|karna|karni|karein|mera|meri|mere|naam|kya|kyun|kaise|kaha|mujhe|humein|apna|apni|hoga|hogi|dijiye|hoon|hu|tum|aap|samjha|samjhe|theek|achha|batao|bataiye|kuch|kripya)\b/i;
   if (hindiKeywords.test(lower)) return "hindi"
   
   return "english"
