@@ -18,6 +18,7 @@
 // server/voice-providers.js.
 
 import type { Language } from "./llm"
+import { normalizeForTts } from "./tts-normalize"
 
 const PROVIDER = (process.env.TTS_PROVIDER || "sarvam").toLowerCase()
 
@@ -153,7 +154,7 @@ async function elevenLabsSpeech(text: string): Promise<Buffer | null> {
 
 /** MP3 audio for the dashboard chat "speak" feature. Returns null on failure. */
 export async function textToSpeech(text: string, language: Language = "english"): Promise<Buffer | null> {
-  const clean = text?.trim().slice(0, 800)
+  const clean = normalizeForTts(text?.trim().slice(0, 800) || "")
   if (!clean) return null
 
   if (PROVIDER === "elevenlabs") return elevenLabsSpeech(clean)

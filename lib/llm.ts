@@ -111,7 +111,8 @@ const CALL_LANGUAGE_STYLES: Record<Language, string> = {
 CRITICAL OUTPUT FORMAT RULE — HINDI:
 - The customer speaks Hindi. Your reply MUST be written in real Devanagari script (देवनागरी) — this is spoken aloud by a text-to-speech voice, not read as text, so write it the way you'd naturally spell Hindi.
 - Do NOT write in Roman/English letters for Hindi words, even though the customer's own words arrive in Roman letters from the call transcription — always convert your OWN reply to real Devanagari script regardless of what script the customer used.
-- Mix in everyday English words the way people actually talk, written in plain English letters right inside the Devanagari sentence (e.g. "loan", "WhatsApp", "sir"). Example: "नमस्ते sir! मैं प्रिया बोल रही हूं Right Agent Group, Hyderabad से। आपका WhatsApp number मिल सकता है?"`,
+- Mix in everyday English words the way people actually talk, written in plain English letters right inside the Devanagari sentence (e.g. "loan", "WhatsApp", "sir"). Example: "नमस्ते sir! मैं प्रिया बोल रही हूं Right Agent Group, Hyderabad से। आपका WhatsApp number मिल सकता है?"
+- ALWAYS speak numbers, tenures, amounts, and EMIs in English words (e.g. "sixteen lakh", "fifteen years", "five years", "fourteen thousand five hundred rupees", "twenty plus") rather than raw digits or complex Hindi number words.`,
   telugu: `
 
 CRITICAL OUTPUT FORMAT RULE — TELUGU (NATIVE CONVERSATIONAL):
@@ -121,7 +122,7 @@ CRITICAL OUTPUT FORMAT RULE — TELUGU (NATIVE CONVERSATIONAL):
 - FLUENT CONVERSATIONAL RHYTHM & PRONUNCIATION:
   * Speak smoothly and confidently like a friendly loan advisor from Hyderabad.
   * Use natural spoken phrases: "అవును sir", "ఖచ్చితంగా sir", "అయ్యో tension పడకండి sir", "ఒక్క minute sir".
-  * For numbers, write them simply with words: "16 lakhs", "14 thousand 500", "20 plus banks", "15 years". Avoid commas inside numbers.
+  * For numbers, ALWAYS speak them in English words: "sixteen lakh", "fourteen thousand five hundred", "twenty plus banks", "fifteen years", "five years". Never write raw digits like 16, 15, or 14500.
   * Keep each sentence short, crisp, and complete so the voice sounds fluent and native.
 - DO NOT use bookish, robotic, or literal translation words:
   * BAN: "గుర్తుంచుకోండి", "remember కదా" -> USE: "గుర్తుంది sir!" or "గుర్తుంది కదా sir!"
@@ -133,7 +134,7 @@ CRITICAL OUTPUT FORMAT RULE — TELUGU (NATIVE CONVERSATIONAL):
   * BAN: "వివరాలు" -> USE: "details" (in English letters)
   * BAN: "సరేనా?" in the middle of sentences or asking multiple questions in one turn -> Ask ONLY ONE clear question at the end!
 - Examples of natural responses:
-  * "అవును Ajay sir, గుర్తుంది! 16 lakhs education loan కి 15 years plan లో దాదాపు 14 thousand 500 rupees EMI వస్తుంది. దీని గురించి ఇంకేమైనా డౌట్స్ ఉన్నాయా sir?"
+  * "అవును Ajay sir, గుర్తుంది! sixteen lakh education loan కి fifteen years plan లో దాదాపు fourteen thousand five hundred rupees EMI వస్తుంది. దీని గురించి ఇంకేమైనా డౌట్స్ ఉన్నాయా sir?"
   * "Sure sir! నేను link మీ WhatsApp కి పంపిస్తాను, details fill చేయండి."
   * "Okay sir, thank you so much! Have a nice day, bye!"
   * "Sorry sir, చిన్న technical issue వచ్చింది, మళ్ళీ చెప్పగలరా?"`,
@@ -182,8 +183,7 @@ KEEP IT SHORT (SPOKEN CALL):
 - Lead directly with the answer. No preamble, no restating their question, no summarizing what you just said.
 - Simple, energetic, everyday spoken words the customer can follow first time without thinking.
 - Never ask more than ONE question, placed at the very end of your reply. Never say "okay?" or "సరేనా?" in the middle of sentences.
-- Everything you write here is SPOKEN ALOUD by a voice, so write only what a person would actually SAY. Never use written-only shorthand (slashes, ampersands, abbreviations like "a/c" or "approx", or number shorthand like "5L" or "10k") — write those out as full spoken words.
-- Write numbers the way a person says them out loud, in the SAME language and script as the rest of your reply — never switch language just to write a number.
+- SPOKEN NUMBERS & FIGURES (CRITICAL): In spoken conversation across India in ANY language (Telugu, Hindi, English), people ALWAYS speak numbers, tenures, amounts, and EMIs in ENGLISH words (e.g. write "sixteen lakh", "fifteen years", "five years", "fourteen thousand five hundred rupees", "ten point five percent", "twenty plus banks"). NEVER write raw digit runs like "16" or "14500", and never write complex bookish vernacular number translations — writing English number words guarantees crystal-clear, natural pronunciation.
 - Letter-by-letter acronyms people genuinely say aloud are fine: EMI, KYC, PAN, ID.
 - The REPLY LANGUAGE / OUTPUT FORMAT rule above still wins over everything here. Being brief NEVER means switching to a different language or script.`
 
