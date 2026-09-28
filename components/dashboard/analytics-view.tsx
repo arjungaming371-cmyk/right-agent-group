@@ -4,7 +4,8 @@ import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from "recharts"
-import { Users, Phone, BadgeCheck, Timer, Mail, CheckCircle2, RotateCcw } from "lucide-react"
+import { Users, Phone, BadgeCheck, Timer, Mail, CheckCircle2, RotateCcw, PhoneOutgoing, TrendingUp } from "lucide-react"
+import { formatPct } from "@/lib/maths"
 
 // Validated (scripts/validate_palette.js, dark surface) — fixed order, never cycled.
 const CAT = { blue: "var(--accent-blue)", aqua: "var(--accent-green)", violet: "var(--accent-violet)" }
@@ -17,6 +18,7 @@ type Analytics = {
   sentiment: { sentiment: string; count: number }[]
   callsByHour: { hour: number; count: number }[]
   totals: { total_leads: number; total_calls: number; total_messages: number; qualified_leads: number; avg_duration: number }
+  rates: { connectRate: number; resolutionRate: number; conversionRate: number; qualificationToApply: number }
 }
 
 const CARD: React.CSSProperties = { background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: 20 }
@@ -100,7 +102,7 @@ export default function AnalyticsView() {
     return <div style={{ padding: 60, textAlign: "center", color: "var(--text-muted)" }}>Loading analytics…</div>
   }
 
-  const { totals, funnel } = data
+  const { totals, funnel, rates } = data
   const avgDur = totals.avg_duration || 0
   const funnelSteps = [
     { label: "New", value: funnel.new, tone: STATUS.neutral },
@@ -135,10 +137,12 @@ export default function AnalyticsView() {
       </div>
 
       {/* Stat tiles */}
-      <div className="grid grid-cols-2 gap-3 md:flex md:gap-4">
+      <div className="grid grid-cols-2 gap-3 md:flex md:flex-wrap md:gap-4">
         <StatTile icon={Users} label="Total Leads" value={String(totals.total_leads)} tone={CAT.violet} />
         <StatTile icon={Phone} label="Total Calls" value={String(totals.total_calls)} tone={CAT.blue} />
+        <StatTile icon={PhoneOutgoing} label="Connect Rate" value={formatPct(rates.connectRate)} tone={CAT.aqua} />
         <StatTile icon={BadgeCheck} label="Qualified" value={String(totals.qualified_leads)} tone={STATUS.good} />
+        <StatTile icon={TrendingUp} label="Lead → Qualified" value={formatPct(rates.conversionRate)} tone={CAT.violet} />
         <StatTile icon={Timer} label="Avg. Call Length" value={`${Math.floor(avgDur / 60)}m ${avgDur % 60}s`} tone={CAT.aqua} />
       </div>
 

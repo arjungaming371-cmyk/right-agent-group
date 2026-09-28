@@ -5,7 +5,7 @@ import { splitSentences } from "./sentences"
 import { sendApplicationLink } from "./whatsapp"
 import { buildLeadBrief, runPostCallAnalysis } from "./lead-brain"
 import { searchKnowledgeBase } from "./knowledge-base"
-import { buildEmiInstruction, buildEligibilityInstruction, buildRateInstruction, detectLoanType } from "./finance"
+import { buildEmiInstruction, buildEligibilityInstruction, buildPrepaymentInstruction, buildRateInstruction, detectLoanType } from "./finance"
 import { detectFrustration, flagFrustratedCall, detectHumanRequest, flagHumanRequested, OPERATOR_REPLY_INSTRUCTION } from "./frustration"
 import { createNotification } from "./notifications"
 import { maybeProposeLoanEdit } from "./loan-edit-requests"
@@ -412,6 +412,16 @@ async function buildTurnInstructions(
       monthlyIncome: knownIncome,
     })
     if (eligibility) merged = [merged, eligibility.instruction].filter(Boolean).join("\n\n")
+
+    // PREPAYMENT / FORECLOSURE (2026-09-29): "if I close early / prepay 5
+    // lakh after 2 years, how much do I save?" used to fall through with no
+    // grounding — the model guessed a savings figure. Now the real schedule
+    // simulation answers it, same contract as the EMI/eligibility hooks.
+    const prepay = buildPrepaymentInstruction(speech, {
+      loanAmount: leadRow.data?.loan_amount ? Number(leadRow.data.loan_amount) : null,
+      loanType: detectedType,
+    })
+    if (prepay) merged = [merged, prepay.instruction].filter(Boolean).join("\n\n")
   }
 
   // OPERATOR / HUMAN HANDOFF (2026-09-26, "train the agent + call operators"):

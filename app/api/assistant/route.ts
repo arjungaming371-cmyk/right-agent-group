@@ -3,6 +3,12 @@ import { query } from "@/lib/db"
 import { chatWithSystemPromptStream } from "@/lib/llm"
 import { getSessionFromRequest } from "@/lib/auth"
 import { rateLimit } from "@/lib/rate-limit"
+import {
+  buildEligibilityInstruction,
+  buildEmiInstruction,
+  buildPrepaymentInstruction,
+  buildRateInstruction,
+} from "@/lib/finance"
 
 export const dynamic = "force-dynamic"
 
@@ -363,6 +369,29 @@ function sanitizeHistory(raw: unknown): { role: "user" | "assistant"; content: s
   return out
 }
 
+/**
+ * MATH GROUNDING (2026-09-29): the Operations Commander used to answer
+ * "EMI for a 20 lakh home loan?" by computing it ITSELF — LLM arithmetic
+ * silently produces plausible wrong rupees. lib/finance.ts is the single
+ * place real math happens, so any money-question in a staff message gets
+ * an exact, code-computed instruction injected here, identical to what
+ * Priya quotes on live calls. Staff asking the console == customers asking
+ * Priya: neither ever receives a model-guessed figure.
+ */
+function buildAssistantMathGrounding(message: string): string | null {
+  const parts: string[] = []
+  const rate = buildRateInstruction(message, {})
+  if (rate) parts.push(rate)
+  const prepay = buildPrepaymentInstruction(message, {})
+  if (prepay) parts.push(prepay.instruction)
+  const emi = buildEmiInstruction(message, {})
+  if (emi) parts.push(emi.instruction)
+  const eligibility = buildEligibilityInstruction(message, {})
+  if (eligibility) parts.push(eligibility.instruction)
+  if (!parts.length) return null
+  return `--- FINANCIAL MATH (pre-computed by code — quote these exact figures, never do your own arithmetic) ---\n${parts.join("\n\n")}`
+}
+
 export async function POST(req: NextRequest) {
   try {
     const session = await getSessionFromRequest(req)
@@ -409,7 +438,8 @@ export async function POST(req: NextRequest) {
     }
 
     const [snapshot, searchResults] = await Promise.all([getStatsSnapshot(), searchDatabase(message)])
-    const fullContext = [SYSTEM_PROMPT, snapshot, searchResults].filter(Boolean).join("\n\n")
+    const mathGrounding = buildAssistantMathGrounding(message)
+    const fullContext = [SYSTEM_PROMPT, snapshot, searchResults, mathGrounding].filter(Boolean).join("\n\n")
     // lib/llm expects the "model" role for assistant turns.
     const messages = [
       ...history.map((m) => ({ role: m.role === "assistant" ? ("model" as const) : ("user" as const), content: m.content })),

@@ -3,6 +3,8 @@
 // confidently produce a WRONG number — this file is the one place actual
 // math happens, so every quoted figure is exact, not a model's guess.
 
+import { clamp } from "./maths"
+
 /** Standard reducing-balance EMI formula. */
 export function calculateEMI(principal: number, annualRatePct: number, tenureMonths: number): number {
   if (principal <= 0 || tenureMonths <= 0) return 0
@@ -243,4 +245,237 @@ export function buildEmiInstruction(customerMessage: string, fallback: { loanAmo
     `the EMI is ${formatINR(emi)} per month. State this exact EMI figure in 1 short sentence.`
 
   return { instruction, principal, ratePct: rateInfo.ratePct, tenureMonths, emi }
+}
+
+// ---- Amortization (where does every rupee of the EMI actually go) ----
+
+export type AmortYear = { year: number; principalPaid: number; interestPaid: number; balance: number }
+export type Amortization = {
+  emi: number
+  tenureMonths: number
+  totalPayable: number
+  totalInterest: number
+  yearly: AmortYear[]
+}
+
+/**
+ * Month-by-month reducing-balance schedule, aggregated by loan-year (Indian
+ * lenders quote in years). The final EMI is adjusted so the balance lands
+ * on exactly 0 instead of drift from the rounded EMI. Inputs are clamped so
+ * a wild query can never spin a 100,000-row loop.
+ */
+export function amortizationSchedule(principal: number, annualRatePct: number, tenureMonths: number): Amortization {
+  const P = clamp(Number(principal) || 0, 0, 1_000_000_000)
+  const n = Math.round(clamp(Number(tenureMonths) || 0, 0, 480))
+  const ratePct = clamp(Number(annualRatePct) || 0, 0, 100)
+  const emi = calculateEMI(P, ratePct, n)
+
+  const r = ratePct / 12 / 100
+  let balance = P
+  let interestSum = 0
+  const yearly: AmortYear[] = []
+  let yPrincipal = 0
+  let yInterest = 0
+
+  for (let m = 1; m <= n; m++) {
+    const interest = Math.round(balance * r)
+    // Pay the regular EMI; if that would overshoot (final month, or a 0%
+    // rate), pay exactly what is owed so the schedule closes at zero.
+    // NOTE: the ceiling is the whole balance — the interest is paid FIRST
+    // out of the EMI, and the remainder is principal. (An earlier draft
+    // capped at balance − interest, double-counting the interest and
+    // leaving a phantom residue on the final balance.)
+    const principalPart = Math.min(emi - interest, balance)
+    balance -= principalPart
+    yPrincipal += principalPart
+    yInterest += interest
+    interestSum += interest
+
+    if (m % 12 === 0 || m === n) {
+      yearly.push({ year: Math.ceil(m / 12), principalPaid: yPrincipal, interestPaid: yInterest, balance: Math.max(0, Math.round(balance)) })
+      yPrincipal = 0
+      yInterest = 0
+    }
+  }
+
+  return { emi, tenureMonths: n, totalPayable: P + interestSum, totalInterest: interestSum, yearly }
+}
+
+// ---- Flat ↔ reducing rate conversion (the #1 confused customer topic) ----
+
+/**
+ * Indian lenders often quote a FLAT rate ("12% flat") — interest on the full
+ * principal for the whole tenure. The equivalent REDUCING rate is far higher
+ * and that gap is exactly what a customer is really asking when they say
+ * "flat what does that mean?". Solved exactly: compute the flat-rate EMI,
+ * then bisect the monthly reducing rate whose annuity formula produces the
+ * same EMI (60 iterations ≈ sub-paisa precision). Returns % p.a.
+ */
+export function flatToReducingAPR(flatRatePct: number, tenureMonths: number): number {
+  const n = Math.round(clamp(Number(tenureMonths) || 0, 1, 480))
+  const f = clamp(Number(flatRatePct) || 0, 0, 100) / 100
+  if (f === 0) return 0
+
+  // Flat EMI per ₹1 of principal: (1 + f·years) / n
+  const flatEmiPerRupee = (1 + f * (n / 12)) / n
+
+  // emiPerRupee(r) = r(1+r)^n / ((1+r)^n − 1) is strictly increasing in r,
+  // so bisection over [0, 1] (0–1200% APR bound) always converges.
+  let lo = 0
+  let hi = 1
+  for (let i = 0; i < 60; i++) {
+    const mid = (lo + hi) / 2
+    const pow = Math.pow(1 + mid, n)
+    const emiMid = mid === 0 ? 1 / n : (mid * pow) / (pow - 1)
+    if (emiMid < flatEmiPerRupee) lo = mid
+    else hi = mid
+  }
+  return Math.round(((lo + hi) / 2) * 12 * 100 * 100) / 100
+}
+
+// ---- Prepayment ("if I pay X extra after Y years, what do I save?") ----
+
+export type PrepaySavings = {
+  originalInterest: number
+  newInterest: number
+  interestSaved: number
+  originalMonths: number
+  newMonths: number
+  monthsSaved: number
+  newPayoffEmi: number
+}
+
+/**
+ * Standard lump-sum answer: keep paying the SAME EMI after the prepayment
+ * and the TENURE shortens (that is how lenders apply it by default unless
+ * the customer asks for an EMI reduction). Simulated on the real schedule,
+ * not a formula shortcut, so rounding matches amortizationSchedule exactly.
+ */
+export function prepaymentSavings(
+  principal: number,
+  annualRatePct: number,
+  tenureMonths: number,
+  prepayAmount: number,
+  afterMonths: number
+): PrepaySavings {
+  const P = clamp(Number(principal) || 0, 0, 1_000_000_000)
+  const n = Math.round(clamp(Number(tenureMonths) || 0, 0, 480))
+  const ratePct = clamp(Number(annualRatePct) || 0, 0, 100)
+  const emi = calculateEMI(P, ratePct, n)
+  const base = amortizationSchedule(P, ratePct, n)
+
+  const lump = clamp(Number(prepayAmount) || 0, 0, P)
+  const after = Math.round(clamp(Number(afterMonths) || 0, 0, n))
+
+  const r = ratePct / 12 / 100
+  let balance = P
+  let newInterest = 0
+  let m = 1
+
+  // Phase 1: normal EMI months up to the prepayment point.
+  for (; m <= after; m++) {
+    const interest = Math.round(balance * r)
+    const principalPart = Math.min(emi - interest, balance)
+    balance -= principalPart
+    newInterest += interest
+  }
+  // The lump sum lands on top of whatever is left.
+  balance -= lump
+  if (balance <= 0) {
+    return {
+      originalInterest: base.totalInterest,
+      newInterest,
+      interestSaved: Math.max(0, base.totalInterest - newInterest),
+      originalMonths: n,
+      newMonths: after,
+      monthsSaved: Math.max(0, n - after),
+      newPayoffEmi: 0,
+    }
+  }
+
+  // Phase 2: same EMI until cleared (final month pays the exact remainder).
+  while (balance > 0 && m <= n + 240) {
+    const interest = Math.round(balance * r)
+    const pay = m >= n ? balance + interest : Math.min(emi, balance + interest)
+    const principalPart = Math.min(pay - interest, balance)
+    balance -= principalPart
+    newInterest += interest
+    m++
+  }
+
+  const newMonths = Math.min(m - 1, n + 240)
+  return {
+    originalInterest: base.totalInterest,
+    newInterest,
+    interestSaved: Math.max(0, base.totalInterest - newInterest),
+    originalMonths: n,
+    newMonths,
+    monthsSaved: Math.max(0, n - newMonths),
+    newPayoffEmi: emi,
+  }
+}
+
+// ---- Prepayment questions on live calls/WhatsApp ("loan close cheyyali early") ----
+
+const PREPAYMENT_QUESTION_RE =
+  /\b(pre.?pay|prepaying|fore.?clos|foreclosures?|pay (it |the )?(off|early)|paying (off|early)|close (the |my )?loan (early|before)|lump sum|bulk (amount|payment)|advance (payment|amount)|muttu ga|munupu)\b/i
+const AFTER_MONTHS_RE = /(?:after|by|within|lo|lō)\s*(\d{1,2})\s*(year|yr|years|month|months)/i
+
+export type PrepayAnswer = {
+  instruction: string
+  principal: number
+  ratePct: number
+  tenureMonths: number
+  prepayAmount: number
+  afterMonths: number
+  interestSaved: number
+}
+
+/**
+ * Same contract as buildEmiInstruction: real code simulates the prepayment
+ * and hands Priya the exact savings figure. Returns null when the message
+ * is not a prepayment/foreclosure question.
+ */
+export function buildPrepaymentInstruction(
+  customerMessage: string,
+  fallback: { loanAmount?: number | null; loanType?: string | null }
+): PrepayAnswer | null {
+  if (!PREPAYMENT_QUESTION_RE.test(customerMessage)) return null
+
+  const loanType = detectLoanType(customerMessage) || detectLoanType(fallback.loanType || "") || "Home Loan"
+  const rateInfo = BEST_RATES[loanType] || BEST_RATES["Home Loan"]
+
+  // PRINCIPAL IS NOT THE QUOTED AMOUNT (mirrors the income-as-principal fix
+  // in buildEmiInstruction): in a prepayment question the number the
+  // customer quotes is the LUMP SUM they plan to pay, not the loan size.
+  // Principal comes from the lead record (or the 20L default); the message
+  // amount becomes the lump sum.
+  const principal = fallback.loanAmount || 2000000
+
+  const afterM = customerMessage.match(AFTER_MONTHS_RE)
+  const afterMonths = afterM
+    ? afterM[2].startsWith("month")
+      ? parseInt(afterM[1], 10)
+      : parseInt(afterM[1], 10) * 12
+    : 24 // "early" with no timing given — assume 2 years in, the common case
+
+  // "prepay 5 lakh AFTER 2 YEARS" — that "2 years" is the prepayment TIMING,
+  // not the loan tenure. Parse the timing first, then strip that phrase
+  // before reading the tenure, or YEARS_RE grabs the wrong number and the
+  // simulation prices a 24-MONTH loan (an ₹8.95L saving shrinks to ₹46k).
+  const tenureText = afterM ? customerMessage.replace(afterM[0], " ") : customerMessage
+  const tenureMonths = parseTenureMonths(tenureText) || rateInfo.maxTenureYears * 12
+
+  const prepayAmount = parseAmount(customerMessage) || 500000
+
+  const s = prepaymentSavings(principal, rateInfo.ratePct, tenureMonths, prepayAmount, afterMonths)
+
+  const instruction =
+    `EXACT PREPAYMENT CALCULATION (use these precise numbers, do NOT calculate your own): ` +
+    `For a ${loanType} of ${formatINR(principal)} at ${rateInfo.ratePct}% p.a. over ${tenureMonths / 12} years, ` +
+    `prepaying ${formatINR(prepayAmount)} after ${afterMonths} months shortens the loan to about ${Math.floor(s.newMonths / 12)} years ${s.newMonths % 12} months ` +
+    `and saves approximately ${formatINR(s.interestSaved)} in total interest. ` +
+    `State the saving figure, and remind them the exact numbers depend on the lender's foreclosure terms (some charge a small fee).`
+
+  return { instruction, principal, ratePct: rateInfo.ratePct, tenureMonths, prepayAmount, afterMonths, interestSaved: s.interestSaved }
 }

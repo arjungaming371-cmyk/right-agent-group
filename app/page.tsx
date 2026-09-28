@@ -4,8 +4,9 @@ import {
   Phone, MessageCircle, Instagram, ShieldCheck, Languages, Brain,
   BarChart3, Building2, CheckCircle2, ArrowRight, Sparkles, PhoneCall,
   FileText, Send, GitBranch, UserCheck, ScrollText, ChevronDown, Globe,
-  Clock, Activity, Lock,
+  Clock, Activity, Lock, Calculator,
 } from "lucide-react"
+import EmiCalculator from "@/components/emi-calculator"
 
 // PUBLIC HOMEPAGE — the website's front door.
 //
@@ -163,6 +164,7 @@ export default function HomePage() {
             <a href="#channels">Channels</a>
             <a href="#how">How it works</a>
             <a href="#platform">Platform</a>
+            <a href="#calculator">EMI calculator</a>
             <a href="#faq">FAQ</a>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -398,6 +400,19 @@ export default function HomePage() {
               </p>
             </div>
           </div>
+        </section>
+
+        {/* ================= EMI CALCULATOR ================= */}
+        <section className="rg-section" id="calculator" style={{ paddingTop: 0 }}>
+          <div className="rg-center">
+            <span className="rg-eyebrow"><Calculator size={12} strokeWidth={2} /> Real math, right now</span>
+            <h2 className="rg-h2">Run the numbers <span className="rg-grad">yourself</span></h2>
+            <p className="rg-sub">
+              This is not a lead magnet with hidden assumptions — it is the same calculation engine Priya uses
+              on live calls, running in your browser. Move a slider and every figure updates instantly.
+            </p>
+          </div>
+          <EmiCalculator />
         </section>
 
         {/* ================= FAQ ================= */}

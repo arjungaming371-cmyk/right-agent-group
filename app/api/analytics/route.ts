@@ -3,6 +3,7 @@ import { apiError } from "@/lib/api-error"
 import { query } from "@/lib/db"
 import { requireModuleOrRole } from "@/lib/auth"
 import { sessionBranchId } from "@/lib/branches"
+import { pctOf } from "@/lib/maths"
 
 export const dynamic = "force-dynamic"
 
@@ -59,11 +60,23 @@ export async function GET(req: NextRequest) {
           (SELECT count(*) FROM voice_calls WHERE ${B("branch_id")})                                    AS total_calls,
           (SELECT count(*) FROM whatsapp_messages WHERE ${B("branch_id")})                              AS total_messages,
           (SELECT count(*) FROM leads WHERE ${B("branch_id")} AND status = 'qualified')                 AS qualified_leads,
-          (SELECT COALESCE(avg(duration), 0)::int FROM voice_calls WHERE ${B("branch_id")} AND duration > 0) AS avg_duration
+          (SELECT COALESCE(avg(duration), 0)::int FROM voice_calls WHERE ${B("branch_id")} AND duration > 0) AS avg_duration,
+          (SELECT count(*) FROM voice_calls WHERE ${B("branch_id")} AND duration > 0)                   AS connected_calls,
+          (SELECT count(*) FROM voice_calls WHERE ${B("branch_id")} AND (outcome = 'resolved' OR status = 'completed')) AS resolved_calls
       `,
         params
       ),
     ])
+
+    const t = totals.rows[0] as Record<string, number>
+    // Derived rates are computed in code (lib/maths), never hand-divided at
+    // the call site — empty databases show 0% instead of NaN/Infinity.
+    const rates = {
+      connectRate: pctOf(t.connected_calls, t.total_calls),          // % of dials that actually picked up
+      resolutionRate: pctOf(t.resolved_calls, t.total_calls),        // % of calls that ended resolved/completed
+      conversionRate: pctOf(t.qualified_leads, t.total_leads),       // lead → qualified
+      qualificationToApply: pctOf(t.qualified_leads, funnel.rows[0].applied), // qualified → applied (funnel handoff)
+    }
 
     return NextResponse.json({
       callsByDay: callsByDay.rows,
@@ -72,6 +85,7 @@ export async function GET(req: NextRequest) {
       sentiment: sentiment.rows,
       callsByHour: callsByHour.rows,
       totals: totals.rows[0],
+      rates,
     })
   } catch (e: any) {
     return apiError(e)
