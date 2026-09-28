@@ -189,7 +189,18 @@ export async function GET(req: NextRequest) {
   ).catch(() => ({ rows: [] as { status: string; n: number }[] }))
 
   const queue: Record<string, number> = {}
-  for (const r of counts.rows as { status: string; n: number }[]) queue[r.status] = r.n
+  for (const r of counts.rows as { status: string; n: number }[]) {
+    // The DB stores specific skip reasons (skipped_do_not_call /
+    // skipped_dnd_suppressed / skipped_outside_window) but every consumer
+    // groups by the lane key "skipped" (statusGroup() in lib/dialer-logic) —
+    // without this aggregation the Skipped tab and its counter were
+    // permanently 0. Detail per row is still shown in the table.
+    if (r.status.startsWith("skipped_")) {
+      queue.skipped = (queue.skipped || 0) + r.n
+    } else {
+      queue[r.status] = r.n
+    }
+  }
 
   return NextResponse.json({ run, queue })
 }

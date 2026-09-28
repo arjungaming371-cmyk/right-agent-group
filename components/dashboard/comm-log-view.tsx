@@ -7,13 +7,11 @@ import { SkeletonList } from "../ui/skeleton"
 import VoiceDictation from "../ui/voice-dictation"
 import { smartFilter } from "@/lib/smart-search"
 
-type CallLog  = { id:string; lead_name:string; phone:string; duration:string; time:string; status:string; transcript:{role:string;text:string}[] }
-type WALog    = { id:string; type:string; lead_name:string; content:string; time:string; status:string }
-
 export default function CommLogView() {
   const [calls, setCalls]     = useState<any[]>([])
   const [waLogs, setWaLogs]   = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<string|null>(null)
   const [search, setSearch] = useState("")
 
@@ -45,12 +43,22 @@ export default function CommLogView() {
     // skeletons all day. First load and user-triggered refreshes still show it.
     if (!silent || calls.length === 0) setLoading(true)
     try {
-      const [c,w] = await Promise.all([
-        fetch("/api/calls").then(r=>r.ok?r.json():[]),
-        fetch("/api/comms").then(r=>r.ok?r.json():[]),
+      const [c, w] = await Promise.all([
+        fetch("/api/calls"),
+        fetch("/api/comms"),
       ])
-      setCalls(c)
-      setWaLogs(w.filter((l:any)=>l.type==="whatsapp"))
+      // A failed fetch used to silently become an empty list — the view
+      // showed "No calls yet" during a 401/500 instead of the truth.
+      if (!c.ok || !w.ok) {
+        setLoadError(c.status === 401 || w.status === 401 ? "Session expired — refresh the page to sign in again." : "Could not load the activity feed — retrying automatically.")
+        return
+      }
+      const [callsData, waData] = await Promise.all([c.json(), w.json()])
+      setLoadError(null)
+      setCalls(callsData)
+      setWaLogs((waData as any[]).filter((l:any)=>l.type==="whatsapp"))
+    } catch {
+      setLoadError("Could not load the activity feed — check your connection.")
     } finally {
       setLoading(false)
     }
@@ -104,8 +112,13 @@ export default function CommLogView() {
             <span style={{ background:"var(--bg-secondary)",border:"1px solid var(--border)",borderRadius:6,padding:"3px 10px",fontSize:12,color:"var(--text-muted)" }}>{filteredCalls.length} calls</span>
           </div>
           <div style={{ flex:1,overflowY:"auto" }}>
+            {loadError && (
+              <div role="alert" style={{ margin:"12px 14px 0",padding:"10px 14px",borderRadius:8,background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.25)",color:"var(--accent-red)",fontSize:12.5 }}>
+                {loadError}
+              </div>
+            )}
             {loading && <SkeletonList rows={3} />}
-            {!loading && filteredCalls.length===0 && (
+            {!loading && !loadError && filteredCalls.length===0 && (
               <div style={{ padding:30,textAlign:"center",color:"var(--text-muted)",fontSize:13 }}>
                 {search ? "No calls match your smart search." : "No calls yet. Trigger an AI call from Voice Logs."}
               </div>
@@ -163,7 +176,7 @@ export default function CommLogView() {
           </div>
           <div style={{ flex:1,overflowY:"auto" }}>
             {loading && <SkeletonList rows={3} />}
-            {!loading && filteredWaLogs.length===0 && (
+            {!loading && !loadError && filteredWaLogs.length===0 && (
               <div style={{ padding:30,textAlign:"center",color:"var(--text-muted)",fontSize:13 }}>
                 {search ? "No WhatsApp logs match your smart search." : "No WhatsApp automation logs yet."}
               </div>

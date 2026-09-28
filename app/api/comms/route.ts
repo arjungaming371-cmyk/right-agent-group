@@ -8,13 +8,16 @@ import { withRoute } from "@/lib/api-route"
 export const GET = withRoute("comms", async (req: NextRequest) => {
   const session = await requireModuleOrRole(req, "comms", ["admin", "agent", "viewer", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
-  // Branch scope: comm logs joined against branch-owned leads only.
+  // Branch scope: logs joined against branch-owned leads, PLUS lead-less
+  // rows (system alerts etc. carry no lead_id) which belong to no branch.
+  // The old `WHERE l.branch_id = $1` silently degraded the LEFT JOIN into an
+  // INNER join and hid those rows from branch-scoped sessions.
   const branchId = sessionBranchId(session)
   if (branchId) {
     const res = await query(
       `SELECT c.*, l.name AS lead_name
          FROM comm_logs c LEFT JOIN leads l ON l.id = c.lead_id
-        WHERE l.branch_id = $1
+        WHERE (l.branch_id = $1 OR c.lead_id IS NULL)
         ORDER BY c.created_at DESC
         LIMIT 200`,
       [branchId]

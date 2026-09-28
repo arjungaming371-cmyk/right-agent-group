@@ -74,6 +74,7 @@ function AccessPageInner() {
   const [loading, setLoading] = useState(true)
   const [emails, setEmails] = useState<AllowedEmail[]>([])
   const [you, setYou] = useState("")
+  const [myRole, setMyRole] = useState<string>("")
   const [branches, setBranches] = useState<BranchOption[]>([])
   const [roles, setRoles] = useState<RoleDefinition[]>([])
   const [isRoleModalOpen, setIsRoleModalOpen] = useState(false)
@@ -106,7 +107,12 @@ function AccessPageInner() {
       const meRes = await fetch("/api/auth/me").catch(() => null)
       if (meRes && meRes.ok) {
         const meData = await meRes.json()
-        if (meData.role !== "admin" && meData.role !== "developer") {
+        setMyRole(String(meData.role || ""))
+        // branch_manager is allowed here on purpose: the team APIs accept
+        // BMs with branch-scoped variants, and the shell shows BMs the
+        // "Branch Team" link — gating them out made that link a dead end
+        // that bounced straight back to /dashboard.
+        if (meData.role !== "admin" && meData.role !== "developer" && meData.role !== "branch_manager") {
           router.replace("/dashboard")
           return
         }
@@ -286,6 +292,19 @@ function AccessPageInner() {
             </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {(myRole === "admin" || myRole === "developer") && (
+              <>
+                {/* These two modals were rendered but NOTHING could open them —
+                    the runtime role catalog and the branch manager were
+                    unreachable UI (2026-09-26 audit). */}
+                <button onClick={() => setIsRoleModalOpen(true)} className="btn-ghost" style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+                  <Layers size={14} strokeWidth={2} /> Manage Roles
+                </button>
+                <button onClick={() => setIsBranchModalOpen(true)} className="btn-ghost" style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+                  <Building2 size={14} strokeWidth={2} /> Manage Branches
+                </button>
+              </>
+            )}
             <ThemeSwitcher />
             <a href="/dashboard" className="btn-ghost" style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 7 }}>
               <ArrowLeft size={14} strokeWidth={2} /> Dashboard

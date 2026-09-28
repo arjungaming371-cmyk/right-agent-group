@@ -222,7 +222,7 @@ export async function getLiveSession(req: Request): Promise<LiveSession | null> 
   try {
     const { query } = await import("@/lib/db")
     const r = await query(
-      `SELECT role, org_id, branch_id, allowed_modules FROM allowed_emails WHERE lower(email) = $1 LIMIT 1`,
+      `SELECT role, org_id, branch_id, allowed_modules, session_epoch FROM allowed_emails WHERE lower(email) = $1 LIMIT 1`,
       [session.email.toLowerCase()]
     )
     if (r.rowCount === 0) {
@@ -245,7 +245,14 @@ export async function getLiveSession(req: Request): Promise<LiveSession | null> 
       try {
         const cf = await query(`SELECT config FROM form_configs WHERE id = 'custom_roles_config'`)
         if (cf.rowCount && cf.rows[0]?.config?.roles) {
-          const found = cf.rows[0].config.roles.find((cr: any) => cr.id === rawRole)
+          // Case-insensitive match: a row stored as "Admin" must resolve to
+          // the custom role whose id is "admin" — a case mismatch here used
+          // to let a raw role string slip through as a plain agent, or worse
+          // escalate through an unintended identity (2026-09-26 audit).
+          const needle = String(rawRole).toLowerCase()
+          const found = cf.rows[0].config.roles.find(
+            (cr: any) => String(cr?.id || "").toLowerCase() === needle || String(cr?.label || "").toLowerCase() === needle
+          )
           if (found?.baseRole) liveRole = found.baseRole as Role
         }
       } catch {}

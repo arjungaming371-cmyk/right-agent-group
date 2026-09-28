@@ -15,7 +15,10 @@ type RoleDefinition = {
   defaultModules?: string[]
 }
 
-const ALL_MODULES_LIST = ["analytics", "leads", "loans", "voice", "whatsapp", "comms", "security", "upload", "script", "knowledge"]
+// Keep in sync with components/dashboard/module-picker.tsx ALL_MODULES —
+// "instagram" and "calendar" were missing here (key drift: a role could be
+// granted a module the server-side allowlist didn't recognize).
+const ALL_MODULES_LIST = ["analytics", "leads", "loans", "voice", "whatsapp", "instagram", "comms", "security", "upload", "script", "knowledge", "calendar"]
 const OPERATIONAL_MODULES = ["analytics", "leads", "loans", "voice", "whatsapp", "comms", "knowledge"]
 
 const DEFAULT_ROLES: RoleDefinition[] = [

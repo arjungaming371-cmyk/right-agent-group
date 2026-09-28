@@ -26,7 +26,12 @@ type QueueRowView = { id: string; name: string | null; phone: string; language: 
 
 const BULK_POLL_MS = 2500
 
-export default function UploadView() {
+export default function UploadView({ role = "admin" }: { role?: string }) {
+  // Role gate (2026-09-26 audit): the shell shows this view to viewers, but
+  // every write API behind it (POST /api/upload, POST /api/outbound,
+  // POST /api/outbound/process) rejects them — the controls just bought
+  // 401 toasts. Viewers get the read-only surfaces; write panels hide.
+  const canWrite = role !== "viewer"
   const toast = useToast()
   const [files, setFiles] = useState<UploadedFile[]>([])
   const [uploading, setUploading] = useState(false)
@@ -291,6 +296,7 @@ export default function UploadView() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      {canWrite && (
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
         <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: 24 }}>
           <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}><ClipboardList size={16} strokeWidth={1.9} style={{ color: "var(--accent-violet)" }} /> Upload Contacts (CSV)</div>
@@ -314,8 +320,10 @@ export default function UploadView() {
           <input ref={docRef} type="file" accept=".txt,.csv,.pdf" style={{ display: "none" }} onChange={(e) => uploadFile(e, "script")} />
         </div>
       </div>
+      )}
 
       {/* Bulk calling console */}
+      {canWrite && (
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: 24 }}>
         <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}><PhoneCall size={16} strokeWidth={1.9} style={{ color: "var(--accent-green)" }} /> Bulk Calling</div>
         <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16 }}>
@@ -421,6 +429,7 @@ export default function UploadView() {
           </>
         )}
       </div>
+      )}
 
       {/* Queue table — live status of every number waiting / dialed */}
       {queueRows.length > 0 && (
@@ -457,6 +466,7 @@ export default function UploadView() {
       )}
 
       {/* Manual single entry */}
+      {canWrite && (
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: 24 }}>
         <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}><Plus size={16} strokeWidth={2.1} style={{ color: "var(--accent-yellow)" }} /> Add Single Number to Queue</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 12 }}>
@@ -477,6 +487,7 @@ export default function UploadView() {
           Add to Queue
         </button>
       </div>
+      )}
 
       {files.length > 0 && (
         <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12 }}>

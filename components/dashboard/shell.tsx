@@ -570,7 +570,7 @@ export default function DashboardShell() {
           {view === "comms"    && <CommLogView />}
           {view === "calendar" && <CalendarView role={role} />}
           {view === "security" && <SecurityView role={role} />}
-          {view === "upload"   && <UploadView />}
+          {view === "upload"   && <UploadView role={role} />}
           {view === "script"   && <ScriptView />}
           {view === "branches" && <BranchesView role={role} branchId={sessionBranchId} />}
           {view === "knowledge" && <KnowledgeBaseView role={role} />}

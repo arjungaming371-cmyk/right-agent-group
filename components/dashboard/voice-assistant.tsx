@@ -853,7 +853,9 @@ export default function VoiceAssistant({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          actionType: proposal.type,
+          // The action route keys on `type` (same field quick-chat sends) —
+          // the old `actionType` key 400'd every voice-path execution.
+          type: proposal.type,
           payload: proposal.payload ?? {},
         }),
       })

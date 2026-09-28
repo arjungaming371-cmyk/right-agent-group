@@ -54,8 +54,22 @@ export async function GET(req: NextRequest) {
   const where: string[] = ["($1::uuid IS NULL OR branch_id = $1)"]
   const params: unknown[] = [branchId]
   if (statuses.length) {
-    params.push(statuses)
-    where.push(`status = ANY($${params.length})`)
+    // "skipped" is a UI GROUP, not a stored status — the rows are
+    // skipped_do_not_call / skipped_dnd_suppressed / skipped_outside_window.
+    // Filtering with = ANY(['skipped']) matched nothing and the Skipped tab
+    // was always empty.
+    const exact = statuses.filter((s) => s !== "skipped")
+    if (statuses.includes("skipped")) {
+      if (exact.length) {
+        params.push(exact)
+        where.push(`(status = ANY($${params.length}) OR status LIKE 'skipped%')`)
+      } else {
+        where.push(`status LIKE 'skipped%'`)
+      }
+    } else {
+      params.push(exact)
+      where.push(`status = ANY($${params.length})`)
+    }
   }
   const whereSql = `WHERE ${where.join(" AND ")}`
   const rows = await query(
@@ -126,6 +140,7 @@ export async function POST(req: NextRequest) {
           name: contact.name, phone: contact.phone,
           language: contact.language || "telugu",
           product_interest: contact.product_interest,
+          notes: (contact as Record<string, unknown>).notes as string | undefined || null,
           lead_id: leadId || null,
           status: "pending",
           branch_id: branchId,
@@ -182,6 +197,7 @@ export async function POST(req: NextRequest) {
       name, phone, language: language || "telugu",
       product_interest, notes, lead_id: leadId,
       status: "called",
+      call_sid: call.sid,
       branch_id: branchId,
     })
 

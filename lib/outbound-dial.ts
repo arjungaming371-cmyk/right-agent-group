@@ -95,6 +95,11 @@ export async function placeOutboundCall(opts: {
   language: string
   requested: RequestedChannel
   branchId?: string | null
+  /** Per-call talk points for Priya — persisted on the voice_calls row so
+   *  /api/calls/turn reads them. The /api/calls/dial route persists these;
+   *  the bulk path silently dropped them (2026-09-26 audit: drifting
+   *  duplicates), so bulk-dialed leads never got their talk points. */
+  instructions?: string | null
 }): Promise<{ channel: ResolvedChannel; callSid: string; status: string }> {
   const { leadId, language } = opts
   const phone = normalizePhone(opts.phone)
@@ -144,6 +149,7 @@ export async function placeOutboundCall(opts: {
       language,
       phone,
       branch_id: branchId,
+      instructions: opts.instructions ?? null,
     })
     console.log(`📤 WhatsApp outbound dial lead=${leadId || "—"} to=***${phone.slice(-4)} callId=***${placed.callId.slice(-8)} registered=${reg.ok ? "yes" : "no"}`)
     return { channel, callSid, status: "ringing" }
@@ -159,6 +165,7 @@ export async function placeOutboundCall(opts: {
     language,
     phone,
     branch_id: branchId,
+    instructions: opts.instructions ?? null,
   })
   return { channel, callSid: call.sid, status: "initiated" }
 }

@@ -49,18 +49,6 @@ export default function SecurityView({ role = "admin" }: { role?: Role }) {
   const toast = useToast()
   const [settings, setSettings] = useState<Setting[]>([])
   const [logs, setLogs] = useState<AuditLog[]>([])
-
-  if (role !== "admin" && role !== "developer") {
-    return (
-      <div style={{ padding: 40, background: "var(--bg-secondary)", borderRadius: 12, border: "1px solid var(--border)", textAlign: "center", color: "var(--accent-red)" }}>
-        <ShieldCheck size={40} style={{ margin: "0 auto 12px", opacity: 0.7 }} />
-        <div style={{ fontSize: 17, fontWeight: 700, color: "var(--text-primary)" }}>Access Denied</div>
-        <div style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 6 }}>
-          Security settings and System API Keys can only be accessed by Administrators.
-        </div>
-      </div>
-    )
-  }
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState<string | null>(null)
 
@@ -72,6 +60,24 @@ export default function SecurityView({ role = "admin" }: { role?: Role }) {
   const [showDndList, setShowDndList] = useState(false)
   const [dndPaste, setDndPaste] = useState("")
   const [addingDnd, setAddingDnd] = useState(false)
+
+  // RULES OF HOOKS: this guard used to early-return BEFORE the useState
+  // block — if the `role` prop ever changed across renders of a mounted
+  // instance (shell re-fetch of /api/auth/me), React threw "rendered more
+  // hooks than during the previous render". All hooks now run
+  // unconditionally; the denial renders below.
+  const accessDenied = role !== "admin" && role !== "developer"
+  if (accessDenied) {
+    return (
+      <div style={{ padding: 40, background: "var(--bg-secondary)", borderRadius: 12, border: "1px solid var(--border)", textAlign: "center", color: "var(--accent-red)" }}>
+        <ShieldCheck size={40} style={{ margin: "0 auto 12px", opacity: 0.7 }} />
+        <div style={{ fontSize: 17, fontWeight: 700, color: "var(--text-primary)" }}>Access Denied</div>
+        <div style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 6 }}>
+          Security settings and System API Keys can only be accessed by Administrators.
+        </div>
+      </div>
+    )
+  }
 
   async function load() {
     setLoading(true)

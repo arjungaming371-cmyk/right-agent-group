@@ -121,6 +121,22 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   const { session, branch } = loaded
   if (!canManageBranches(session)) return NextResponse.json({ error: "forbidden" }, { status: 403 })
   try {
+    // FK pre-check: allowed_emails.branch_id / leads.branch_id / etc. have no
+    // ON DELETE rule — the raw DELETE used to surface as a generic 500. Give
+    // the operator the actual blocker instead.
+    const children = await query(
+      `SELECT
+         (SELECT COUNT(*)::int FROM allowed_emails WHERE branch_id = $1) AS members,
+         (SELECT COUNT(*)::int FROM leads          WHERE branch_id = $1) AS leads`,
+      [branch!.id]
+    )
+    const c = children.rows[0] as { members: number; leads: number }
+    if (c.members > 0 || c.leads > 0) {
+      return NextResponse.json(
+        { error: `Cannot delete this branch: it still has ${c.members} team member(s) and ${c.leads} lead(s). Reassign or remove them first.` },
+        { status: 409 }
+      )
+    }
     await query(`DELETE FROM branches WHERE id = $1`, [branch!.id])
     invalidateBranchCache(branch!.id)
     logAudit("branch deleted", session!.email, { branch: branch!.code })

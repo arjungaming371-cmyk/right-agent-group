@@ -25,7 +25,12 @@ export async function POST(req: NextRequest) {
   const branchId = sessionBranchId(session)
   const body = await req.json().catch(() => ({}))
 
-  const ids: string[] = Array.isArray(body?.ids) ? body.ids.map((x: unknown) => String(x)).filter(Boolean) : []
+  // UUID-validate like the requeue route does — a junk id used to 500 on the
+  // ::uuid[] cast instead of just matching nothing.
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  const ids: string[] = Array.isArray(body?.ids)
+    ? body.ids.map((x: unknown) => String(x)).filter((x: string) => UUID_RE.test(x))
+    : []
   const allPending = body?.allPending === true
   if (!allPending && !ids.length) {
     return NextResponse.json({ error: "ids or allPending required" }, { status: 400 })

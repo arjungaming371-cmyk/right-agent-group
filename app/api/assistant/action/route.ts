@@ -41,7 +41,11 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = asRecord(await req.json().catch(() => null))
-    const { type, payload } = body
+    // The voice widget sends `actionType` (voice-assistant.tsx) while the
+    // QuickChat commander sends `type` (quick-chat.tsx) — accept both, or
+    // every "Approve & Execute" from the voice path 400s here.
+    const type = typeof body.type === "string" ? body.type : typeof body.actionType === "string" ? body.actionType : undefined
+    const payload = body.payload
 
     if (typeof type !== "string" || !ACTION_TYPES.has(type) || !payload) {
       return NextResponse.json({ error: "Valid action type and payload are required" }, { status: 400 })
@@ -292,10 +296,16 @@ export async function POST(req: NextRequest) {
         const { data, error } = await db.from("loan_applications").update(updates).eq("id", id).select().single()
         if (error) throw new Error(error.message)
 
-        logAudit("loan application updated via ops assistant", session.email, { id, status })
+        // `status` is NOT in scope here (it compiled only because the DOM lib
+        // declares a global `status: string` — undefined in Node). Report the
+        // value actually written.
+        const nextStatus = typeof updates.status === "string" ? updates.status : null
+        logAudit("loan application updated via ops assistant", session.email, { id, status: nextStatus })
         return NextResponse.json({
           success: true,
-          message: `Loan application #${id} status updated to "${status}".`,
+          message: nextStatus
+            ? `Loan application status updated to "${nextStatus}".`
+            : `Loan application #${id.slice(0, 8)} updated.`,
           details: data,
         })
       }

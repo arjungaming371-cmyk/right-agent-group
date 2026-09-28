@@ -26,6 +26,11 @@ export const ALL_MODULES: ModuleOption[] = [
   { key: "upload", label: "Upload & Data", section: "System", description: "Bulk CSV contact uploads & file data" },
   { key: "script", label: "Priya's Script", section: "System", description: "AI system prompts & call scripts" },
   { key: "knowledge", label: "Knowledge Base", section: "System", description: "Contextual facts repository" },
+  // Security + Calendar were missing from this catalog while the roles-config
+  // allowlist (and the shell nav) knew them — a granted module key the picker
+  // couldn't render, and vice versa (2026-09-26 audit: key drift).
+  { key: "security", label: "Security", section: "System", description: "Access controls, calling window, DND & audit log" },
+  { key: "calendar", label: "Calendar", section: "Overview", description: "Follow-up calendar & scheduled callbacks" },
 ]
 
 export const SECTIONS = ["Overview", "Engagement", "System"] as const

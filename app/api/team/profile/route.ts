@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
-import { getSessionFromRequest } from "@/lib/auth"
+import { getLiveSession } from "@/lib/auth"
 
 export const dynamic = "force-dynamic"
 
@@ -18,7 +18,10 @@ const MAX_ADDRESS = 300
 const MAX_AVATAR_BYTES = 300 * 1024
 
 export async function PATCH(req: NextRequest) {
-  const session = await getSessionFromRequest(req)
+  // Live revalidation (not the signature-only check): a user deleted from
+  // allowed_emails must not keep writing team_profiles for up to 7 days on
+  // the strength of a stolen/stale cookie (2026-09-26 audit).
+  const session = await getLiveSession(req)
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const body = await req.json().catch(() => ({}) as any)

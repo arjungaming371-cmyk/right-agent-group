@@ -76,7 +76,14 @@ function scheduledLabel(iso: string | null): string {
 }
 
 export default function QueueView({ role }: { role: Role }) {
+  // Row-level operations (dial now, cancel, requeue, bulk select) — agents
+  // are allowed; the cancel/requeue/dial APIs all accept agent.
   const canOperate = role === "admin" || role === "agent" || role === "branch_manager"
+  // Campaign-level controls (Start/Stop runner, dialer settings) — the APIs
+  // are admin/branch_manager only (POST /api/outbound/process,
+  // PATCH /api/outbound/settings); showing them to agents just bought 401
+  // toasts (2026-09-26 audit).
+  const canRunCampaign = role === "admin" || role === "branch_manager"
   const toast = useToast()
   const [items, setItems] = useState<QueueItem[]>([])
   const [total, setTotal] = useState(0)
@@ -111,8 +118,13 @@ export default function QueueView({ role }: { role: Role }) {
       }
       if (listRes.ok) {
         const d = await listRes.json()
-        setItems(d.items || [])
-        setTotal(d.total || 0)
+        // The listing route returns a BARE ARRAY when no status filter is set
+        // (the Upload console consumes it that way) and an { items, total }
+        // envelope for filtered calls — the "All" tab used to read .items off
+        // the array and render an empty queue forever.
+        const rows = Array.isArray(d) ? d : d.items || []
+        setItems(rows)
+        setTotal(Array.isArray(d) ? d.length : d.total ?? rows.length)
       }
     } catch { /* transient — next poll catches up */ }
     if (!silent) setLoading(false)
@@ -337,7 +349,7 @@ export default function QueueView({ role }: { role: Role }) {
             </div>
           )}
           <div style={{ marginTop: 14, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-            {canOperate && (
+            {canRunCampaign && (
               running ? (
                 <button onClick={() => campaign("stop")} className="btn-ghost" style={{ height: 38, color: "var(--accent-red)" }}>
                   <Pause size={14} strokeWidth={2} /> Stop Campaign
@@ -371,15 +383,15 @@ export default function QueueView({ role }: { role: Role }) {
           <input
             type="range" min={1} max={10} step={1}
             value={settings?.concurrency ?? 1}
-            disabled={!canOperate}
+            disabled={!canRunCampaign}
             onChange={(e) => setSettings(settings ? { ...settings, concurrency: Number(e.target.value) } : settings)}
-            onMouseUp={(e) => canOperate && patchSettings({ concurrency: Number((e.target as HTMLInputElement).value) })}
-            onTouchEnd={(e) => canOperate && patchSettings({ concurrency: Number((e.target as HTMLInputElement).value) })}
-            style={{ width: "100%", accentColor: "var(--accent-violet)", cursor: canOperate ? "pointer" : "not-allowed", marginBottom: 12 }}
+            onMouseUp={(e) => canRunCampaign && patchSettings({ concurrency: Number((e.target as HTMLInputElement).value) })}
+            onTouchEnd={(e) => canRunCampaign && patchSettings({ concurrency: Number((e.target as HTMLInputElement).value) })}
+            style={{ width: "100%", accentColor: "var(--accent-violet)", cursor: canRunCampaign ? "pointer" : "not-allowed", marginBottom: 12 }}
           />
-          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "var(--text-secondary)", marginBottom: 8, cursor: canOperate ? "pointer" : "default" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "var(--text-secondary)", marginBottom: 8, cursor: canRunCampaign ? "pointer" : "default" }}>
             <input
-              type="checkbox" checked={settings?.autoRetry ?? true} disabled={!canOperate}
+              type="checkbox" checked={settings?.autoRetry ?? true} disabled={!canRunCampaign}
               onChange={(e) => patchSettings({ autoRetry: e.target.checked })}
               style={{ width: 14, height: 14, accentColor: "var(--accent-violet)" }}
             />

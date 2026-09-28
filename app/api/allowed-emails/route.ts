@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
 import { requireRole, type Role } from "@/lib/auth"
+import { logAudit } from "@/lib/audit"
 
 export const dynamic = "force-dynamic"
 
@@ -14,7 +15,13 @@ async function getBaseRole(roleId: string): Promise<Role> {
   try {
     const res = await query(`SELECT config FROM form_configs WHERE id = 'custom_roles_config'`)
     if (res.rowCount && res.rows[0]?.config?.roles) {
-      const found = res.rows[0].config.roles.find((r: any) => r.id === roleId)
+      // Case-insensitive on id AND label: "Admin" must resolve to the role
+      // whose id is "admin" — a case mismatch let a crafted role name slip
+      // past every gate and escalate at login time (2026-09-26 audit).
+      const needle = String(roleId).toLowerCase()
+      const found = res.rows[0].config.roles.find(
+        (r: any) => String(r?.id || "").toLowerCase() === needle || String(r?.label || "").toLowerCase() === needle
+      )
       if (found?.baseRole) return found.baseRole as Role
     }
   } catch {}
@@ -65,7 +72,15 @@ export async function POST(req: NextRequest) {
 
   const isBM = session.role === "branch_manager"
   const roleInput = String(body?.role || "agent").trim()
-  const baseRole: Role = (body?.baseRole && VALID_BUILTIN_ROLES.includes(body.baseRole))
+  // SECURITY (2026-09-26 audit): baseRole is DERVED, never trusted from the
+  // body. A branch manager could previously send {role:"developer",
+  // baseRole:"agent"} — the gate validated baseRole while the INSERT wrote
+  // the raw role string, minting a full-access developer account (the
+  // single-developer cap only fired when baseRole === "developer").
+  // body.baseRole is honored ONLY for trusted callers (admin/developer)
+  // declaring the base of a NEW custom title; the effective base of the
+  // role we actually store is recomputed below and drives every gate.
+  const baseRole: Role = (!isBM && body?.baseRole && VALID_BUILTIN_ROLES.includes(body.baseRole))
     ? (body.baseRole as Role)
     : await getBaseRole(roleInput)
 
@@ -104,15 +119,22 @@ export async function POST(req: NextRequest) {
     if (!b.rowCount) return NextResponse.json({ error: "unknown branch" }, { status: 400 })
     branchId = b.rows[0].id
   }
-  if (baseRole === "branch_manager" && !branchId) {
-    return NextResponse.json({ error: "branch_manager requires a branch" }, { status: 400 })
-  }
-
   let finalRole = roleInput
   const adminEmailEnv = (process.env.ADMIN_EMAIL || "").toLowerCase()
   if (email === adminEmailEnv) {
     finalRole = "admin"
-  } else if (baseRole === "admin") {
+  }
+  // The effective base of the role we will ACTUALLY store — the single
+  // source of truth for every privilege gate below, immune to whatever the
+  // client declared in body.baseRole.
+  const effBase = await getBaseRole(finalRole)
+  if (effBase === "branch_manager" && !branchId) {
+    return NextResponse.json({ error: "branch_manager requires a branch" }, { status: 400 })
+  }
+  if (isBM && effBase !== "agent" && effBase !== "viewer") {
+    return NextResponse.json({ error: "Branch managers can only assign Loan Officer or Viewer roles." }, { status: 403 })
+  }
+  if (email !== adminEmailEnv && effBase === "admin") {
     const existingAdmins = await query(
       `SELECT COUNT(*)::int AS n FROM allowed_emails WHERE role = 'admin' AND lower(email) != $1`,
       [email]
@@ -123,7 +145,7 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       )
     }
-  } else if (baseRole === "developer") {
+  } else if (email !== adminEmailEnv && effBase === "developer") {
     const existingDevs = await query(
       `SELECT COUNT(*)::int AS n FROM allowed_emails WHERE role = 'developer' AND lower(email) != $1`,
       [email]
@@ -170,7 +192,7 @@ export async function POST(req: NextRequest) {
           label: finalRole,
           desc: `Custom ${baseRole.replace("_", " ")} role`,
           color: "var(--accent-violet)",
-          baseRole,
+          baseRole: isBM ? effBase : baseRole,
           isDefault: false,
           defaultModules: allowedModules || ["analytics", "leads", "loans", "voice", "whatsapp", "comms", "knowledge"],
         })
@@ -183,7 +205,8 @@ export async function POST(req: NextRequest) {
     } catch {}
   }
 
-  return NextResponse.json({ ok: true, email, role: finalRole, baseRole, branch_id: branchId, displayName, allowed_modules: allowedModules })
+  logAudit("team member added", session.email, { email, role: finalRole, baseRole: effBase, branchId })
+  return NextResponse.json({ ok: true, email, role: finalRole, baseRole: effBase, branch_id: branchId, displayName, allowed_modules: allowedModules })
 }
 
 export async function PATCH(req: NextRequest) {
@@ -201,6 +224,12 @@ export async function PATCH(req: NextRequest) {
   if (!email) return NextResponse.json({ error: "email required" }, { status: 400 })
 
   const isBM = session.role === "branch_manager"
+  if (isBM && !session.branchId) {
+    // A null-pinned BM must not pass the branch_id !== session.branchId
+    // checks below (NULL != NULL is true in SQL, and the JS comparison here
+    // would compare against null) — fail closed instead.
+    return NextResponse.json({ error: "Branch manager session is not pinned to a branch." }, { status: 400 })
+  }
   if (isBM) {
     // Verify target belongs to BM's branch and is an agent or viewer
     const target = await query(`SELECT role, branch_id FROM allowed_emails WHERE lower(email) = $1`, [email])
@@ -212,7 +241,10 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: "Cannot modify this member." }, { status: 403 })
     }
     if (body?.role) {
-      const newBaseRole = (body?.baseRole && VALID_BUILTIN_ROLES.includes(body.baseRole)) ? body.baseRole : await getBaseRole(String(body.role))
+      // SECURITY (2026-09-26 audit): derived from the role being written —
+      // body.baseRole is NOT trusted (a BM could declare baseRole:"agent"
+      // while writing role:"developer" onto an own-branch agent).
+      const newBaseRole = await getBaseRole(String(body.role))
       if (newBaseRole !== "agent" && newBaseRole !== "viewer") {
         return NextResponse.json({ error: "Branch managers can only assign Loan Officer or Viewer roles." }, { status: 403 })
       }
@@ -238,6 +270,24 @@ export async function PATCH(req: NextRequest) {
   const values: any[] = [email]
 
   if (roleInput) {
+    // Caps on privilege changes via PATCH (POST had them; PATCH didn't — an
+    // admin could mint a 3rd admin or a 2nd developer through the edit form).
+    // No-op role writes (target already has this base) skip the cap.
+    const newBase = await getBaseRole(roleInput)
+    const current = await query(`SELECT role FROM allowed_emails WHERE lower(email) = $1 LIMIT 1`, [email])
+    const currentBase = current.rowCount ? await getBaseRole(current.rows[0].role) : null
+    if (newBase !== currentBase && newBase === "admin") {
+      const others = await query(`SELECT COUNT(*)::int AS n FROM allowed_emails WHERE role = 'admin' AND lower(email) != $1`, [email])
+      if (others.rows[0].n >= 1) {
+        return NextResponse.json({ error: "Only 2 admins are allowed in total. Remove the other admin first." }, { status: 400 })
+      }
+    }
+    if (newBase !== currentBase && newBase === "developer") {
+      const others = await query(`SELECT COUNT(*)::int AS n FROM allowed_emails WHERE role = 'developer' AND lower(email) != $1`, [email])
+      if (others.rows[0].n >= 1) {
+        return NextResponse.json({ error: "That role already has the maximum number of accounts." }, { status: 400 })
+      }
+    }
     values.push(roleInput)
     updates.push(`role = $${values.length}`)
   }
@@ -259,6 +309,7 @@ export async function PATCH(req: NextRequest) {
       `UPDATE allowed_emails SET ${updates.join(", ")} WHERE lower(email) = $1`,
       values
     )
+    logAudit("team member updated", session.email, { email, fields: updates.map((u) => u.split(" ")[0]) })
   }
 
   if (displayName !== undefined && displayName) {
@@ -305,5 +356,6 @@ export async function DELETE(req: NextRequest) {
   }
 
   await query(`DELETE FROM allowed_emails WHERE lower(email) = $1`, [email])
+  logAudit("team member removed", session.email, { email, role: targetRole })
   return NextResponse.json({ ok: true })
 }

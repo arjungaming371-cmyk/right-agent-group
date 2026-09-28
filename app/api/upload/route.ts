@@ -131,7 +131,7 @@ export async function POST(req: NextRequest) {
           lead = newLead.data
         }
 
-        parsedContacts.push({ name, phone, language: lang, product_interest: product, leadId: lead?.id })
+        parsedContacts.push({ name, phone, language: lang, product_interest: product, notes, leadId: lead?.id })
         created++
       } catch (e) {
         console.error(`Failed to process CSV row for ${phone.slice(0, 3)}****${phone.slice(-3)}:`, (e as Error).message)

@@ -98,10 +98,35 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
     "occupation", "company_name", "cibil_score", "existing_emi", "down_payment",
     "property_value", "pincode", "state", "dob", "gender", "marital_status",
   ])
+  const CUSTOM_KEY_RE = /^custom_\d+$/
   const restData: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(rest || {})) {
     if (SAFE_REST_KEYS.has(k) && (typeof v === "string" || typeof v === "number")) {
       restData[k] = typeof v === "string" ? v.slice(0, 300) : v
+    }
+  }
+  // Admin-defined custom questions (loan-form customizer) submit under ids
+  // like custom_1735… — SAFE_REST_KEYS didn't know them, so every customer
+  // answer to those questions was silently dropped from form_data and the
+  // "Additional Form Responses" panel never showed them (2026-09-26 audit).
+  // Accept a bounded number of them, map id → question label from the stored
+  // form config when possible, cap each value.
+  const customEntries = Object.entries(rest || {}).filter(
+    ([k, v]) => CUSTOM_KEY_RE.test(k) && typeof v === "string" && v.trim() !== ""
+  ).slice(0, 20)
+  if (customEntries.length) {
+    let idToLabel: Record<string, string> = {}
+    try {
+      const cfg = await query(`SELECT config FROM form_configs WHERE id = 'whatsapp_loan_form' LIMIT 1`)
+      const fields = cfg.rows[0]?.config?.custom_fields
+      if (Array.isArray(fields)) {
+        idToLabel = Object.fromEntries(
+          fields.filter((f: any) => f?.id && f?.label).map((f: any) => [String(f.id), String(f.label).slice(0, 120)])
+        )
+      }
+    } catch { /* unlabeled fallback below */ }
+    for (const [k, v] of customEntries) {
+      restData[idToLabel[k] || k] = String(v).slice(0, 300)
     }
   }
   const formData = JSON.stringify(restData).slice(0, 16_000)

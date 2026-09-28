@@ -220,6 +220,12 @@ DO $$ BEGIN
   ALTER TABLE allowed_emails ADD CONSTRAINT allowed_emails_role_check CHECK (role IN ('admin', 'agent', 'viewer'));
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
+-- Session revocation (2026-09-20 security hardening). lib/auth.ts
+-- getLiveSession() reads this column to invalidate cookies minted before a
+-- logout — it shipped only in migrations/2026-09-20_security_hardening.sql,
+-- so fresh local-setup databases 42703'd on it and revocation silently
+-- never fired (2026-09-26 audit).
+ALTER TABLE allowed_emails ADD COLUMN IF NOT EXISTS session_epoch INTEGER NOT NULL DEFAULT 0;
 
 -- Internal Ops Assistant — persistent chat history, one thread per staff member.
 CREATE TABLE IF NOT EXISTS assistant_chats (
