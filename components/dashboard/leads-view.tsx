@@ -899,36 +899,6 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                           <>
                             <button
                               onClick={() => {
-                                setConvertTarget(lead)
-                                setConvertForm({
-                                  phone: lead.ig_phone_extracted ? lead.ig_phone_extracted.replace(/\D/g, "") : "",
-                                  productInterest: lead.product_interest || "",
-                                  notes: lead.notes || "",
-                                  sendWa: true,
-                                  addToQueue: !!lead.ig_phone_extracted,
-                                })
-                              }}
-                              title={lead.ig_phone_extracted ? "Phone detected — convert to CRM lead now" : "Convert to a callable CRM lead"}
-                              style={{
-                                display: "inline-flex",
-                                alignItems: "center",
-                                gap: 5,
-                                background: lead.ig_phone_extracted ? "linear-gradient(135deg, #10b981, #059669)" : "rgba(34,197,94,0.1)",
-                                border: lead.ig_phone_extracted ? "none" : "1px solid rgba(34,197,94,0.3)",
-                                color: lead.ig_phone_extracted ? "#fff" : "var(--accent-green)",
-                                borderRadius: 8,
-                                height: 32,
-                                padding: "0 11px",
-                                fontSize: 12,
-                                fontWeight: 600,
-                                cursor: "pointer",
-                                boxShadow: lead.ig_phone_extracted ? "0 2px 8px rgba(16,185,129,0.3)" : undefined,
-                              }}
-                            >
-                              <Sparkles size={13} strokeWidth={2} /> Convert
-                            </button>
-                            <button
-                              onClick={() => {
                                 const targetId = lead.instagram_handle || lead.ig_user_id || lead.name
                                 window.dispatchEvent(new CustomEvent("rag:navigate", { detail: { view: "instagram", search: targetId } }))
                               }}
