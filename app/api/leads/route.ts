@@ -129,9 +129,14 @@ export async function GET(req: NextRequest) {
     // lead_code is matched as a substring so all of "RAG-0042", "0042", and
     // "42" find the same lead — staff read these out over the phone and will
     // not type the prefix or the zero padding.
+    // ig_phone_extracted ships in the SAME migration as is_social_prospect,
+    // so the probe above guards it too — naming a missing column here would
+    // 500 every search on a pre-migration DB (the exact failure the probe
+    // pattern exists to prevent).
     const codeClause = (await hasLeadCodeColumn()) ? ` OR lead_code ILIKE $${i}` : ""
+    const igPhoneClause = socialCol ? ` OR ig_phone_extracted ILIKE $${i}` : ""
     where.push(
-      `(name ILIKE $${i} OR phone ILIKE $${i}${codeClause} OR instagram_handle ILIKE $${i} OR ig_phone_extracted ILIKE $${i} OR search_vector @@ websearch_to_tsquery('english', $${i + 1}) OR word_similarity($${i + 1}, COALESCE(name, '')) > 0.28 OR word_similarity($${i + 1}, COALESCE(address, '')) > 0.28 OR word_similarity($${i + 1}, COALESCE(product_interest, '')) > 0.28)`
+      `(name ILIKE $${i} OR phone ILIKE $${i}${codeClause} OR instagram_handle ILIKE $${i}${igPhoneClause} OR search_vector @@ websearch_to_tsquery('english', $${i + 1}) OR word_similarity($${i + 1}, COALESCE(name, '')) > 0.28 OR word_similarity($${i + 1}, COALESCE(address, '')) > 0.28 OR word_similarity($${i + 1}, COALESCE(product_interest, '')) > 0.28)`
     )
     params.push(`%${search}%`, search)
     i += 2
