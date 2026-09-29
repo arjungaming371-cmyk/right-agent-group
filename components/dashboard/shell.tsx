@@ -59,6 +59,10 @@ const KnowledgeBaseView = dynamic(() => import("./knowledge-base-view"), {
   ssr: false,
   loading: () => <ViewFallback label="Knowledge Base" />,
 })
+const OmnichannelTester = dynamic(() => import("./omnichannel-tester"), {
+  ssr: false,
+  loading: () => <ViewFallback label="AI Simulator" />,
+})
 
 // Floating ops chatbot (Executive Operations Commander) — drag bubble bottom-
 // right, chat history, attachments, voice dictation, action proposals with
@@ -99,7 +103,7 @@ function ViewFallback({ label }: { label: string }) {
   return <div style={{ padding: 24, color: "var(--text-muted)" }}>Loading {label}…</div>
 }
 
-export type ViewKey = "leads" | "loans" | "queue" | "voice" | "voice-studio" | "whatsapp" | "instagram" | "comms" | "calendar" | "security" | "upload" | "script" | "knowledge" | "analytics" | "branches" | "dev-logs"
+export type ViewKey = "leads" | "loans" | "queue" | "voice" | "voice-studio" | "whatsapp" | "instagram" | "comms" | "calendar" | "security" | "upload" | "script" | "knowledge" | "analytics" | "branches" | "dev-logs" | "simulator"
 export type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
 
 const ROLE_LABEL: Record<Role, string> = { admin: "Administrator", agent: "Loan Officer", viewer: "Viewer", developer: "Administrator", branch_manager: "Branch Manager" }
@@ -126,6 +130,7 @@ const NAV_SECTIONS: NavSection[] = [
       { key: "voice-studio", label: "Voice Studio",  icon: AudioWaveform,  roles: ["admin", "branch_manager", "developer"] },
       { key: "whatsapp", label: "WhatsApp Chat",     icon: MessageCircle,  roles: ["admin", "agent", "viewer", "branch_manager"] },
       { key: "instagram",label: "Instagram Chat",    icon: Instagram,      roles: ["admin", "agent", "viewer", "branch_manager"] },
+      { key: "simulator",label: "AI Simulator",      icon: Sparkles,       roles: ["admin", "agent", "viewer", "branch_manager", "developer"] },
       { key: "comms",    label: "Communication Log", icon: Activity,       roles: ["admin", "agent", "viewer", "branch_manager"] },
     ],
   },
@@ -155,6 +160,7 @@ const VIEW_TITLES: Record<ViewKey, { title: string; sub: string }> = {
   "voice-studio": { title: "Voice Studio", sub: "Browse, audition, and clone Sarvam & Cartesia voices" },
   whatsapp: { title: "WhatsApp Chat",      sub: "Live customer conversations" },
   instagram:{ title: "Instagram Chat",     sub: "Direct messages and post comment auto-replies" },
+  simulator:{ title: "AI Script Simulator",sub: "Interactive testing chatbot for Calls, WhatsApp, and Instagram with real lead contexts" },
   comms:    { title: "Communication Log",  sub: "Automated calls and WhatsApp activity" },
   calendar: { title: "Calendar",           sub: "Upcoming calls and follow-up callbacks" },
   security: { title: "Security",           sub: "Access control and audit policy" },
@@ -581,6 +587,7 @@ export default function DashboardShell() {
           {view === "script"   && <ScriptView />}
           {view === "branches" && <BranchesView role={role} branchId={sessionBranchId} />}
           {view === "knowledge" && <KnowledgeBaseView role={role} />}
+          {view === "simulator" && <OmnichannelTester />}
           {view === "dev-logs" && role === "developer" && <DeveloperLogsView userEmail={userEmail} />}
         </main>
       </div>

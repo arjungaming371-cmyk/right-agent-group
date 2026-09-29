@@ -100,13 +100,13 @@ export const WA_CALLBACK_GREETINGS = DEFAULT_VOICE_OPENERS.whatsappCallback
 // FIXED: only real goodbye phrases end the call.
 // Plain "thank you" / "धन्यवाद" / "ధన్యవాదాలు" must NOT hang up —
 // Priya says thanks naturally in the middle of a conversation.
-const GOODBYE_RE =
+export const GOODBYE_RE =
   /\b(goodbye|bye|bye[- ]?bye|take care)\b|have a (great|good|nice|wonderful) day|din shubh ho|phir milenge|alvida|manchi roju|selavu|veedkolu|अलविदा|फिर मिलेंगे|दिन शुभ हो|వీడ్కోలు|సెలవు|మంచి రోజు జరగాలి/i
 
 // CUSTOMER-side goodbye / no doubts: when the CALLER says bye or states they have
 // no more doubts, the call can conclude.
 // Comprehensive coverage across Telugu, Hindi, English, and Romanized forms.
-const CUSTOMER_BYE_RE = new RegExp(
+export const CUSTOMER_BYE_RE = new RegExp(
   '\\b(' +
   'bye|goodbye|bye[- ]?bye|call you later|talk to you later|later bye|take care|thanks bye|thank you bye|' +
   'no doubts?|no more doubts?|no questions?|all clear|everything clear|that is all|that\'s all|that is it|that\'s it|all good|done|' +
