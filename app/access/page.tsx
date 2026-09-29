@@ -8,8 +8,8 @@ import { useRouter } from "next/navigation"
 import { ArrowLeft, LogOut, Shield, UserCog, Eye, UserPlus, Users, Trash2, Building2, Pencil, Check, X, SlidersHorizontal, Plus, Layers } from "lucide-react"
 import { ToastProvider, useToast } from "@/components/ui/toast"
 import { SkeletonList } from "@/components/ui/skeleton"
-import { RoleManagerModal, type RoleDefinition } from "@/components/dashboard/role-manager-modal"
-import { BranchManagerModal, type BranchOption } from "@/components/dashboard/branch-manager-modal"
+import type { RoleDefinition } from "@/components/dashboard/role-manager-modal"
+import type { BranchOption } from "@/components/dashboard/branch-manager-modal"
 import { ModulePicker, ALL_MODULES } from "@/components/dashboard/module-picker"
 import { VoiceDictation } from "@/components/ui/voice-dictation"
 import ThemeSwitcher from "@/components/dashboard/theme-switcher"
@@ -77,8 +77,7 @@ function AccessPageInner() {
   const [myRole, setMyRole] = useState<string>("")
   const [branches, setBranches] = useState<BranchOption[]>([])
   const [roles, setRoles] = useState<RoleDefinition[]>([])
-  const [isRoleModalOpen, setIsRoleModalOpen] = useState(false)
-  const [isBranchModalOpen, setIsBranchModalOpen] = useState(false)
+
 
   // Add form state
   const [newName, setNewName] = useState("")
@@ -292,19 +291,7 @@ function AccessPageInner() {
             </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            {(myRole === "admin" || myRole === "developer") && (
-              <>
-                {/* These two modals were rendered but NOTHING could open them —
-                    the runtime role catalog and the branch manager were
-                    unreachable UI (2026-09-26 audit). */}
-                <button onClick={() => setIsRoleModalOpen(true)} className="btn-ghost" style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
-                  <Layers size={14} strokeWidth={2} /> Manage Roles
-                </button>
-                <button onClick={() => setIsBranchModalOpen(true)} className="btn-ghost" style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
-                  <Building2 size={14} strokeWidth={2} /> Manage Branches
-                </button>
-              </>
-            )}
+
             <ThemeSwitcher />
             <a href="/dashboard" className="btn-ghost" style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 7 }}>
               <ArrowLeft size={14} strokeWidth={2} /> Dashboard
@@ -704,24 +691,7 @@ function AccessPageInner() {
         </div>
       )}
 
-      {/* Role Manager Modal */}
-      <RoleManagerModal
-        isOpen={isRoleModalOpen}
-        onClose={() => setIsRoleModalOpen(false)}
-        roles={roles}
-        isBranchManager={isBranchManager}
-        onRolesUpdated={(updated) => {
-          setRoles(updated)
-        }}
-      />
 
-      {/* Branch Manager Modal */}
-      <BranchManagerModal
-        isOpen={isBranchModalOpen}
-        onClose={() => setIsBranchModalOpen(false)}
-        branches={branches}
-        onBranchesUpdated={() => load()}
-      />
     </main>
   )
 }
