@@ -1,6 +1,6 @@
 "use client"
 import { useEffect, useState } from "react"
-import { X, Brain, Lock, RefreshCw, Phone, MessageCircle, StickyNote, ArrowDownLeft, ArrowUpRight } from "lucide-react"
+import { X, Brain, Lock, RefreshCw, Phone, MessageCircle, StickyNote, ArrowDownLeft, ArrowUpRight, Pencil, Check } from "lucide-react"
 import { timeAgo, formatDateTime } from "@/lib/utils"
 import { useToast } from "../ui/toast"
 
@@ -65,6 +65,38 @@ export default function LeadMemoryModal({ leadId, canEdit, onClose }: { leadId: 
   const [stageDraft, setStageDraft] = useState("")
   const [saving, setSaving] = useState(false)
   const [reanalyzing, setReanalyzing] = useState(false)
+  const [isEditingName, setIsEditingName] = useState(false)
+  const [nameDraft, setNameDraft] = useState("")
+  const [savingName, setSavingName] = useState(false)
+
+  async function saveName() {
+    const trimmed = nameDraft.trim()
+    if (!trimmed) {
+      toast.error("Lead name cannot be empty")
+      return
+    }
+    setSavingName(true)
+    try {
+      const res = await fetch(`/api/leads/${leadId}/memory`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: trimmed }),
+      })
+      if (res.ok) {
+        toast.success(`Lead name updated to "${trimmed}"`)
+        setIsEditingName(false)
+        load()
+        window.dispatchEvent(new CustomEvent("rag:refresh"))
+      } else {
+        const d = await res.json().catch(() => ({}))
+        toast.error(d.error || "Failed to update lead name")
+      }
+    } catch {
+      toast.error("Failed to update name — check connection")
+    } finally {
+      setSavingName(false)
+    }
+  }
 
   async function load() {
     setLoading(true)
@@ -149,7 +181,71 @@ export default function LeadMemoryModal({ leadId, canEdit, onClose }: { leadId: 
             <Brain size={17} strokeWidth={1.9} style={{ color: "var(--accent-violet)" }} />
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontWeight: 700, fontSize: 15 }}>{data?.lead?.name || "Lead Memory"}</div>
+            {isEditingName ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
+                <input
+                  value={nameDraft}
+                  onChange={(e) => setNameDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") saveName()
+                    else if (e.key === "Escape") setIsEditingName(false)
+                  }}
+                  disabled={savingName}
+                  placeholder="Enter lead name"
+                  autoFocus
+                  style={{
+                    height: 28,
+                    fontSize: 14,
+                    fontWeight: 600,
+                    padding: "2px 8px",
+                    borderRadius: 6,
+                    border: "1.5px solid var(--accent-violet)",
+                    background: "var(--bg-elevated)",
+                    color: "var(--text-primary)",
+                    minWidth: 160,
+                  }}
+                />
+                <button
+                  onClick={saveName}
+                  disabled={savingName}
+                  title="Save name"
+                  className="btn-primary"
+                  style={{ height: 28, padding: "0 8px", fontSize: 12, display: "inline-flex", alignItems: "center", gap: 4 }}
+                >
+                  <Check size={13} strokeWidth={2.5} />
+                </button>
+                <button
+                  onClick={() => setIsEditingName(false)}
+                  disabled={savingName}
+                  title="Cancel"
+                  className="btn-ghost"
+                  style={{ height: 28, padding: "0 8px" }}
+                >
+                  <X size={13} strokeWidth={2} />
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ fontWeight: 700, fontSize: 15 }}>{data?.lead?.name || "Lead Memory"}</span>
+                {canEdit && data?.lead && (
+                  <button
+                    onClick={() => { setNameDraft(data?.lead?.name || ""); setIsEditingName(true) }}
+                    title="Edit lead name"
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      color: "var(--text-muted)",
+                      cursor: "pointer",
+                      padding: 2,
+                      display: "inline-flex",
+                      alignItems: "center",
+                    }}
+                  >
+                    <Pencil size={12} strokeWidth={2} />
+                  </button>
+                )}
+              </div>
+            )}
             <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{data?.lead?.phone}</div>
           </div>
           {data && (

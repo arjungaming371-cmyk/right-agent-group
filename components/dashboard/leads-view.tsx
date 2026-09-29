@@ -5,7 +5,7 @@ import { useEffect, useState, useMemo } from "react"
 import {
   Users, Target, IndianRupee, BadgeCheck, Phone, MessageCircle, MessageSquare, RotateCcw,
   Plus, Search, Link2, Check, Download, Brain, Pin, Sparkles, CheckSquare,
-  PhoneCall, Instagram, X, ExternalLink, Clock, CheckCircle2, ArrowRight
+  PhoneCall, Instagram, X, ExternalLink, Clock, CheckCircle2, ArrowRight, Pencil
 } from "lucide-react"
 import { formatCurrency, timeAgo, formatDateTime } from "@/lib/utils"
 import { pctOf } from "@/lib/maths"
@@ -241,6 +241,114 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
   const [queueForm, setQueueForm] = useState<{ channel: string; timing: "now" | "later"; scheduledAt: string; language: string }>({
     channel: "phone", timing: "now", scheduledAt: "", language: "auto",
   })
+
+  // ── Lead Name & Details Editing ──
+  const [editingLeadId, setEditingLeadId] = useState<string | null>(null)
+  const [editingNameValue, setEditingNameValue] = useState<string>("")
+  const [savingNameId, setSavingNameId] = useState<string | null>(null)
+  const [editModalLead, setEditModalLead] = useState<Lead | null>(null)
+  const [editForm, setEditForm] = useState<{
+    name: string
+    phone: string
+    address: string
+    loan_amount: string
+    product_interest: string
+    notes: string
+  }>({ name: "", phone: "", address: "", loan_amount: "", product_interest: "", notes: "" })
+  const [savingEditModal, setSavingEditModal] = useState(false)
+
+  function startEditName(lead: Lead) {
+    setEditingLeadId(lead.id)
+    setEditingNameValue(lead.name || "")
+  }
+
+  function cancelEditName() {
+    setEditingLeadId(null)
+    setEditingNameValue("")
+  }
+
+  async function saveLeadName(id: string) {
+    const trimmed = editingNameValue.trim()
+    if (!trimmed) {
+      toast.error("Lead name cannot be empty")
+      return
+    }
+    setSavingNameId(id)
+    setLeads((prev) => prev.map((l) => (l.id === id ? { ...l, name: trimmed } : l)))
+    try {
+      const res = await fetch("/api/leads", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, name: trimmed }),
+      })
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}))
+        toast.error(d.error || "Failed to update lead name")
+        load(true)
+      } else {
+        toast.success(`Lead name updated to "${trimmed}"`)
+        setEditingLeadId(null)
+      }
+    } catch {
+      toast.error("Failed to update lead name — check connection")
+      load(true)
+    } finally {
+      setSavingNameId(null)
+    }
+  }
+
+  function openEditModal(lead: Lead) {
+    setEditModalLead(lead)
+    setEditForm({
+      name: lead.name || "",
+      phone: lead.phone || "",
+      address: lead.address || "",
+      loan_amount: lead.loan_amount ? String(lead.loan_amount) : "",
+      product_interest: lead.product_interest || "",
+      notes: lead.notes || "",
+    })
+  }
+
+  async function saveEditModal() {
+    if (!editModalLead) return
+    const trimmedName = editForm.name.trim()
+    if (!trimmedName) {
+      toast.error("Lead name is required")
+      return
+    }
+    setSavingEditModal(true)
+    try {
+      const updates: Record<string, unknown> = {
+        id: editModalLead.id,
+        name: trimmedName,
+        address: editForm.address,
+        product_interest: editForm.product_interest,
+        loan_amount: editForm.loan_amount ? Number(editForm.loan_amount) : null,
+        notes: editForm.notes,
+      }
+      if (editForm.phone.trim()) {
+        updates.phone = editForm.phone.trim()
+      }
+      const res = await fetch("/api/leads", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      })
+      if (res.ok) {
+        const updated = await res.json()
+        setLeads((prev) => prev.map((l) => (l.id === editModalLead.id ? { ...l, ...updated } : l)))
+        toast.success(`Lead "${trimmedName}" updated`)
+        setEditModalLead(null)
+      } else {
+        const d = await res.json().catch(() => ({}))
+        toast.error(d.error || "Failed to update lead")
+      }
+    } catch {
+      toast.error("Failed to update lead — check connection")
+    } finally {
+      setSavingEditModal(false)
+    }
+  }
 
   // Prune selections that no longer exist (lead deleted / filter changed).
   useEffect(() => {
@@ -802,36 +910,121 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                         <SocialAvatar name={lead.name} handle={lead.instagram_handle} />
                         <div>
-                          <div style={{ fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", gap: 6 }}>
-                            {lead.pinned && <Pin size={12} strokeWidth={2.2} style={{ color: "var(--accent-yellow)", fill: "var(--accent-yellow)", flexShrink: 0 }} />}
-                            {lead.name || "Instagram Inquirer"}
-                            {lead.instagram_handle && (
-                              <a
-                                href={`https://instagram.com/${lead.instagram_handle.replace(/^@/, "")}`}
-                                target="_blank"
-                                rel="noreferrer"
-                                onClick={(e) => e.stopPropagation()}
-                                title={`Open @${lead.instagram_handle.replace(/^@/, "")} on Instagram`}
+                          {editingLeadId === lead.id ? (
+                            <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 2 }} onClick={(e) => e.stopPropagation()}>
+                              <input
+                                type="text"
+                                value={editingNameValue}
+                                onChange={(e) => setEditingNameValue(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") saveLeadName(lead.id)
+                                  if (e.key === "Escape") cancelEditName()
+                                }}
+                                autoFocus
                                 style={{
+                                  fontSize: 13,
+                                  fontWeight: 600,
+                                  padding: "2px 8px",
+                                  borderRadius: 6,
+                                  border: "1px solid var(--accent-violet)",
+                                  background: "var(--bg-card)",
+                                  color: "var(--text-primary)",
+                                  minWidth: 140,
+                                  maxWidth: 200,
+                                }}
+                              />
+                              <button
+                                onClick={() => saveLeadName(lead.id)}
+                                disabled={savingNameId === lead.id}
+                                title="Save Name"
+                                style={{
+                                  padding: "3px 6px",
+                                  borderRadius: 6,
+                                  background: "var(--accent-green)",
+                                  border: "none",
+                                  color: "white",
+                                  cursor: "pointer",
                                   display: "inline-flex",
                                   alignItems: "center",
-                                  gap: 3,
-                                  fontSize: 10.5,
-                                  fontWeight: 600,
-                                  color: "#e1306c",
-                                  background: "rgba(225,48,108,0.1)",
-                                  border: "1px solid rgba(225,48,108,0.28)",
-                                  borderRadius: 5,
-                                  padding: "1px 6px",
-                                  textDecoration: "none",
-                                  flexShrink: 0,
                                 }}
                               >
-                                <Instagram size={10} strokeWidth={2.2} /> @{lead.instagram_handle.replace(/^@/, "")}
-                                <ExternalLink size={9} style={{ opacity: 0.6 }} />
-                              </a>
-                            )}
-                          </div>
+                                <Check size={12} strokeWidth={2.5} />
+                              </button>
+                              <button
+                                onClick={cancelEditName}
+                                disabled={savingNameId === lead.id}
+                                title="Cancel"
+                                style={{
+                                  padding: "3px 6px",
+                                  borderRadius: 6,
+                                  background: "transparent",
+                                  border: "1px solid var(--border)",
+                                  color: "var(--text-muted)",
+                                  cursor: "pointer",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                }}
+                              >
+                                <X size={12} strokeWidth={2} />
+                              </button>
+                            </div>
+                          ) : (
+                            <div style={{ fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                              {lead.pinned && <Pin size={12} strokeWidth={2.2} style={{ color: "var(--accent-yellow)", fill: "var(--accent-yellow)", flexShrink: 0 }} />}
+                              <span>{lead.name || "Instagram Inquirer"}</span>
+                              {canEdit && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    startEditName(lead)
+                                  }}
+                                  title="Edit Name"
+                                  style={{
+                                    background: "none",
+                                    border: "none",
+                                    padding: "2px 4px",
+                                    cursor: "pointer",
+                                    color: "var(--text-muted)",
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    borderRadius: 4,
+                                    opacity: 0.65,
+                                    transition: "opacity 0.15s",
+                                  }}
+                                  onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
+                                  onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.65")}
+                                >
+                                  <Pencil size={12} strokeWidth={2} />
+                                </button>
+                              )}
+                              {lead.instagram_handle && (
+                                <a
+                                  href={`https://instagram.com/${lead.instagram_handle.replace(/^@/, "")}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  title={`Open @${lead.instagram_handle.replace(/^@/, "")} on Instagram`}
+                                  style={{
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: 3,
+                                    fontSize: 10.5,
+                                    fontWeight: 600,
+                                    color: "#e1306c",
+                                    background: "rgba(225,48,108,0.1)",
+                                    border: "1px solid rgba(225,48,108,0.28)",
+                                    borderRadius: 5,
+                                    padding: "1px 6px",
+                                    textDecoration: "none",
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  <Instagram size={10} strokeWidth={2.2} /> @{lead.instagram_handle.replace(/^@/, "")}
+                                  <ExternalLink size={9} style={{ opacity: 0.6 }} />
+                                </a>
+                              )}
+                            </div>
+                          )}
                           <div style={{ fontSize: 12, color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 6, marginTop: 2 }}>
                             {lead.lead_code && <LeadCodeBadge code={lead.lead_code} />}
                             {lead.ig_user_id && <span style={{ fontFamily: "monospace", fontSize: 11, opacity: 0.7 }}>ID: {lead.ig_user_id.slice(-6)}</span>}
@@ -948,6 +1141,13 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                               <Pin size={13} strokeWidth={1.9} style={lead.pinned ? { fill: "var(--accent-yellow)" } : undefined} />
                             </button>
                             <button
+                              onClick={() => openEditModal(lead)}
+                              title="Edit Lead Details"
+                              style={{ background: "rgba(139,124,255,0.1)", border: "1px solid rgba(139,124,255,0.28)", color: "var(--accent-violet)", borderRadius: 8, width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+                            >
+                              <Pencil size={13} strokeWidth={1.9} />
+                            </button>
+                            <button
                               onClick={() => setMemoryLeadId(lead.id)}
                               title="View Lead Memory"
                               style={{ background: "rgba(247,183,49,0.1)", border: "1px solid rgba(247,183,49,0.28)", color: "var(--accent-yellow)", borderRadius: 8, width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
@@ -976,18 +1176,103 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                       <Avatar name={lead.name} />
                       <div>
-                        <div style={{ fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", gap: 6 }}>
-                          {lead.pinned && <Pin size={12} strokeWidth={2.2} style={{ color: "var(--accent-yellow)", fill: "var(--accent-yellow)", flexShrink: 0 }} />}
-                          {lead.name || "Unknown"}
-                          {lead.source?.startsWith("Instagram") && lead.instagram_handle && (
-                            <span
-                              title={`Instagram origin: @${lead.instagram_handle}${lead.promoted_to_crm_at ? " — promoted from Instagram Prospects" : ""}`}
-                              style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 10, fontWeight: 600, color: "#e1306c", background: "rgba(225,48,108,0.1)", border: "1px solid rgba(225,48,108,0.3)", borderRadius: 5, padding: "1px 6px", flexShrink: 0 }}
+                        {editingLeadId === lead.id ? (
+                          <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 2 }} onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="text"
+                              value={editingNameValue}
+                              onChange={(e) => setEditingNameValue(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") saveLeadName(lead.id)
+                                if (e.key === "Escape") cancelEditName()
+                              }}
+                              autoFocus
+                              style={{
+                                fontSize: 13,
+                                fontWeight: 600,
+                                padding: "2px 8px",
+                                borderRadius: 6,
+                                border: "1px solid var(--accent-violet)",
+                                background: "var(--bg-card)",
+                                color: "var(--text-primary)",
+                                minWidth: 140,
+                                maxWidth: 200,
+                              }}
+                            />
+                            <button
+                              onClick={() => saveLeadName(lead.id)}
+                              disabled={savingNameId === lead.id}
+                              title="Save Name"
+                              style={{
+                                padding: "3px 6px",
+                                borderRadius: 6,
+                                background: "var(--accent-green)",
+                                border: "none",
+                                color: "white",
+                                cursor: "pointer",
+                                display: "inline-flex",
+                                alignItems: "center",
+                              }}
                             >
-                              <Instagram size={10} strokeWidth={2.2} /> @{lead.instagram_handle}
-                            </span>
-                          )}
-                        </div>
+                              <Check size={12} strokeWidth={2.5} />
+                            </button>
+                            <button
+                              onClick={cancelEditName}
+                              disabled={savingNameId === lead.id}
+                              title="Cancel"
+                              style={{
+                                padding: "3px 6px",
+                                borderRadius: 6,
+                                background: "transparent",
+                                border: "1px solid var(--border)",
+                                color: "var(--text-muted)",
+                                cursor: "pointer",
+                                display: "inline-flex",
+                                alignItems: "center",
+                              }}
+                            >
+                              <X size={12} strokeWidth={2} />
+                            </button>
+                          </div>
+                        ) : (
+                          <div style={{ fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                            {lead.pinned && <Pin size={12} strokeWidth={2.2} style={{ color: "var(--accent-yellow)", fill: "var(--accent-yellow)", flexShrink: 0 }} />}
+                            <span>{lead.name || "Unknown"}</span>
+                            {canEdit && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  startEditName(lead)
+                                }}
+                                title="Edit Name"
+                                style={{
+                                  background: "none",
+                                  border: "none",
+                                  padding: "2px 4px",
+                                  cursor: "pointer",
+                                  color: "var(--text-muted)",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  borderRadius: 4,
+                                  opacity: 0.65,
+                                  transition: "opacity 0.15s",
+                                }}
+                                onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
+                                onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.65")}
+                              >
+                                <Pencil size={12} strokeWidth={2} />
+                              </button>
+                            )}
+                            {lead.source?.startsWith("Instagram") && lead.instagram_handle && (
+                              <span
+                                title={`Instagram origin: @${lead.instagram_handle}${lead.promoted_to_crm_at ? " — promoted from Instagram Prospects" : ""}`}
+                                style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 10, fontWeight: 600, color: "#e1306c", background: "rgba(225,48,108,0.1)", border: "1px solid rgba(225,48,108,0.3)", borderRadius: 5, padding: "1px 6px", flexShrink: 0 }}
+                              >
+                                <Instagram size={10} strokeWidth={2.2} /> @{lead.instagram_handle}
+                              </span>
+                            )}
+                          </div>
+                        )}
                         <div style={{ fontSize: 12, color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 6 }}>
                           {lead.lead_code && <LeadCodeBadge code={lead.lead_code} />}
                           {lead.phone ? (
@@ -1023,6 +1308,11 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                             title={lead.pinned ? "Unpin" : "Pin to top"}
                             style={{ background: lead.pinned ? "rgba(247,183,49,0.15)" : "var(--overlay-hover)", border: `1px solid ${lead.pinned ? "rgba(247,183,49,0.35)" : "var(--border)"}`, color: lead.pinned ? "var(--accent-yellow)" : "var(--text-muted)", borderRadius: 9, width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
                           ><Pin size={14} strokeWidth={1.9} style={lead.pinned ? { fill: "var(--accent-yellow)" } : undefined} /></button>
+                          <button
+                            onClick={() => openEditModal(lead)}
+                            title="Edit Lead Details"
+                            style={{ background: "rgba(139,124,255,0.1)", border: "1px solid rgba(139,124,255,0.28)", color: "var(--accent-violet)", borderRadius: 9, width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+                          ><Pencil size={14} strokeWidth={1.9} /></button>
                           <button
                             onClick={() => { setCallTarget(lead); setCallInstructions("") }}
                             disabled={!lead.phone || calling === lead.id}
@@ -1221,6 +1511,137 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
             <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
               <button onClick={() => setShowAdd(false)} style={{ flex: 1, padding: 10, background: "transparent", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text-secondary)" }}>Cancel</button>
               <button onClick={addLead} disabled={!form.name || !form.phone} className="btn-primary" style={{ flex: 1, height: 40 }}>Add Lead</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Lead Modal */}
+      {editModalLead && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}>
+          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, padding: 28, width: 460, maxWidth: "100%", maxHeight: "90vh", overflowY: "auto" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 16 }}>Edit Lead Details</div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2, display: "flex", alignItems: "center", gap: 6 }}>
+                  {editModalLead.lead_code && <LeadCodeBadge code={editModalLead.lead_code} />}
+                  <span>ID: {editModalLead.id.slice(0, 8)}…</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditModalLead(null)}
+                style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", padding: 4 }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Full Name *</label>
+              <div style={{ position: "relative" }}>
+                <input
+                  type="text"
+                  value={editForm.name}
+                  onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                  placeholder="e.g. Rahul Sharma"
+                  style={{ width: "100%", paddingRight: 36, height: 38, borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)", paddingLeft: 10, fontSize: 13 }}
+                />
+                <div style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)" }}>
+                  <VoiceDictation onTranscript={(t: string) => setEditForm((prev) => ({ ...prev, name: prev.name ? `${prev.name} ${t}` : t }))} title="Speak full name" />
+                </div>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Phone Number</label>
+              <input
+                type="text"
+                value={editForm.phone}
+                onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
+                placeholder="e.g. +91 98765 43210"
+                style={{ width: "100%", height: 38, borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)", paddingLeft: 10, fontSize: 13 }}
+              />
+            </div>
+
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Address / Location</label>
+              <div style={{ position: "relative" }}>
+                <input
+                  type="text"
+                  value={editForm.address}
+                  onChange={(e) => setEditForm({ ...editForm, address: e.target.value })}
+                  placeholder="e.g. Andheri East, Mumbai"
+                  style={{ width: "100%", paddingRight: 36, height: 38, borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)", paddingLeft: 10, fontSize: 13 }}
+                />
+                <div style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)" }}>
+                  <VoiceDictation onTranscript={(t: string) => setEditForm((prev) => ({ ...prev, address: prev.address ? `${prev.address} ${t}` : t }))} title="Speak address" />
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Loan Amount (₹)</label>
+                <input
+                  type="number"
+                  value={editForm.loan_amount}
+                  onChange={(e) => setEditForm({ ...editForm, loan_amount: e.target.value })}
+                  placeholder="e.g. 5000000"
+                  style={{ width: "100%", height: 38, borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)", paddingLeft: 10, fontSize: 13 }}
+                />
+              </div>
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Product Interest</label>
+                <select
+                  value={editForm.product_interest}
+                  onChange={(e) => setEditForm({ ...editForm, product_interest: e.target.value })}
+                  style={{ width: "100%", height: 38, borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)", paddingLeft: 10, fontSize: 13 }}
+                >
+                  <option value="">Select product...</option>
+                  {PRODUCT_GROUPS.map((g) => (
+                    <optgroup key={g.label} label={g.label}>
+                      {g.products.map((t) => <option key={t} value={t}>{t}</option>)}
+                    </optgroup>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 18 }}>
+              <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Internal Notes</label>
+              <div style={{ position: "relative" }}>
+                <textarea
+                  value={editForm.notes}
+                  onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+                  placeholder="Notes about this lead..."
+                  rows={3}
+                  style={{ width: "100%", background: "var(--bg-card)", border: "1px solid var(--border)", color: "var(--text-primary)", borderRadius: 8, padding: "8px 36px 8px 10px", fontSize: 13, resize: "vertical" }}
+                />
+                <div style={{ position: "absolute", right: 8, top: 10 }}>
+                  <VoiceDictation onTranscript={(t: string) => setEditForm((prev) => ({ ...prev, notes: prev.notes ? `${prev.notes} ${t}` : t }))} title="Dictate notes" />
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: 10 }}>
+              <button
+                type="button"
+                onClick={() => setEditModalLead(null)}
+                disabled={savingEditModal}
+                style={{ flex: 1, padding: 10, background: "transparent", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text-secondary)", cursor: "pointer" }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={saveEditModal}
+                disabled={savingEditModal || !editForm.name.trim()}
+                className="btn-primary"
+                style={{ flex: 1, height: 40 }}
+              >
+                {savingEditModal ? "Saving…" : "Save Changes"}
+              </button>
             </div>
           </div>
         </div>

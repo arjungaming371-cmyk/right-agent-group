@@ -112,6 +112,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const nextSummary = summary !== undefined ? summary : existing.summary
     const nextStage = stage !== undefined ? stage : existing.stage
 
+    if (typeof body?.name === "string" && body.name.trim()) {
+      await client.query("UPDATE leads SET name = $1, updated_at = now() WHERE id = $2", [body.name.trim().slice(0, 100), id])
+    }
+
     await client.query(
       `INSERT INTO lead_memory (lead_id, facts, locked_facts, summary, stage, updated_at)
        VALUES ($1, $2::jsonb, $3, $4, $5, now())
@@ -129,15 +133,19 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   logAudit("lead memory manually edited", session.email, {
     leadId: id,
+    nameEdited: typeof body?.name === "string",
     factKeysEdited: factEdits ? Object.keys(factEdits) : [],
     unlockKeys,
     summaryEdited: summary !== undefined,
     stageChanged: stage !== undefined ? stage : undefined,
   })
 
-  const updated = await query(
-    `SELECT facts, locked_facts, summary, sentiment, sentiment_history, stage, last_analysis_at, updated_at FROM lead_memory WHERE lead_id = $1`,
-    [id]
-  )
-  return NextResponse.json({ ok: true, memory: updated.rows[0] })
+  const [updated, leadRes] = await Promise.all([
+    query(
+      `SELECT facts, locked_facts, summary, sentiment, sentiment_history, stage, last_analysis_at, updated_at FROM lead_memory WHERE lead_id = $1`,
+      [id]
+    ),
+    query(`SELECT id, name, phone, address, whatsapp_number, product_interest FROM leads WHERE id = $1`, [id]),
+  ])
+  return NextResponse.json({ ok: true, memory: updated.rows[0], lead: leadRes.rows[0] })
 }
