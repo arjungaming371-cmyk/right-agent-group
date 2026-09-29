@@ -92,6 +92,12 @@ function AccessPageInner() {
   const [isBranchManager, setIsBranchManager] = useState(false)
   const [profiles, setProfiles] = useState<Record<string, { displayName: string | null; avatarUrl: string | null; phone?: string | null; address?: string | null; age?: number | null }>>({})
 
+  // Add Admin modal state
+  const [isAdminModalOpen, setIsAdminModalOpen] = useState(false)
+  const [adminName, setAdminName] = useState("")
+  const [adminEmail, setAdminEmail] = useState("")
+  const [addingAdmin, setAddingAdmin] = useState(false)
+
   // Edit modal state
   const [editingMember, setEditingMember] = useState<AllowedEmail | null>(null)
   const [editName, setEditName] = useState("")
@@ -204,6 +210,39 @@ function AccessPageInner() {
     }
   }
 
+  async function handleAddAdmin(e: React.FormEvent) {
+    e.preventDefault()
+    const email = adminEmail.trim().toLowerCase()
+    if (!email) return
+    setAddingAdmin(true)
+    try {
+      const finalDisplayName = adminName.trim()
+      const res = await fetch("/api/allowed-emails", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email,
+          displayName: finalDisplayName || undefined,
+          role: "admin",
+          baseRole: "admin",
+          branch_id: undefined,
+          allowed_modules: ALL_MODULES.map((m) => m.key),
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "Failed to add administrator")
+      setAdminEmail("")
+      setAdminName("")
+      setIsAdminModalOpen(false)
+      toast.success(`${finalDisplayName ? finalDisplayName : email} added as Administrator!`)
+      await load()
+    } catch (err: any) {
+      toast.error(err.message)
+    } finally {
+      setAddingAdmin(false)
+    }
+  }
+
   function startEdit(member: AllowedEmail) {
     const profile = profiles[member.email.toLowerCase()]
     setEditingMember(member)
@@ -291,7 +330,30 @@ function AccessPageInner() {
             </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-
+            {(myRole === "admin" || myRole === "developer") && (
+              <button
+                type="button"
+                onClick={() => setIsAdminModalOpen(true)}
+                className="btn-primary"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 7,
+                  background: "linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%)",
+                  border: "none",
+                  boxShadow: "0 2px 8px rgba(139, 92, 246, 0.35)",
+                  color: "#fff",
+                  fontWeight: 600,
+                  fontSize: 13,
+                  height: 36,
+                  padding: "0 14px",
+                  borderRadius: 8,
+                  cursor: "pointer",
+                }}
+              >
+                <Shield size={14} strokeWidth={2.2} /> Add Admin
+              </button>
+            )}
             <ThemeSwitcher />
             <a href="/dashboard" className="btn-ghost" style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 7 }}>
               <ArrowLeft size={14} strokeWidth={2} /> Dashboard
@@ -311,6 +373,27 @@ function AccessPageInner() {
               <UserPlus size={16} strokeWidth={2} style={{ color: "var(--accent-blue)" }} />
               Add Teammate & Allot Work
             </div>
+            {(myRole === "admin" || myRole === "developer") && (
+              <button
+                type="button"
+                onClick={() => setIsAdminModalOpen(true)}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: "var(--accent-violet)",
+                  background: "rgba(139, 92, 246, 0.1)",
+                  border: "1px solid rgba(139, 92, 246, 0.3)",
+                  padding: "5px 12px",
+                  borderRadius: 8,
+                  cursor: "pointer",
+                }}
+              >
+                <Shield size={13} strokeWidth={2.2} /> Quick Add Admin
+              </button>
+            )}
           </div>
 
           <form onSubmit={addEmail} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -361,9 +444,93 @@ function AccessPageInner() {
 
               {/* Custom Role Name / Designation */}
               <div style={{ gridColumn: "span 1" }}>
-                <label style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", display: "block", marginBottom: 6 }}>
-                  Role Name / Designation
-                </label>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6, flexWrap: "wrap", gap: 4 }}>
+                  <label style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", display: "block" }}>
+                    Role Name / Designation
+                  </label>
+                  <div style={{ display: "flex", gap: 5 }}>
+                    {(myRole === "admin" || myRole === "developer") && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNewRoleTitle("Admin")
+                          setNewBaseRole("admin")
+                          setNewAllowedModules(ALL_MODULES.map((m) => m.key))
+                          setNewBranch("")
+                        }}
+                        style={{
+                          fontSize: 10.5,
+                          padding: "2px 7px",
+                          borderRadius: 4,
+                          border: "1px solid rgba(139,92,246,0.35)",
+                          background: newRoleTitle.toLowerCase() === "admin" ? "var(--accent-violet)" : "rgba(139,92,246,0.12)",
+                          color: newRoleTitle.toLowerCase() === "admin" ? "#fff" : "var(--accent-violet)",
+                          fontWeight: 700,
+                          cursor: "pointer",
+                        }}
+                      >
+                        Admin
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewRoleTitle("Loan Officer")
+                        setNewBaseRole("agent")
+                      }}
+                      style={{
+                        fontSize: 10.5,
+                        padding: "2px 7px",
+                        borderRadius: 4,
+                        border: "1px solid var(--border)",
+                        background: newRoleTitle === "Loan Officer" ? "var(--accent-blue)" : "transparent",
+                        color: newRoleTitle === "Loan Officer" ? "#fff" : "var(--text-muted)",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Loan Officer
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewRoleTitle("Branch Manager")
+                        setNewBaseRole("branch_manager")
+                      }}
+                      style={{
+                        fontSize: 10.5,
+                        padding: "2px 7px",
+                        borderRadius: 4,
+                        border: "1px solid var(--border)",
+                        background: newRoleTitle === "Branch Manager" ? "var(--accent-green)" : "transparent",
+                        color: newRoleTitle === "Branch Manager" ? "#fff" : "var(--text-muted)",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Branch Manager
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewRoleTitle("Viewer")
+                        setNewBaseRole("viewer")
+                      }}
+                      style={{
+                        fontSize: 10.5,
+                        padding: "2px 7px",
+                        borderRadius: 4,
+                        border: "1px solid var(--border)",
+                        background: newRoleTitle === "Viewer" ? "var(--text-secondary)" : "transparent",
+                        color: newRoleTitle === "Viewer" ? "#fff" : "var(--text-muted)",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Viewer
+                    </button>
+                  </div>
+                </div>
                 <div style={{ position: "relative" }}>
                   <input
                     type="text"
@@ -691,7 +858,142 @@ function AccessPageInner() {
         </div>
       )}
 
+      {/* Add Admin Modal */}
+      {isAdminModalOpen && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.65)",
+            backdropFilter: "blur(4px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+            padding: 20,
+          }}
+          onClick={() => !addingAdmin && setIsAdminModalOpen(false)}
+        >
+          <div
+            style={{
+              background: "var(--bg-card)",
+              border: "1px solid var(--border)",
+              borderRadius: 14,
+              width: "100%",
+              maxWidth: 480,
+              padding: "24px 26px",
+              boxShadow: "0 10px 30px rgba(0,0,0,0.3)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ width: 34, height: 34, borderRadius: 8, background: "rgba(139, 92, 246, 0.15)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--accent-violet)" }}>
+                  <Shield size={18} strokeWidth={2.2} />
+                </div>
+                <div>
+                  <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: "var(--text-primary)" }}>
+                    Add Administrator
+                  </h3>
+                  <p style={{ fontSize: 12, color: "var(--text-muted)", margin: "2px 0 0" }}>
+                    Full access across all branches, settings, and staff permissions
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAdminModalOpen(false)}
+                disabled={addingAdmin}
+                style={{ background: "transparent", border: "none", color: "var(--text-muted)", cursor: "pointer", padding: 4 }}
+              >
+                <X size={18} />
+              </button>
+            </div>
 
+            <form onSubmit={handleAddAdmin} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <div>
+                <label style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", display: "block", marginBottom: 6 }}>
+                  Admin Full Name
+                </label>
+                <div style={{ position: "relative" }}>
+                  <input
+                    type="text"
+                    required
+                    value={adminName}
+                    onChange={(e) => setAdminName(e.target.value)}
+                    placeholder="e.g. Ramesh Kumar"
+                    style={{ width: "100%", height: 40, paddingRight: 38 }}
+                  />
+                  <div style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)" }}>
+                    <VoiceDictation onTranscript={(t: string) => setAdminName((prev) => (prev ? `${prev} ${t}` : t))} title="Dictate name" />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", display: "block", marginBottom: 6 }}>
+                  Admin Email Address
+                </label>
+                <input
+                  type="email"
+                  required
+                  value={adminEmail}
+                  onChange={(e) => setAdminEmail(e.target.value)}
+                  placeholder="admin@example.com"
+                  style={{ width: "100%", height: 40 }}
+                />
+              </div>
+
+              <div style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 6 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-secondary)" }}>Assigned Role</span>
+                  <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--accent-violet)", background: "rgba(139, 92, 246, 0.15)", padding: "2px 8px", borderRadius: 6, display: "inline-flex", alignItems: "center", gap: 5 }}>
+                    <Shield size={12} strokeWidth={2.5} /> Administrator
+                  </span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-secondary)" }}>Branch Scope</span>
+                  <span style={{ fontSize: 11.5, color: "var(--text-primary)", fontWeight: 500 }}>All Branches (HQ)</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-secondary)" }}>Permissions</span>
+                  <span style={{ fontSize: 11.5, color: "var(--accent-green)", fontWeight: 600 }}>All {ALL_MODULES.length} Modules Pre-Granted</span>
+                </div>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 6 }}>
+                <button
+                  type="button"
+                  onClick={() => setIsAdminModalOpen(false)}
+                  disabled={addingAdmin}
+                  className="btn-ghost"
+                  style={{ height: 38, padding: "0 16px" }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={addingAdmin}
+                  className="btn-primary"
+                  style={{
+                    height: 38,
+                    padding: "0 20px",
+                    background: "linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%)",
+                    opacity: addingAdmin ? 0.7 : 1,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 7,
+                    border: "none",
+                  }}
+                >
+                  <Shield size={14} strokeWidth={2.2} />
+                  {addingAdmin ? "Adding Admin..." : "Add Admin"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </main>
   )
 }

@@ -9,8 +9,9 @@ const EMAIL_RE = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/
 const VALID_BUILTIN_ROLES: Role[] = ["admin", "agent", "viewer", "developer", "branch_manager"]
 
 async function getBaseRole(roleId: string): Promise<Role> {
-  if (VALID_BUILTIN_ROLES.includes(roleId as Role)) {
-    return roleId as Role
+  const norm = String(roleId || "").trim().toLowerCase()
+  if (VALID_BUILTIN_ROLES.includes(norm as Role)) {
+    return norm as Role
   }
   try {
     const res = await query(`SELECT config FROM form_configs WHERE id = 'custom_roles_config'`)
@@ -18,7 +19,7 @@ async function getBaseRole(roleId: string): Promise<Role> {
       // Case-insensitive on id AND label: "Admin" must resolve to the role
       // whose id is "admin" — a case mismatch let a crafted role name slip
       // past every gate and escalate at login time (2026-09-26 audit).
-      const needle = String(roleId).toLowerCase()
+      const needle = norm
       const found = res.rows[0].config.roles.find(
         (r: any) => String(r?.id || "").toLowerCase() === needle || String(r?.label || "").toLowerCase() === needle
       )
@@ -139,9 +140,9 @@ export async function POST(req: NextRequest) {
       `SELECT COUNT(*)::int AS n FROM allowed_emails WHERE role = 'admin' AND lower(email) != $1`,
       [email]
     )
-    if (existingAdmins.rows[0].n >= 1) {
+    if (existingAdmins.rows[0].n >= 5) {
       return NextResponse.json(
-        { error: "Only 2 admins are allowed in total (including the creator account). Remove the other admin first, or assign a different role." },
+        { error: "Maximum number of admin accounts (5) reached. Remove an existing admin first, or assign a different role." },
         { status: 400 }
       )
     }
@@ -278,8 +279,8 @@ export async function PATCH(req: NextRequest) {
     const currentBase = current.rowCount ? await getBaseRole(current.rows[0].role) : null
     if (newBase !== currentBase && newBase === "admin") {
       const others = await query(`SELECT COUNT(*)::int AS n FROM allowed_emails WHERE role = 'admin' AND lower(email) != $1`, [email])
-      if (others.rows[0].n >= 1) {
-        return NextResponse.json({ error: "Only 2 admins are allowed in total. Remove the other admin first." }, { status: 400 })
+      if (others.rows[0].n >= 5) {
+        return NextResponse.json({ error: "Maximum number of admin accounts (5) reached. Remove an existing admin first." }, { status: 400 })
       }
     }
     if (newBase !== currentBase && newBase === "developer") {
