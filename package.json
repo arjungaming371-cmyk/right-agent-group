@@ -1,6 +1,9 @@
 {
   "name": "right-agent-group",
   "version": "1.0.0",
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "private": true,
   "scripts": {
     "dev": "next dev -p 3000",

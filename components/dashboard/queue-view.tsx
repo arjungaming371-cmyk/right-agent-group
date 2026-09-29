@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useState, useCallback, useMemo } from "react"
 import {
   PhoneCall, Phone, MessageCircle, Zap, XCircle, RotateCcw, Download, Play,
   Pause, ListChecks, Clock, ShieldAlert, RefreshCw,
@@ -101,6 +101,17 @@ export default function QueueView({ role }: { role: Role }) {
   const planned = done + g("pending")
   const pct = planned > 0 ? Math.round((done / planned) * 100) : 0
   const running = !!run?.running
+
+  // Repeat-contact badge data: how many rows in the CURRENT view share each
+  // phone. We deliberately do NOT merge/dedup rows — every row is a real
+  // queued call (originals, retries, re-queues) that the runner will honor,
+  // so hiding "duplicates" would misrepresent the queue. The badge just
+  // makes repeats visible at a glance.
+  const phoneCounts = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const i of shown) m.set(i.phone, (m.get(i.phone) || 0) + 1)
+    return m
+  }, [shown])
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
@@ -233,21 +244,17 @@ export default function QueueView({ role }: { role: Role }) {
     setActing(false)
   }
 
-  async function requeueSelected() {
-    const requeueable = selectedIds.filter((id) => {
-      const item = items.find((i) => i.id === id)
-      return item && isRequeueable(item.status)
-    })
-    if (!requeueable.length) {
-      toast.info("Select failed, cancelled, or skipped rows to re-queue")
-      return
-    }
+  // Shared re-queue worker: takes explicit queue-row ids, pushes them back
+  // to pending (the server re-validates every status), reports the honest
+  // count from the response.
+  async function requeueIds(ids: string[]) {
+    if (!ids.length) return
     setActing(true)
     try {
       const res = await fetch("/api/outbound/queue/requeue", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids: requeueable }),
+        body: JSON.stringify({ ids }),
       })
       const d = await res.json()
       if (res.ok) toast.success(`Re-queued ${d.requeuedCount} call${d.requeuedCount === 1 ? "" : "s"}`)
@@ -258,6 +265,30 @@ export default function QueueView({ role }: { role: Role }) {
     setSelectedIds([])
     await load(true)
     setActing(false)
+  }
+
+  async function requeueSelected() {
+    const requeueable = selectedIds.filter((id) => {
+      const item = items.find((i) => i.id === id)
+      return item && isRequeueable(item.status)
+    })
+    if (!requeueable.length) {
+      toast.info("Select failed, cancelled, or skipped rows to re-queue")
+      return
+    }
+    await requeueIds(requeueable)
+  }
+
+  // "Resume" path for a drained queue: when nothing is pending, a silently
+  // disabled Start button teaches nothing — offer the one-click bulk
+  // re-queue of every requeueable row already loaded. The listing fetch is
+  // capped at 200 rows, so this acts on exactly what the table shows; click
+  // again after reload for any remainder beyond the cap.
+  const requeueableItems = useMemo(() => items.filter((i) => isRequeueable(i.status)), [items])
+  async function requeueAllLoaded() {
+    if (!requeueableItems.length) return
+    if (!confirm(`Re-queue ${requeueableItems.length} failed/cancelled/skipped call(s)? They go back to pending in scheduled order.`)) return
+    await requeueIds(requeueableItems.map((i) => i.id))
   }
 
   async function dialNow(item: QueueItem) {
@@ -355,9 +386,25 @@ export default function QueueView({ role }: { role: Role }) {
                   <Pause size={14} strokeWidth={2} /> Stop Campaign
                 </button>
               ) : (
-                <button onClick={() => campaign("start")} disabled={acting || g("pending") === 0} className="btn-primary" style={{ height: 38 }}>
-                  <Play size={14} strokeWidth={2} fill="currentColor" /> Start Campaign (×{settings?.concurrency ?? 1})
-                </button>
+                <>
+                  <button
+                    onClick={() => campaign("start")}
+                    disabled={acting || g("pending") === 0}
+                    className="btn-primary"
+                    style={{ height: 38 }}
+                    title={g("pending") === 0 ? "Nothing pending to dial" : undefined}
+                  >
+                    <Play size={14} strokeWidth={2} fill="currentColor" /> Start Campaign (×{settings?.concurrency ?? 1})
+                  </button>
+                  {g("pending") === 0 && canOperate && requeueableItems.length > 0 && (
+                    <button onClick={requeueAllLoaded} disabled={acting} className="btn-primary" style={{ height: 38 }} title="Push failed/cancelled/skipped calls back to pending, then Start Campaign">
+                      <RotateCcw size={14} strokeWidth={2} /> Re-queue {requeueableItems.length} call{requeueableItems.length === 1 ? "" : "s"}
+                    </button>
+                  )}
+                  {g("pending") === 0 && requeueableItems.length === 0 && (
+                    <span style={{ fontSize: 12, color: "var(--text-muted)" }}>Nothing pending — add leads from the Leads view or upload a CSV</span>
+                  )}
+                </>
               )
             )}
             {canOperate && (
@@ -387,8 +434,11 @@ export default function QueueView({ role }: { role: Role }) {
             onChange={(e) => setSettings(settings ? { ...settings, concurrency: Number(e.target.value) } : settings)}
             onMouseUp={(e) => canRunCampaign && patchSettings({ concurrency: Number((e.target as HTMLInputElement).value) })}
             onTouchEnd={(e) => canRunCampaign && patchSettings({ concurrency: Number((e.target as HTMLInputElement).value) })}
-            style={{ width: "100%", accentColor: "var(--accent-violet)", cursor: canRunCampaign ? "pointer" : "not-allowed", marginBottom: 12 }}
+            style={{ width: "100%", accentColor: "var(--accent-violet)", cursor: canRunCampaign ? "pointer" : "not-allowed", marginBottom: 8 }}
           />
+          <div style={{ fontSize: 11.5, color: "var(--text-muted)", lineHeight: 1.55, marginBottom: 12 }}>
+            ×N = calls dialed at the same time. Higher drains the queue faster, but holds N live provider lines at once (each billed per minute) and can flood you with simultaneous human handoffs — 1–3 is a sane start.
+          </div>
           <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "var(--text-secondary)", marginBottom: 8, cursor: canRunCampaign ? "pointer" : "default" }}>
             <input
               type="checkbox" checked={settings?.autoRetry ?? true} disabled={!canRunCampaign}
@@ -492,7 +542,17 @@ export default function QueueView({ role }: { role: Role }) {
                       </td>
                     )}
                     <td style={{ padding: "12px 14px" }}>
-                      <div style={{ fontWeight: 600, fontSize: 13.5 }}>{item.name || "Unknown"}</div>
+                      <div style={{ fontWeight: 600, fontSize: 13.5, display: "flex", alignItems: "center", gap: 6 }}>
+                        {item.name || "Unknown"}
+                        {(phoneCounts.get(item.phone) || 0) > 1 && (
+                          <span
+                            title={`This contact has ${phoneCounts.get(item.phone)} calls in the current view — originals, retries and re-queues are kept as separate rows so the queue stays auditable.`}
+                            style={{ fontSize: 10, fontWeight: 700, color: "var(--accent-yellow)", background: "rgba(234,179,8,0.10)", border: "1px solid rgba(234,179,8,0.28)", borderRadius: 5, padding: "1px 5px", flexShrink: 0 }}
+                          >
+                            ×{phoneCounts.get(item.phone)}
+                          </span>
+                        )}
+                      </div>
                       <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{item.phone}</div>
                     </td>
                     <td style={{ padding: "12px 14px" }}>

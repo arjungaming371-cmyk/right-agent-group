@@ -8,6 +8,7 @@ import {
   PhoneCall, Instagram, X, ExternalLink, Clock, CheckCircle2, ArrowRight
 } from "lucide-react"
 import { formatCurrency, timeAgo, formatDateTime } from "@/lib/utils"
+import { pctOf } from "@/lib/maths"
 import { usePolling } from "@/lib/use-poll"
 import { useToast } from "../ui/toast"
 import { Skeleton } from "../ui/skeleton"
@@ -427,6 +428,16 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
     const amt = Number(l.loan_amount)
     return s + (isFinite(amt) && amt > 0 ? amt : 0)
   }, 0)
+  // Qualified value = the same sum, but only for leads marked "qualified".
+  // The raw total is inflated by junk/test entries (a single ₹1,234Cr test
+  // lead once showed a ₹1,235Cr pipeline), so the tile leads with the
+  // qualified money and shows the total as context — qualified vs total.
+  const qualifiedValue = leads.reduce((s, l) => {
+    if (l.status !== "qualified") return s
+    const amt = Number(l.loan_amount)
+    return s + (isFinite(amt) && amt > 0 ? amt : 0)
+  }, 0)
+  const qualifiedPct = pctOf(qualifiedValue, pipelineValue)
   const interestedCount = leads.filter((l) => l.interested === "interested").length
 
   // Instagram prospect metrics:
@@ -501,12 +512,15 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
     else { const d = await res.json().catch(() => ({})); toast.error(d.error || "Could not add lead") }
   }
 
-  const Card = ({ label, value, icon: Icon, tone }: { label: string; value: string; icon: any; tone: string }) => (
+  const Card = ({ label, value, icon: Icon, tone, sub }: { label: string; value: string; icon: any; tone: string; sub?: string }) => (
     <div className="card" style={{ padding: "22px 24px", flex: 1 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
         <div>
           <div style={{ color: "var(--text-muted)", fontSize: 12.5, fontWeight: 500, marginBottom: 8, letterSpacing: "0.01em" }}>{label}</div>
           <div style={{ fontSize: 27, fontWeight: 700, color: "var(--text-primary)", letterSpacing: "-0.02em" }}>{value}</div>
+          {sub && (
+            <div style={{ fontSize: 11.5, fontWeight: 500, color: "var(--text-muted)", marginTop: 5, letterSpacing: "0.01em" }}>{sub}</div>
+          )}
         </div>
         <div style={{
           width: 42, height: 42, background: `${tone}1f`, border: `1px solid ${tone}33`,
@@ -551,8 +565,14 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-4">
           <Card label="Total Leads" value={totalLeads.toLocaleString()} icon={Users} tone="var(--accent-violet)" />
           <Card label="Interested" value={interestedCount.toLocaleString()} icon={Target} tone="var(--accent-cyan)" />
-          <Card label="Pipeline Value" value={formatCurrency(pipelineValue)} icon={IndianRupee} tone="var(--accent-yellow)" />
-          <Card label="Qualified" value={qualified.toLocaleString()} icon={BadgeCheck} tone="var(--accent-green)" />
+          <Card
+            label="Pipeline Value"
+            value={formatCurrency(qualifiedValue)}
+            icon={IndianRupee}
+            tone="var(--accent-yellow)"
+            sub={`Qualified · of ${formatCurrency(pipelineValue)} total (${qualifiedPct}%)`}
+          />
+          <Card label="Qualified Leads" value={qualified.toLocaleString()} icon={BadgeCheck} tone="var(--accent-green)" />
         </div>
       )}
 
