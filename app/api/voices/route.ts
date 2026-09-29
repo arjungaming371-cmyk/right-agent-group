@@ -44,6 +44,31 @@ export async function GET(req: NextRequest) {
       listCartesiaVoices(),
     ])
 
+    if (sarvamKey) {
+      try {
+        const sarvamRes = await fetch("https://api.sarvam.ai/voices", {
+          headers: { "api-subscription-key": sarvamKey },
+          signal: AbortSignal.timeout(5000),
+        })
+        if (sarvamRes.ok) {
+          const sdata = await sarvamRes.json()
+          const sVoices = sdata?.data?.voices || []
+          for (const sv of sVoices) {
+            const lang = (sv.language || "").startsWith("hi") ? "hindi" : (sv.language || "").startsWith("en") ? "english" : "telugu"
+            const gender = (sv.gender === "male" || sv.gender === "female") ? sv.gender : "female"
+            await query(
+              `INSERT INTO custom_voices
+                 (org_id, provider, voice_id, name, gender, primary_language, cloned, consent_confirmed, consent_note, is_active)
+               VALUES ((SELECT id FROM organizations ORDER BY created_at LIMIT 1), 'sarvam', $1, $2, $3, $4, true, true, 'synced from Sarvam', true)
+               ON CONFLICT (provider, voice_id) DO UPDATE
+                 SET name = EXCLUDED.name, is_active = true, updated_at = now()`,
+              [sv.id, sv.name || "Custom Voice", gender, lang]
+            ).catch(() => {})
+          }
+        }
+      } catch {}
+    }
+
     const customRes = await query(
       `SELECT id, provider, voice_id, name, gender, primary_language, description,
               sample_text, consent_confirmed, consent_note, created_by, created_at

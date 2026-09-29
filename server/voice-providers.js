@@ -428,10 +428,15 @@ async function sarvamTts(text, language, speakerOverride) {
 async function sarvamCloneTts(text, language, cloneVoiceId) {
   const locale = resolveTtsLocale(text, language, SARVAM_TTS_LOCALES)
   const t0 = Date.now()
+  const form = new FormData()
+  form.append("voice_id", cloneVoiceId)
+  form.append("text", text)
+  form.append("language_code", locale)
+
   const res = await fetchWithRetry(`${SARVAM_BASE}/voices/clone`, {
     method: "POST",
-    headers: { "api-subscription-key": SARVAM_API_KEY, "Content-Type": "application/json" },
-    body: JSON.stringify({ voice_id: cloneVoiceId, text, language_code: locale }),
+    headers: { "api-subscription-key": SARVAM_API_KEY },
+    body: form,
     signal: AbortSignal.timeout(30000),
   })
   const ctype = res.headers.get("content-type") || ""
@@ -440,7 +445,7 @@ async function sarvamCloneTts(text, language, cloneVoiceId) {
     wav = Buffer.from(await res.arrayBuffer())
   } else {
     const data = await res.json().catch(() => null)
-    const b64 = Array.isArray(data?.audios) ? data.audios.join("") : (data?.audio || "")
+    const b64 = data?.audio_b64 || data?.audio || (Array.isArray(data?.audios) ? data.audios.join("") : "")
     wav = Buffer.from(b64, "base64")
   }
   if (wav.length < 100) throw new Error("Sarvam clone synthesis returned empty audio")

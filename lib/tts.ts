@@ -52,14 +52,15 @@ async function sarvamSpeech(text: string, language: Language, speakerOverride?: 
   // the clone-synthesis endpoint, not Bulbul's preset-speaker endpoint.
   if (speakerOverride && speakerOverride.startsWith("svc-")) {
     try {
+      const form = new FormData()
+      form.append("voice_id", speakerOverride)
+      form.append("text", text)
+      form.append("language_code", SARVAM_LOCALES[language] || SARVAM_LOCALES.english)
+
       const res = await fetch(`${SARVAM_BASE}/voices/clone`, {
         method: "POST",
-        headers: { "api-subscription-key": SARVAM_API_KEY, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          voice_id: speakerOverride,
-          text,
-          language_code: SARVAM_LOCALES[language] || SARVAM_LOCALES.english,
-        }),
+        headers: { "api-subscription-key": SARVAM_API_KEY },
+        body: form,
         signal: AbortSignal.timeout(25000),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`)
@@ -68,8 +69,8 @@ async function sarvamSpeech(text: string, language: Language, speakerOverride?: 
         const wav = Buffer.from(await res.arrayBuffer())
         return wav.length > 100 ? wav : null
       }
-      const data = (await res.json().catch(() => null)) as { audios?: string[]; audio?: string } | null
-      const b64 = Array.isArray(data?.audios) ? data!.audios!.join("") : data?.audio || ""
+      const data = (await res.json().catch(() => null)) as { audio_b64?: string; audios?: string[]; audio?: string } | null
+      const b64 = data?.audio_b64 || data?.audio || (Array.isArray(data?.audios) ? data!.audios!.join("") : "")
       const wav = Buffer.from(b64, "base64")
       return wav.length > 100 ? wav : null
     } catch (e) {

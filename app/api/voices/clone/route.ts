@@ -63,13 +63,25 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       )
     }
-    const mime = file.type || "audio/wav"
-    if (!ALLOWED_MIME.includes(mime)) {
-      return NextResponse.json({ error: `Unsupported audio type "${mime}" — use WAV, MP3, or M4A` }, { status: 400 })
+    const rawMime = file.type || "audio/wav"
+    const mime = rawMime.split(";")[0].trim().toLowerCase()
+    const nameLower = (file.name || "").toLowerCase()
+    const isAllowed =
+      ALLOWED_MIME.includes(mime) ||
+      mime === "audio/ogg" ||
+      mime === "audio/aac" ||
+      nameLower.endsWith(".wav") ||
+      nameLower.endsWith(".mp3") ||
+      nameLower.endsWith(".m4a") ||
+      nameLower.endsWith(".webm") ||
+      nameLower.endsWith(".ogg") ||
+      nameLower.endsWith(".aac")
+    if (!isAllowed) {
+      return NextResponse.json({ error: `Unsupported audio type "${rawMime}" — use WAV, MP3, M4A, or WebM` }, { status: 400 })
     }
     const audio = Buffer.from(await file.arrayBuffer())
     if (audio.length < 20_000) {
-      return NextResponse.json({ error: "Sample too short — record at least 10 seconds of clean speech" }, { status: 400 })
+      return NextResponse.json({ error: "Sample too short — please record or upload at least 5 to 10 seconds of clear speech" }, { status: 400 })
     }
     if (audio.length > MAX_AUDIO_BYTES) {
       return NextResponse.json({ error: "Sample too large (max 10 MB) — 10 to 60 seconds is plenty" }, { status: 413 })

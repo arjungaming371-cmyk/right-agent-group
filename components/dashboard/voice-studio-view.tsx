@@ -89,7 +89,7 @@ export default function VoiceStudioView({ role }: { role: Role }) {
   const blobRef = useRef<string | null>(null)
 
   // Clone Lab state
-  const [cloneProvider, setCloneProvider] = useState<VoiceProvider>("cartesia")
+  const [cloneProvider, setCloneProvider] = useState<VoiceProvider>("sarvam")
   const [cloneName, setCloneName] = useState("")
   const [cloneGender, setCloneGender] = useState<VoiceGender>("female")
   const [cloneLang, setCloneLang] = useState<VoiceLanguage>("telugu")
@@ -420,8 +420,8 @@ export default function VoiceStudioView({ role }: { role: Role }) {
               <label style={{ fontSize: 12, color: "var(--text-secondary)", display: "flex", flexDirection: "column", gap: 5 }}>
                 Provider
                 <select value={cloneProvider} onChange={(e) => setCloneProvider(e.target.value as VoiceProvider)} className={inputCls}>
-                  <option value="cartesia" disabled={!catalog?.keys.cartesia}>Cartesia — instant clone {catalog?.keys.cartesia ? "" : "(key missing)"}</option>
-                  <option value="sarvam" disabled={!catalog?.keys.sarvam}>Sarvam — if enabled on your key {catalog?.keys.sarvam ? "" : "(key missing)"}</option>
+                  <option value="sarvam" disabled={!catalog?.keys.sarvam}>Sarvam AI (Indian Languages & Telugu/Hindi — Ready)</option>
+                  <option value="cartesia" disabled={!catalog?.keys.cartesia}>Cartesia (Requires Paid Plan)</option>
                 </select>
               </label>
               <label style={{ fontSize: 12, color: "var(--text-secondary)", display: "flex", flexDirection: "column", gap: 5 }}>
@@ -447,19 +447,24 @@ export default function VoiceStudioView({ role }: { role: Role }) {
               <UploadCloud size={22} strokeWidth={1.6} style={{ color: "var(--text-muted)" }} />
               <label className="btn-ghost" style={{ height: 34, cursor: "pointer" }}>
                 <UploadCloud size={14} strokeWidth={2} /> Choose audio file
-                <input type="file" accept="audio/wav,audio/x-wav,audio/mpeg,audio/mp4,audio/x-m4a,audio/webm" style={{ display: "none" }}
+                <input type="file" accept="audio/wav,audio/x-wav,audio/mpeg,audio/mp3,audio/mp4,audio/x-m4a,audio/webm" style={{ display: "none" }}
                   onChange={(e) => setFile(e.target.files?.[0] || null)} />
               </label>
               <button onClick={toggleRecording} className={recording ? "btn-ghost" : "btn-primary"} style={{ height: 34, color: recording ? "var(--accent-red)" : undefined }}>
-                {recording ? <><Square size={13} fill="currentColor" /> Stop ({recordSecs}s)</> : <><Mic size={14} strokeWidth={2} /> Record with microphone</>}
+                {recording ? <><Square size={13} fill="currentColor" /> Stop Recording ({recordSecs}s)</> : <><Mic size={14} strokeWidth={2} /> Record with microphone</>}
               </button>
-              {file && (
+              {recording && (
+                <div style={{ fontSize: 12, color: recordSecs < 10 ? "var(--accent-yellow)" : "var(--accent-green)", fontWeight: 600 }}>
+                  {recordSecs < 10 ? `Recording in progress... (${recordSecs}s / 10s minimum)` : `Good length (${recordSecs}s) — speak up to 60s, then click Stop`}
+                </div>
+              )}
+              {file && !recording && (
                 <div style={{ fontSize: 12, color: "var(--accent-green)", fontWeight: 600 }}>
                   ✓ {file.name} ({Math.round(file.size / 1024)} KB)
                 </div>
               )}
               <div style={{ fontSize: 11, color: "var(--text-muted)", textAlign: "center" }}>
-                10–60 seconds of clean speech, WAV / MP3 / M4A. The sample is sent to the provider for cloning and then discarded — it is never stored on our servers.
+                10–60 seconds of clean speech (WAV, MP3, M4A, or WebM). The sample is sent to the provider for cloning and then discarded — it is never stored on our servers.
               </div>
             </div>
 

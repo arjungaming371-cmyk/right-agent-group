@@ -270,9 +270,11 @@ export async function cartesiaCloneVoice(input: CloneInput): Promise<{ voiceId: 
   const key = await getCartesiaKey()
   if (!key) throw new VoiceProviderError("CARTESIA_API_KEY is not set (Security → System Keys)", 503)
   const form = new FormData()
-  form.append("clip", new Blob([new Uint8Array(input.audio)], { type: input.audioMime }), "sample.wav")
+  const mime = (input.audioMime || "audio/wav").split(";")[0].trim().toLowerCase()
+  const ext = mime.includes("webm") ? "sample.webm" : mime.includes("mp3") || mime.includes("mpeg") ? "sample.mp3" : "sample.wav"
+  form.append("clip", new Blob([new Uint8Array(input.audio)], { type: mime }), ext)
   form.append("name", input.name)
-  form.append("language", SARVAM_LOCALES[input.language])
+  form.append("language", SARVAM_LOCALES[input.language] || "te-IN")
   if (input.description) form.append("description", input.description.slice(0, 300))
   const res = await fetch(`${CARTESIA_BASE}/voices/clone`, {
     method: "POST",
@@ -280,9 +282,22 @@ export async function cartesiaCloneVoice(input: CloneInput): Promise<{ voiceId: 
     body: form,
     signal: AbortSignal.timeout(60000),
   })
+  if (res.status === 402) {
+    throw new VoiceProviderError(
+      "Cartesia voice cloning requires a paid plan (HTTP 402: plan_upgrade_required). Please upgrade at https://play.cartesia.ai/subscription or use Sarvam voice cloning (ready on your account).",
+      400
+    )
+  }
   if (!res.ok) {
-    const detail = (await res.text().catch(() => "")).slice(0, 200)
-    throw new VoiceProviderError(`Cartesia clone failed: HTTP ${res.status}${detail ? ` — ${detail}` : ""}`)
+    const raw = await res.text().catch(() => "")
+    let msg = `Cartesia clone failed: HTTP ${res.status}`
+    try {
+      const parsed = JSON.parse(raw)
+      if (parsed?.message) msg = `Cartesia: ${parsed.message}`
+    } catch {
+      if (raw) msg += ` — ${raw.slice(0, 200)}`
+    }
+    throw new VoiceProviderError(msg, res.status >= 500 ? 502 : 400)
   }
   const data = (await res.json()) as { id?: string }
   if (!data?.id) throw new VoiceProviderError("Cartesia clone returned no voice id")
@@ -291,52 +306,72 @@ export async function cartesiaCloneVoice(input: CloneInput): Promise<{ voiceId: 
 }
 
 /**
- * Clone via Sarvam (operator-provided spec: POST /voices/create, multipart
- * file field). Sarvam gates cloning per key tier — a 403/404 maps to a clear
- * message so the UI can steer the operator to Cartesia instead of failing
- * cryptically.
+ * Clone via Sarvam (POST /voices/create, multipart form).
+ * Fields: 'file' (audio clip 5-60s), 'name' (1-100 chars), 'language' (BCP-47 e.g. 'te-IN').
  */
 export async function sarvamCloneVoice(input: CloneInput): Promise<{ voiceId: string }> {
   const key = await getSarvamKey()
   if (!key) throw new VoiceProviderError("SARVAM_API_KEY is not set (Security → System Keys)", 503)
   const form = new FormData()
-  form.append("file", new Blob([new Uint8Array(input.audio)], { type: input.audioMime }), "sample.wav")
-  if (input.name) form.append("voice_name", input.name)
+  const mime = (input.audioMime || "audio/wav").split(";")[0].trim().toLowerCase()
+  const ext = mime.includes("webm") ? "sample.webm" : mime.includes("mp3") || mime.includes("mpeg") ? "sample.mp3" : "sample.wav"
+  form.append("file", new Blob([new Uint8Array(input.audio)], { type: mime }), ext)
+  form.append("name", input.name.trim().slice(0, 80))
+  form.append("language", SARVAM_LOCALES[input.language] || "te-IN")
+  if (input.description) form.append("description", input.description.slice(0, 300))
+
   const res = await fetch(`${SARVAM_BASE}/voices/create`, {
     method: "POST",
     headers: { "api-subscription-key": key },
     body: form,
     signal: AbortSignal.timeout(60000),
   })
+
   if (res.status === 403 || res.status === 404) {
     throw new VoiceProviderError(
-      "Sarvam voice cloning is not enabled for this API key (HTTP " + res.status + ") — use Cartesia cloning, or enable cloning on your Sarvam plan",
+      "Sarvam voice cloning is not enabled for this API key (HTTP " + res.status + ") — please check your Sarvam plan permissions",
       400
     )
   }
   if (!res.ok) {
-    const detail = (await res.text().catch(() => "")).slice(0, 200)
-    throw new VoiceProviderError(`Sarvam clone failed: HTTP ${res.status}${detail ? ` — ${detail}` : ""}`)
+    const raw = await res.text().catch(() => "")
+    let msg = `Sarvam clone failed: HTTP ${res.status}`
+    try {
+      const parsed = JSON.parse(raw)
+      const err = parsed?.error || parsed
+      if (err?.message) {
+        msg = `Sarvam: ${err.message}`
+        if (Array.isArray(err.failure_reasons) && err.failure_reasons.length) {
+          msg += ` (${err.failure_reasons.join("; ")})`
+        }
+      }
+    } catch {
+      if (raw) msg += ` — ${raw.slice(0, 200)}`
+    }
+    throw new VoiceProviderError(msg, res.status >= 500 ? 502 : 400)
   }
-  const data = (await res.json()) as { voice_id?: string; id?: string }
-  const voiceId = data?.voice_id || data?.id
-  if (!voiceId) throw new VoiceProviderError("Sarvam clone returned no voice id")
+
+  const data = (await res.json()) as { status?: string; data?: { voice_id?: string }; voice_id?: string; id?: string }
+  const voiceId = data?.data?.voice_id || data?.voice_id || data?.id
+  if (!voiceId) throw new VoiceProviderError("Sarvam clone succeeded but returned no voice id")
   return { voiceId }
 }
 
 /**
  * Synthesize through a Sarvam CLONED voice (voice ids look like "svc-...").
- * Per the operator-provided spec: POST /voices/clone { voice_id, text,
- * language_code }. The response envelope is handled liberally (audios[] like
- * Bulbul, bare audio base64, or binary bytes) because Sarvam's clone synthesis
- * response shape is the least documented part of their API — every known
- * shape decodes, anything else fails loudly with the first bytes quoted.
+ * Endpoint: POST /voices/clone (multipart/form-data: voice_id, text, language_code).
+ * Returns base64 audio in `audio_b64` envelope or raw audio bytes.
  */
 async function sarvamCloneSynthesize(clean: string, language: VoiceLanguage, voiceId: string, key: string): Promise<Buffer> {
+  const form = new FormData()
+  form.append("voice_id", voiceId)
+  form.append("text", clean)
+  form.append("language_code", SARVAM_LOCALES[language] || "te-IN")
+
   const res = await fetch(`${SARVAM_BASE}/voices/clone`, {
     method: "POST",
-    headers: { "api-subscription-key": key, "Content-Type": "application/json" },
-    body: JSON.stringify({ voice_id: voiceId, text: clean, language_code: SARVAM_LOCALES[language] }),
+    headers: { "api-subscription-key": key },
+    body: form,
     signal: AbortSignal.timeout(30000),
   })
   if (!res.ok) {
@@ -349,8 +384,8 @@ async function sarvamCloneSynthesize(clean: string, language: VoiceLanguage, voi
     if (wav.length >= 100) return wav
     throw new VoiceProviderError("Sarvam clone synthesis returned empty audio")
   }
-  const data = (await res.json().catch(() => null)) as { audios?: string[]; audio?: string } | null
-  const b64 = Array.isArray(data?.audios) ? data!.audios!.join("") : data?.audio || ""
+  const data = (await res.json().catch(() => null)) as { audio_b64?: string; audios?: string[]; audio?: string } | null
+  const b64 = data?.audio_b64 || data?.audio || (Array.isArray(data?.audios) ? data!.audios!.join("") : "")
   const wav = Buffer.from(b64, "base64")
   if (wav.length < 100) throw new VoiceProviderError("Sarvam clone synthesis returned empty audio")
   return wav
@@ -364,18 +399,37 @@ export async function deleteCustomVoice(rowId: string): Promise<{ providerDelete
   )
   const row = res.rows[0] as { provider: VoiceProvider; voice_id: string } | undefined
   if (!row) throw new VoiceProviderError("Voice not found", 404)
-  if (row.provider !== "cartesia") return { providerDelete: "skipped" }
-  try {
-    const key = await getCartesiaKey()
-    if (!key) return { providerDelete: "skipped" }
-    const del = await fetch(`${CARTESIA_BASE}/voices/${encodeURIComponent(row.voice_id)}`, {
-      method: "DELETE",
-      headers: { "X-API-Key": key, "Authorization": `Bearer ${key}`, "Cartesia-Version": CARTESIA_VERSION },
-      signal: AbortSignal.timeout(15000),
-    })
-    clearCartesiaCache()
-    return { providerDelete: del.ok || del.status === 404 ? "done" : "failed" }
-  } catch {
-    return { providerDelete: "failed" }
+
+  if (row.provider === "cartesia") {
+    try {
+      const key = await getCartesiaKey()
+      if (!key) return { providerDelete: "skipped" }
+      const del = await fetch(`${CARTESIA_BASE}/voices/${encodeURIComponent(row.voice_id)}`, {
+        method: "DELETE",
+        headers: { "X-API-Key": key, "Authorization": `Bearer ${key}`, "Cartesia-Version": CARTESIA_VERSION },
+        signal: AbortSignal.timeout(15000),
+      })
+      clearCartesiaCache()
+      return { providerDelete: del.ok || del.status === 404 ? "done" : "failed" }
+    } catch {
+      return { providerDelete: "failed" }
+    }
   }
+
+  if (row.provider === "sarvam") {
+    try {
+      const key = await getSarvamKey()
+      if (!key) return { providerDelete: "skipped" }
+      const del = await fetch(`${SARVAM_BASE}/voices/delete/${encodeURIComponent(row.voice_id)}`, {
+        method: "DELETE",
+        headers: { "api-subscription-key": key },
+        signal: AbortSignal.timeout(15000),
+      })
+      return { providerDelete: del.ok || del.status === 204 || del.status === 404 ? "done" : "failed" }
+    } catch {
+      return { providerDelete: "failed" }
+    }
+  }
+
+  return { providerDelete: "skipped" }
 }
