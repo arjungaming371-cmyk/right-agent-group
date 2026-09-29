@@ -715,20 +715,20 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
             })}
           </div>
           {/* Single compact filter row */}
-          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-            <div style={{ position: "relative", width: scopeTab === "social" ? 240 : 210, display: "flex", alignItems: "center" }}>
-              <Search size={12.5} style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
+          <div style={{ display: "flex", gap: 7, alignItems: "center", flexWrap: "wrap" }}>
+            <div style={{ position: "relative", width: scopeTab === "social" ? 250 : 220, display: "flex", alignItems: "center" }}>
+              <Search size={13} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
               <input
                 placeholder={scopeTab === "social" ? "Search @handle, name, phone…" : "Search name, phone, code…"}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                style={{ width: "100%", height: 30, fontSize: 12, paddingLeft: 28, paddingRight: 30 }}
+                style={{ width: "100%", height: 34, fontSize: 12.5, paddingLeft: 30, paddingRight: 32 }}
               />
-              <div style={{ position: "absolute", right: 2, top: "50%", transform: "translateY(-50%)" }}>
+              <div style={{ position: "absolute", right: 3, top: "50%", transform: "translateY(-50%)" }}>
                 <VoiceDictation
                   onTranscript={(spoken) => setSearch(prev => (prev ? `${prev} ${spoken}` : spoken))}
-                  size={13}
-                  style={{ width: 26, height: 26, border: "none", background: "transparent" }}
+                  size={14}
+                  style={{ width: 28, height: 28, border: "none", background: "transparent" }}
                   title="Speak to search leads"
                 />
               </div>
@@ -736,38 +736,66 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
 
             {scopeTab === "social" ? (
               <>
-                <select value={socialPhoneFilter} onChange={(e) => setSocialPhoneFilter(e.target.value as any)} style={{ height: 30, fontSize: 11.5, width: 165 }}>
+                <select
+                  value={socialPhoneFilter}
+                  onChange={(e) => setSocialPhoneFilter(e.target.value as any)}
+                  style={{ height: 34, padding: "0 26px 0 10px", fontSize: 12.5, width: 180, borderRadius: 8, background: "var(--bg-secondary)", color: "var(--text-primary)", border: "1px solid var(--border)", lineHeight: "32px" }}
+                >
                   <option value="all">All Phone Statuses</option>
                   <option value="detected">🟢 Phone Detected (Ready)</option>
                   <option value="missing">⏳ Awaiting Phone</option>
                 </select>
-                <select value={socialChannelFilter} onChange={(e) => setSocialChannelFilter(e.target.value as any)} style={{ height: 30, fontSize: 11.5, width: 135 }}>
+                <select
+                  value={socialChannelFilter}
+                  onChange={(e) => setSocialChannelFilter(e.target.value as any)}
+                  style={{ height: 34, padding: "0 26px 0 10px", fontSize: 12.5, width: 150, borderRadius: 8, background: "var(--bg-secondary)", color: "var(--text-primary)", border: "1px solid var(--border)", lineHeight: "32px" }}
+                >
                   <option value="all">All Channels</option>
                   <option value="dm">💬 Direct Messages</option>
                   <option value="comment">💬 Post Comments</option>
                 </select>
-                <select value={loanTypeFilter} onChange={(e) => setLoanTypeFilter(e.target.value)} style={{ height: 30, fontSize: 11.5, width: 130 }}>
+                <select
+                  value={loanTypeFilter}
+                  onChange={(e) => setLoanTypeFilter(e.target.value)}
+                  style={{ height: 34, padding: "0 26px 0 10px", fontSize: 12.5, width: 145, borderRadius: 8, background: "var(--bg-secondary)", color: "var(--text-primary)", border: "1px solid var(--border)", lineHeight: "32px" }}
+                >
                   <option value="all">All Products</option>
                   {LOAN_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
                 </select>
               </>
             ) : (
               <>
-                <select value={ageFilter} onChange={(e) => setAgeFilter(e.target.value)} style={{ height: 30, fontSize: 11.5, width: 100 }}>
+                <select
+                  value={ageFilter}
+                  onChange={(e) => setAgeFilter(e.target.value)}
+                  style={{ height: 34, padding: "0 26px 0 10px", fontSize: 12.5, width: 115, borderRadius: 8, background: "var(--bg-secondary)", color: "var(--text-primary)", border: "1px solid var(--border)", lineHeight: "32px" }}
+                >
                   <option value="all">All Ages</option>
                   <option value="new">New (7d)</option>
                   <option value="old">Older</option>
                 </select>
-                <select value={amountFilter} onChange={(e) => setAmountFilter(e.target.value)} style={{ height: 30, fontSize: 11.5, width: 120 }}>
+                <select
+                  value={amountFilter}
+                  onChange={(e) => setAmountFilter(e.target.value)}
+                  style={{ height: 34, padding: "0 26px 0 10px", fontSize: 12.5, width: 135, borderRadius: 8, background: "var(--bg-secondary)", color: "var(--text-primary)", border: "1px solid var(--border)", lineHeight: "32px" }}
+                >
                   <option value="all">All Amounts</option>
                   <option value="high">High (≥ ₹10L)</option>
                   <option value="low">Low (&lt; ₹10L)</option>
                 </select>
-                <select value={loanTypeFilter} onChange={(e) => setLoanTypeFilter(e.target.value)} style={{ height: 30, fontSize: 11.5, width: 130 }}>
+                <select
+                  value={loanTypeFilter}
+                  onChange={(e) => setLoanTypeFilter(e.target.value)}
+                  style={{ height: 34, padding: "0 26px 0 10px", fontSize: 12.5, width: 150, borderRadius: 8, background: "var(--bg-secondary)", color: "var(--text-primary)", border: "1px solid var(--border)", lineHeight: "32px" }}
+                >
                   <option value="all">All Loan Types</option>
                   {LOAN_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
                 </select>
-                <select value={interestedFilter} onChange={(e) => setInterestedFilter(e.target.value)} style={{ height: 30, fontSize: 11.5, width: 120 }}>
+                <select
+                  value={interestedFilter}
+                  onChange={(e) => setInterestedFilter(e.target.value)}
+                  style={{ height: 34, padding: "0 26px 0 10px", fontSize: 12.5, width: 135, borderRadius: 8, background: "var(--bg-secondary)", color: "var(--text-primary)", border: "1px solid var(--border)", lineHeight: "32px" }}
+                >
                   <option value="all">All Statuses</option>
                   <option value="interested">Interested</option>
                   <option value="not_interested">Not Interested</option>
@@ -789,19 +817,19 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
               }}
               title="Reset filters"
               className="icon-btn"
-              style={{ width: 30, height: 30 }}
-            ><RotateCcw size={13} strokeWidth={1.9} /></button>
+              style={{ width: 34, height: 34 }}
+            ><RotateCcw size={14} strokeWidth={1.9} /></button>
 
             {scopeTab === "social" && (
               <button
                 onClick={() => window.dispatchEvent(new CustomEvent("rag:navigate", { detail: { view: "instagram" } }))}
                 className="btn-ghost"
                 style={{
-                  height: 30,
+                  height: 34,
                   display: "inline-flex",
                   alignItems: "center",
-                  gap: 5,
-                  fontSize: 11.5,
+                  gap: 6,
+                  fontSize: 12,
                   fontWeight: 600,
                   color: "#e1306c",
                   borderColor: "rgba(225,48,108,0.3)",
@@ -809,18 +837,18 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                 }}
                 title="Open Instagram Chat engagement hub"
               >
-                <Instagram size={13} strokeWidth={2.2} /> Live IG Chat
+                <Instagram size={14} strokeWidth={2.2} /> Live IG Chat
               </button>
             )}
 
             {/* Spacer */}
             <div style={{ flex: 1 }} />
-            <div style={{ fontSize: 11.5, color: "var(--text-muted)" }}>{displayLeads.length} shown</div>
-            <a href="/api/leads/export" className="btn-ghost" style={{ height: 30, fontSize: 11.5, padding: "0 10px", textDecoration: "none" }} title="Export all leads as CSV">
+            <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{displayLeads.length} shown</div>
+            <a href="/api/leads/export" className="btn-ghost" style={{ height: 34, fontSize: 12, padding: "0 12px", textDecoration: "none" }} title="Export all leads as CSV">
               <Download size={13} strokeWidth={2} /> Export
             </a>
             {canEdit && scopeTab === "crm" && (
-              <button onClick={() => setShowAdd(true)} className="btn-primary" style={{ height: 30, fontSize: 11.5, padding: "0 12px" }}>
+              <button onClick={() => setShowAdd(true)} className="btn-primary" style={{ height: 34, fontSize: 12, padding: "0 14px" }}>
                 <Plus size={14} strokeWidth={2.2} /> Add Lead
               </button>
             )}
@@ -834,18 +862,18 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
             <tr style={{ borderBottom: "1px solid var(--border)" }}>
               {scopeTab === "crm" ? (
                 <>
-                  <th style={{ padding: "8px 6px 8px 12px", width: 36, textAlign: "left" }}>
+                  <th style={{ padding: "10px 8px 10px 12px", width: 36, textAlign: "left" }}>
                     {canEdit && displayLeads.length > 0 && (
                       <input type="checkbox" checked={allSelected} onChange={toggleAll} title="Select all shown leads" style={{ width: 14, height: 14, cursor: "pointer", accentColor: "var(--accent-violet)" }} />
                     )}
                   </th>
                   {["LEAD", "SCORE", "ADDRESS", "LOAN TYPE", "VALUE", "STATUS", "FORM", "CALLS", "UPDATED", "ACTIONS"].map((h) => (
-                    <th key={h} style={{ padding: "8px 10px", textAlign: h === "CALLS" ? "center" : "left", fontSize: 10.5, fontWeight: 600, color: "var(--text-muted)", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>{h}</th>
+                    <th key={h} style={{ padding: "10px 12px", textAlign: h === "CALLS" ? "center" : "left", fontSize: 11, fontWeight: 600, color: "var(--text-muted)", letterSpacing: "0.05em", whiteSpace: "nowrap" }}>{h}</th>
                   ))}
                 </>
               ) : (
                 ["PROSPECT / HANDLE", "CHANNEL", "DETECTED PHONE", "PRODUCT INTEREST", "LATEST INQUIRY", "LAST ACTIVE", "ACTIONS"].map((h) => (
-                  <th key={h} style={{ padding: "8px 10px", textAlign: "left", fontSize: 10.5, fontWeight: 600, color: "var(--text-muted)", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>{h}</th>
+                  <th key={h} style={{ padding: "10px 12px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "var(--text-muted)", letterSpacing: "0.05em", whiteSpace: "nowrap" }}>{h}</th>
                 ))
               )}
             </tr>
