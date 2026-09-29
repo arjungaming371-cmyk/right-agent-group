@@ -103,13 +103,35 @@ export const WA_CALLBACK_GREETINGS = DEFAULT_VOICE_OPENERS.whatsappCallback
 const GOODBYE_RE =
   /\b(goodbye|bye|bye[- ]?bye|take care)\b|have a (great|good|nice|wonderful) day|din shubh ho|phir milenge|alvida|manchi roju|selavu|veedkolu|अलविदा|फिर मिलेंगे|दिन शुभ हो|వీడ్కోలు|సెలవు|మంచి రోజు జరగాలి/i
 
-// CUSTOMER-side goodbye: when the CALLER says bye, the call is over — full
-// stop. Observed live: customer said "Thank you. Bye." and Priya kept
-// probing for a WhatsApp number, which reads as pushy and disrespectful.
-// \b keeps "bye" from matching inside other words; Telugu/Hindi phrases are
-// the common phone sign-offs ("I'll hang up now", "I'll take leave").
-const CUSTOMER_BYE_RE =
-  /\b(bye|goodbye|bye[- ]?bye|call you later|talk to you later|later bye|take care)\b|రేపు మాట్లాడుదాం|సెలవు|ఉంటాను మరి|పెట్టేస్తున్నాను|తర్వాత మాట్లాడుదాం|फोन रखत[ाी] हूँ?|रखत[ाी] हूँ?|बाद में बात करत[ाी] हूँ|अलविदा|बाय/i
+// CUSTOMER-side goodbye / no doubts: when the CALLER says bye or states they have
+// no more doubts, the call can conclude.
+// Comprehensive coverage across Telugu, Hindi, English, and Romanized forms.
+const CUSTOMER_BYE_RE = new RegExp(
+  '\\b(' +
+  'bye|goodbye|bye[- ]?bye|call you later|talk to you later|later bye|take care|thanks bye|thank you bye|' +
+  'no doubts?|no more doubts?|no questions?|all clear|everything clear|that is all|that\'s all|that is it|that\'s it|all good|done|' +
+  'nothing else|nothing more|nothing sir|nothing madam|no nothing|' +
+  'no thanks?|no thank you|no sir thanks|no madam thanks|' +
+  'em ledu|emi ledu|em ledhu|emi ledhu|em ledandi|emi ledandi|inka em ledu|inka emi ledu|inka em ledhu|inka emi ledhu|' +
+  'doubts? em levu|doubts? emi levu|doubts? levu|doubts? levandi|doubts? levu sir|inka doubts? levu|doubt em ledu|doubt emi ledu|doubt ledu|' +
+  'chalu|chalandi|chalu sir|avunu chalu|aithe chalu|ithe chalu|saripothundi|saripoddi|' +
+  'anthe|anthena|anthe sir|anthey|anthe andi|kavalsindi anthe|' +
+  'clear aindi|antha clear|antha clear aindi|clear ga undi|' +
+  'untanu|untanu sir|untanandi|untanu mari|sare untanu|inka untanu|selavu|veedkolu|' +
+  'phone pettestunna|phone pettestha|phone pettesthunna|phone cut chestunna|phone cut chestha|phone pettandi|phone cut cheyyandi|' +
+  'repu matladadam|tarvata matladadam|' +
+  'sare bye|ok bye|okay bye|sare thank you|ok thank you|' +
+  'koi doubt nahi|kuch nahi|nahi koi doubt nahi|sab clear hai|bas itna hi|itna hi|ho gaya|theek hai bye' +
+  ')\\b|' +
+  '^(no|no sir|no madam|ledu|ledu sir|ledu madam|ledandi|ledu andi|nahi|nahi sir|thank you|thanks|thank you sir|thanks sir|thank you madam|dhanyavadalu)[.!? ]*$|' +
+  '^(లేదు|లేదండి|లేదు సర్|ఏం లేదు|ఏమీ లేదు|ధన్యవాదాలు|థాంక్యూ)[.!? ]*$|' +
+  '\\b(sare|ok|okay)[\\s,]+(andi[\\s,]+)?(thank you|thanks)\\b|' +
+  'రేపు మాట్లాడుదాం|సెలవు|ఉంటాను మరి|ఉంటాను|ఉంటానండి|పెట్టేస్తున్నాను|తర్వాత మాట్లాడుదాం|ఫోన్ పెట్టేస్తున్నా|వీడ్కోలు|' +
+  'ఏం లేదు|ఏమీ లేదు|ఏం లేదండి|ఏమీ లేదండి|ఇంకేం లేదు|ఇంకేమీ లేదు|డౌట్స్ లేవు|డౌట్ లేదు|డౌట్స్ ఏమీ లేవు|డౌట్స్ ఏం లేవు|' +
+  'చాలు|చాలండి|అంతే|సరిపోతుంది|అంతా క్లియర్|క్లియర్ అయింది|సరే బాయ్|ఓకే బాయ్|బాయ్|' +
+  'अलविदा|बाय|कोई डाउट नहीं|कुछ नहीं|बस इतना ही|हो गया|फोन रख रहा हूँ|फोन रख रही हूँ',
+  'i'
+)
 
 // VOICEMAIL / ANSWERING MACHINE detection — checked ONLY on the very first
 // thing heard after an OUTBOUND greeting (history.length === 0). Deliberately
@@ -405,13 +427,18 @@ async function buildTurnInstructions(
     }
   }
 
-  // Enforce Spoken Brevity & Natural Closing
+  // Enforce Conversational Active Listening, Doubts Clarification, and Patient Flow
   merged = [
     merged,
-    `=== SPOKEN BREVITY & NATURAL CLOSING MANDATE ===
-- MAXIMUM 1 TO 2 SHORT SENTENCES ONLY (under 25 words total). Never monologue or speak long paragraphs.
-- If you have answered the customer or reached the end of the conversation, conclude with a warm, polite goodbye (e.g. "ధన్యవాదాలు sir, good day!" or "Have a great day sir, goodbye!") and STOP.
-- NEVER ask "ఇంకేమైనా help కావాలా sir?" or "anything else you need?" after wrapping up.`,
+    `=== CONVERSATIONAL ACTIVE LISTENING & DOUBTS CLARIFICATION (DO NOT HANG UP PREMATURELY) ===
+- You are on a live phone call. LISTEN PATIENTLY to the customer.
+- NEVER cut the call or say "Have a great day / Goodbye / Bye" after only one reply.
+- After answering any question, giving status, or confirming details, ALWAYS proactively ask if they have any doubts:
+  * Telugu: "మీకు లోన్ గురించి ఇంకా ఏమైనా doubts లేదా ప్రశ్నలు ఉన్నాయా sir?"
+  * English: "Do you have any other questions or doubts about your loan, sir?"
+  * Hindi: "क्या आपको लोन को लेकर कोई और सवाल या doubt है sir?"
+- Answer each doubt clearly and concisely (1 to 2 short sentences).
+- ONLY conclude and say goodbye when the customer explicitly says they have no more doubts or says bye (e.g. "no doubts", "emi ledu", "chalu", "bye", "thank you").`,
   ].filter(Boolean).join("\n\n")
 
   // KNOWLEDGE BASE: unlike the Lead Brain brief above, this runs on EVERY
@@ -716,7 +743,11 @@ export async function handleTurn(opts: {
   const completed = await completeLeadIfReady({ leadId, callSid, callerPhone, isWhatsAppCall, messages, reply, branchId })
   if (completed) return { text: getVoiceClosingsSnapshot().qualified[language], hangup: true }
 
-  return { text: reply, hangup: GOODBYE_RE.test(reply) }
+  const isCustomerEnding = CUSTOMER_BYE_RE.test((speech || "").trim())
+  const isPriyaEnding = GOODBYE_RE.test(reply)
+  const customerHasEnded = isCustomerEnding || history.some(h => (h.role === "user" || (h as any).role === "customer") && CUSTOMER_BYE_RE.test(h.content || ""))
+  const hangup = isCustomerEnding || (isPriyaEnding && customerHasEnded)
+  return { text: reply, hangup }
 }
 
 /**
@@ -828,5 +859,9 @@ export async function handleTurnStream(
     return { hangup: true }
   }
 
-  return { hangup: GOODBYE_RE.test(reply) }
+  const isCustomerEnding = CUSTOMER_BYE_RE.test((speech || "").trim())
+  const isPriyaEnding = GOODBYE_RE.test(reply)
+  const customerHasEnded = isCustomerEnding || history.some(h => (h.role === "user" || (h as any).role === "customer") && CUSTOMER_BYE_RE.test(h.content || ""))
+  const hangup = isCustomerEnding || (isPriyaEnding && customerHasEnded)
+  return { hangup }
 }
