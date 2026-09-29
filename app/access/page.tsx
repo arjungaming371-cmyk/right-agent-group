@@ -444,93 +444,9 @@ function AccessPageInner() {
 
               {/* Custom Role Name / Designation */}
               <div style={{ gridColumn: "span 1" }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6, flexWrap: "wrap", gap: 4 }}>
-                  <label style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", display: "block" }}>
-                    Role Name / Designation
-                  </label>
-                  <div style={{ display: "flex", gap: 5 }}>
-                    {(myRole === "admin" || myRole === "developer") && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setNewRoleTitle("Admin")
-                          setNewBaseRole("admin")
-                          setNewAllowedModules(ALL_MODULES.map((m) => m.key))
-                          setNewBranch("")
-                        }}
-                        style={{
-                          fontSize: 10.5,
-                          padding: "2px 7px",
-                          borderRadius: 4,
-                          border: "1px solid rgba(139,92,246,0.35)",
-                          background: newRoleTitle.toLowerCase() === "admin" ? "var(--accent-violet)" : "rgba(139,92,246,0.12)",
-                          color: newRoleTitle.toLowerCase() === "admin" ? "#fff" : "var(--accent-violet)",
-                          fontWeight: 700,
-                          cursor: "pointer",
-                        }}
-                      >
-                        Admin
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setNewRoleTitle("Loan Officer")
-                        setNewBaseRole("agent")
-                      }}
-                      style={{
-                        fontSize: 10.5,
-                        padding: "2px 7px",
-                        borderRadius: 4,
-                        border: "1px solid var(--border)",
-                        background: newRoleTitle === "Loan Officer" ? "var(--accent-blue)" : "transparent",
-                        color: newRoleTitle === "Loan Officer" ? "#fff" : "var(--text-muted)",
-                        fontWeight: 600,
-                        cursor: "pointer",
-                      }}
-                    >
-                      Loan Officer
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setNewRoleTitle("Branch Manager")
-                        setNewBaseRole("branch_manager")
-                      }}
-                      style={{
-                        fontSize: 10.5,
-                        padding: "2px 7px",
-                        borderRadius: 4,
-                        border: "1px solid var(--border)",
-                        background: newRoleTitle === "Branch Manager" ? "var(--accent-green)" : "transparent",
-                        color: newRoleTitle === "Branch Manager" ? "#fff" : "var(--text-muted)",
-                        fontWeight: 600,
-                        cursor: "pointer",
-                      }}
-                    >
-                      Branch Manager
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setNewRoleTitle("Viewer")
-                        setNewBaseRole("viewer")
-                      }}
-                      style={{
-                        fontSize: 10.5,
-                        padding: "2px 7px",
-                        borderRadius: 4,
-                        border: "1px solid var(--border)",
-                        background: newRoleTitle === "Viewer" ? "var(--text-secondary)" : "transparent",
-                        color: newRoleTitle === "Viewer" ? "#fff" : "var(--text-muted)",
-                        fontWeight: 600,
-                        cursor: "pointer",
-                      }}
-                    >
-                      Viewer
-                    </button>
-                  </div>
-                </div>
+                <label style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", display: "block", marginBottom: 6 }}>
+                  Role Name / Designation
+                </label>
                 <div style={{ position: "relative" }}>
                   <input
                     type="text"
