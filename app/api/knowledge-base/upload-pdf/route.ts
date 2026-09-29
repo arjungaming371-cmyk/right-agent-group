@@ -3,6 +3,7 @@ import { db } from "@/lib/db"
 import { requireModuleOrRole } from "@/lib/auth"
 import { logAudit } from "@/lib/audit"
 import { extractPdfText, chunkText } from "@/lib/kb-ingest"
+import { validateKbEntries } from "@/lib/kb-rules"
 
 const MAX_PDF_BYTES = 15 * 1024 * 1024 // 15MB — plenty for a policy/rate-card PDF, guards against someone uploading a huge scan
 
@@ -35,11 +36,32 @@ export async function POST(req: NextRequest) {
   if (chunks.length === 0) return NextResponse.json({ error: "PDF text was too short/fragmentary to import" }, { status: 400 })
 
   const baseName = file.name.replace(/\.pdf$/i, "")
+  const entries = chunks.map((content, i) => ({
+    title: chunks.length > 1 ? `${baseName} — part ${i + 1}/${chunks.length}` : baseName,
+    content,
+  }))
+
+  // 2026-09-30: script-compliance gate. Third-party PDF content: guarantee /
+  // OTP-solicitation blocks still apply (a marketing PDF promising
+  // "guaranteed approval" must never ground Priya), but contact-coordinate
+  // blocks downgrade to warnings — a partner bank's rate card legitimately
+  // carries the bank's own helpline numbers.
+  const { violations, warnings } = validateKbEntries(entries, { contactAsWarning: true })
+  if (violations.length > 0) {
+    return NextResponse.json(
+      {
+        error: "PDF rejected — content violates the call-script compliance rules",
+        violationCount: violations.length,
+        violations: violations.slice(0, 50),
+      },
+      { status: 422 }
+    )
+  }
+
   let created = 0
-  for (let i = 0; i < chunks.length; i++) {
+  for (let i = 0; i < entries.length; i++) {
     const { error } = await db.from("knowledge_base").insert({
-      title: chunks.length > 1 ? `${baseName} — part ${i + 1}/${chunks.length}` : baseName,
-      content: chunks[i],
+      ...entries[i],
       source_type: "pdf",
       source_filename: file.name,
       created_by: session.email,
@@ -48,5 +70,5 @@ export async function POST(req: NextRequest) {
   }
 
   logAudit("knowledge base PDF imported", session.email, { filename: file.name, chunks: chunks.length, created })
-  return NextResponse.json({ ok: true, created, chunks: chunks.length })
+  return NextResponse.json({ ok: true, created, chunks: chunks.length, warnings: warnings.slice(0, 20) })
 }

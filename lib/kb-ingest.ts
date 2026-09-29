@@ -5,38 +5,12 @@
 import { PDFParse } from "pdf-parse"
 import * as cheerio from "cheerio"
 
-export type ParsedKbEntry = { title: string; content: string; category?: string }
-
-// ---------------------------------------------------------------------------
-// CSV — same flexible-header-matching spirit as app/api/upload/route.ts's
-// lead CSV import, adapted for title/content/category columns.
-// ---------------------------------------------------------------------------
-export function parseCsvToEntries(text: string): ParsedKbEntry[] {
-  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean)
-  if (lines.length < 2) return []
-
-  // Minimal CSV split — good enough for simple exports; a quoted field
-  // containing a literal comma would need a real CSV parser, out of scope
-  // for a first cut of this feature.
-  const splitRow = (row: string) => row.split(",").map((c) => c.trim().replace(/^"|"$/g, ""))
-
-  const headers = splitRow(lines[0]).map((h) => h.toLowerCase())
-  const rows = lines.slice(1)
-  const entries: ParsedKbEntry[] = []
-
-  for (const row of rows) {
-    const cols = splitRow(row)
-    const obj: Record<string, string> = {}
-    headers.forEach((h, i) => { obj[h] = cols[i] ?? "" })
-
-    const title = obj.title || obj.question || obj.q || ""
-    const content = obj.content || obj.answer || obj.a || ""
-    const category = obj.category || obj.cat || undefined
-    if (!title || !content) continue
-    entries.push({ title: title.slice(0, 200), content: content.slice(0, 4000), category })
-  }
-  return entries
-}
+// CSV parsing lives in lib/csv-parse.ts as an IMPORT-FREE pure module so
+// the seed script and test suites can compile it standalone (2026-09-30:
+// quote-aware rewrite — a comma inside an entry no longer mis-aligns the
+// columns). Re-exported here so existing importers keep working.
+export { parseCsvToEntries, splitCsvRow, splitCsvRows } from "./csv-parse"
+export type { ParsedKbEntry } from "./csv-parse"
 
 // ---------------------------------------------------------------------------
 // PDF — pdf-parse v2's PDFParse class, buffer input, text extraction only

@@ -166,6 +166,16 @@ npm run build
 pm2 start npm --name web -- start
 ```
 
+Load Priya's knowledge base (the curated company facts — rates, products,
+documents, office address — that ground her answers on calls and chats):
+```bash
+npm run seed:kb
+```
+This is idempotent — safe to re-run on every deploy; it only inserts what is
+missing and updates what changed. Every seeded row passes the script-compliance
+check (no approval guarantees, no invented phone/email/address) before it can
+enter the knowledge base.
+
 ---
 
 ## STEP 8 — Start the helper services

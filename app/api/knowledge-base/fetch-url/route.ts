@@ -3,6 +3,7 @@ import { query } from "@/lib/db"
 import { requireModuleOrRole } from "@/lib/auth"
 import { logAudit } from "@/lib/audit"
 import { fetchAndExtractUrl } from "@/lib/kb-ingest"
+import { validateKbEntries } from "@/lib/kb-rules"
 
 // POST — fetch a URL, extract readable text, and upsert ONE knowledge_base
 // entry keyed by source_url. Calling this again on the same URL (the
@@ -25,6 +26,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `Could not fetch that page: ${e.message}` }, { status: 400 })
   }
 
+  // 2026-09-30: script-compliance gate. Third-party web content: guarantee /
+  // OTP-solicitation blocks still apply, contact-coordinate blocks downgrade
+  // to warnings (fetched pages legitimately carry other companies' numbers).
+  const { violations, warnings } = validateKbEntries([extracted], { contactAsWarning: true })
+  if (violations.length > 0) {
+    return NextResponse.json(
+      {
+        error: "Page rejected — content violates the call-script compliance rules",
+        violationCount: violations.length,
+        violations: violations.slice(0, 50),
+      },
+      { status: 422 }
+    )
+  }
+
   const existing = await query(`SELECT id FROM knowledge_base WHERE source_url = $1 LIMIT 1`, [url])
   let row
   if (existing.rows.length > 0) {
@@ -44,5 +60,5 @@ export async function POST(req: NextRequest) {
   }
 
   logAudit(existing.rows.length > 0 ? "knowledge base URL refreshed" : "knowledge base URL added", session.email, { url })
-  return NextResponse.json({ ok: true, entry: row, refreshed: existing.rows.length > 0 })
+  return NextResponse.json({ ok: true, entry: row, refreshed: existing.rows.length > 0, warnings: warnings.slice(0, 20) })
 }
