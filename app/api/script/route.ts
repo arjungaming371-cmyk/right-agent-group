@@ -13,6 +13,7 @@ import {
 } from "@/lib/channel-scripts"
 import { requireModuleOrRole } from "@/lib/auth"
 import { logAudit } from "@/lib/audit"
+import { invalidateScriptCache } from "@/lib/llm"
 
 export const dynamic = "force-dynamic"
 
@@ -124,6 +125,7 @@ export async function POST(req: NextRequest) {
     // Channel scripts are cached in memory (5-min TTL) — bump immediately so
     // the next call/message picks the new text up without waiting.
     if (!LEGACY_KEYS.includes(language)) invalidateChannelScriptsCache()
+    invalidateScriptCache()
     logAudit("Priya script edited", session.email, { language })
     return NextResponse.json({ ok: true })
   } catch (e: any) {
@@ -155,6 +157,7 @@ export async function DELETE(req: NextRequest) {
       await query(`DELETE FROM ai_scripts WHERE language = $1`, [language])
       invalidateChannelScriptsCache()
     }
+    invalidateScriptCache()
     logAudit("Priya script reset to default", session.email, { language })
     return NextResponse.json({ ok: true, message: "Reset to default script" })
   } catch (e: any) {

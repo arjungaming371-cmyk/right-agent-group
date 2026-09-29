@@ -223,6 +223,10 @@ export function replyTokenBudget(language: Language, channel: Channel): number {
 let _scriptCache: Map<string, { prompt: string; at: number }> = new Map()
 const SCRIPT_CACHE_TTL = 5 * 60 * 1000
 
+export function invalidateScriptCache(): void {
+  _scriptCache.clear()
+}
+
 /**
  * Branch context block — injected below the script so a branch's persona can
  * speak for the BRANCH's brand instead of the deployment's default company.
