@@ -179,6 +179,29 @@ function Avatar({ name }: { name: string }) {
   )
 }
 
+const CRM_HEADERS = [
+  { key: "lead", label: "LEAD", width: 260, minWidth: 240 },
+  { key: "score", label: "SCORE", width: 90, minWidth: 85 },
+  { key: "address", label: "ADDRESS", width: 175, minWidth: 150 },
+  { key: "product", label: "LOAN TYPE", width: 145, minWidth: 130 },
+  { key: "value", label: "VALUE", width: 125, minWidth: 110 },
+  { key: "status", label: "STATUS", width: 130, minWidth: 115 },
+  { key: "form", label: "FORM", width: 140, minWidth: 130 },
+  { key: "calls", label: "CALLS", width: 75, minWidth: 70, align: "center" as const },
+  { key: "updated", label: "UPDATED", width: 135, minWidth: 125 },
+  { key: "actions", label: "ACTIONS", width: 200, minWidth: 195 },
+]
+
+const SOCIAL_HEADERS = [
+  { key: "prospect", label: "PROSPECT / HANDLE", width: 260, minWidth: 230 },
+  { key: "channel", label: "CHANNEL", width: 110, minWidth: 100 },
+  { key: "phone", label: "DETECTED PHONE", width: 165, minWidth: 140 },
+  { key: "product", label: "PRODUCT INTEREST", width: 150, minWidth: 130 },
+  { key: "inquiry", label: "LATEST INQUIRY", width: 220, minWidth: 180 },
+  { key: "updated", label: "LAST ACTIVE", width: 135, minWidth: 120 },
+  { key: "actions", label: "ACTIONS", width: 200, minWidth: 190 },
+]
+
 export default function LeadsView({ role, initialSearch }: { role: Role; initialSearch?: string }) {
   const canEdit = role !== "viewer"
   const toast = useToast()
@@ -714,137 +737,172 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
               )
             })}
           </div>
-          {/* Single compact filter row */}
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <div style={{ position: "relative", width: scopeTab === "social" ? 260 : 230, display: "flex", alignItems: "center" }}>
-              <Search size={13} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
-              <input
-                placeholder={scopeTab === "social" ? "Search @handle, name, detected phone, message…" : "Smart search name, phone, code (typo-tolerant)…"}
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                style={{ width: "100%", height: 34, fontSize: 12.5, paddingLeft: 30, paddingRight: 34 }}
-              />
-              <div style={{ position: "absolute", right: 2, top: "50%", transform: "translateY(-50%)" }}>
-                <VoiceDictation
-                  onTranscript={(spoken) => setSearch(prev => (prev ? `${prev} ${spoken}` : spoken))}
-                  size={14}
-                  style={{ width: 28, height: 28, border: "none", background: "transparent" }}
-                  title="Speak to search leads"
+          {/* Compact filter row with balanced spacing */}
+          <div style={{ display: "flex", gap: 12, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", flex: 1, minWidth: 280 }}>
+              <div style={{ position: "relative", width: scopeTab === "social" ? 260 : 230, display: "flex", alignItems: "center" }}>
+                <Search size={13} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
+                <input
+                  placeholder={scopeTab === "social" ? "Search @handle, name, detected phone, message…" : "Smart search name, phone, code (typo-tolerant)…"}
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  style={{ width: "100%", height: 34, fontSize: 12.5, paddingLeft: 30, paddingRight: 34 }}
                 />
+                <div style={{ position: "absolute", right: 2, top: "50%", transform: "translateY(-50%)" }}>
+                  <VoiceDictation
+                    onTranscript={(spoken) => setSearch(prev => (prev ? `${prev} ${spoken}` : spoken))}
+                    size={14}
+                    style={{ width: 28, height: 28, border: "none", background: "transparent" }}
+                    title="Speak to search leads"
+                  />
+                </div>
               </div>
+
+              {scopeTab === "social" ? (
+                <>
+                  <select value={socialPhoneFilter} onChange={(e) => setSocialPhoneFilter(e.target.value as any)} style={{ height: 34, fontSize: 12, width: 175 }}>
+                    <option value="all">All Phone Statuses</option>
+                    <option value="detected">🟢 Phone Detected (Ready)</option>
+                    <option value="missing">⏳ Awaiting Phone</option>
+                  </select>
+                  <select value={socialChannelFilter} onChange={(e) => setSocialChannelFilter(e.target.value as any)} style={{ height: 34, fontSize: 12, width: 145 }}>
+                    <option value="all">All Channels</option>
+                    <option value="dm">💬 Direct Messages</option>
+                    <option value="comment">💬 Post Comments</option>
+                  </select>
+                  <select value={loanTypeFilter} onChange={(e) => setLoanTypeFilter(e.target.value)} style={{ height: 34, fontSize: 12, width: 140 }}>
+                    <option value="all">All Products</option>
+                    {LOAN_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </>
+              ) : (
+                <>
+                  <select value={ageFilter} onChange={(e) => setAgeFilter(e.target.value)} style={{ height: 34, fontSize: 12, width: 110 }}>
+                    <option value="all">All Ages</option>
+                    <option value="new">New (7d)</option>
+                    <option value="old">Older</option>
+                  </select>
+                  <select value={amountFilter} onChange={(e) => setAmountFilter(e.target.value)} style={{ height: 34, fontSize: 12, width: 130 }}>
+                    <option value="all">All Amounts</option>
+                    <option value="high">High (≥ ₹10L)</option>
+                    <option value="low">Low (&lt; ₹10L)</option>
+                  </select>
+                  <select value={loanTypeFilter} onChange={(e) => setLoanTypeFilter(e.target.value)} style={{ height: 34, fontSize: 12, width: 140 }}>
+                    <option value="all">All Loan Types</option>
+                    {LOAN_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                  <select value={interestedFilter} onChange={(e) => setInterestedFilter(e.target.value)} style={{ height: 34, fontSize: 12, width: 130 }}>
+                    <option value="all">All Statuses</option>
+                    <option value="interested">Interested</option>
+                    <option value="not_interested">Not Interested</option>
+                    <option value="unknown">Unknown</option>
+                  </select>
+                </>
+              )}
+
+              {/* Refresh — resets all filters and reloads */}
+              <button
+                onClick={() => {
+                  setSearch("")
+                  setAgeFilter("all")
+                  setAmountFilter("all")
+                  setLoanTypeFilter("all")
+                  setInterestedFilter("all")
+                  setSocialPhoneFilter("all")
+                  setSocialChannelFilter("all")
+                }}
+                title="Reset filters"
+                className="icon-btn"
+              ><RotateCcw size={14} strokeWidth={1.9} /></button>
+
+              {scopeTab === "social" && (
+                <button
+                  onClick={() => window.dispatchEvent(new CustomEvent("rag:navigate", { detail: { view: "instagram" } }))}
+                  className="btn-ghost"
+                  style={{
+                    height: 34,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: "#e1306c",
+                    borderColor: "rgba(225,48,108,0.3)",
+                    background: "rgba(225,48,108,0.06)",
+                  }}
+                  title="Open Instagram Chat engagement hub"
+                >
+                  <Instagram size={14} strokeWidth={2.2} /> Live IG Chat
+                </button>
+              )}
             </div>
 
-            {scopeTab === "social" ? (
-              <>
-                <select value={socialPhoneFilter} onChange={(e) => setSocialPhoneFilter(e.target.value as any)} style={{ height: 34, fontSize: 12, width: 175 }}>
-                  <option value="all">All Phone Statuses</option>
-                  <option value="detected">🟢 Phone Detected (Ready)</option>
-                  <option value="missing">⏳ Awaiting Phone</option>
-                </select>
-                <select value={socialChannelFilter} onChange={(e) => setSocialChannelFilter(e.target.value as any)} style={{ height: 34, fontSize: 12, width: 145 }}>
-                  <option value="all">All Channels</option>
-                  <option value="dm">💬 Direct Messages</option>
-                  <option value="comment">💬 Post Comments</option>
-                </select>
-                <select value={loanTypeFilter} onChange={(e) => setLoanTypeFilter(e.target.value)} style={{ height: 34, fontSize: 12, width: 140 }}>
-                  <option value="all">All Products</option>
-                  {LOAN_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-                </select>
-              </>
-            ) : (
-              <>
-                <select value={ageFilter} onChange={(e) => setAgeFilter(e.target.value)} style={{ height: 34, fontSize: 12, width: 110 }}>
-                  <option value="all">All Ages</option>
-                  <option value="new">New (7d)</option>
-                  <option value="old">Older</option>
-                </select>
-                <select value={amountFilter} onChange={(e) => setAmountFilter(e.target.value)} style={{ height: 34, fontSize: 12, width: 130 }}>
-                  <option value="all">All Amounts</option>
-                  <option value="high">High (≥ ₹10L)</option>
-                  <option value="low">Low (&lt; ₹10L)</option>
-                </select>
-                <select value={loanTypeFilter} onChange={(e) => setLoanTypeFilter(e.target.value)} style={{ height: 34, fontSize: 12, width: 140 }}>
-                  <option value="all">All Loan Types</option>
-                  {LOAN_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-                </select>
-                <select value={interestedFilter} onChange={(e) => setInterestedFilter(e.target.value)} style={{ height: 34, fontSize: 12, width: 130 }}>
-                  <option value="all">All Statuses</option>
-                  <option value="interested">Interested</option>
-                  <option value="not_interested">Not Interested</option>
-                  <option value="unknown">Unknown</option>
-                </select>
-              </>
-            )}
-
-            {/* Refresh — resets all filters and reloads */}
-            <button
-              onClick={() => {
-                setSearch("")
-                setAgeFilter("all")
-                setAmountFilter("all")
-                setLoanTypeFilter("all")
-                setInterestedFilter("all")
-                setSocialPhoneFilter("all")
-                setSocialChannelFilter("all")
-              }}
-              title="Reset filters"
-              className="icon-btn"
-            ><RotateCcw size={14} strokeWidth={1.9} /></button>
-
-            {scopeTab === "social" && (
-              <button
-                onClick={() => window.dispatchEvent(new CustomEvent("rag:navigate", { detail: { view: "instagram" } }))}
-                className="btn-ghost"
-                style={{
-                  height: 34,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color: "#e1306c",
-                  borderColor: "rgba(225,48,108,0.3)",
-                  background: "rgba(225,48,108,0.06)",
-                }}
-                title="Open Instagram Chat engagement hub"
-              >
-                <Instagram size={14} strokeWidth={2.2} /> Live IG Chat
-              </button>
-            )}
-
-            {/* Spacer */}
-            <div style={{ flex: 1 }} />
-            <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{displayLeads.length} shown</div>
-            <a href="/api/leads/export" className="btn-ghost" style={{ height: 34, textDecoration: "none" }} title="Export all leads as CSV">
-              <Download size={14} strokeWidth={2} /> Export
-            </a>
-            {canEdit && scopeTab === "crm" && (
-              <button onClick={() => setShowAdd(true)} className="btn-primary" style={{ height: 34 }}>
-                <Plus size={15} strokeWidth={2.2} /> Add Lead
-              </button>
-            )}
+            {/* Right-aligned action buttons */}
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0, marginLeft: "auto" }}>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", whiteSpace: "nowrap" }}>{displayLeads.length} shown</div>
+              <a href="/api/leads/export" className="btn-ghost" style={{ height: 34, textDecoration: "none" }} title="Export all leads as CSV">
+                <Download size={14} strokeWidth={2} /> Export
+              </a>
+              {canEdit && scopeTab === "crm" && (
+                <button onClick={() => setShowAdd(true)} className="btn-primary" style={{ height: 34, whiteSpace: "nowrap" }}>
+                  <Plus size={15} strokeWidth={2.2} /> Add Lead
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
         {/* Horizontal scroll container */}
         <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", minWidth: 820, borderCollapse: "collapse" }}>
+        <table style={{ width: "100%", minWidth: scopeTab === "crm" ? 1280 : 1180, borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ borderBottom: "1px solid var(--border)" }}>
               {scopeTab === "crm" ? (
                 <>
-                  <th style={{ padding: "12px 8px 12px 16px", width: 40, textAlign: "left" }}>
+                  <th style={{ padding: "12px 10px 12px 16px", width: 44, minWidth: 44, textAlign: "center", verticalAlign: "middle" }}>
                     {canEdit && displayLeads.length > 0 && (
                       <input type="checkbox" checked={allSelected} onChange={toggleAll} title="Select all shown leads" style={{ width: 15, height: 15, cursor: "pointer", accentColor: "var(--accent-violet)" }} />
                     )}
                   </th>
-                  {["LEAD", "SCORE", "ADDRESS", "LOAN TYPE", "VALUE", "STATUS", "FORM", "CALLS", "UPDATED", "ACTIONS"].map((h) => (
-                    <th key={h} style={{ padding: "12px 16px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "var(--text-muted)", letterSpacing: "0.05em" }}>{h}</th>
+                  {CRM_HEADERS.map((h) => (
+                    <th
+                      key={h.key}
+                      style={{
+                        padding: "12px 16px",
+                        textAlign: (h as any).align || "left",
+                        fontSize: 11,
+                        fontWeight: 600,
+                        color: "var(--text-muted)",
+                        letterSpacing: "0.05em",
+                        whiteSpace: "nowrap",
+                        width: h.width,
+                        minWidth: h.minWidth,
+                        verticalAlign: "middle",
+                      }}
+                    >
+                      {h.label}
+                    </th>
                   ))}
                 </>
               ) : (
-                ["PROSPECT / HANDLE", "CHANNEL", "DETECTED PHONE", "PRODUCT INTEREST", "LATEST INQUIRY", "LAST ACTIVE", "ACTIONS"].map((h) => (
-                  <th key={h} style={{ padding: "12px 16px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "var(--text-muted)", letterSpacing: "0.05em" }}>{h}</th>
+                SOCIAL_HEADERS.map((h) => (
+                  <th
+                    key={h.key}
+                    style={{
+                      padding: "12px 16px",
+                      textAlign: (h as any).align || "left",
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: "var(--text-muted)",
+                      letterSpacing: "0.05em",
+                      whiteSpace: "nowrap",
+                      width: h.width,
+                      minWidth: h.minWidth,
+                      verticalAlign: "middle",
+                    }}
+                  >
+                    {h.label}
+                  </th>
                 ))
               )}
             </tr>
@@ -852,8 +910,13 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
           <tbody>
             {loading && Array.from({ length: 4 }).map((_, i) => (
               <tr key={`sk-${i}`} style={{ borderBottom: "1px solid var(--border-light)" }}>
-                <td style={{ padding: "14px 16px" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                {scopeTab === "crm" && canEdit && (
+                  <td style={{ padding: "14px 10px 14px 16px", textAlign: "center", verticalAlign: "middle", width: 44 }}>
+                    <Skeleton w={16} h={16} r={4} />
+                  </td>
+                )}
+                <td style={{ padding: "14px 16px", verticalAlign: "middle" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                     <Skeleton w={36} h={36} r={18} />
                     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                       <Skeleton w={110} h={12} />
@@ -862,13 +925,15 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                   </div>
                 </td>
                 {Array.from({ length: scopeTab === "social" ? 6 : 9 }).map((_, j) => (
-                  <td key={j} style={{ padding: "14px 16px" }}><Skeleton w={j === (scopeTab === "social" ? 5 : 8) ? 68 : 52} h={12} /></td>
+                  <td key={j} style={{ padding: "14px 16px", verticalAlign: "middle" }}>
+                    <Skeleton w={j === (scopeTab === "social" ? 5 : 8) ? 80 : 56} h={12} />
+                  </td>
                 ))}
               </tr>
             ))}
             {!loading && loadError && (
               <tr>
-                <td colSpan={scopeTab === "social" ? 7 : 11} style={{ padding: 32, textAlign: "center" }}>
+                <td colSpan={scopeTab === "social" ? 7 : (canEdit ? 11 : 10)} style={{ padding: 32, textAlign: "center" }}>
                   <div style={{ color: "var(--accent-red)", fontSize: 13, fontWeight: 600, marginBottom: 12 }}>{loadError}</div>
                   <button onClick={() => load()} className="btn-ghost" style={{ height: 32, padding: "0 14px", fontSize: 12.5 }}>
                     <RotateCcw size={12.5} strokeWidth={1.9} /> Try again
@@ -906,10 +971,10 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
               if (scopeTab === "social") {
                 return (
                   <tr key={lead.id} style={{ borderBottom: "1px solid var(--border-light)" }}>
-                    <td style={{ padding: "14px 16px" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <td style={{ padding: "14px 16px", width: 260, minWidth: 230, verticalAlign: "middle" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                         <SocialAvatar name={lead.name} handle={lead.instagram_handle} />
-                        <div>
+                        <div style={{ minWidth: 0, flex: 1 }}>
                           {editingLeadId === lead.id ? (
                             <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 2 }} onClick={(e) => e.stopPropagation()}>
                               <input
@@ -929,8 +994,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                                   border: "1px solid var(--accent-violet)",
                                   background: "var(--bg-card)",
                                   color: "var(--text-primary)",
-                                  minWidth: 140,
-                                  maxWidth: 200,
+                                  width: 150,
                                 }}
                               />
                               <button
@@ -969,9 +1033,9 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                               </button>
                             </div>
                           ) : (
-                            <div style={{ fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                            <div style={{ fontWeight: 600, fontSize: 13.5, display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
                               {lead.pinned && <Pin size={12} strokeWidth={2.2} style={{ color: "var(--accent-yellow)", fill: "var(--accent-yellow)", flexShrink: 0 }} />}
-                              <span>{lead.name || "Instagram Inquirer"}</span>
+                              <span style={{ maxWidth: 150, overflow: "hidden", textOverflow: "ellipsis", display: "inline-block" }} title={lead.name}>{lead.name || "Instagram Inquirer"}</span>
                               {canEdit && (
                                 <button
                                   onClick={(e) => {
@@ -994,7 +1058,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                                   onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
                                   onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.65")}
                                 >
-                                  <Pencil size={12} strokeWidth={2} />
+                                  <Pencil size={11} strokeWidth={2} />
                                 </button>
                               )}
                               {lead.instagram_handle && (
@@ -1025,14 +1089,14 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                               )}
                             </div>
                           )}
-                          <div style={{ fontSize: 12, color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 6, marginTop: 2 }}>
+                          <div style={{ fontSize: 12, color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 6, marginTop: 3, whiteSpace: "nowrap" }}>
                             {lead.lead_code && <LeadCodeBadge code={lead.lead_code} />}
                             {lead.ig_user_id && <span style={{ fontFamily: "monospace", fontSize: 11, opacity: 0.7 }}>ID: {lead.ig_user_id.slice(-6)}</span>}
                           </div>
                         </div>
                       </div>
                     </td>
-                    <td style={{ padding: "14px 16px" }}>
+                    <td style={{ padding: "14px 16px", width: 110, minWidth: 100, verticalAlign: "middle", whiteSpace: "nowrap" }}>
                       {lead.source?.toLowerCase().includes("comment") ? (
                         <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: "#e1306c", background: "rgba(225,48,108,0.1)", border: "1px solid rgba(225,48,108,0.25)", borderRadius: 6, padding: "3px 8px" }}>
                           <MessageSquare size={12} strokeWidth={2.2} /> Comment
@@ -1043,9 +1107,9 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                         </span>
                       )}
                     </td>
-                    <td style={{ padding: "14px 16px" }}>
+                    <td style={{ padding: "14px 16px", width: 165, minWidth: 140, verticalAlign: "middle", whiteSpace: "nowrap" }}>
                       {lead.phone ? (
-                        <span style={{ fontWeight: 600, fontSize: 13, color: "var(--accent-green)" }}>{lead.phone}</span>
+                        <span style={{ fontWeight: 600, fontSize: 13, color: "var(--accent-green)", fontFamily: "monospace" }}>{lead.phone}</span>
                       ) : lead.ig_phone_extracted ? (
                         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                           <span
@@ -1076,25 +1140,25 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                         </div>
                       )}
                     </td>
-                    <td style={{ padding: "14px 16px" }}>
-                      <span style={{ background: "rgba(59,130,246,0.12)", color: "var(--text-secondary)", borderRadius: 6, padding: "4px 10px", fontSize: 12, fontWeight: 500 }}>
+                    <td style={{ padding: "14px 16px", width: 150, minWidth: 130, verticalAlign: "middle", whiteSpace: "nowrap" }}>
+                      <span style={{ background: "rgba(59,130,246,0.12)", color: "var(--text-secondary)", borderRadius: 6, padding: "4px 10px", fontSize: 12, fontWeight: 500, display: "inline-block", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis" }} title={lead.product_interest || "General Inquiry"}>
                         {lead.product_interest || "General Inquiry"}
                       </span>
-                      {lead.loan_amount ? <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-muted)", marginTop: 2 }}>{formatCurrency(lead.loan_amount)}</div> : null}
+                      {lead.loan_amount ? <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-muted)", marginTop: 2, fontVariantNumeric: "tabular-nums" }}>{formatCurrency(lead.loan_amount)}</div> : null}
                     </td>
-                    <td style={{ padding: "14px 16px", maxWidth: 260 }}>
+                    <td style={{ padding: "14px 16px", width: 220, minWidth: 180, verticalAlign: "middle" }}>
                       <div style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.4 }} title={lead.last_message || lead.notes || ""}>
                         {lead.last_message ? (
                           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                             <span style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 700, textTransform: "uppercase", padding: "1px 5px", borderRadius: 4, background: "var(--overlay-hover)", flexShrink: 0 }}>
                               {lead.last_direction === "inbound" ? "User" : "Priya"}
                             </span>
-                            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 170, display: "inline-block" }}>
                               {lead.last_message}
                             </span>
                           </div>
                         ) : lead.notes ? (
-                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "inline-block", maxWidth: 200 }}>
                             {lead.notes}
                           </span>
                         ) : (
@@ -1102,12 +1166,12 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                         )}
                       </div>
                     </td>
-                    <td style={{ padding: "14px 16px", color: "var(--text-muted)", fontSize: 12 }}>
+                    <td style={{ padding: "14px 16px", width: 135, minWidth: 120, verticalAlign: "middle", color: "var(--text-muted)", fontSize: 12, whiteSpace: "nowrap" }}>
                       <div>{timeAgo(lead.last_interaction_at || lead.updated_at || lead.created_at)}</div>
-                      <div style={{ fontSize: 10.5, marginTop: 1 }}>{formatDateTime(lead.last_interaction_at || lead.updated_at || lead.created_at)}</div>
+                      <div style={{ fontSize: 10.5, marginTop: 2, opacity: 0.8 }}>{formatDateTime(lead.last_interaction_at || lead.updated_at || lead.created_at)}</div>
                     </td>
-                    <td style={{ padding: "14px 16px" }}>
-                      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <td style={{ padding: "14px 16px", width: 200, minWidth: 190, verticalAlign: "middle", whiteSpace: "nowrap" }}>
+                      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "nowrap" }}>
                         {canEdit && (
                           <>
                             <button
@@ -1129,6 +1193,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                                 fontSize: 12,
                                 fontWeight: 600,
                                 cursor: "pointer",
+                                flexShrink: 0,
                               }}
                             >
                               <Instagram size={13} strokeWidth={2} /> Chat
@@ -1136,21 +1201,21 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                             <button
                               onClick={() => togglePin(lead)}
                               title={lead.pinned ? "Unpin" : "Pin to top"}
-                              style={{ background: lead.pinned ? "rgba(247,183,49,0.15)" : "var(--overlay-hover)", border: `1px solid ${lead.pinned ? "rgba(247,183,49,0.35)" : "var(--border)"}`, color: lead.pinned ? "var(--accent-yellow)" : "var(--text-muted)", borderRadius: 8, width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+                              style={{ background: lead.pinned ? "rgba(247,183,49,0.15)" : "var(--overlay-hover)", border: `1px solid ${lead.pinned ? "rgba(247,183,49,0.35)" : "var(--border)"}`, color: lead.pinned ? "var(--accent-yellow)" : "var(--text-muted)", borderRadius: 8, width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}
                             >
                               <Pin size={13} strokeWidth={1.9} style={lead.pinned ? { fill: "var(--accent-yellow)" } : undefined} />
                             </button>
                             <button
                               onClick={() => openEditModal(lead)}
                               title="Edit Lead Details"
-                              style={{ background: "rgba(139,124,255,0.1)", border: "1px solid rgba(139,124,255,0.28)", color: "var(--accent-violet)", borderRadius: 8, width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+                              style={{ background: "rgba(139,124,255,0.1)", border: "1px solid rgba(139,124,255,0.28)", color: "var(--accent-violet)", borderRadius: 8, width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}
                             >
                               <Pencil size={13} strokeWidth={1.9} />
                             </button>
                             <button
                               onClick={() => setMemoryLeadId(lead.id)}
                               title="View Lead Memory"
-                              style={{ background: "rgba(247,183,49,0.1)", border: "1px solid rgba(247,183,49,0.28)", color: "var(--accent-yellow)", borderRadius: 8, width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+                              style={{ background: "rgba(247,183,49,0.1)", border: "1px solid rgba(247,183,49,0.28)", color: "var(--accent-yellow)", borderRadius: 8, width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}
                             >
                               <Brain size={14} strokeWidth={1.9} />
                             </button>
@@ -1166,18 +1231,18 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
               // CRM row
               const ist = INTERESTED_STYLES[lead.interested] ?? INTERESTED_STYLES.unknown
               return (
-                <tr key={lead.id} style={{ borderBottom: "1px solid var(--border-light)", background: selectedIds.includes(lead.id) ? "rgba(139,124,255,0.05)" : undefined }}>
+                <tr key={lead.id} style={{ borderBottom: "1px solid var(--border-light)", background: selectedIds.includes(lead.id) ? "rgba(139,124,255,0.05)" : undefined, transition: "background 0.15s ease" }}>
                   {canEdit && scopeTab === "crm" && (
-                    <td style={{ padding: "14px 8px 14px 16px" }}>
+                    <td style={{ padding: "14px 10px 14px 16px", width: 44, minWidth: 44, textAlign: "center", verticalAlign: "middle" }}>
                       <input type="checkbox" checked={selectedIds.includes(lead.id)} onChange={() => toggleOne(lead.id)} title="Select for bulk call queue" style={{ width: 15, height: 15, cursor: "pointer", accentColor: "var(--accent-violet)" }} />
                     </td>
                   )}
-                  <td style={{ padding: "14px 16px" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <td style={{ padding: "14px 16px", width: 260, minWidth: 240, verticalAlign: "middle" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                       <Avatar name={lead.name} />
-                      <div>
+                      <div style={{ minWidth: 0, flex: 1 }}>
                         {editingLeadId === lead.id ? (
-                          <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 2 }} onClick={(e) => e.stopPropagation()}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 2 }} onClick={(e) => e.stopPropagation()}>
                             <input
                               type="text"
                               value={editingNameValue}
@@ -1195,8 +1260,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                                 border: "1px solid var(--accent-violet)",
                                 background: "var(--bg-card)",
                                 color: "var(--text-primary)",
-                                minWidth: 140,
-                                maxWidth: 200,
+                                width: 150,
                               }}
                             />
                             <button
@@ -1235,16 +1299,16 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                             </button>
                           </div>
                         ) : (
-                          <div style={{ fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                          <div style={{ fontWeight: 600, fontSize: 13.5, display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
                             {lead.pinned && <Pin size={12} strokeWidth={2.2} style={{ color: "var(--accent-yellow)", fill: "var(--accent-yellow)", flexShrink: 0 }} />}
-                            <span>{lead.name || "Unknown"}</span>
+                            <span style={{ maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", display: "inline-block" }} title={lead.name}>{lead.name || "Unknown"}</span>
                             {canEdit && (
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation()
                                   startEditName(lead)
                                 }}
-                                title="Edit Name"
+                                title="Quick Edit Name"
                                 style={{
                                   background: "none",
                                   border: "none",
@@ -1260,7 +1324,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                                 onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
                                 onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.65")}
                               >
-                                <Pencil size={12} strokeWidth={2} />
+                                <Pencil size={11} strokeWidth={2} />
                               </button>
                             )}
                             {lead.source?.startsWith("Instagram") && lead.instagram_handle && (
@@ -1273,10 +1337,10 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                             )}
                           </div>
                         )}
-                        <div style={{ fontSize: 12, color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 6 }}>
+                        <div style={{ fontSize: 12, color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 6, marginTop: 3, whiteSpace: "nowrap" }}>
                           {lead.lead_code && <LeadCodeBadge code={lead.lead_code} />}
                           {lead.phone ? (
-                            <span>{lead.phone}</span>
+                            <span style={{ fontFamily: "monospace", letterSpacing: 0.2 }}>{lead.phone}</span>
                           ) : lead.ig_phone_extracted ? (
                             <span style={{ color: "var(--accent-yellow)", fontWeight: 600 }} title="Auto-detected in their DM — click Convert to use it">Detected: {lead.ig_phone_extracted}</span>
                           ) : null}
@@ -1284,53 +1348,72 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                       </div>
                     </div>
                   </td>
-                  <td style={{ padding: "14px 16px" }}><ScoreBadge score={lead.score ?? 0} /></td>
-                  <td style={{ padding: "14px 16px", color: "var(--text-secondary)", fontSize: 13, maxWidth: 200 }}>{lead.address || "—"}</td>
-                  <td style={{ padding: "14px 16px" }}>
-                    <span style={{ background: "rgba(59,130,246,0.12)", color: "var(--text-secondary)", borderRadius: 6, padding: "4px 10px", fontSize: 12 }}>{lead.product_interest || "—"}</span>
+                  <td style={{ padding: "14px 16px", width: 90, minWidth: 85, verticalAlign: "middle", whiteSpace: "nowrap" }}>
+                    <ScoreBadge score={lead.score ?? 0} />
                   </td>
-                  <td style={{ padding: "14px 16px", fontWeight: 600, fontSize: 13 }}>{lead.loan_amount ? formatCurrency(lead.loan_amount) : "—"}</td>
-                  <td style={{ padding: "14px 16px" }}>
-                    <span style={{ background: ist.bg, color: ist.color, borderRadius: 6, padding: "4px 10px", fontSize: 12, fontWeight: 600 }}>{ist.label}</span>
+                  <td style={{ padding: "14px 16px", width: 175, minWidth: 150, verticalAlign: "middle", color: "var(--text-secondary)", fontSize: 13 }}>
+                    <div style={{ maxWidth: 175, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={lead.address || undefined}>
+                      {lead.address || "—"}
+                    </div>
                   </td>
-                  <td style={{ padding: "14px 16px" }}><FormLinkCell lead={lead} /></td>
-                  <td style={{ padding: "14px 16px", fontSize: 13, color: "var(--text-secondary)" }}>{lead.call_count ?? 0}</td>
-                  <td style={{ padding: "14px 16px", color: "var(--text-muted)", fontSize: 12 }}>
+                  <td style={{ padding: "14px 16px", width: 145, minWidth: 130, verticalAlign: "middle", whiteSpace: "nowrap" }}>
+                    <span
+                      style={{ background: "rgba(59,130,246,0.12)", color: "var(--text-secondary)", borderRadius: 6, padding: "4px 10px", fontSize: 12, display: "inline-block", maxWidth: 135, overflow: "hidden", textOverflow: "ellipsis" }}
+                      title={lead.product_interest || undefined}
+                    >
+                      {lead.product_interest || "—"}
+                    </span>
+                  </td>
+                  <td style={{ padding: "14px 16px", width: 125, minWidth: 110, verticalAlign: "middle", whiteSpace: "nowrap", fontWeight: 600, fontSize: 13, fontVariantNumeric: "tabular-nums" }}>
+                    {lead.loan_amount ? formatCurrency(lead.loan_amount) : "—"}
+                  </td>
+                  <td style={{ padding: "14px 16px", width: 130, minWidth: 115, verticalAlign: "middle", whiteSpace: "nowrap" }}>
+                    <span style={{ background: ist.bg, color: ist.color, borderRadius: 6, padding: "4px 10px", fontSize: 12, fontWeight: 600, display: "inline-block" }}>
+                      {ist.label}
+                    </span>
+                  </td>
+                  <td style={{ padding: "14px 16px", width: 140, minWidth: 130, verticalAlign: "middle", whiteSpace: "nowrap" }}>
+                    <FormLinkCell lead={lead} />
+                  </td>
+                  <td style={{ padding: "14px 16px", width: 75, minWidth: 70, textAlign: "center", verticalAlign: "middle", fontSize: 13, color: "var(--text-secondary)", fontVariantNumeric: "tabular-nums" }}>
+                    {lead.call_count ?? 0}
+                  </td>
+                  <td style={{ padding: "14px 16px", width: 135, minWidth: 125, verticalAlign: "middle", color: "var(--text-muted)", fontSize: 12, whiteSpace: "nowrap" }}>
                     <div>{timeAgo(lead.updated_at || lead.created_at)}</div>
-                    <div style={{ fontSize: 10.5, marginTop: 1 }}>{formatDateTime(lead.updated_at || lead.created_at)}</div>
+                    <div style={{ fontSize: 10.5, marginTop: 2, opacity: 0.8 }}>{formatDateTime(lead.updated_at || lead.created_at)}</div>
                   </td>
-                  <td style={{ padding: "14px 16px" }}>
-                    <div style={{ display: "flex", gap: 6 }}>
+                  <td style={{ padding: "14px 16px", width: 200, minWidth: 195, verticalAlign: "middle", whiteSpace: "nowrap" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "nowrap" }}>
                       {canEdit && (
                         <>
                           <button
                             onClick={() => togglePin(lead)}
                             title={lead.pinned ? "Unpin" : "Pin to top"}
-                            style={{ background: lead.pinned ? "rgba(247,183,49,0.15)" : "var(--overlay-hover)", border: `1px solid ${lead.pinned ? "rgba(247,183,49,0.35)" : "var(--border)"}`, color: lead.pinned ? "var(--accent-yellow)" : "var(--text-muted)", borderRadius: 9, width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                            style={{ background: lead.pinned ? "rgba(247,183,49,0.15)" : "var(--overlay-hover)", border: `1px solid ${lead.pinned ? "rgba(247,183,49,0.35)" : "var(--border)"}`, color: lead.pinned ? "var(--accent-yellow)" : "var(--text-muted)", borderRadius: 9, width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}
                           ><Pin size={14} strokeWidth={1.9} style={lead.pinned ? { fill: "var(--accent-yellow)" } : undefined} /></button>
                           <button
                             onClick={() => openEditModal(lead)}
                             title="Edit Lead Details"
-                            style={{ background: "rgba(139,124,255,0.1)", border: "1px solid rgba(139,124,255,0.28)", color: "var(--accent-violet)", borderRadius: 9, width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+                            style={{ background: "rgba(139,124,255,0.1)", border: "1px solid rgba(139,124,255,0.28)", color: "var(--accent-violet)", borderRadius: 9, width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}
                           ><Pencil size={14} strokeWidth={1.9} /></button>
                           <button
                             onClick={() => { setCallTarget(lead); setCallInstructions("") }}
                             disabled={!lead.phone || calling === lead.id}
                             title="Call with AI"
-                            style={{ background: "rgba(139,124,255,0.12)", border: "1px solid rgba(139,124,255,0.28)", color: "var(--accent-violet)", borderRadius: 9, width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center", opacity: calling === lead.id ? 0.5 : 1 }}
+                            style={{ background: "rgba(139,124,255,0.12)", border: "1px solid rgba(139,124,255,0.28)", color: "var(--accent-violet)", borderRadius: 9, width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center", opacity: calling === lead.id ? 0.5 : 1, cursor: !lead.phone || calling === lead.id ? "default" : "pointer", flexShrink: 0 }}
                           ><Phone size={14} strokeWidth={1.9} /></button>
                           <button
                             onClick={() => setWaTarget(lead)}
                             disabled={!lead.phone && !lead.whatsapp_number}
                             title="Send WhatsApp"
-                            style={{ background: "rgba(45,212,160,0.1)", border: "1px solid rgba(45,212,160,0.28)", color: "var(--accent-green)", borderRadius: 9, width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                            style={{ background: "rgba(45,212,160,0.1)", border: "1px solid rgba(45,212,160,0.28)", color: "var(--accent-green)", borderRadius: 9, width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: !lead.phone && !lead.whatsapp_number ? "default" : "pointer", flexShrink: 0 }}
                           ><MessageCircle size={14} strokeWidth={1.9} /></button>
                         </>
                       )}
                       <button
                         onClick={() => setMemoryLeadId(lead.id)}
                         title="View Lead Memory"
-                        style={{ background: "rgba(247,183,49,0.1)", border: "1px solid rgba(247,183,49,0.28)", color: "var(--accent-yellow)", borderRadius: 9, width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                        style={{ background: "rgba(247,183,49,0.1)", border: "1px solid rgba(247,183,49,0.28)", color: "var(--accent-yellow)", borderRadius: 9, width: 32, height: 32, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}
                       ><Brain size={14} strokeWidth={1.9} /></button>
                       {!canEdit && <span style={{ fontSize: 12, color: "var(--text-muted)", alignSelf: "center" }}>View only</span>}
                     </div>
