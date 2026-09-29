@@ -884,3 +884,33 @@ CREATE TABLE IF NOT EXISTS dialer_settings (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_by TEXT
 );
+
+-- ============================================================
+-- Custom Voices / Voice Studio (2026-09-30_custom_voices)
+-- Mirrors migrations/2026-09-30_custom_voices.sql — safe to re-run.
+-- Metadata + consent records for cloned voices; reference audio is
+-- deliberately NOT persisted (DPDP 2023).
+-- ============================================================
+CREATE TABLE IF NOT EXISTS custom_voices (
+  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id           UUID REFERENCES organizations(id) ON DELETE CASCADE,
+  provider         TEXT NOT NULL CHECK (provider IN ('sarvam', 'cartesia')),
+  voice_id         TEXT NOT NULL,
+  name             TEXT NOT NULL,
+  gender           TEXT NOT NULL DEFAULT 'female' CHECK (gender IN ('female', 'male', 'neutral')),
+  primary_language TEXT NOT NULL DEFAULT 'english' CHECK (primary_language IN ('english', 'hindi', 'telugu')),
+  description      TEXT,
+  sample_text      TEXT,
+  cloned           BOOLEAN NOT NULL DEFAULT true,
+  consent_confirmed BOOLEAN NOT NULL DEFAULT false,
+  consent_note     TEXT,
+  consent_by       TEXT,
+  created_by       TEXT,
+  is_active        BOOLEAN NOT NULL DEFAULT true,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (provider, voice_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_custom_voices_provider ON custom_voices (provider);
+CREATE INDEX IF NOT EXISTS idx_custom_voices_org      ON custom_voices (org_id);

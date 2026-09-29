@@ -4,7 +4,7 @@ import dynamic from "next/dynamic"
 import {
   Users, FileText, Phone, MessageCircle, Activity, ShieldCheck, UploadCloud,
   ScrollText, LogOut, Mic, BarChart3, UserCog, Search, Menu, X, BookOpen,
-  Building2, Sparkles, Instagram, PhoneCall, type LucideIcon,
+  Building2, Sparkles, Instagram, PhoneCall, AudioWaveform, type LucideIcon,
 } from "lucide-react"
 import { ToastProvider } from "../ui/toast"
 import CommandPalette from "../ui/command-palette"
@@ -26,6 +26,10 @@ const QueueView = dynamic(() => import("./queue-view"), {
 const VoiceLogsView = dynamic(() => import("./voice-logs-view"), {
   ssr: false,
   loading: () => <ViewFallback label="Voice Logs" />,
+})
+const VoiceStudioView = dynamic(() => import("./voice-studio-view"), {
+  ssr: false,
+  loading: () => <ViewFallback label="Voice Studio" />,
 })
 const WhatsAppView  = dynamic(() => import("./whatsapp-view"), {
   ssr: false,
@@ -95,7 +99,7 @@ function ViewFallback({ label }: { label: string }) {
   return <div style={{ padding: 24, color: "var(--text-muted)" }}>Loading {label}…</div>
 }
 
-export type ViewKey = "leads" | "loans" | "queue" | "voice" | "whatsapp" | "instagram" | "comms" | "calendar" | "security" | "upload" | "script" | "knowledge" | "analytics" | "branches" | "dev-logs"
+export type ViewKey = "leads" | "loans" | "queue" | "voice" | "voice-studio" | "whatsapp" | "instagram" | "comms" | "calendar" | "security" | "upload" | "script" | "knowledge" | "analytics" | "branches" | "dev-logs"
 export type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
 
 const ROLE_LABEL: Record<Role, string> = { admin: "Administrator", agent: "Loan Officer", viewer: "Viewer", developer: "Administrator", branch_manager: "Branch Manager" }
@@ -119,6 +123,7 @@ const NAV_SECTIONS: NavSection[] = [
     title: "Engagement",
     items: [
       { key: "voice",    label: "Voice Logs",        icon: Phone,          roles: ["admin", "agent", "viewer", "branch_manager"] },
+      { key: "voice-studio", label: "Voice Studio",  icon: AudioWaveform,  roles: ["admin", "branch_manager", "developer"] },
       { key: "whatsapp", label: "WhatsApp Chat",     icon: MessageCircle,  roles: ["admin", "agent", "viewer", "branch_manager"] },
       { key: "instagram",label: "Instagram Chat",    icon: Instagram,      roles: ["admin", "agent", "viewer", "branch_manager"] },
       { key: "comms",    label: "Communication Log", icon: Activity,       roles: ["admin", "agent", "viewer", "branch_manager"] },
@@ -147,6 +152,7 @@ const VIEW_TITLES: Record<ViewKey, { title: string; sub: string }> = {
   loans:    { title: "Loan Applications",  sub: "Incoming home & business loan enquiries" },
   queue:    { title: "Call Queue",         sub: "Bulk outbound calling — queue, radar, and controls" },
   voice:    { title: "Voice Logs",         sub: "Voice bot call activity and outcomes" },
+  "voice-studio": { title: "Voice Studio", sub: "Browse, audition, and clone Sarvam & Cartesia voices" },
   whatsapp: { title: "WhatsApp Chat",      sub: "Live customer conversations" },
   instagram:{ title: "Instagram Chat",     sub: "Direct messages and post comment auto-replies" },
   comms:    { title: "Communication Log",  sub: "Automated calls and WhatsApp activity" },
@@ -565,6 +571,7 @@ export default function DashboardShell() {
           {view === "loans"    && <LoanAppsView role={role} initialSearch={seedSearch?.view === "loans" ? seedSearch.q : undefined} />}
           {view === "queue"    && <QueueView role={role} />}
           {view === "voice"    && <VoiceLogsView role={role} />}
+          {view === "voice-studio" && <VoiceStudioView role={role} />}
           {view === "whatsapp" && <WhatsAppView role={role} />}
           {view === "instagram" && <InstagramView initialSearch={seedSearch?.view === "instagram" ? seedSearch.q : undefined} />}
           {view === "comms"    && <CommLogView />}

@@ -12,7 +12,8 @@
 // branch_manager sees a READ-ONLY version scoped to their own branch (the
 // API enforces it too — the UI restrictions are just ergonomics).
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Loader2, Play, Square } from "lucide-react"
 
 type Branch = {
   id: string; org_id: string; name: string; code: string; region: string | null
@@ -686,18 +687,12 @@ function EmployeeModal({ employee, onClose, onSubmit }: {
             <label className={labelCls}>Description</label>
             <input name="description" defaultValue={employee?.description || ""} placeholder="Telugu-first loan advisor for the Hyderabad branch" className={inputCls} />
           </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <label className={labelCls}>Voice provider</label>
-              <select name="voice_provider" defaultValue={employee?.voice_provider || "sarvam"} className={inputCls}>
-                <option value="sarvam">Sarvam Bulbul (Indian voices)</option>
-                <option value="cartesia">Cartesia Sonic</option>
-              </select>
-            </div>
-            <div>
-              <label className={labelCls}>Voice speaker / ID</label>
-              <input name="voice_speaker" defaultValue={employee?.voice_speaker || ""} placeholder="priya  (or a Cartesia voice ID)" className={inputCls} />
-            </div>
+          <div>
+            <label className={labelCls}>Voice</label>
+            <VoicePicker
+              initialProvider={(employee?.voice_provider || "sarvam") as "sarvam" | "cartesia"}
+              initialSpeaker={employee?.voice_speaker || ""}
+            />
           </div>
           <div>
             <label className={labelCls}>Languages</label>
@@ -719,3 +714,163 @@ function EmployeeModal({ employee, onClose, onSubmit }: {
     </div>
   )
 }
+
+// ---------------------------------------------------------------------------
+// VoicePicker — visual voice selector for AI Employees (Voice Studio feed).
+// Replaces the old raw "type a speaker name / paste a UUID" inputs: provider
+// tabs, searchable voice cards, one-click audition, one-click assign. The
+// picked { provider, voiceId } rides into the form through hidden inputs, so
+// the submit contract (FormData voice_provider / voice_speaker) is unchanged.
+// "Advanced" keeps the raw-entry escape hatch for a voice that is neither
+// listed nor cloned (e.g. a brand-new Cartesia id not yet cached).
+// ---------------------------------------------------------------------------
+
+function VoicePicker({ initialProvider, initialSpeaker }: { initialProvider: "sarvam" | "cartesia"; initialSpeaker: string }) {
+  type VoiceOption = { provider: "sarvam" | "cartesia"; voiceId: string; name: string; gender: string; origin: "preset" | "provider" | "custom"; description?: string }
+  const [catalog, setCatalog] = useState<{ sarvam: VoiceOption[]; cartesia: VoiceOption[]; custom: VoiceOption[]; keys: { sarvam: boolean; cartesia: boolean } } | null>(null)
+  const [tab, setTab] = useState<"sarvam" | "cartesia" | "custom">(initialSpeaker.startsWith("svc-") ? "custom" : initialProvider)
+  const [search, setSearch] = useState("")
+  const [picked, setPicked] = useState<{ provider: "sarvam" | "cartesia"; voiceId: string } | null>(
+    initialSpeaker ? { provider: initialProvider, voiceId: initialSpeaker } : null
+  )
+  const [advanced, setAdvanced] = useState(false)
+  const [playingKey, setPlayingKey] = useState<string | null>(null)
+  const [previewLoading, setPreviewLoading] = useState<string | null>(null)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const blobRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    fetch("/api/voices").then((r) => (r.ok ? r.json() : null)).then(setCatalog).catch(() => {})
+    return () => { audioRef.current?.pause(); if (blobRef.current) URL.revokeObjectURL(blobRef.current) }
+  }, [])
+
+  const list = useMemo(() => {
+    if (!catalog) return []
+    const src = tab === "custom" ? catalog.custom : tab === "sarvam" ? catalog.sarvam : catalog.cartesia
+    const q = search.trim().toLowerCase()
+    return q ? src.filter((v) => `${v.name} ${v.voiceId}`.toLowerCase().includes(q)) : src
+  }, [catalog, tab, search])
+
+  function pick(v: VoiceOption) {
+    setPicked({ provider: v.provider, voiceId: v.voiceId })
+  }
+
+  async function preview(v: VoiceOption) {
+    const key = `${v.provider}:${v.voiceId}`
+    if (playingKey === key) {
+      audioRef.current?.pause()
+      if (blobRef.current) { URL.revokeObjectURL(blobRef.current); blobRef.current = null }
+      setPlayingKey(null)
+      return
+    }
+    audioRef.current?.pause()
+    if (blobRef.current) { URL.revokeObjectURL(blobRef.current); blobRef.current = null }
+    setPreviewLoading(key)
+    try {
+      const res = await fetch("/api/voices/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: v.provider, voiceId: v.voiceId, language: "telugu" }),
+      })
+      if (!res.ok) return // silent here — the Studio surfaces provider errors loudly
+      const blob = await res.blob()
+      blobRef.current = URL.createObjectURL(blob)
+      const el = audioRef.current
+      if (el) {
+        el.src = blobRef.current
+        el.onended = () => setPlayingKey(null)
+        await el.play()
+        setPlayingKey(key)
+      }
+    } catch { /* silent */ } finally { setPreviewLoading(null) }
+  }
+
+  const current = picked ? list.find((v) => v.voiceId === picked.voiceId && v.provider === picked.provider) : null
+
+  return (
+    <div className="rounded-[10px] border border-[var(--border)] bg-[var(--bg-elevated)] p-3">
+      <audio ref={audioRef} style={{ display: "none" }} />
+      {picked && (
+        <div className="mb-2.5 flex items-center gap-2 text-[12px]">
+          <span className="font-semibold text-[var(--text-primary)]">Assigned:</span>
+          <span className="rounded-md border border-[rgba(139,124,255,0.4)] bg-[rgba(139,124,255,0.1)] px-2 py-0.5 text-[var(--accent-violet)]">
+            {current ? current.name : picked.voiceId} · {picked.voiceId.startsWith("svc-") ? "Sarvam clone" : picked.provider}
+          </span>
+        </div>
+      )}
+      {!advanced ? (
+        <>
+          <div className="mb-2 flex gap-1.5">
+            {(["sarvam", "cartesia", "custom"] as const).map((t) => (
+              <button key={t} type="button" onClick={() => setTab(t)}
+                className="rounded-lg px-2.5 py-1 text-[11.5px] font-semibold"
+                style={{
+                  cursor: "pointer",
+                  border: `1px solid ${tab === t ? "rgba(139,124,255,0.5)" : "var(--border)"}`,
+                  background: tab === t ? "rgba(139,124,255,0.12)" : "transparent",
+                  color: tab === t ? "var(--accent-violet)" : "var(--text-secondary)",
+                }}>
+                {t === "sarvam" ? "Sarvam" : t === "cartesia" ? "Cartesia" : "Clones"}
+              </button>
+            ))}
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search…"
+              className="ml-auto w-28 rounded-lg border border-[var(--border)] bg-[var(--bg-primary)] px-2 py-1 text-[11.5px] outline-none focus:border-[var(--accent-violet)]" />
+          </div>
+          <div className="max-h-44 space-y-1 overflow-y-auto pr-1">
+            {!catalog && <div className="py-3 text-center text-[12px] text-[var(--text-muted)]">Loading voices…</div>}
+            {catalog && list.length === 0 && <div className="py-3 text-center text-[12px] text-[var(--text-muted)]">No voices here — try another tab.</div>}
+            {list.map((v) => {
+              const key = `${v.provider}:${v.voiceId}`
+              const isPicked = picked?.voiceId === v.voiceId && picked?.provider === v.provider
+              return (
+                <div key={key}
+                  onClick={() => pick(v)}
+                  className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5"
+                  style={{ border: `1px solid ${isPicked ? "rgba(139,124,255,0.55)" : "transparent"}`, background: isPicked ? "rgba(139,124,255,0.08)" : "transparent" }}>
+                  <button type="button" onClick={(e) => { e.stopPropagation(); preview(v) }}
+                    title="Listen (Telugu)"
+                    className="grid h-6 w-6 shrink-0 place-items-center rounded-md"
+                    style={{ background: "var(--gradient-brand)", color: "#fff", border: "none", cursor: "pointer" }}>
+                    {previewLoading === key
+                      ? <Loader2 size={11} className="animate-spin" />
+                      : playingKey === key
+                        ? <Square size={9} fill="currentColor" />
+                        : <Play size={10} fill="currentColor" />}
+                  </button>
+                  <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-[var(--text-primary)]">{v.name}</span>
+                  {v.origin === "custom" && <span className="shrink-0 rounded border border-[rgba(34,197,94,0.3)] bg-[rgba(34,197,94,0.1)] px-1 text-[9px] font-bold text-[var(--accent-green)]">CLONE</span>}
+                  <span className="shrink-0 text-[10.5px] capitalize text-[var(--text-muted)]">{v.gender}</span>
+                </div>
+              )
+            })}
+          </div>
+        </>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label className={labelCls}>Provider</label>
+            <select name="voice_provider" defaultValue={picked?.provider || initialProvider} className={inputCls}>
+              <option value="sarvam">Sarvam Bulbul (Indian voices)</option>
+              <option value="cartesia">Cartesia Sonic</option>
+            </select>
+          </div>
+          <div>
+            <label className={labelCls}>Speaker / voice ID</label>
+            <input name="voice_speaker" defaultValue={picked?.voiceId || ""} placeholder="priya (or a voice ID)" className={inputCls} />
+          </div>
+        </div>
+      )}
+      {/* Picker mode carries the selection through the form contract. */}
+      {!advanced && picked && (
+        <>
+          <input type="hidden" name="voice_provider" value={picked.provider} />
+          <input type="hidden" name="voice_speaker" value={picked.voiceId} />
+        </>
+      )}
+      <button type="button" onClick={() => setAdvanced((v) => !v)} className="mt-2 text-[11px] font-semibold text-[var(--accent-violet)]" style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }}>
+        {advanced ? "← Back to voice cards" : "Advanced: type a speaker manually"}
+      </button>
+    </div>
+  )
+}
+

@@ -386,6 +386,9 @@ async function sarvamTts(text, language, speakerOverride) {
   if (!SARVAM_API_KEY) throw new Error("SARVAM_API_KEY is not set — cannot use TTS_CALL_PROVIDER=sarvam")
   text = normalizeForTts(text)
   const speaker = speakerOverride || SARVAM_TTS_SPEAKER
+  // Cloned Sarvam voices (Clone Lab ids look like "svc-...") speak through
+  // the clone-synthesis endpoint, not Bulbul's preset-speaker endpoint.
+  if (speaker.startsWith("svc-")) return sarvamCloneTts(text, language, speaker)
   const locale = resolveTtsLocale(text, language, SARVAM_TTS_LOCALES)
   const body = {
     text,
@@ -409,6 +412,39 @@ async function sarvamTts(text, language, speakerOverride) {
   const wav = Buffer.from(audioB64, "base64")
   if (wav.length < 100) throw new Error("Sarvam TTS returned empty audio")
   console.log(`⏱ TTS(sarvam ${SARVAM_TTS_MODEL}/${speaker}@${locale}): ${Date.now() - t0}ms  ("${text.slice(0, 40)}${text.length > 40 ? "…" : ""}")`)
+  return wav
+}
+
+// ---------- Sarvam CLONED voice synthesis (Voice Studio, "svc-..." ids) ----------
+//
+// Endpoint per the operator-provided Sarvam clone API spec: POST /voices/clone
+// { voice_id, text, language_code }. The response envelope is decoded
+// liberally (Bulbul-style audios[], bare base64 "audio", or raw audio bytes)
+// because this is the least documented corner of Sarvam's API — when the
+// account's key tier has cloning enabled this just works; when it doesn't the
+// HTTP 403/404 surfaces as a synthesizer failure and the existing Cartesia→
+// Sarvam fallback logic keeps the call alive.
+
+async function sarvamCloneTts(text, language, cloneVoiceId) {
+  const locale = resolveTtsLocale(text, language, SARVAM_TTS_LOCALES)
+  const t0 = Date.now()
+  const res = await fetchWithRetry(`${SARVAM_BASE}/voices/clone`, {
+    method: "POST",
+    headers: { "api-subscription-key": SARVAM_API_KEY, "Content-Type": "application/json" },
+    body: JSON.stringify({ voice_id: cloneVoiceId, text, language_code: locale }),
+    signal: AbortSignal.timeout(30000),
+  })
+  const ctype = res.headers.get("content-type") || ""
+  let wav
+  if (ctype.includes("audio/")) {
+    wav = Buffer.from(await res.arrayBuffer())
+  } else {
+    const data = await res.json().catch(() => null)
+    const b64 = Array.isArray(data?.audios) ? data.audios.join("") : (data?.audio || "")
+    wav = Buffer.from(b64, "base64")
+  }
+  if (wav.length < 100) throw new Error("Sarvam clone synthesis returned empty audio")
+  console.log(`⏱ TTS(sarvam-clone ${cloneVoiceId}@${locale}): ${Date.now() - t0}ms  ("${text.slice(0, 40)}${text.length > 40 ? "…" : ""}")`)
   return wav
 }
 
@@ -540,7 +576,7 @@ module.exports = {
   // dispatchers (throw on failure — caller-facing error handling takes over)
   transcribe, synthesize,
   // direct provider calls (exported for tests + reuse)
-  sarvamStt, sarvamTts, cartesiaTts,
+  sarvamStt, sarvamTts, sarvamCloneTts, cartesiaTts,
   // internals used by tests
   resolveTtsLocale, hasIndicScript, normalizeForTts, buildMultipart, fetchWithRetry,
   normalizeNumbersToEnglishWords, integerToWords, digitsToWords,

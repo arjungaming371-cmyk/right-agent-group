@@ -12,10 +12,15 @@
 //   TTS_PROVIDER=elevenlabs Optional — ElevenLabs REST API. Requires
 //                            ELEVENLABS_API_KEY.
 //
-// This file only serves the dashboard's "speak" button. The phone-call
-// voicebot pipeline (server/voicebot-server.js) selects its own provider with
-// TTS_CALL_PROVIDER and shares SARVAM_API_KEY / CARTESIA_* config through
-// server/voice-providers.js.
+// This file only serves the dashboard's "speak" button (and any caller that
+// wants audio for text). The phone-call voicebot pipeline (server/voicebot-
+// server.js) selects its own provider with TTS_CALL_PROVIDER and shares
+// SARVAM_API_KEY / CARTESIA_* config through server/voice-providers.js.
+//
+// VOICE OVERRIDE (Voice Studio, 2026-09-30): textToSpeech() accepts an
+// optional { provider, voiceId } so the assigned AI-Employee voice — preset
+// OR cloned (Sarvam "svc-..." ids speak through the clone endpoint) — is what
+// actually plays, instead of the deployment default speaker.
 
 import type { Language } from "./llm"
 import { normalizeForTts } from "./tts-normalize"
@@ -38,17 +43,46 @@ const SARVAM_LOCALES: Record<Language, string> = {
   telugu: "te-IN",
 }
 
-async function sarvamSpeech(text: string, language: Language): Promise<Buffer | null> {
+async function sarvamSpeech(text: string, language: Language, speakerOverride?: string): Promise<Buffer | null> {
   if (!SARVAM_API_KEY) {
     console.error("Sarvam TTS error: SARVAM_API_KEY is not set in .env")
     return null
+  }
+  // Cloned Sarvam voices (Clone Lab ids look like "svc-...") speak through
+  // the clone-synthesis endpoint, not Bulbul's preset-speaker endpoint.
+  if (speakerOverride && speakerOverride.startsWith("svc-")) {
+    try {
+      const res = await fetch(`${SARVAM_BASE}/voices/clone`, {
+        method: "POST",
+        headers: { "api-subscription-key": SARVAM_API_KEY, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          voice_id: speakerOverride,
+          text,
+          language_code: SARVAM_LOCALES[language] || SARVAM_LOCALES.english,
+        }),
+        signal: AbortSignal.timeout(25000),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`)
+      const ctype = res.headers.get("content-type") || ""
+      if (ctype.includes("audio/")) {
+        const wav = Buffer.from(await res.arrayBuffer())
+        return wav.length > 100 ? wav : null
+      }
+      const data = (await res.json().catch(() => null)) as { audios?: string[]; audio?: string } | null
+      const b64 = Array.isArray(data?.audios) ? data!.audios!.join("") : data?.audio || ""
+      const wav = Buffer.from(b64, "base64")
+      return wav.length > 100 ? wav : null
+    } catch (e) {
+      console.error("Sarvam clone TTS error:", e instanceof Error ? e.message : e)
+      return null
+    }
   }
   try {
     const body: Record<string, unknown> = {
       text,
       model: SARVAM_TTS_MODEL,
       language_code: SARVAM_LOCALES[language] || SARVAM_LOCALES.english,
-      speaker: SARVAM_TTS_SPEAKER,
+      speaker: speakerOverride || SARVAM_TTS_SPEAKER,
       output_audio_codec: "wav",
     }
     if (SARVAM_TTS_PACE !== 1.0) body.pace = SARVAM_TTS_PACE
@@ -82,12 +116,13 @@ const CARTESIA_LOCALES: Record<Language, string> = {
   telugu: "te-IN",
 }
 
-async function cartesiaSpeech(text: string, language: Language): Promise<Buffer | null> {
+async function cartesiaSpeech(text: string, language: Language, voiceIdOverride?: string): Promise<Buffer | null> {
   if (!CARTESIA_API_KEY) {
     console.error("Cartesia TTS error: CARTESIA_API_KEY is not set in .env")
     return null
   }
-  if (!CARTESIA_VOICE_ID) {
+  const voiceId = voiceIdOverride || CARTESIA_VOICE_ID
+  if (!voiceId) {
     console.error("Cartesia TTS error: CARTESIA_VOICE_ID is not set — pick a voice at https://play.cartesia.ai/voices")
     return null
   }
@@ -95,7 +130,7 @@ async function cartesiaSpeech(text: string, language: Language): Promise<Buffer 
     const body: Record<string, unknown> = {
       model_id: CARTESIA_MODEL,
       transcript: text,
-      voice: { id: CARTESIA_VOICE_ID },
+      voice: { id: voiceId },
       language: CARTESIA_LOCALES[language] || CARTESIA_LOCALES.english,
       output_format: { container: "wav", encoding: "pcm_s16le", sample_rate: 24000 },
     }
@@ -152,11 +187,26 @@ async function elevenLabsSpeech(text: string): Promise<Buffer | null> {
   }
 }
 
-/** MP3 audio for the dashboard chat "speak" feature. Returns null on failure. */
-export async function textToSpeech(text: string, language: Language = "english"): Promise<Buffer | null> {
+/** Voice override for the assigned AI-Employee voice (preset or cloned). */
+export type TtsVoiceOverride = { provider: "sarvam" | "cartesia"; voiceId: string }
+
+/** MP3 audio for the dashboard chat "speak" feature. Returns null on failure.
+ *  voiceOverride (Voice Studio): speak with a specific provider voice instead
+ *  of the deployment default — cloned ids included. */
+export async function textToSpeech(
+  text: string,
+  language: Language = "english",
+  voiceOverride?: TtsVoiceOverride
+): Promise<Buffer | null> {
   const clean = normalizeForTts(text?.trim().slice(0, 800) || "")
   if (!clean) return null
 
+  if (voiceOverride?.provider === "cartesia" && voiceOverride.voiceId) {
+    return cartesiaSpeech(clean, language, voiceOverride.voiceId)
+  }
+  if (voiceOverride?.provider === "sarvam" && voiceOverride.voiceId) {
+    return sarvamSpeech(clean, language, voiceOverride.voiceId)
+  }
   if (PROVIDER === "elevenlabs") return elevenLabsSpeech(clean)
   if (PROVIDER === "cartesia") return cartesiaSpeech(clean, language)
   return sarvamSpeech(clean, language)
