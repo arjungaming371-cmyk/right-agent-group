@@ -98,3 +98,27 @@ export function isRequeueable(status: string): boolean {
   const s = String(status || "")
   return s === "failed" || s === "cancelled" || s.startsWith("skipped")
 }
+
+/**
+ * Collapse queue rows to ONE entry per phone (last-10 digits, so "+91 98765
+ * 43210" and "9876543210" are the same contact). The FIRST occurrence in the
+ * given order wins — the listing feeds rows newest-first (priority DESC,
+ * created_at DESC), so that is the live entry; older rows for the same number
+ * are audit history (originals / retries / re-queues), not separate people.
+ *
+ * Used by the Call Queue view's default "deduplicated" display and by the
+ * bulk re-queue pick, so the UI and the API agree on which row represents a
+ * contact. Pure + import-free ON PURPOSE (see file header): the last-10
+ * keying mirrors lib/phone.ts's phoneLast10 without the import.
+ */
+export function dedupeQueueRows<T extends { phone: string }>(rows: T[]): { unique: T[]; hidden: number } {
+  const seen = new Set<string>()
+  const unique: T[] = []
+  for (const r of rows) {
+    const k = String(r?.phone || "").replace(/\D/g, "").slice(-10)
+    if (seen.has(k)) continue
+    seen.add(k)
+    unique.push(r)
+  }
+  return { unique, hidden: rows.length - unique.length }
+}

@@ -131,6 +131,26 @@ try {
   eq(dl.isRequeueable("called"), false, "called rows are history, not re-queueable")
   eq(dl.isRequeueable("pending"), false, "pending rows are already queued")
   eq(dl.isRequeueable("dialing"), false, "a live call cannot be re-queued")
+
+  // ── 6. Duplicate collapse (Call Queue deduplicated view + requeue pick) ──
+  section("dedupeQueueRows: one row per contact, newest-first wins")
+  // The listing feeds rows priority DESC, created_at DESC — i.e. NEWEST
+  // FIRST — so "first occurrence wins" must keep the newest entry.
+  const rows = [
+    { id: "newest", phone: "+919876543210", status: "called" },
+    { id: "mid",    phone: "9876543210",    status: "failed" },  // same number, no +91
+    { id: "oldest", phone: "+91 98765 43210", status: "cancelled" }, // same, spaced
+    { id: "other",  phone: "+919123456780", status: "pending" },
+  ]
+  const dd = dl.dedupeQueueRows(rows)
+  eq(dd.unique.map((r) => r.id), ["newest", "other"], "keeps the FIRST (newest) row per last-10, order preserved")
+  eq(dd.hidden, 2, "reports the hidden duplicate count")
+  eq(dl.dedupeQueueRows([]).unique.length, 0, "empty queue → empty view")
+  eq(dl.dedupeQueueRows([]).hidden, 0, "empty queue → nothing hidden")
+  const singles = [{ id: "a", phone: "+911111111111" }, { id: "b", phone: "+912222222222" }]
+  eq(dl.dedupeQueueRows(singles).unique.length, 2, "distinct numbers are untouched")
+  const fmts = [{ phone: "+91-99008-88099" }, { phone: "09900888099" }, { phone: "919900888099" }]
+  eq(dl.dedupeQueueRows(fmts).unique.length, 1, "trunk-prefix / 91-prefix / dashed formats all collapse to one")
 } catch (e) {
   failed++
   console.error("❌ SUITE ERROR:", e.message)

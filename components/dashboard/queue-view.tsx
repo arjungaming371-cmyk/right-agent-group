@@ -8,7 +8,8 @@ import {
 import { formatDateTime } from "@/lib/utils"
 import { usePolling } from "@/lib/use-poll"
 import { useToast } from "../ui/toast"
-import { statusGroup, isRequeueable, STATUS_GROUP_COLORS, type QueueStatusGroup } from "@/lib/dialer-logic"
+import { statusGroup, isRequeueable, STATUS_GROUP_COLORS, dedupeQueueRows, type QueueStatusGroup } from "@/lib/dialer-logic"
+import { phoneLast10 } from "@/lib/phone"
 
 type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
 
@@ -94,6 +95,12 @@ export default function QueueView({ role }: { role: Role }) {
   const [loading, setLoading] = useState(true)
   const [acting, setActing] = useState(false)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
+  // Duplicate handling: the queue keeps one row per campaign add / retry /
+  // re-queue, so a number can legitimately appear several times in terminal
+  // tabs. The default view shows ONE row per phone (the newest — the listing
+  // arrives priority DESC, created_at DESC); "Show history" reveals every
+  // entry for the full audit trail. Nothing is deleted from the database.
+  const [showAll, setShowAll] = useState(false)
 
   const shown = tab === "all" ? items : items.filter((i) => statusGroup(i.status) === tab)
   const g = (k: QueueStatusGroup) => counts[k] || 0
@@ -102,16 +109,28 @@ export default function QueueView({ role }: { role: Role }) {
   const pct = planned > 0 ? Math.round((done / planned) * 100) : 0
   const running = !!run?.running
 
-  // Repeat-contact badge data: how many rows in the CURRENT view share each
-  // phone. We deliberately do NOT merge/dedup rows — every row is a real
-  // queued call (originals, retries, re-queues) that the runner will honor,
-  // so hiding "duplicates" would misrepresent the queue. The badge just
-  // makes repeats visible at a glance.
+  // Per-contact counts keyed by LAST-10 digits — raw phone strings differ by
+  // formatting ("+91 98765 43210" vs "9876543210" are the same contact), so
+  // the old raw-string key missed real duplicates. Counts cover the WHOLE
+  // current view, including rows hidden by the deduplicated default, so the
+  // ×N badge always reflects the contact's full history in this tab.
   const phoneCounts = useMemo(() => {
     const m = new Map<string, number>()
-    for (const i of shown) m.set(i.phone, (m.get(i.phone) || 0) + 1)
+    for (const i of shown) {
+      const k = phoneLast10(i.phone)
+      m.set(k, (m.get(k) || 0) + 1)
+    }
     return m
   }, [shown])
+
+  // Deduplicated default: one row per contact, newest entry wins (same rule
+  // the requeue API enforces server-side, from lib/dialer-logic so both
+  // cannot drift). Hidden rows stay in the database and reappear with the
+  // "Show history" toggle above the table.
+  const { unique: visibleRows, hidden: hiddenDupes } = useMemo(
+    () => (showAll ? { unique: shown, hidden: 0 } : dedupeQueueRows(shown)),
+    [shown, showAll]
+  )
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
@@ -257,7 +276,10 @@ export default function QueueView({ role }: { role: Role }) {
         body: JSON.stringify({ ids }),
       })
       const d = await res.json()
-      if (res.ok) toast.success(`Re-queued ${d.requeuedCount} call${d.requeuedCount === 1 ? "" : "s"}`)
+      if (res.ok) {
+        const dup = Number(d.skippedDuplicate) || 0
+        toast.success(`Re-queued ${d.requeuedCount} call${d.requeuedCount === 1 ? "" : "s"}${dup > 0 ? ` · ${dup} duplicate${dup === 1 ? "" : "s"} skipped (number already queued)` : ""}`)
+      }
       else toast.error(d.error || "Re-queue failed")
     } catch {
       toast.error("Re-queue failed — check your connection and try again")
@@ -284,7 +306,13 @@ export default function QueueView({ role }: { role: Role }) {
   // re-queue of every requeueable row already loaded. The listing fetch is
   // capped at 200 rows, so this acts on exactly what the table shows; click
   // again after reload for any remainder beyond the cap.
-  const requeueableItems = useMemo(() => items.filter((i) => isRequeueable(i.status)), [items])
+  // Bulk re-queue acts on the NEWEST row per phone only — the server refuses
+  // duplicates anyway (active-stack guard), so including history rows would
+  // just inflate the confirm count with rows that get refused.
+  const requeueableItems = useMemo(
+    () => dedupeQueueRows(items.filter((i) => isRequeueable(i.status))).unique,
+    [items]
+  )
   async function requeueAllLoaded() {
     if (!requeueableItems.length) return
     if (!confirm(`Re-queue ${requeueableItems.length} failed/cancelled/skipped call(s)? They go back to pending in scheduled order.`)) return
@@ -334,7 +362,7 @@ export default function QueueView({ role }: { role: Role }) {
     setActing(false)
   }
 
-  const allShownSelected = shown.length > 0 && shown.every((i) => selectedIds.includes(i.id))
+  const allShownSelected = visibleRows.length > 0 && visibleRows.every((i) => selectedIds.includes(i.id))
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -478,7 +506,19 @@ export default function QueueView({ role }: { role: Role }) {
             )
           })}
           <div style={{ flex: 1 }} />
-          <div style={{ fontSize: 11.5, color: "var(--text-muted)" }}>showing {shown.length} of {total.toLocaleString()}</div>
+          <label
+            style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--text-secondary)", cursor: "pointer" }}
+            title="Earlier adds, retries and re-queues of the same number are hidden by default — tick to see every entry (full audit trail)"
+          >
+            <input
+              type="checkbox"
+              checked={showAll}
+              onChange={() => setShowAll((v) => !v)}
+              style={{ width: 13, height: 13, cursor: "pointer", accentColor: "var(--accent-violet)" }}
+            />
+            Show history{!showAll && hiddenDupes > 0 ? ` (${hiddenDupes} duplicate${hiddenDupes === 1 ? "" : "s"} hidden)` : ""}
+          </label>
+          <div style={{ fontSize: 11.5, color: "var(--text-muted)" }}>showing {visibleRows.length} of {total.toLocaleString()}</div>
         </div>
 
         {selectedIds.length > 0 && canOperate && (
@@ -499,11 +539,11 @@ export default function QueueView({ role }: { role: Role }) {
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border)" }}>
                 <th style={{ padding: "12px 8px 12px 16px", width: 40 }}>
-                  {canOperate && shown.length > 0 && (
+                  {canOperate && visibleRows.length > 0 && (
                     <input
                       type="checkbox"
                       checked={allShownSelected}
-                      onChange={() => setSelectedIds(allShownSelected ? selectedIds.filter((id) => !shown.some((i) => i.id === id)) : [...new Set([...selectedIds, ...shown.map((i) => i.id)])])}
+                      onChange={() => setSelectedIds(allShownSelected ? selectedIds.filter((id) => !visibleRows.some((i) => i.id === id)) : [...new Set([...selectedIds, ...visibleRows.map((i) => i.id)])])}
                       style={{ width: 15, height: 15, cursor: "pointer", accentColor: "var(--accent-violet)" }}
                     />
                   )}
@@ -517,12 +557,12 @@ export default function QueueView({ role }: { role: Role }) {
               {loading && (
                 <tr><td colSpan={8} style={{ padding: "14px 16px", color: "var(--text-muted)", fontSize: 12 }}>Loading queue…</td></tr>
               )}
-              {!loading && shown.length === 0 && (
+              {!loading && visibleRows.length === 0 && (
                 <tr><td colSpan={8} style={{ padding: 40, textAlign: "center", color: "var(--text-muted)" }}>
                   Nothing here yet — select leads in the Leads view and click "Add to Call Queue", or upload a CSV in Upload & Data.
                 </td></tr>
               )}
-              {shown.map((item) => {
+              {visibleRows.map((item) => {
                 const group = statusGroup(item.status)
                 const color = STATUS_GROUP_COLORS[group]
                 const ch = channelMeta(item.channel)
@@ -544,12 +584,12 @@ export default function QueueView({ role }: { role: Role }) {
                     <td style={{ padding: "12px 14px" }}>
                       <div style={{ fontWeight: 600, fontSize: 13.5, display: "flex", alignItems: "center", gap: 6 }}>
                         {item.name || "Unknown"}
-                        {(phoneCounts.get(item.phone) || 0) > 1 && (
+                        {(phoneCounts.get(phoneLast10(item.phone)) || 0) > 1 && (
                           <span
-                            title={`This contact has ${phoneCounts.get(item.phone)} calls in the current view — originals, retries and re-queues are kept as separate rows so the queue stays auditable.`}
+                            title={`${phoneCounts.get(phoneLast10(item.phone))} entries for this number in the current view — showing the latest; the older ones are audit history. Tick "Show history" (top right) to see every entry.`}
                             style={{ fontSize: 10, fontWeight: 700, color: "var(--accent-yellow)", background: "rgba(234,179,8,0.10)", border: "1px solid rgba(234,179,8,0.28)", borderRadius: 5, padding: "1px 5px", flexShrink: 0 }}
                           >
-                            ×{phoneCounts.get(item.phone)}
+                            ×{phoneCounts.get(phoneLast10(item.phone))}
                           </span>
                         )}
                       </div>

@@ -44,20 +44,32 @@ export async function maybeRequeueMissed(opts: {
 
     // Optimistic claim: WHERE retry_count = <the value we read> means two
     // concurrent webhook retries can't both requeue (the loser matches 0 rows).
-    const updated = await query(
-      `UPDATE outbound_queue
-          SET status = 'pending',
-              retry_count = retry_count + 1,
-              scheduled_at = now() + ($2 || ' minutes')::interval,
-              called_at = NULL,
-              claimed_at = NULL,
-              cancelled_at = NULL,
-              cancelled_by = NULL
-        WHERE id = $1 AND retry_count = $3
-        RETURNING retry_count, scheduled_at`,
-      [queueRow.id, String(settings.retryDelayMinutes), retryCount]
-    )
-    const win = updated.rows[0] as { retry_count: number; scheduled_at: string } | undefined
+    // A 23505 here means the number ALREADY has another pending/dialing row
+    // (e.g. the operator re-added the lead while this webhook was in flight)
+    // — the anti-stacking index doing its job, not an error.
+    let win: { retry_count: number; scheduled_at: string } | undefined
+    try {
+      const updated = await query(
+        `UPDATE outbound_queue
+            SET status = 'pending',
+                retry_count = retry_count + 1,
+                scheduled_at = now() + ($2 || ' minutes')::interval,
+                called_at = NULL,
+                claimed_at = NULL,
+                cancelled_at = NULL,
+                cancelled_by = NULL
+          WHERE id = $1 AND retry_count = $3
+          RETURNING retry_count, scheduled_at`,
+        [queueRow.id, String(settings.retryDelayMinutes), retryCount]
+      )
+      win = updated.rows[0] as { retry_count: number; scheduled_at: string } | undefined
+    } catch (e: unknown) {
+      if ((e as { code?: string })?.code === "23505") {
+        console.log(`🔁 auto-requeue: queue row ${queueRow.id} skipped — number already active in another queue row`)
+        return { requeued: false }
+      }
+      throw e
+    }
     if (!win) return { requeued: false }
     console.log(`🔁 auto-requeue: queue row ${queueRow.id} → pending (retry ${win.retry_count}/${settings.maxRetries}, outcome=${outcome})`)
     return { requeued: true, retryCount: Number(win.retry_count), scheduledAt: win.scheduled_at }
