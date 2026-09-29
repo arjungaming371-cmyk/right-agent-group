@@ -351,8 +351,17 @@ export async function buildLeadBrief(leadId: string): Promise<string> {
   try {
     const res = await query(
       `SELECT
-         l.name, l.address, l.language, l.whatsapp_number,
+         l.name, l.address, l.language, l.whatsapp_number, l.form_completed, l.product_interest, l.loan_amount,
          lm.facts, lm.summary, lm.sentiment, lm.stage,
+         (SELECT json_build_object(
+            'id', la.id,
+            'ref_number', la.ref_number,
+            'loan_type', la.loan_type,
+            'loan_amount', la.loan_amount,
+            'status', la.status,
+            'submitted_at', la.submitted_at
+          ) FROM loan_applications la WHERE la.lead_id = l.id ORDER BY la.submitted_at DESC NULLS LAST, la.created_at DESC LIMIT 1
+         ) AS latest_application,
          COALESCE(
            (SELECT json_agg(t) FROM (
              SELECT channel, direction, occurred_at, one_line_summary
@@ -415,6 +424,21 @@ export async function buildLeadBrief(leadId: string): Promise<string> {
     ].filter(Boolean).join(", ")
     if (identity) lines.push(`IDENTITY — ${identity}`)
 
+    // LOAN APPLICATION ALREADY ON FILE
+    if (row.latest_application || row.form_completed) {
+      const app = row.latest_application
+      const refNum = app?.ref_number ? `Ref #${app.ref_number}` : ""
+      const appType = app?.loan_type || row.product_interest || "loan"
+      const appAmt = app?.loan_amount ? `₹${Number(app.loan_amount).toLocaleString("en-IN")}` : row.loan_amount ? `₹${Number(row.loan_amount).toLocaleString("en-IN")}` : ""
+      const appStatus = app?.status || "under review"
+      
+      lines.push(
+        `LOAN APPLICATION ALREADY ON FILE (${[refNum, appType, appAmt, `status: ${appStatus}`].filter(Boolean).join(", ")}):\n` +
+        `- The customer ALREADY submitted their loan application. NEVER say "we are sending you a loan application" or ask them to fill any form.\n` +
+        `- Acknowledge their submitted application directly. Answer any questions about process/rates, and confirm our loan officer is reviewing it and will call them.`
+      )
+    }
+
     // KNOWN FACTS — only non-null, one compact line
     const factLines = FACT_KEYS
       .map((k) => {
@@ -426,8 +450,12 @@ export async function buildLeadBrief(leadId: string): Promise<string> {
       .filter(Boolean) as string[]
     if (factLines.length) lines.push(`KNOWN FACTS — ${factLines.join(" | ")}`)
 
-    // RELATIONSHIP SUMMARY
-    if (summary.trim()) lines.push(`RELATIONSHIP SUMMARY — ${clip(summary, 400)}`)
+    // RELATIONSHIP SUMMARY (sanitized: jokes/troll words filtered)
+    const cleanSummary = (summary || "")
+      .replace(/\b(corrected his name from|called himself|name is|recorded as|alias)\s+['"]?(Prabhutvam|Government|Unknown)['"]?/gi, "")
+      .replace(/Prabhutvam/gi, "")
+      .trim()
+    if (cleanSummary) lines.push(`RELATIONSHIP SUMMARY — ${clip(cleanSummary, 400)}`)
 
     if (unanalyzedBrief) lines.push(unanalyzedBrief)
 

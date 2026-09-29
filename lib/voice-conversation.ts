@@ -375,6 +375,45 @@ async function buildTurnInstructions(
     ].filter(Boolean).join("\n\n")
   }
 
+  // -------------------------------------------------------------------------
+  // LIVE IN-CALL CONVERSATION SCANNER (Enforce cross-turn memory & prevent contradiction)
+  // -------------------------------------------------------------------------
+  const allConversationText = [...history.map((h) => `${h.role}: ${h.content}`), `customer: ${speech}`].join("\n").toLowerCase()
+  const customerMentionedFormFilled = /\b(fill\s*(?:ches[a-z]*|chey|already|chesanu)|form|application|submitt|already\s*sent|pampinch|vacchindaa|received)\b/i.test(allConversationText)
+  const hasAppOnRecord = /LOAN APPLICATION ALREADY ON FILE/i.test(brief || "")
+
+  if (customerMentionedFormFilled || hasAppOnRecord) {
+    merged = [
+      merged,
+      `=== LIVE STATE: LOAN APPLICATION IS ALREADY SUBMITTED (STRICT MANDATE) ===
+- The customer has ALREADY submitted their loan application (either confirmed in this call or on record in the database).
+- NEVER tell them: "we are sending you a loan application" or "please fill out the application" or "application link పంపిస్తున్నాము".
+- Under NO circumstances promise to send them a new loan application link.
+- State clearly that their application is received, and that our loan officer is reviewing it and will personally contact them with the next steps.`,
+    ].filter(Boolean).join("\n\n")
+  }
+
+  // Detect if customer explicitly stated their name in this call
+  const spokenNameMatch = speech.match(/\b(?:naa|my)\s+(?:full\s+)?name\s+(?:is\s+)?([A-Za-z\s]+)/i)
+  if (spokenNameMatch) {
+    const spokenName = spokenNameMatch[1].trim().split(/\s+/).slice(0, 3).join(" ")
+    if (spokenName && spokenName.length > 2 && !/prabhutvam|government|unknown/i.test(spokenName)) {
+      merged = [
+        merged,
+        `LIVE FACT: Customer just explicitly gave their name as "${spokenName}". Address them as ${spokenName} sir/madam. NEVER re-ask for their name.`,
+      ].filter(Boolean).join("\n\n")
+    }
+  }
+
+  // Enforce Spoken Brevity & Natural Closing
+  merged = [
+    merged,
+    `=== SPOKEN BREVITY & NATURAL CLOSING MANDATE ===
+- MAXIMUM 1 TO 2 SHORT SENTENCES ONLY (under 25 words total). Never monologue or speak long paragraphs.
+- If you have answered the customer or reached the end of the conversation, conclude with a warm, polite goodbye (e.g. "ధన్యవాదాలు sir, good day!" or "Have a great day sir, goodbye!") and STOP.
+- NEVER ask "ఇంకేమైనా help కావాలా sir?" or "anything else you need?" after wrapping up.`,
+  ].filter(Boolean).join("\n\n")
+
   // KNOWLEDGE BASE: unlike the Lead Brain brief above, this runs on EVERY
   // turn — a question about documents/eligibility/rates can land at any
   // point in the call, not just the opening. One cheap indexed query.

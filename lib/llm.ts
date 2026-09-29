@@ -768,9 +768,9 @@ export async function rewriteKnowledgeQuery(rawQuery: string): Promise<string | 
           role: "system",
           content:
             "Return ONLY valid JSON, no other text. The user text is one turn from a phone/WhatsApp " +
-            "conversation with a loan sales AI. Decide: is the customer asking a factual question " +
-            "(eligibility, documents, interest rate, EMI, loan amount, process, timelines, etc.)? " +
-            'If yes, return {"is_question": true, "query": "<3-6 keyword search query capturing what they want to know>"}. ' +
+            "conversation with a loan sales AI. The customer may speak English, Telugu, Hindi, or Tenglish/Hinglish. " +
+            "Decide: is the customer asking a factual question (eligibility, documents, interest rate, EMI, loan amount, process, timelines, office location, company info)? " +
+            'If yes, return {"is_question": true, "query": "<3-6 plain ENGLISH keywords capturing what they want to know>"}. ' +
             'If it is small talk, a greeting, or personal info (name/address/number), return {"is_question": false, "query": null}.',
         },
         { role: "user", content: rawQuery.slice(0, 300) },

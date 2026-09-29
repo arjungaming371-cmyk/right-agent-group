@@ -82,9 +82,12 @@ export async function searchKnowledgeBase(userQuery: string): Promise<string> {
   if (!looksLikeQuestion(q)) return ""
 
   try {
-    const firstPass = await ftsSearch(q)
-    if (firstPass.length > 0 && firstPass[0].rank >= MIN_RANK) {
-      return formatHits(firstPass)
+    const isIndicScript = /[ऀ-ॿఀ-౿]/.test(q)
+    if (!isIndicScript) {
+      const firstPass = await ftsSearch(q)
+      if (firstPass.length > 0 && firstPass[0].rank >= MIN_RANK) {
+        return formatHits(firstPass)
+      }
     }
 
     // First pass was empty or weak — one bounded reformulation hop, but only
