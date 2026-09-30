@@ -1110,7 +1110,7 @@ export function detectLanguage(text: string): Language {
   
   const lower = text.toLowerCase()
   // Telugu romanized keywords and common spoken verb forms/pronouns
-  const teluguKeywords = /\b(kavali|kavala|kavalenu|naku|maaku|meeku|neeku|gurinchi|cheppandi|chepandi|cheppanu|cheppali|cheppu|endukante|avunu|ledhu|ledu|vaddhu|vaddu|undhi|undi|unna|unnaru|unnara|unnaya|unnaayi|istara|matladutunnanu|matladali|matladandi|telugu|telugulo|namaskaram|garu|kaadu|kadu|telusukovadaniki|enti|ento|enta|enni|eppudu|ela|evaru|ekkada|motham|nenu|manaki|kosam|chudandi|baga|kadha|kada|chalu|leka|patte|mari|mariyu|ayithe|kuda|antha|inka|koddiga|konchem|idi|adi|eedi|aadi|meera|ayindi|ayipoyindi|chesanu|chesam|chesaru)\b/i;
+  const teluguKeywords = /\b(kavali|kaavali|kavala|kaavala|kavalenu|naku|naaku|maaku|meeku|neeku|gurinchi|cheppandi|chepandi|cheppanu|cheppali|cheppu|endukante|avunu|ledhu|ledu|vaddhu|vaddu|undhi|undi|unna|unnaru|unnara|unnaya|unnaayi|istara|matladutunnanu|matladali|matladandi|telugu|telugulo|namaskaram|garu|kaadu|kadu|telusukovadaniki|enti|ento|enta|enni|eppudu|ela|evaru|ekkada|motham|nenu|manaki|kosam|chudandi|baga|kadha|kada|chalu|leka|patte|mari|mariyu|ayithe|kuda|antha|inka|koddiga|konchem|idi|adi|eedi|aadi|meera|ayindi|ayipoyindi|chesanu|chesam|chesaru)\b/i;
   if (teluguKeywords.test(lower)) return "telugu"
   
   // Hindi romanized keywords and common spoken verb forms/pronouns
