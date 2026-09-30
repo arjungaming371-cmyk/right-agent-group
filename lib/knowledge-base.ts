@@ -68,7 +68,10 @@ async function ftsSearch(q: string): Promise<KbHit[]> {
 
 function formatHits(hits: KbHit[]): string {
   const lines = hits.map((h) => `${h.title}: ${clip(h.content, MAX_SNIPPET)}`)
-  return `KNOWLEDGE BASE — relevant facts for what the customer just said (use naturally to answer, do not recite verbatim, never mention "knowledge base"):\n${lines.join("\n")}`
+  return (
+    `KNOWLEDGE BASE — relevant facts for what the customer just said (use naturally to answer, do not recite verbatim, never mention "knowledge base"):\n${lines.join("\n")}\n` +
+    `GROUNDING RULE: the figures above (rates, amounts, timelines, documents) are the CURRENT company answers for this topic — state them exactly as written here, in your own words. If the specific detail the customer wants is NOT among them, say our loan officer will confirm the exact figure shortly — NEVER approximate, extrapolate, or invent one.`
+  )
 }
 
 /**

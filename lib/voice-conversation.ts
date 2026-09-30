@@ -7,6 +7,7 @@ import { buildLeadBrief, runPostCallAnalysis } from "./lead-brain"
 import { searchKnowledgeBase } from "./knowledge-base"
 import { buildEmiInstruction, buildEligibilityInstruction, buildPrepaymentInstruction, buildRateInstruction, detectLoanType } from "./finance"
 import { detectFrustration, flagFrustratedCall, detectHumanRequest, flagHumanRequested, OPERATOR_REPLY_INSTRUCTION } from "./frustration"
+import { extractCallFacts, formatInCallFactsBlock } from "./call-facts"
 import { createNotification } from "./notifications"
 import { maybeProposeLoanEdit } from "./loan-edit-requests"
 import { currentDateTimeInstruction } from "./compliance"
@@ -370,9 +371,35 @@ async function buildTurnInstructions(
   // even starts. They now run together AND overlap the transcript read that
   // used to precede them (startTurnContext, fired by the caller), so the
   // wait here is whichever single read is slowest rather than the sum.
-  const [brief, kbContext, financeRows] = await contextPromise
+  const [brief, kbFromSpeech, financeRows] = await contextPromise
+
+  let kbContext = kbFromSpeech
+
+  // KB RETRY WITH CONVERSATION CONTEXT (2026-09-30): the first search uses
+  // only the customer's raw words — but on a real call the question is often
+  // SPLIT across turns (Priya asks "which product are you looking at?", the
+  // customer answers "home loan... and what documents?") or STT-garbled. When
+  // that first search missed, retry ONCE with Priya's last question prepended
+  // — it usually carries the actual topic. One extra indexed Postgres query,
+  // and only on the miss path, so the common case pays nothing.
+  if (!kbContext && history.length > 0) {
+    const lastPriyaTurn = [...history].reverse().find((h) => h.role === "model")
+    if (lastPriyaTurn?.content) {
+      kbContext = await searchKnowledgeBase(`${lastPriyaTurn.content} ${speech}`.slice(0, 300)).catch(() => "")
+    }
+  }
 
   if (brief) merged = [merged, brief].filter(Boolean).join("\n\n")
+
+  // IN-CALL FACT MEMORY (2026-09-30): lead_memory is only written AFTER the
+  // call (post-call analysis), and the model's live window holds the last 12
+  // messages — so facts given early in a longer call (name at turn 2, area at
+  // turn 4) fell out of the window and Priya re-asked them, sometimes twice.
+  // This deterministic scan of the FULL retained transcript (getHistory keeps
+  // the last 40 messages) re-surfaces every answered item, every turn, at
+  // zero LLM cost. lib/call-facts.ts is unit-tested.
+  const inCallFactsBlock = formatInCallFactsBlock(extractCallFacts(history, speech))
+  if (inCallFactsBlock) merged = [merged, inCallFactsBlock].filter(Boolean).join("\n\n")
 
   // GROUNDING: give Priya the real caller number every turn. Without it, a
   // customer saying "same number / this number" left the model with nothing
@@ -427,17 +454,19 @@ async function buildTurnInstructions(
     }
   }
 
-  // Enforce Conversational Active Listening, Doubts Clarification, and Patient Flow
+  // Live-call conversation rules — listen first, never rush the goodbye.
+  // REWRITE (2026-09-30): the previous version mandated "ALWAYS proactively
+  // ask if they have any doubts" after EVERY reply — that single line made
+  // Priya stack a second question on top of every answer, every turn, which
+  // read as robotic and pushed real questions out of the 1-2 sentence budget.
+  // Doubt-checking is now ONCE per reply at a natural pause, never stacked.
   merged = [
     merged,
-    `=== CONVERSATIONAL ACTIVE LISTENING & DOUBTS CLARIFICATION (DO NOT HANG UP PREMATURELY) ===
+    `=== LIVE-CALL CONVERSATION RULES (LISTEN FIRST — NEVER RUSH THE GOODBYE) ===
 - You are on a live phone call. LISTEN PATIENTLY to the customer.
 - NEVER cut the call or say "Have a great day / Goodbye / Bye" after only one reply.
-- After answering any question, giving status, or confirming details, ALWAYS proactively ask if they have any doubts:
-  * Telugu: "మీకు లోన్ గురించి ఇంకా ఏమైనా doubts లేదా ప్రశ్నలు ఉన్నాయా sir?"
-  * English: "Do you have any other questions or doubts about your loan, sir?"
-  * Hindi: "क्या आपको लोन को लेकर कोई और सवाल या doubt है sir?"
-- Answer each doubt clearly and concisely (1 to 2 short sentences).
+- When the customer asks a doubt, answer it clearly and briefly (1 to 2 short sentences) using the knowledge context provided with this turn.
+- Ask whether they have more doubts AT MOST ONCE per reply, and ONLY at a natural pause (right after you answered something, or after they finished a complete thought). NEVER stack it on top of another question — one question per reply, always at the end.
 - ONLY conclude and say goodbye when the customer explicitly says they have no more doubts or says bye (e.g. "no doubts", "emi ledu", "chalu", "bye", "thank you").`,
   ].filter(Boolean).join("\n\n")
 
