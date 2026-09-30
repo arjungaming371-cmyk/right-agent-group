@@ -181,9 +181,9 @@ const TURN_TIMEOUT_MS = parseInt(process.env.VOICEBOT_TURN_TIMEOUT_MS || "20000"
 const TURN_STREAM_TIMEOUT_MS = parseInt(process.env.VOICEBOT_TURN_STREAM_TIMEOUT_MS || "90000")
 
 // Call recording (RECORD_CALLS=0 disables both the capture AND the notice).
-// The consent line is spoken BEFORE the greeting whenever a recording is
-// actually running — India's telecom norms and general call etiquette both
-// require the caller to know. A custom line can be set per deployment.
+// The consent line is spoken BEFORE the greeting ONLY when explicitly configured —
+// prevents 7-10s greeting delay and caller hangup.
+const RECORDING_NOTICE_ENABLED = (process.env.VOICEBOT_WA_RECORDING_NOTICE || "0").trim() === "1"
 const RECORDING_NOTICE_TEXT = (process.env.RECORDING_NOTICE_TEXT || "").trim()
 const RECORDING_NOTICE_PHRASE = {
   english: "Please note, this call is recorded for quality and training purposes.",
@@ -767,7 +767,7 @@ class WhatsAppCallSession {
     this.pacer = setInterval(() => {
       if (this.closed) return
       const dtlsState = this.sender?.dtlsTransport?.state
-      const isReady = dtlsState === "connected" || (this.connected && !dtlsState)
+      const isReady = this.connected || dtlsState === "connected"
       if (!isReady) {
         return
       }
@@ -971,7 +971,6 @@ class WhatsAppCallSession {
     if (!clean || this.closed) return
     const epoch = turnEpoch === undefined ? this.speechEpoch : turnEpoch
     if (epoch !== this.speechEpoch) return
-    this.botTalking = true
     const lang = sentenceLang || this.language || "english"
     const synth = this.synth(clean, epoch, lang)
     this.synthChain = synth
@@ -983,13 +982,24 @@ class WhatsAppCallSession {
         // this sentence finished (+ 200 ms natural pause) before the next
         // sentence's frames join the queue — keeps sentence order AND lets
         // the endpointing state machine stay quiet while she talks.
+        this.botTalking = true
         this.enqueuePcm(frames)
         this.sendingAudio = true
         try {
-          while (this.outQueue.length > 0 && !this.closed && epoch === this.speechEpoch) await sleep(40)
+          const maxWaitMs = Math.max(3000, Math.ceil((frames.length / WA_FRAME_BYTES) * 20) + 3000)
+          const waitStart = Date.now()
+          while (this.outQueue.length > 0 && !this.closed && epoch === this.speechEpoch) {
+            if (Date.now() - waitStart > maxWaitMs) {
+              console.warn(`[WA] outQueue drain timeout (${this.outQueue.length} frames remaining) — continuing`)
+              this.outQueue = []
+              break
+            }
+            await sleep(40)
+          }
           if (!this.closed && epoch === this.speechEpoch) await sleep(200)
         } finally {
           this.sendingAudio = false
+          if (this.outQueue.length === 0) this.botTalking = false
         }
       } else if ((!frames || frames.length === 0) && !this.closed && epoch === this.speechEpoch) {
         console.error("wa TTS produced no audio for a sentence")
@@ -1070,7 +1080,9 @@ class WhatsAppCallSession {
    *  Priya announce a recording that will not exist. */
   recordingNotice() {
     if (!this.recorder || !this.recorder.recording()) return null
-    return RECORDING_NOTICE_TEXT || RECORDING_NOTICE_PHRASE[this.language] || RECORDING_NOTICE_PHRASE.english
+    if (RECORDING_NOTICE_TEXT) return RECORDING_NOTICE_TEXT
+    if (RECORDING_NOTICE_ENABLED) return RECORDING_NOTICE_PHRASE[this.language] || RECORDING_NOTICE_PHRASE.english
+    return null
   }
 
   /** Fire the app's "start" (lead resolution + greeting) once media is up. */
