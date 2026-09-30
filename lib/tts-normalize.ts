@@ -2,9 +2,13 @@
  * TTS number & text hygiene for speech synthesis.
  * Converts numbers, currencies, phone numbers, tenures, and percentages into English words
  * so TTS engines pronounce them clearly in any language (Telugu, Hindi, English).
+ *
+ * NOTE (2026-09-30, native-speech pipeline): this used to force every reply
+ * through a native→Roman transliterator ("English alphabets only") — which
+ * destroyed the native orthography Bulbul v3 needs and made Priya sound
+ * foreign. Native script now passes through untouched; the number
+ * normalizer only ever PRODUCES Latin words, it never strips script.
  */
-
-import { toTanglish } from "./transliterate"
 
 const ONES = [
   "", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
@@ -175,9 +179,6 @@ export function normalizeForTts(text: string): string {
   out = normalizeNumbersToEnglishWords(out)
 
   out = out.replace(/rupees\s+rupees/gi, "rupees")
-
-  // Ensure output is strictly in English alphabets (Tanglish / Hinglish)
-  out = toTanglish(out)
 
   out = out.replace(/\s{2,}/g, " ").trim()
   return out

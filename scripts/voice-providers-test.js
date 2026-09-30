@@ -156,7 +156,10 @@ async function scenarioC() {
     check("C12 TTS hits /text-to-speech", req.url.endsWith("/text-to-speech"), req.url)
     const sent = JSON.parse(req.init.body)
     check("C13 TTS model bulbul:v3", sent.model === "bulbul:v3", sent.model)
-    check("C14 TTS speaker default priya", sent.speaker === "priya", sent.speaker)
+    // b0c7ecb switched the Telugu default to the Tier-1 native female
+    // speaker 'ishita' (CER <= 0.20%) but left this assertion stale —
+    // updated 2026-09-30 alongside the native-speech pipeline work.
+    check("C14 TTS speaker default ishita (Telugu Tier-1 native)", sent.speaker === "ishita", sent.speaker)
     check("C15 TTS locale te-IN for telugu", sent.language_code === "te-IN", sent.language_code)
     check("C16 TTS requests wav", sent.output_audio_codec === "wav")
     check("C17 TTS sample rate default 24000", sent.speech_sample_rate === 24000)

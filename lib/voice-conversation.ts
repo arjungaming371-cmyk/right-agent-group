@@ -11,7 +11,6 @@ import { extractCallFacts, formatInCallFactsBlock } from "./call-facts"
 import { createNotification } from "./notifications"
 import { maybeProposeLoanEdit } from "./loan-edit-requests"
 import { currentDateTimeInstruction } from "./compliance"
-import { toTanglish } from "./transliterate"
 import {
   DEFAULT_VOICE_CLOSINGS,
   DEFAULT_VOICE_OPENERS,
@@ -740,7 +739,9 @@ export async function handleTurn(opts: {
   try {
     reply = (await chatWithLLM(messages, language, mergedInstructions || undefined, { channel: "call", branchId })).trim()
     if (!reply) reply = getVoiceOpenersSnapshot().cold[language]
-    reply = toTanglish(reply)
+    // NO toTanglish here: on a telugu/hindi call the reply is SPOKEN by the
+    // native Indic TTS voice, which needs the native script to sound native
+    // (the old flattening pass was the root cause of the foreign accent).
   } catch (e) {
     console.error("LLM error:", e)
     const closings = getVoiceClosingsSnapshot()
@@ -841,22 +842,26 @@ export async function handleTurnStream(
 
   let reply = ""
   let pending = ""
+  // Outpero-grade first-audio latency: the FIRST clause ("నమస్కారం sir,")
+  // is flushed to TTS at the first comma while the model is still writing
+  // the main clause. Comma flushes only apply to the very first emission —
+  // flushedSentences tracks that (splitSentences itself stays pure).
+  let flushedSentences = 0
   try {
     reply = (
       await chatWithLLMStream(messages, language, mergedInstructions || undefined, (delta) => {
         pending += delta
-        const { complete, rest } = splitSentences(pending)
-        for (const s of complete) onSentence(toTanglish(s))
+        const { complete, rest } = splitSentences(pending, { allowFirstCommaFlush: flushedSentences === 0 })
+        for (const s of complete) onSentence(s)
+        flushedSentences += complete.length
         pending = rest
       }, "call", { branchId })
     ).trim()
     const tail = pending.trim()
-    if (tail) onSentence(toTanglish(tail))
+    if (tail) onSentence(tail)
     if (!reply) {
       reply = getVoiceOpenersSnapshot().cold[language]
-      onSentence(toTanglish(reply))
-    } else {
-      reply = toTanglish(reply)
+      onSentence(reply)
     }
   } catch (e) {
     console.error("LLM error:", e)

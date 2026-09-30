@@ -19,8 +19,9 @@
 export type Language = "english" | "hindi" | "telugu"
 
 import { DEFAULT_SCRIPTS as SHARED_DEFAULT_SCRIPTS } from "./default-scripts"
+// Only the WHATSAPP Roman-guard fallback uses this now — native-script call
+// replies must NEVER pass through it (see CALL_LANGUAGE_STYLES above).
 import { toTanglish } from "./transliterate"
-import { splitSentences } from "./sentences"
 
 const LLM_PROVIDER = (process.env.LLM_PROVIDER || "sarvam").toLowerCase()
 
@@ -99,8 +100,13 @@ function wantsNativeScript(language: Language, channel: Channel): boolean {
   return channel === "call" && (language === "telugu" || language === "hindi")
 }
 
-const NATIVE_REWRITE_MANDATE =
-  "\n\n=== SCRIPT VIOLATION — YOUR LAST ATTEMPT WAS REJECTED ===\nYou just replied in English (Roman) letters, but this is a LIVE VOICE CALL and your reply is SPOKEN ALOUD by a native Indic text-to-speech voice. Roman-letter native words get pronounced wrong and sound foreign to the customer. Rewrite the SAME reply — same meaning, same warmth, same length — writing every native word in REAL script (Telugu in తెలుగు లిపి / Hindi in देवनागरी). Keep everyday English loanwords (loan, EMI, documents, WhatsApp, sir) in English letters inside the sentence, and speak numbers as English words like sixteen lakh. Do not apologise and do not mention this instruction."
+function nativeRewriteMandate(language: Language): string {
+  const voice = language === "telugu" ? "Telugu" : "Hindi"
+  const script = language === "telugu"
+    ? "writing every native word in REAL Telugu script (తెలుగు లిపి)"
+    : "writing every native word in REAL Devanagari script (देवनागरी)"
+  return `\n\n=== SCRIPT VIOLATION — YOUR LAST ATTEMPT WAS REJECTED ===\nYou just replied in English (Roman) letters, but this is a LIVE VOICE CALL and your reply is SPOKEN ALOUD by a native ${voice} text-to-speech voice. Roman-letter native words get pronounced with a mangled, foreign accent. Rewrite the SAME reply — same meaning, same warmth, same length — ${script}. Keep everyday English loanwords (loan, EMI, documents, WhatsApp, sir) in English letters inside the sentence, and write numbers as English words like sixteen lakh. Do not apologise and do not mention this instruction.`
+}
 
 // WhatsApp stays Roman-script always — it's read as text by the customer AND
 // by the human team on the dashboard, so it needs to stay something everyone
@@ -126,69 +132,72 @@ REPLY LANGUAGE — TENGLISH (MOST IMPORTANT RULE):
 - If the customer ASKS you to speak or write "in Telugu", they mean the LANGUAGE, not the script. Keep replying in Tenglish in Roman letters — that is what Telugu looks like on WhatsApp.`,
 }
 
-// Calls only: replies are spoken by TTS, never read as text, so there's no
-// readability reason to force Roman letters — and forcing Roman letters was
-// actively hurting call audio quality. The old pipeline had the LLM write
-// Roman text, then a separate service reverse-transliterated it back to
-// native Telugu/Devanagari script for the native-script TTS voices to read
-// clearly, which mangled English loanwords in the process (e.g. "loan"
-// guessed into Telugu script as "లోఅన్"). Having the LLM write native
-// script directly — the way it already knows how to spell these words
-// correctly — skips that lossy round-trip. English loanwords are kept in
-// Latin letters intentionally, matching how people actually code-mix on
-// WhatsApp/in speech, and matching the TTS service's own loanword handling
-// (server/tts-service/app.py's _LOANWORDS list).
+// Calls only — NATIVE-SCRIPT TRAINING (2026-09-30, "train them like Outpero").
+// A call reply is SPOKEN ALOUD by the native Indic TTS voice (Sarvam Bulbul
+// v3), which is trained on native orthography: తెలుగు/देवनागरी reads with
+// native phonemes, while Roman-letter Tenglish/Hinglish gets read with
+// ENGLISH phoneme rules — measured live as a mangled, foreign accent (the
+// "she is not speaking natively" report). An intermediate commit forced
+// "English alphabets only" and flattened every reply with a lossy
+// native→Roman transliterator applied to the LLM stream, the sentence pump
+// AND the TTS input — that flattening is the exact root cause of the
+// foreign-sounding voice. So the call styles mandate NATIVE script directly
+// (the Sarvam brain writes Indic scripts natively — no lossy round-trip),
+// with everyday English loanwords deliberately kept in Latin letters: that
+// mixed orthography is how real Hyderabad agents code-switch AND how
+// Bulbul's own code-mixed training data is written. WhatsApp keeps the
+// OPPOSITE rule (Roman letters, ops-team readability) via LANGUAGE_STYLES.
 const CALL_LANGUAGE_STYLES: Record<Language, string> = {
   english: LANGUAGE_STYLES.english,
   hindi: `
 
-CRITICAL OUTPUT FORMAT RULE — HINDI (HINGLISH — ENGLISH ALPHABETS ONLY):
-- The customer speaks Hindi. Your reply MUST be written in natural spoken Hindi in English (Roman) alphabets ONLY (Hinglish), mixing everyday English words the way people actually talk. Example: "Namaste sir, main Priya bol rahi hoon Right Agent Group, Hyderabad se. Aapka WhatsApp number mil sakta hai?"
-- STRICT SCRIPT RULE: You MUST write ONLY in English letters (A-Z, a-z). NEVER write in Devanagari script (देवनागरी). Absolutely zero Devanagari characters allowed.
-- ALWAYS speak numbers, tenures, amounts, and EMIs in English words (e.g. "sixteen lakh", "fifteen years", "five years", "fourteen thousand five hundred rupees", "twenty plus") rather than raw digits.
+CRITICAL OUTPUT FORMAT RULE — HINDI (NATIVE SCRIPT + ENGLISH LOANWORDS):
+- The customer speaks Hindi. Your reply is SPOKEN ALOUD by a native Hindi text-to-speech voice. Write EVERY Hindi word in REAL Devanagari script (देवनागरी) — NEVER romanized Hindi. Roman-letter Hindi words ("main", "aapka", "kijiye") get pronounced with English phoneme rules and sound foreign; Devanagari is what makes the voice sound like a real Hindi speaker.
+- Keep everyday English loanwords in ENGLISH (Latin) letters inside the Hindi sentence — exactly how real Indians code-switch: आपका loan, EMI, documents, WhatsApp, sir, link, office, interest rate.
+- ALWAYS write numbers, tenures, amounts and EMIs as English words in Latin letters (e.g. "sixteen lakh", "fifteen years", "fourteen thousand five hundred rupees", "twenty plus") — NEVER raw digits.
+- The customer's words may appear in Roman letters (Hinglish) from the call transcription — understand them normally, but ALWAYS reply in Devanagari script with Latin loanwords.
 
 SMOOTH SPOKEN FLOW (PREVENT FALLING VOICE & ROBOTIC STOPS):
-- ALWAYS connect short greetings or acknowledgments directly to the main clause with a COMMA, NEVER an exclamation mark or standalone period (e.g. write "Namaste sir, main...", "Haan sir, aapka loan...", NEVER "Namaste sir!", "Haan sir!"). Standalone short phrases cause the voice pitch to collapse.
-- Write 1-2 smooth, continuous sentences that flow naturally together.
+- ALWAYS connect short greetings or acknowledgments directly to the main clause with a COMMA, NEVER an exclamation mark or standalone period (e.g. write "नमस्ते sir, मैं...", "हाँ sir, आपका loan...", NEVER "नमस्ते sir!", "हाँ sir!"). Standalone short phrases cause the voice pitch to collapse.
+- Write 1-2 smooth, continuous sentences that flow naturally together (under 25 words total).
 
 SPEAK LIKE A REAL INDIAN AGENT (NOT AN IVR):
 - ADAPT INSTANTLY: the moment the customer switches language (English ↔ Hindi ↔ anything else), your very NEXT sentence switches with them — no comment, no apology, no missed beat. A real agent does this without thinking.
-- CODE-SWITCH LIKE A LOCAL: real spoken Hindi flows between Hindi and English words in English alphabets inside the SAME sentence ("loan chahiye sir?", "documents ready kijiye sir", "EMI aapke budget mein aaram se aayega"). Warm, confident, friendly — never bookish, never robotic, never a word-for-word translation.
-- REMEMBER LIKE A PERSON: when the context below shows a returning customer, open with what you ALREADY know, the way a colleague who remembers them would — e.g. "Wapas aakar achha laga sir! Aapka home loan process kaisa chal raha hai?" — NEVER re-introduce yourself, NEVER re-ask anything already known.`,
+- CODE-SWITCH LIKE A LOCAL: real spoken Hindi flows between Devanagari and English words in Latin letters inside the SAME sentence ("loan चाहिए sir?", "documents ready कीजिए sir", "EMI आपके budget में आराम से आएगा"). Warm, confident, friendly — never bookish, never robotic, never a word-for-word translation.
+- REMEMBER LIKE A PERSON: when the context below shows a returning customer, open with what you ALREADY know, the way a colleague who remembers them would — e.g. "वापस आकर अच्छा लगा sir! आपका home loan process कैसा चल रहा है?" — NEVER re-introduce yourself, NEVER re-ask anything already known.`,
   telugu: `
 
-CRITICAL OUTPUT FORMAT RULE — TELUGU (TANGLISH / TENGLISH — ENGLISH ALPHABETS ONLY):
-- The customer speaks Telugu. Your reply MUST be written in natural, spoken Telugu in English (Roman) alphabets ONLY (Tenglish/Tanglish), mixing everyday English loanwords the way people actually talk in Hyderabad.
-- MANDATORY SCRIPT RULE: You MUST write ONLY in the English/Roman alphabet (A-Z, a-z). NEVER write in Telugu script (Telugu characters). Absolutely NO Telugu script characters allowed under any circumstances. Every single word must be written in English alphabets!
-- SPELL PHONETICALLY IN ENGLISH LETTERS:
-  * "Avunu sir", "Gurthundi sir", "Kavala sir?", "Cheppandi sir", "Namaskaram sir", "Memu help chestamu".
-  * Common loanwords: 'loan', 'personal loan', 'education loan', 'home loan', 'EMI', 'WhatsApp', 'sir', 'link', 'office', 'thank you', 'documents'.
-- SMOOTH CONVERSATIONAL FLOW & INTONATION (PREVENT FALLING VOICE & ROBOTIC STOPS):
+CRITICAL OUTPUT FORMAT RULE — TELUGU (NATIVE SCRIPT + ENGLISH LOANWORDS):
+- The customer speaks Telugu. Your reply is SPOKEN ALOUD by a native Telugu text-to-speech voice. Write EVERY Telugu word in REAL Telugu script (తెలుగు లిపి) — NEVER romanized Telugu. Roman-letter Telugu words ("nenu", "mee", "cheppandi") get pronounced with English phoneme rules and sound foreign; Telugu script is what makes the voice sound like a real Telugu speaker from Hyderabad.
+- Keep everyday English loanwords in ENGLISH (Latin) letters inside the Telugu sentence — exactly how Hyderabad people code-switch: మీ loan, personal loan, home loan, EMI, WhatsApp, sir, link, office, documents, interest rate.
+- ALWAYS write numbers as English words in Latin letters: "sixteen lakh", "twenty five lakhs", "fifteen years", "five years", "nine point nine nine percent", "twenty plus banks". NEVER raw digits like 16, 25, or 14500.
+- The customer's words may appear in Roman letters (Tenglish) from the call transcription — understand them normally, but ALWAYS reply in Telugu script with Latin loanwords.
+
+SMOOTH CONVERSATIONAL FLOW & INTONATION (PREVENT FALLING VOICE & ROBOTIC STOPS):
   * Speak smoothly and confidently like a friendly loan advisor from Hyderabad.
-  * NEVER use exclamation marks (!) on short greetings or acknowledgments like "Avunu sir!", "Sure sir!", "Namaskaram sir!". Exclamation marks make the TTS voice drop pitch sharply or sound robotic.
+  * NEVER use exclamation marks (!) on short greetings or acknowledgments like "అవును sir!", "Sure sir!", "నమస్కారం sir!". Exclamation marks make the TTS voice drop pitch sharply or sound robotic.
   * ALWAYS connect acknowledgments to the main sentence using a COMMA:
-    - WRITE: "Avunu sir, twenty five lakh personal loan gurinchi cheptanu."
-    - WRITE: "Sure sir, mee WhatsApp ki link pampistanu, details fill cheyandi."
-    - WRITE: "Namaskaram sir, Right Agent Group nunchi Priya matladutunnanu."
-    - NEVER write isolated 2-word sentences like "Avunu sir. Nenu..." or "Sure sir! Nenu...".
-  * For numbers, ALWAYS speak them in English words: "sixteen lakh", "twenty five lakhs", "fourteen thousand five hundred", "twenty plus banks", "fifteen years", "five years", "nine point nine nine percent". Never write raw digits like 16, 25, or 14500.
+    - WRITE: "అవును sir, twenty five lakh personal loan గురించి చెప్తాను."
+    - WRITE: "Sure sir, నేను link మీ WhatsApp కి పంపిస్తాను, details fill చేయండి."
+    - WRITE: "నమస్కారం sir, Right Agent Group నుంచి Priya మాట్లాడుతున్నాను."
+    - NEVER write isolated 2-word sentences like "అవును sir. నేను..." or "Sure sir! నేను...".
   * Keep each reply to 1-2 smooth, complete sentences (under 25 words total) so the voice sounds fluent, warm, melodic, and native.
-- DO NOT use bookish or robotic words:
-  * BAN: "dhanyavadalu" -> USE: "thank you sir" or "thanks"
-  * BAN: "samayam" -> USE: "time"
-  * BAN: "shubhodayam" -> USE: "good morning"
-  * BAN: "karyalayam" -> USE: "office" or "branch"
-  * BAN: Asking multiple questions in one turn -> Ask ONLY ONE clear question at the end!
-- Examples of natural Tenglish responses:
-  * "Avunu Suresh sir, gurthundi, twenty five lakh personal loan ki fifteen years plan lo interest nine point nine nine percent untundi. Deeni gurinchi inka emaina doubts unnaya sir?"
-  * "Sure sir, nenu link mee WhatsApp ki pampistanu, details fill cheyandi."
+- DO NOT use bookish or robotic words — keep the English loanword instead:
+  * BAN: ధన్యవాదాలు -> USE: "thank you sir" or "thanks"
+  * BAN: సమయం -> USE: "time"
+  * BAN: శుభోదయం -> USE: "good morning"
+  * BAN: కార్యాలయం -> USE: "office" or "branch"
+  * BAN: Asking multiple questions in one turn -> Ask ONLY ONE clear question at the end.
+- Examples of natural code-mixed Telugu responses (native script + Latin loanwords):
+  * "అవును Suresh sir, గుర్తుంది, twenty five lakh personal loan కి fifteen years plan లో interest nine point nine nine percent ఉంటుంది. దీని గురించి ఇంకా ఏమైనా doubts ఉన్నాయా sir?"
+  * "Sure sir, నేను link మీ WhatsApp కి పంపిస్తాను, details fill చేయండి."
   * "(Only when customer explicitly says bye or has no doubts): Okay sir, thank you so much, have a great day, bye!"
-  * "Sorry sir, chinna technical issue vachindi, malli cheppagalara?"
+  * "Sorry sir, చిన్న technical issue వచ్చింది, మళ్ళీ చెప్పగలరా?"
 
 SPEAK LIKE A REAL HYDERABAD AGENT (NOT AN IVR):
 - ADAPT INSTANTLY: the moment the customer switches language (English ↔ Telugu ↔ anything else), your very NEXT sentence switches with them — no comment, no apology, no missed beat. A real agent does this without thinking about it.
-- CODE-SWITCH LIKE A LOCAL: real Hyderabad speech flows between Telugu and English words in English alphabets inside the SAME sentence ("meeku loan kavala sir?", "documents ready cheyandi sir", "EMI mee budget lo easy ga vastundi"). Warm, confident, friendly — never bookish, never robotic, never a word-for-word translation.
-- REMEMBER LIKE A PERSON: when the context below shows a returning customer, open with what you ALREADY know, the way a colleague who remembers them would — e.g. "Malli matladinanduku chala santosham sir! Mee home loan process ela sagutondi?" — NEVER re-introduce yourself, NEVER re-ask anything already known.`,
+- CODE-SWITCH LIKE A LOCAL: real Hyderabad speech flows between Telugu script and English words in Latin letters inside the SAME sentence ("మీకు loan కావాలా sir?", "documents ready చేయండి sir", "EMI మీ budget లో easy గా వస్తుంది"). Warm, confident, friendly — never bookish, never robotic, never a word-for-word translation.
+- REMEMBER LIKE A PERSON: when the context below shows a returning customer, open with what you ALREADY know, the way a colleague who remembers them would — e.g. "మళ్ళీ మాట్లాడినందుకు చాలా సంతోషం sir! మీ home loan process ఎలా సాగుతోంది?" — NEVER re-introduce yourself, NEVER re-ask anything already known.`,
 }
 
 // Brevity rules, keyed by CHANNEL rather than language, and appended in
@@ -358,10 +367,16 @@ async function getSystemPrompt(language: Language, channel: Channel = "whatsapp"
     // Prevent unbounded growth (many branch×employee×language combos).
   if (_scriptCache.size > 500) _scriptCache.clear()
 
-  // Rare DB-down fallback: always Roman-script (matches default-scripts.ts),
-  // regardless of channel — not worth duplicating the native-script variant
-  // into the fallback-only file for a path this infrequent. Brevity still
-  // applies: a DB outage is no reason for Priya to start giving speeches.
+  // Rare DB-down fallback. DEFAULT_SCRIPTS carries the WhatsApp-style
+  // (Roman) language rules baked into its per-language rows, so serving
+  // those verbatim on a CALL would silently flip Telugu/Hindi calls back
+  // to Roman output during a DB outage. Calls instead get the clean 'base'
+  // script (no language rule) + the channel's native-script call style —
+  // identical composition to the normal path. Brevity still applies: a DB
+  // outage is no reason for Priya to start giving speeches.
+  if (channel === "call") {
+    return DEFAULT_SCRIPTS.base + CALL_LANGUAGE_STYLES[language] + CHANNEL_BREVITY[channel]
+  }
   return (DEFAULT_SCRIPTS[language] || DEFAULT_SCRIPTS.english) + CHANNEL_BREVITY[channel]
 }
 
@@ -632,36 +647,49 @@ export async function chatWithLLM(
     timeoutMs: opts?.timeoutMs,
     temperature: channel === "call" ? CALL_TEMPERATURE : undefined,
   })
-  // Both calls and WhatsApp must stay in Roman letters (Tanglish / Hinglish)
-  // so TTS engines (Sarvam/Cartesia) receive English alphabets cleanly.
-  if (!NATIVE_SCRIPT_RE.test(reply)) return reply
+  // Guard direction now depends on the CHANNEL (2026-09-30):
+  //  - WhatsApp: replies are READ as text by the ops team on the dashboard
+  //    (half of whom can't read Telugu/Devanagari), so they must stay in
+  //    Roman letters — the model still breaks this rule live (one slip
+  //    becomes permanent because her own native-script messages come back
+  //    as conversation history), so a native-script reply is rewritten
+  //    once with an explicit Roman mandate.
+  //  - Calls (telugu/hindi): the OPPOSITE is wanted — the reply is SPOKEN
+  //    by the native Indic TTS voice, and a Roman-letter slip gets read
+  //    with English phonemes (foreign accent). A Roman reply on a call is
+  //    rewritten once with the native-script mandate. English calls are
+  //    exempt (they are always Latin).
+  if (channel === "whatsapp" && NATIVE_SCRIPT_RE.test(reply)) {
+    const corrected = await runChat(
+      messages,
+      systemPrompt +
+        "\n\n=== SCRIPT VIOLATION — YOUR LAST ATTEMPT WAS REJECTED ===\nYou just replied using Telugu or Devanagari script. That is never acceptable on WhatsApp. Write the SAME reply again, same meaning, same language, but transliterated into English (Roman) letters — the way people actually type on WhatsApp. Do not apologise or mention this instruction.",
+      { numPredict: opts?.numPredict ?? replyTokenBudget(language, channel), timeoutMs: opts?.timeoutMs }
+    ).catch(() => "")
 
-  // WhatsApp must stay in Roman letters — the ops team reads these on the
-  // dashboard, and half of them can't read Telugu or Devanagari script.
-  //
-  // The prompt says so in capitals, and the model still breaks it. Observed
-  // live: a customer typed "Can you tell me in telugu", Priya answered in
-  // full Telugu script, and then stayed there for 21 of the next 59 replies
-  // in that thread — because her own native-script messages come back as
-  // conversation history and she mirrors herself. One slip becomes permanent.
-  //
-  // So this is a guard, not a nudge: catch it before it can be stored and
-  // become the example she copies. One retry, because the failure is a lapse
-  // rather than an inability — the same model writes Tenglish correctly on
-  // every other turn.
-  const corrected = await runChat(
-    messages,
-    systemPrompt +
-      "\n\n=== SCRIPT VIOLATION — YOUR LAST ATTEMPT WAS REJECTED ===\nYou just replied using Telugu or Devanagari script. That is never acceptable on WhatsApp. Write the SAME reply again, same meaning, same language, but transliterated into English (Roman) letters — the way people actually type on WhatsApp. Do not apologise or mention this instruction.",
-    { numPredict: opts?.numPredict ?? replyTokenBudget(language, channel), timeoutMs: opts?.timeoutMs }
-  ).catch(() => "")
+    if (corrected && !NATIVE_SCRIPT_RE.test(corrected)) return corrected
+    // Both attempts failed. Send the original rather than nothing — an
+    // unreadable reply still beats silence for the customer — but say so
+    // loudly, because a pattern here means the prompt rule needs rethinking.
+    console.error(`LANGUAGE: ${language} WhatsApp reply came back in native script twice; sending it anyway`)
+    return toTanglish(reply)
+  }
+  if (wantsNativeScript(language, channel) && !NATIVE_SCRIPT_RE.test(reply)) {
+    // Slip: the call style mandates native script, but the model answered
+    // in Roman letters anyway (rare — most often a legacy Roman script row
+    // being served). Nothing has been spoken yet on this blocking path, so
+    // the reply can still be replaced wholesale with one native-mandate
+    // retry. Zero cost on the happy path — this branch only fires on slips.
+    const corrected = await runChat(
+      messages,
+      systemPrompt + nativeRewriteMandate(language),
+      { numPredict: replyTokenBudget(language, channel), timeoutMs: opts?.timeoutMs }
+    ).catch(() => "")
 
-  if (corrected && !NATIVE_SCRIPT_RE.test(corrected)) return corrected
-  // Both attempts failed. Send the original rather than nothing — an
-  // unreadable reply still beats silence for the customer — but say so
-  // loudly, because a pattern here means the prompt rule needs rethinking.
-  console.error(`LANGUAGE: ${language} WhatsApp reply came back in native script twice; sending it anyway`)
-  return toTanglish(reply)
+    if (corrected && NATIVE_SCRIPT_RE.test(corrected)) return corrected
+    console.error(`LANGUAGE: ${language} call reply came back in Roman letters twice; sending the Roman version — TTS will read it with foreign prosody`)
+  }
+  return reply
 }
 
 /**
@@ -704,14 +732,22 @@ export async function chatWithLLMStream(
     temperature: channel === "call" ? CALL_TEMPERATURE : undefined,
   }
 
-  // Live call streaming: tokens flow to onChunk as they generate.
-  // Each chunk is passed through toTanglish so zero native script characters reach TTS.
-  const reply = await runCompletionStream(
-    chatMessages,
-    streamOpts,
-    (chunk) => onChunk(toTanglish(chunk))
-  )
-  return toTanglish(reply)
+  // Live call streaming: tokens flow to onChunk AS the model writes them.
+  // Each chunk is passed through UNMODIFIED — on a native-script call the
+  // reply is SPOKEN by the native Indic TTS voice, and flattening it to
+  // Roman letters here was exactly what made Priya sound foreign (measured
+  // live: Bulbul reads తెలుగు/देवनागरी with native phonemes, but Roman-
+  // letter Tenglish with English phoneme rules). WhatsApp text never
+  // streams through here — its Roman guard lives in chatWithLLM above.
+  const reply = await runCompletionStream(chatMessages, streamOpts, onChunk)
+  if (wantsNativeScript(language, channel) && !NATIVE_SCRIPT_RE.test(reply)) {
+    // Slip telemetry: audio for THIS turn is already on the wire (streamed
+    // sentences can't be retracted), so no retry is possible here — the
+    // native-script prompt is the first line of defense and this warning is
+    // the tripwire that makes a systematic slip visible in server logs.
+    console.warn(`LANGUAGE: ${language} streamed call reply had no native-script characters — check the served script/style rows`)
+  }
+  return reply
 }
 
 /**

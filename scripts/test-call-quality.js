@@ -238,14 +238,52 @@ ok(!llm.includes('recordTokenUsage(LLM_PROVIDER'), "token metering uses the ACTI
 const envex = fs.readFileSync(path.join(ROOT, ".env.example"), "utf8").replace(/\r\n/g, "\n")
 ok(envex.includes("LLM_PROVIDER=sarvam"), ".env.example ships LLM_PROVIDER=sarvam as the documented default")
 
-section("19. lib/llm.ts — Tanglish & English alphabets guarantee for TTS")
-ok(llm.includes('import { toTanglish } from "./transliterate"'), "toTanglish transliterator imported in lib/llm.ts")
-ok(llm.includes("toTanglish(chunk)"), "streaming path guarantees English alphabets for TTS")
-ok(llm.includes("toTanglish(reply)"), "blocking path guarantees English alphabets for TTS")
-ok(llm.includes('import { splitSentences } from "./sentences"'), "sentence splitter imported")
-ok(llm.includes("CRITICAL OUTPUT FORMAT RULE — TELUGU (TANGLISH / TENGLISH — ENGLISH ALPHABETS ONLY)"), "Telugu call prompt strictly enforces English alphabets")
-ok(llm.includes("CRITICAL OUTPUT FORMAT RULE — HINDI (HINGLISH — ENGLISH ALPHABETS ONLY)"), "Hindi call prompt strictly enforces English alphabets")
-ok(llm.includes("SCRIPT VIOLATION — YOUR LAST ATTEMPT WAS REJECTED"), "violation suffix reuses the proven WhatsApp-guard framing")
+section("19. Native-script call pipeline (Outpero native speech) — no Roman flattening anywhere")
+ok(llm.includes('import { toTanglish } from "./transliterate"'), "toTanglish kept ONLY for the WhatsApp Roman-guard fallback")
+ok(!llm.includes("toTanglish(chunk)"), "streaming path passes native script through UNMODIFIED (no Roman flattening)")
+ok((llm.match(/return toTanglish\(reply\)/g) || []).length === 1, "exactly ONE toTanglish(reply) fallback remains in the whole brain (WhatsApp guard only)")
+ok(llm.indexOf('if (channel === "whatsapp" && NATIVE_SCRIPT_RE.test(reply))') < llm.indexOf("return toTanglish(reply)"), "that Roman fallback sits inside the WhatsApp guard branch, after the call-native gate")
+ok(!llm.includes("splitSentences"), "llm.ts no longer splits sentences (sentence pump owns that)")
+ok(llm.includes("CRITICAL OUTPUT FORMAT RULE — TELUGU (NATIVE SCRIPT + ENGLISH LOANWORDS)"), "Telugu call prompt mandates native Telugu script + Latin loanwords")
+ok(llm.includes("CRITICAL OUTPUT FORMAT RULE — HINDI (NATIVE SCRIPT + ENGLISH LOANWORDS)"), "Hindi call prompt mandates native Devanagari + Latin loanwords")
+ok(llm.includes("తెలుగు లిపి") && llm.includes("देवनागरी"), "both native orthographies named explicitly in the training")
+ok(llm.includes("function nativeRewriteMandate(language: Language)"), "native-script slip mandate is language-aware (Telugu vs Hindi)")
+ok((llm.match(/wantsNativeScript\(language, channel\)/g) || []).length >= 2, "native-script gate wired into BOTH chat paths (blocking + streaming)")
+ok(llm.includes('if (channel === "whatsapp" && NATIVE_SCRIPT_RE.test(reply))'), "WhatsApp Roman guard scoped to WhatsApp ONLY (calls want native script)")
+ok(llm.includes("DEFAULT_SCRIPTS.base + CALL_LANGUAGE_STYLES[language]"), "DB-down call fallback composes base script + native call style (no Roman regression)")
+const vconv = fs.readFileSync(path.join(ROOT, "lib", "voice-conversation.ts"), "utf8").replace(/\r\n/g, "\n")
+ok(!vconv.includes("toTanglish("), "voice-conversation never flattens replies/sentences to Roman (native script reaches TTS)")
+const ttsnorm = fs.readFileSync(path.join(ROOT, "lib", "tts-normalize.ts"), "utf8").replace(/\r\n/g, "\n")
+ok(!ttsnorm.includes("toTanglish"), "tts-normalize passes native script through untouched (numbers only PRODUCE Latin)")
+const vprov = fs.readFileSync(path.join(ROOT, "server", "voice-providers.js"), "utf8").replace(/\r\n/g, "\n")
+ok(!vprov.includes("toTanglish"), "voice-providers no longer flattens TTS input — Bulbul v3 receives native orthography")
+ok(vprov.includes("fixSttLexicon") && vprov.includes("STT_LEXICON"), "STT trained with a domain lexicon polish (EMI/CIBIL/WhatsApp/PAN/e-KYC/GST)")
+ok(vprov.includes("fixSttLexicon((data?.transcript || \"\").trim())"), "STT lexicon polish applied to the live transcript")
+const sentp = fs.readFileSync(path.join(ROOT, "lib", "sentences.ts"), "utf8").replace(/\r\n/g, "\n")
+ok(sentp.includes("allowFirstCommaFlush") && sentp.includes("FIRST_COMMA_FLUSH_CHARS"), "first-comma flush trained for Outpero-grade first-audio latency")
+ok(vconv.includes("allowFirstCommaFlush: flushedSentences === 0"), "sentence pump requests the comma flush ONLY before the first emission")
+ok(llm.includes("SCRIPT VIOLATION — YOUR LAST ATTEMPT WAS REJECTED"), "violation suffix reuses the proven guard framing in BOTH directions")
+
+section("19b. Native-script openers & closings (spoken every call — must match the replies)")
+const chansc = fs.readFileSync(path.join(ROOT, "lib", "channel-scripts.ts"), "utf8").replace(/\r\n/g, "\n")
+ok(chansc.includes("నమస్కారం") && chansc.includes("नमस्ते"), "voice openers carry native-script Telugu + Hindi lines")
+ok(!chansc.includes("matladutunnanu — memu"), "no Roman-letter Telugu opener left in the defaults")
+ok(!chansc.includes("Main Priya bol rahi hoon"), "no Roman-letter Hindi opener left in the defaults")
+{
+  // Real cross-script guard: within the openers/closings, every hindi: line
+  // must stay Devanagari-only and every telugu: line Telugu-only (comments
+  // and code outside these keys are unchecked by design).
+  let cur = ""
+  let badMix = 0
+  for (const line of chansc.split("\n")) {
+    const m = line.trim().match(/^(hindi|telugu|english):/)
+    if (m) cur = m[1]
+    if (cur === "hindi" && /[\u0C00-\u0C7F]/.test(line)) badMix++
+    if (cur === "telugu" && /[\u0900-\u097F]/.test(line)) badMix++
+  }
+  ok(badMix === 0, "no cross-script leakage between hindi/telugu opener & closing lines")
+}
+ok(!chansc.includes("చిన్న technical problem"), "no Telugu words leaked into the Hindi closing lines")
 
 section("20. Outpero-standard training in the call language styles")
 ok(llm.includes("SPEAK LIKE A REAL HYDERABAD AGENT (NOT AN IVR)"), "Telugu call style carries the not-an-IVR training block")
