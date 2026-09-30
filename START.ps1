@@ -1,11 +1,17 @@
 # RIGHT AGENT GROUP - ONE CLICK STARTUP (all 7 services)
-# Run: PowerShell -ExecutionPolicy Bypass -File START.ps1
+# Run: PowerShell -ExecutionPolicy Bypass -File START.ps1 [-Detach]
+
+param(
+    [switch]$Detach
+)
 
 $ProjectDir = if ($PSScriptRoot) { $PSScriptRoot } elseif ($MyInvocation.MyCommand.Path) { Split-Path -Parent $MyInvocation.MyCommand.Path } else { (Get-Location).Path }
 Set-Location $ProjectDir
 $ffmpegCmd = Get-Command ffmpeg -ErrorAction SilentlyContinue
 $FFmpegBin = if ($ffmpegCmd) { Split-Path -Parent $ffmpegCmd.Source } else { "C:\Users\Lenovo\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-8.1.2-full_build\bin" }
-$env:PATH = "$ProjectDir;$FFmpegBin;" + $env:PATH
+$ngrokCmd = Get-Command ngrok -ErrorAction SilentlyContinue
+$ngrokBin = if ($ngrokCmd) { Split-Path -Parent $ngrokCmd.Source } else { "C:\Users\Lenovo\AppData\Local\Microsoft\WindowsApps" }
+$env:PATH = "$ProjectDir;$FFmpegBin;$ngrokBin;" + $env:PATH
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
@@ -137,7 +143,7 @@ if ($namedTunnel) {
         Write-Host "      SKIP cloudflared not found - run: winget install Cloudflare.cloudflared" -ForegroundColor Yellow
     }
 } elseif (Get-Command "ngrok" -ErrorAction SilentlyContinue) {
-    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ProjectDir "scripts\tunnel-autofix.ps1") -ProjectDir $ProjectDir
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ProjectDir "scripts\tunnel-autofix.ps1") -ProjectDir "$ProjectDir"
 } else {
     Write-Host "      SKIP ngrok not found - run: winget install ngrok.ngrok (then: ngrok config add-authtoken <token>)" -ForegroundColor Yellow
 }
@@ -154,6 +160,13 @@ Write-Host "  Health    : http://localhost:3000/api/test (after login)" -Foregro
 Write-Host ""
 Write-Host "  Press Ctrl+C to stop everything" -ForegroundColor Gray
 Write-Host ""
+
+if ($Detach) {
+    Write-Host "  OK Services running in persistent background mode." -ForegroundColor Green
+    Write-Host "========================================" -ForegroundColor Green
+    Write-Host ""
+    exit 0
+}
 
 try {
     while ($true) {

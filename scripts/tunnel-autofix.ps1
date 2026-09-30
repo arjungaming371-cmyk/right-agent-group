@@ -68,7 +68,12 @@ Start-Sleep -Seconds 1
 Start-Process "node" -ArgumentList "`"$(Join-Path $ProjectDir 'scripts\local-proxy.js')`" 3005" -WorkingDirectory $ProjectDir -WindowStyle Hidden | Out-Null
 $ngrokPath = "ngrok"
 $cmd = Get-Command "ngrok" -ErrorAction SilentlyContinue
-if ($cmd) { $ngrokPath = $cmd.Source }
+if ($cmd) {
+    $ngrokPath = $cmd.Source
+} else {
+    $fallbackNgrok = "$env:LOCALAPPDATA\Microsoft\WindowsApps\ngrok.exe"
+    if (Test-Path $fallbackNgrok) { $ngrokPath = $fallbackNgrok }
+}
 Start-Process $ngrokPath -ArgumentList "http 3005 --domain=$domain" -WindowStyle Hidden | Out-Null
 
 # --- 3. Wait (max 30s) for ngrok's local API to report the tunnel live ---
