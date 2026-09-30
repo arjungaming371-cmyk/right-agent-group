@@ -213,7 +213,7 @@ ok(vc.includes('callSid?.startsWith("wacall-")'), "channel fact derived from wac
 ok(llm.includes("CALL_TEMPERATURE"), "tone lock (temperature) applies to the call channel — shared by WhatsApp calls")
 
 section("17. lib/lead-brain.ts — unanalyzed WhatsApp chat reaches the call (no re-asking fresh chat facts)")
-const lb = fs.readFileSync(path.join(ROOT, "lib", "lead-brain.ts"), "utf8")
+const lb = fs.readFileSync(path.join(ROOT, "lib", "lead-brain.ts"), "utf8").replace(/\r\n/g, "\n")
 ok(lb.includes("RECENT WHATSAPP CHAT"), "unanalyzed WhatsApp chat fallback block present in buildLeadBrief")
 ok(lb.includes("never re-ask it, never restart from scratch"), "chat block carries an explicit do-not-re-ask mandate")
 ok(lb.includes("$2::timestamptz IS NULL OR created_at > $2::timestamptz"), "chat fallback gated on last_analysis_at (no double injection after the idle-scan runs)")
