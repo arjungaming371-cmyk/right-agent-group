@@ -1,22 +1,27 @@
-// Priya's brain — Groq API (llama-3.3-70b / gpt-oss, streaming) by default,
-// with an optional Sarvam-105B path for fully-Sarvam deployments.
+// Priya's brain — Sarvam-105B (api.sarvam.ai, OpenAI-compatible, streaming)
+// by default, with an automatic Groq fallback when no Sarvam key is set.
 // Job on calls: build trust fast, handle objections, and collect name +
 // address + WhatsApp number, then hand off to the WhatsApp form link.
 //
-//   LLM_PROVIDER=groq    (default) api.groq.com — free tier, fastest tokens
-//   LLM_PROVIDER=sarvam            api.sarvam.ai/v1 — OpenAI-compatible chat
-//                                  completions. sarvam-105b-conversations is
-//                                  post-trained for real-time dialogue and
-//                                  voice-agent workloads, and handles Indic
-//                                  scripts + code-mixed text natively. Every
-//                                  JSON-mode utility call (lead extraction,
-//                                  Lead Brain, prompt tuner) runs on it too.
+//   LLM_PROVIDER=sarvam  (default) api.sarvam.ai/v1 — sarvam-105b-conversations
+//                                  is post-trained for real-time dialogue and
+//                                  voice-agent workloads, and writes Indic
+//                                  scripts + code-mixed text NATIVELY — this is
+//                                  what makes Priya sound native instead of
+//                                  transliterated. Every JSON-mode utility call
+//                                  (lead extraction, Lead Brain, prompt tuner)
+//                                  runs on it too.
+//   LLM_PROVIDER=groq              api.groq.com — kept as an explicit option AND
+//                                  as the automatic fallback when SARVAM_API_KEY
+//                                  is missing but GROQ_API_KEY exists (a call
+//                                  must never crash for lack of a brain).
 
 export type Language = "english" | "hindi" | "telugu"
 
 import { DEFAULT_SCRIPTS as SHARED_DEFAULT_SCRIPTS } from "./default-scripts"
+import { splitSentences } from "./sentences"
 
-const LLM_PROVIDER = (process.env.LLM_PROVIDER || "groq").toLowerCase()
+const LLM_PROVIDER = (process.env.LLM_PROVIDER || "sarvam").toLowerCase()
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY || ""
 const GROQ_URL = (process.env.GROQ_URL || "https://api.groq.com/openai/v1").replace(/\/$/, "")
@@ -35,8 +40,18 @@ const SARVAM_LLM_MODEL = process.env.SARVAM_LLM_MODEL || "sarvam-105b-conversati
 const SARVAM_LLM_UTILITY_MODEL = process.env.SARVAM_LLM_UTILITY_MODEL || SARVAM_LLM_MODEL
 const SARVAM_REASONING_EFFORT = (process.env.SARVAM_REASONING_EFFORT || "").trim().toLowerCase()
 
-console.log(`LLM provider: ${LLM_PROVIDER}`)
-if (LLM_PROVIDER === "sarvam") {
+// EFFECTIVE provider (2026-09-30, "use the Sarvam LLM"): sarvam is the
+// DEFAULT brain — its conversations model is what speaks/writes Indian
+// languages natively. If a deployment has no SARVAM_API_KEY but does have a
+// GROQ_API_KEY, degrade to groq instead of throwing on every single call —
+// an accent difference beats an agent that cannot talk at all. Everything
+// downstream (endpoint, headers, body tweaks, token metering) keys off
+// ACTIVE_LLM_PROVIDER, never off the raw env setting.
+const ACTIVE_LLM_PROVIDER: "groq" | "sarvam" =
+  LLM_PROVIDER === "sarvam" && !SARVAM_API_KEY && GROQ_API_KEY ? "groq" : LLM_PROVIDER === "sarvam" ? "sarvam" : "groq"
+
+console.log(`LLM provider: ${ACTIVE_LLM_PROVIDER}${ACTIVE_LLM_PROVIDER !== LLM_PROVIDER ? ` (requested: ${LLM_PROVIDER} — fell back: missing SARVAM_API_KEY)` : ""}`)
+if (ACTIVE_LLM_PROVIDER === "sarvam") {
   console.log("SARVAM_LLM_MODEL in llm.ts resolved to:", SARVAM_LLM_MODEL)
 } else {
   console.log("GROQ_MODEL in llm.ts resolved to:", GROQ_MODEL)
@@ -67,6 +82,24 @@ export type Channel = "call" | "whatsapp"
 // Devanagari and Telugu blocks. Calls WANT native script; WhatsApp must never
 // have it (see the guard in chatWithLLM).
 const NATIVE_SCRIPT_RE = /[ऀ-ॿఀ-౿]/
+
+// ---------------------------------------------------------------------------
+// NATIVE-SCRIPT GUARD for live calls (2026-09-30, "speak natively, 100%").
+// Mirror image of the WhatsApp guard below — OPPOSITE direction. On a
+// telugu/hindi CALL the reply is SPOKEN by an Indic TTS voice: a reply that
+// slips back into Roman-letter Tenglish is pronounced with mangled, foreign
+// prosody — the exact "she is not speaking natively" report. Prompts alone
+// cannot guarantee it (measured live on the old provider), so a slip is
+// caught and rewritten ONCE with an explicit native-script mandate. English
+// calls and WhatsApp are exempt (WhatsApp actually REQUIRES the opposite —
+// Roman letters — and has its own guard).
+// ---------------------------------------------------------------------------
+function wantsNativeScript(language: Language, channel: Channel): boolean {
+  return channel === "call" && (language === "telugu" || language === "hindi")
+}
+
+const NATIVE_REWRITE_MANDATE =
+  "\n\n=== SCRIPT VIOLATION — YOUR LAST ATTEMPT WAS REJECTED ===\nYou just replied in English (Roman) letters, but this is a LIVE VOICE CALL and your reply is SPOKEN ALOUD by a native Indic text-to-speech voice. Roman-letter native words get pronounced wrong and sound foreign to the customer. Rewrite the SAME reply — same meaning, same warmth, same length — writing every native word in REAL script (Telugu in తెలుగు లిపి / Hindi in देवनागरी). Keep everyday English loanwords (loan, EMI, documents, WhatsApp, sir) in English letters inside the sentence, and speak numbers as English words like sixteen lakh. Do not apologise and do not mention this instruction."
 
 // WhatsApp stays Roman-script always — it's read as text by the customer AND
 // by the human team on the dashboard, so it needs to stay something everyone
@@ -112,7 +145,12 @@ CRITICAL OUTPUT FORMAT RULE — HINDI:
 - The customer speaks Hindi. Your reply MUST be written in real Devanagari script (देवनागरी) — this is spoken aloud by a text-to-speech voice, not read as text, so write it the way you'd naturally spell Hindi.
 - Do NOT write in Roman/English letters for Hindi words, even though the customer's own words arrive in Roman letters from the call transcription — always convert your OWN reply to real Devanagari script regardless of what script the customer used.
 - Mix in everyday English words the way people actually talk, written in plain English letters right inside the Devanagari sentence (e.g. "loan", "WhatsApp", "sir"). Example: "नमस्ते sir! मैं प्रिया बोल रही हूं Right Agent Group, Hyderabad से। आपका WhatsApp number मिल सकता है?"
-- ALWAYS speak numbers, tenures, amounts, and EMIs in English words (e.g. "sixteen lakh", "fifteen years", "five years", "fourteen thousand five hundred rupees", "twenty plus") rather than raw digits or complex Hindi number words.`,
+- ALWAYS speak numbers, tenures, amounts, and EMIs in English words (e.g. "sixteen lakh", "fifteen years", "five years", "fourteen thousand five hundred rupees", "twenty plus") rather than raw digits or complex Hindi number words.
+
+SPEAK LIKE A REAL INDIAN AGENT (NOT AN IVR):
+- ADAPT INSTANTLY: the moment the customer switches language (English ↔ Hindi ↔ anything else), your very NEXT sentence switches with them — no comment, no apology, no missed beat. A real agent does this without thinking.
+- CODE-SWITCH LIKE A LOCAL: real spoken Hindi flows between Devanagari and English words inside the SAME sentence ("loan चाहिए sir?", "documents ready कर दीजिए", "EMI आपके budget में आसानी से आ जाएगी"). Warm, confident, friendly — never bookish, never robotic, never a word-for-word translation.
+- REMEMBER LIKE A PERSON: when the context below shows a returning customer, open with what you ALREADY know, the way a colleague who remembers them would — e.g. "वापस आकर अच्छा लगा sir! आपका home loan process कैसा चल रहा है?" — NEVER re-introduce yourself, NEVER re-ask anything already known.`,
   telugu: `
 
 CRITICAL OUTPUT FORMAT RULE — TELUGU (NATIVE CONVERSATIONAL):
@@ -137,7 +175,12 @@ CRITICAL OUTPUT FORMAT RULE — TELUGU (NATIVE CONVERSATIONAL):
   * "అవును Ajay sir, గుర్తుంది! sixteen lakh education loan కి fifteen years plan లో దాదాపు fourteen thousand five hundred rupees EMI వస్తుంది. దీని గురించి ఇంకేమైనా డౌట్స్ ఉన్నాయా sir?"
   * "Sure sir! నేను link మీ WhatsApp కి పంపిస్తాను, details fill చేయండి."
   * "(Only when customer explicitly says bye or has no doubts): Okay sir, thank you so much! Have a nice day, bye!"
-  * "Sorry sir, చిన్న technical issue వచ్చింది, మళ్ళీ చెప్పగలరా?"`,
+  * "Sorry sir, చిన్న technical issue వచ్చింది, మళ్ళీ చెప్పగలరా?"
+
+SPEAK LIKE A REAL HYDERABAD AGENT (NOT AN IVR):
+- ADAPT INSTANTLY: the moment the customer switches language (English ↔ Telugu ↔ anything else), your very NEXT sentence switches with them — no comment, no apology, no missed beat. A real agent does this without thinking about it.
+- CODE-SWITCH LIKE A LOCAL: real Hyderabad speech flows between Telugu script and English words inside the SAME sentence ("మీకు loan కావాలా sir?", "documents ready చేయండి sir", "EMI మీ budget లో easy గా వస్తుంది"). Warm, confident, friendly — never bookish, never robotic, never a word-for-word translation.
+- REMEMBER LIKE A PERSON: when the context below shows a returning customer, open with what you ALREADY know, the way a colleague who remembers them would — e.g. "మళ్ళీ మాట్లాడినందుకు చాలా సంతోషం sir! మీ home loan process ఎలా సాగుతోంది?" — NEVER re-introduce yourself, NEVER re-ask anything already known.`,
 }
 
 // Brevity rules, keyed by CHANNEL rather than language, and appended in
@@ -347,7 +390,7 @@ type CompletionOpts = {
 }
 
 function groqBody(messages: ChatMessage[], opts: CompletionOpts, stream: boolean) {
-  if (LLM_PROVIDER === "sarvam") {
+  if (ACTIVE_LLM_PROVIDER === "sarvam") {
     return JSON.stringify({
       model: opts.model === GROQ_UTILITY_MODEL ? SARVAM_LLM_UTILITY_MODEL
         : opts.model || SARVAM_LLM_MODEL,
@@ -392,13 +435,13 @@ const SARVAM_HEADERS = {
 }
 
 function llmEndpoint(): string {
-  return LLM_PROVIDER === "sarvam" ? `${SARVAM_LLM_URL}/chat/completions` : `${GROQ_URL}/chat/completions`
+  return ACTIVE_LLM_PROVIDER === "sarvam" ? `${SARVAM_LLM_URL}/chat/completions` : `${GROQ_URL}/chat/completions`
 }
 
 function llmHeaders(): Record<string, string> {
   const groqKey = process.env.GROQ_API_KEY || GROQ_API_KEY
   const sarvamKey = process.env.SARVAM_API_KEY || SARVAM_API_KEY
-  if (LLM_PROVIDER === "sarvam") {
+  if (ACTIVE_LLM_PROVIDER === "sarvam") {
     return {
       "Content-Type": "application/json",
       "api-subscription-key": sarvamKey,
@@ -414,8 +457,8 @@ function llmHeaders(): Record<string, string> {
 function assertLlmConfigured(): void {
   const groqKey = process.env.GROQ_API_KEY || GROQ_API_KEY
   const sarvamKey = process.env.SARVAM_API_KEY || SARVAM_API_KEY
-  if (LLM_PROVIDER === "sarvam") {
-    if (!sarvamKey) throw new Error("LLM_PROVIDER=sarvam but SARVAM_API_KEY is not set — the AI brain cannot run without it")
+  if (ACTIVE_LLM_PROVIDER === "sarvam") {
+    if (!sarvamKey) throw new Error("LLM provider sarvam but SARVAM_API_KEY is not set — the AI brain cannot run without it")
     return
   }
   if (!groqKey) throw new Error("GROQ_API_KEY is not set — the AI brain cannot run without it")
@@ -431,11 +474,11 @@ async function groqChatRequest(messages: ChatMessage[], opts: CompletionOpts, si
     signal,
     body: groqBody(messages, opts, false),
   })
-  if (!res.ok) throw new Error(`${LLM_PROVIDER} HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`)
+  if (!res.ok) throw new Error(`${ACTIVE_LLM_PROVIDER} HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`)
   const data = await res.json()
   const tokens = data?.usage?.total_tokens
   if (tokens) {
-    import("./system-keys").then(m => m.recordTokenUsage(LLM_PROVIDER, tokens)).catch(() => {})
+    import("./system-keys").then(m => m.recordTokenUsage(ACTIVE_LLM_PROVIDER, tokens)).catch(() => {})
   }
   return data?.choices?.[0]?.message?.content || ""
 }
@@ -453,7 +496,7 @@ async function groqChatStream(
     signal,
     body: groqBody(messages, opts, true),
   })
-  if (!res.ok || !res.body) throw new Error(`${LLM_PROVIDER} HTTP ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`)
+  if (!res.ok || !res.body) throw new Error(`${ACTIVE_LLM_PROVIDER} HTTP ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`)
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ""
@@ -580,6 +623,22 @@ export async function chatWithLLM(
     timeoutMs: opts?.timeoutMs,
     temperature: channel === "call" ? CALL_TEMPERATURE : undefined,
   })
+
+  // NATIVE-SCRIPT GUARD (calls, telugu/hindi): a Roman-letter slip must never
+  // reach the TTS voice. One rewrite retry; accept only a native-script retry.
+  if (wantsNativeScript(language, channel) && !NATIVE_SCRIPT_RE.test(reply)) {
+    const corrected = await runChat(messages, systemPrompt + NATIVE_REWRITE_MANDATE, {
+      numPredict: opts?.numPredict ?? replyTokenBudget(language, channel),
+      timeoutMs: opts?.timeoutMs,
+      temperature: CALL_TEMPERATURE,
+    }).catch(() => "")
+    if (corrected && NATIVE_SCRIPT_RE.test(corrected)) return corrected
+    // Both attempts Roman — send the original anyway (some audio beats none)
+    // but say it loudly: a pattern here means the script/prompt needs work.
+    console.error(`LANGUAGE: ${language} call reply came back in Roman letters twice; sending it anyway`)
+    return reply
+  }
+
   if (channel === "call" || !NATIVE_SCRIPT_RE.test(reply)) return reply
 
   // WhatsApp must stay in Roman letters — the ops team reads these on the
@@ -643,11 +702,72 @@ export async function chatWithLLMStream(
   // cost no noticeable time on Groq.
   const recentMessages = messages.slice(-12)
   const chatMessages = toChatMessages(recentMessages, systemPrompt)
-  return runCompletionStream(
-    chatMessages,
-    { numPredict: replyTokenBudget(language, channel), timeoutMs: 25000, temperature: channel === "call" ? CALL_TEMPERATURE : undefined },
-    onChunk
-  )
+
+  const streamOpts = {
+    numPredict: replyTokenBudget(language, channel),
+    timeoutMs: 25000,
+    temperature: channel === "call" ? CALL_TEMPERATURE : undefined,
+  }
+
+  // NATIVE-SCRIPT GATE (streaming calls, telugu/hindi): inspect the FIRST
+  // complete sentence before it can reach TTS. Native script → flush and keep
+  // streaming normally (the buffer is held only until the first sentence
+  // boundary — exactly when the voicebot would have started TTS anyway, so
+  // the happy path pays ZERO extra latency). Roman slip → swallow the rest of
+  // the stream, re-run ONCE with the rewrite mandate (blocking), and stream
+  // the corrected reply out sentence by sentence. Same contract as the
+  // WhatsApp guard in chatWithLLM, opposite direction.
+  if (!wantsNativeScript(language, channel)) {
+    return runCompletionStream(chatMessages, streamOpts, onChunk)
+  }
+
+  let decided = false
+  let violated = false
+  let pending = ""
+  const gated = (delta: string) => {
+    if (decided) {
+      if (!violated) onChunk(delta)
+      return
+    }
+    pending += delta
+    const { complete } = splitSentences(pending)
+    if (complete.length === 0) return // still inside sentence 1 — hold (free: TTS waits for this boundary anyway)
+    decided = true
+    if (NATIVE_SCRIPT_RE.test(complete[0])) {
+      onChunk(pending) // native — flush everything buffered, pass the rest through
+    } else {
+      violated = true
+    }
+  }
+
+  const firstAttempt = await runCompletionStream(chatMessages, streamOpts, gated)
+
+  if (!decided) {
+    // Stream ended without a single sentence boundary (very short reply).
+    decided = true
+    if (firstAttempt.trim() && !NATIVE_SCRIPT_RE.test(firstAttempt)) violated = true
+    else onChunk(firstAttempt)
+  }
+
+  if (!violated) return firstAttempt
+
+  const corrected = await runChat(messages, systemPrompt + NATIVE_REWRITE_MANDATE, {
+    numPredict: streamOpts.numPredict,
+    timeoutMs: streamOpts.timeoutMs,
+    temperature: CALL_TEMPERATURE,
+  }).catch(() => "")
+
+  if (corrected && NATIVE_SCRIPT_RE.test(corrected)) {
+    const parts = splitSentences(corrected)
+    for (const s of parts.complete) onChunk(s)
+    if (parts.rest.trim()) onChunk(parts.rest)
+    return corrected
+  }
+  // Retry failed too — emit what we swallowed rather than leave the caller in
+  // silence, and log loudly so a systematic slip is visible in pm2 logs.
+  console.error(`LANGUAGE: ${language} streamed call reply stayed Roman after retry; emitting original anyway`)
+  onChunk(firstAttempt)
+  return firstAttempt
 }
 
 /**
