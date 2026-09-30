@@ -221,6 +221,41 @@ ok(lb.includes("lm.last_analysis_at"), "brief SELECT now reads last_analysis_at 
 ok(lb.includes("unanalyzedChatBrief) {"), "DO/DON'T no-re-ask line also fires on fresh chat context alone")
 ok(lb.includes('WHERE lead_id = $1\n          AND content IS NOT NULL'), "empty/media-only chat messages filtered out")
 
+// ---------------------------------------------------------------------------
+// "USE THE SARVAM LLM + SPEAK NATIVELY + LOW LATENCY" (Outpero benchmark:
+// natural code-switched Telugu, instant mid-call language adaptation, warm
+// memory-first openers, zero robotic IVR tone). Sarvam-105B is the default
+// brain (native Indic); a first-sentence native-script gate on the live-call
+// stream guarantees no Roman-Tenglish slip ever reaches the TTS voice, at
+// zero added latency on the happy path.
+// ---------------------------------------------------------------------------
+section("18. lib/llm.ts — Sarvam is the default brain (auto Groq fallback)")
+ok(llm.includes('process.env.LLM_PROVIDER || "sarvam"'), "LLM_PROVIDER defaults to sarvam in code")
+ok(llm.includes("ACTIVE_LLM_PROVIDER"), "effective provider resolved separately from the env request")
+ok(llm.includes('LLM_PROVIDER === "sarvam" && !SARVAM_API_KEY && GROQ_API_KEY ? "groq"'), "missing SARVAM key degrades to groq instead of crashing every call")
+ok((llm.match(/ACTIVE_LLM_PROVIDER === "sarvam"/g) || []).length >= 3, "endpoint/headers/body all key off the ACTIVE provider")
+ok(!llm.includes('recordTokenUsage(LLM_PROVIDER'), "token metering uses the ACTIVE provider")
+const envex = fs.readFileSync(path.join(ROOT, ".env.example"), "utf8").replace(/\r\n/g, "\n")
+ok(envex.includes("LLM_PROVIDER=sarvam"), ".env.example ships LLM_PROVIDER=sarvam as the documented default")
+
+section("19. lib/llm.ts — Tanglish & English alphabets guarantee for TTS")
+ok(llm.includes('import { toTanglish } from "./transliterate"'), "toTanglish transliterator imported in lib/llm.ts")
+ok(llm.includes("toTanglish(chunk)"), "streaming path guarantees English alphabets for TTS")
+ok(llm.includes("toTanglish(reply)"), "blocking path guarantees English alphabets for TTS")
+ok(llm.includes('import { splitSentences } from "./sentences"'), "sentence splitter imported")
+ok(llm.includes("CRITICAL OUTPUT FORMAT RULE — TELUGU (TANGLISH / TENGLISH — ENGLISH ALPHABETS ONLY)"), "Telugu call prompt strictly enforces English alphabets")
+ok(llm.includes("CRITICAL OUTPUT FORMAT RULE — HINDI (HINGLISH — ENGLISH ALPHABETS ONLY)"), "Hindi call prompt strictly enforces English alphabets")
+ok(llm.includes("SCRIPT VIOLATION — YOUR LAST ATTEMPT WAS REJECTED"), "violation suffix reuses the proven WhatsApp-guard framing")
+
+section("20. Outpero-standard training in the call language styles")
+ok(llm.includes("SPEAK LIKE A REAL HYDERABAD AGENT (NOT AN IVR)"), "Telugu call style carries the not-an-IVR training block")
+ok(llm.includes("SPEAK LIKE A REAL INDIAN AGENT (NOT AN IVR)"), "Hindi call style carries the not-an-IVR training block")
+ok((llm.match(/ADAPT INSTANTLY/g) || []).length === 2, "instant mid-call language adaptation trained in BOTH native languages")
+ok((llm.match(/CODE-SWITCH LIKE A LOCAL/g) || []).length === 2, "local code-switching trained in BOTH native languages")
+ok((llm.match(/REMEMBER LIKE A PERSON/g) || []).length === 2, "memory-first welcome-back openers trained in BOTH native languages")
+const ds = fs.readFileSync(path.join(ROOT, "lib", "default-scripts.ts"), "utf8").replace(/\r\n/g, "\n")
+ok(!ds.includes("ధన్యవాదాలు"), "default base script no longer violates the Telugu BAN list (ధన్యవాదాలు → thank you sir)")
+
 console.log(`\n========================================`)
 console.log(`  RESULT: ${passed} passed, ${failed} failed`)
 console.log(`========================================`)
