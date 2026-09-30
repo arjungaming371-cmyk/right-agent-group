@@ -48,15 +48,15 @@ const SARVAM_STT_MODE = process.env.SARVAM_STT_MODE || "translit"
 const SARVAM_STT_AUTO = (process.env.SARVAM_STT_AUTO || "0").trim() === "1"
 
 const SARVAM_TTS_MODEL = process.env.SARVAM_TTS_MODEL || "bulbul:v3"
-// bulbul:v3 female voices include "priya" — on the nose for this agent.
-// Others: ritu, neha, pooja, simran, kavya, ishita, shreya, roopa, tanya,
-// shruti, suhani, kavitha, rupali; males: shubh (default), aditya, rahul...
-const SARVAM_TTS_SPEAKER = process.env.SARVAM_TTS_SPEAKER || "priya"
+const SARVAM_TTS_SPEAKER_TELUGU = process.env.SARVAM_TTS_SPEAKER_TELUGU || "ishita"
+const SARVAM_TTS_SPEAKER_HINDI = process.env.SARVAM_TTS_SPEAKER_HINDI || "priya"
+const SARVAM_TTS_SPEAKER_ENGLISH = process.env.SARVAM_TTS_SPEAKER_ENGLISH || "priya"
+const SARVAM_TTS_SPEAKER = process.env.SARVAM_TTS_SPEAKER || ""
 const SARVAM_TTS_SAMPLE_RATE = parseInt(process.env.SARVAM_TTS_SAMPLE_RATE || "24000")
-// Pace 1.15 provides natural human conversational speed without dragging or slow motion
-const SARVAM_TTS_PACE = parseFloat(process.env.SARVAM_TTS_PACE || "1.15")
-// Temperature 0.65 for natural, warm expressive vocal inflections
-const SARVAM_TTS_TEMPERATURE = parseFloat(process.env.SARVAM_TTS_TEMPERATURE || "0.65")
+// Pace 1.0 provides relaxed, natural human conversational flow without robotic rushing or clipping
+const SARVAM_TTS_PACE = parseFloat(process.env.SARVAM_TTS_PACE || "1.0")
+// Temperature 0.3 provides stable, warm melodic pitch without vocal wobble or falling voice
+const SARVAM_TTS_TEMPERATURE = parseFloat(process.env.SARVAM_TTS_TEMPERATURE || "0.3")
 
 const CARTESIA_API_KEY = (process.env.CARTESIA_API_KEY || "").trim()
 const CARTESIA_BASE = (process.env.CARTESIA_URL || "https://api.cartesia.ai").replace(/\/$/, "")
@@ -308,7 +308,12 @@ function toTanglish(text) {
         out += base + 'a'
       }
     } else if (ch === '\u0C02') {
-      out += 'm'
+      const nextCh = text[i + 1]
+      if (nextCh && /[\u0C15-\u0C29\u0C36-\u0C39]/.test(nextCh)) {
+        out += 'n'
+      } else {
+        out += 'm'
+      }
     } else if (ch === '\u0C03') {
       out += 'h'
     } else if (HINDI_VOWELS[ch]) {
@@ -336,7 +341,12 @@ function toTanglish(text) {
       out += ch
     }
   }
-  return out.replace(/\bnumdi\b/gi, 'nunchi').replace(/\bnamaskaaram\b/gi, 'namaskaram')
+  return out
+    .replace(/(\w)mdi\b/gi, '$1ndi')
+    .replace(/\bamdi\b/gi, 'andi')
+    .replace(/\bcheppamdi\b/gi, 'cheppandi')
+    .replace(/\bnumdi\b/gi, 'nunchi')
+    .replace(/\bnamaskaaram\b/gi, 'namaskaram')
 }
 
 function normalizeForTts(text) {
@@ -349,6 +359,8 @@ function normalizeForTts(text) {
   out = out.replace(/\b1\s*minute\b/gi, "okka minute")
   out = out.replace(/&/g, " and ")
   out = out.replace(/(\.{2,}|…)/g, ".") // ellipses to single period
+  out = out.replace(/!\s+/g, ", ") // soften exclamations to commas to prevent terminal pitch crashes
+  out = out.replace(/!+$/g, ".") // end of text exclamation softened to period
 
   // Convert numbers, integers, amounts, tenures, percentages, phone numbers to clean English words
   out = normalizeNumbersToEnglishWords(out)
@@ -449,11 +461,16 @@ async function sarvamStt(wavBuffer, language) {
 async function sarvamTts(text, language, speakerOverride) {
   if (!SARVAM_API_KEY) throw new Error("SARVAM_API_KEY is not set — cannot use TTS_CALL_PROVIDER=sarvam")
   text = normalizeForTts(text)
-  const speaker = speakerOverride || SARVAM_TTS_SPEAKER
+  const locale = resolveTtsLocale(text, language, SARVAM_TTS_LOCALES)
+  let speaker = speakerOverride || SARVAM_TTS_SPEAKER
+  if (!speaker) {
+    if (locale === "te-IN") speaker = SARVAM_TTS_SPEAKER_TELUGU
+    else if (locale === "hi-IN") speaker = SARVAM_TTS_SPEAKER_HINDI
+    else speaker = SARVAM_TTS_SPEAKER_ENGLISH
+  }
   // Cloned Sarvam voices (Clone Lab ids look like "svc-...") speak through
   // the clone-synthesis endpoint, not Bulbul's preset-speaker endpoint.
   if (speaker.startsWith("svc-")) return sarvamCloneTts(text, language, speaker)
-  const locale = resolveTtsLocale(text, language, SARVAM_TTS_LOCALES)
   const body = {
     text,
     model: SARVAM_TTS_MODEL,

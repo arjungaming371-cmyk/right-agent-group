@@ -418,7 +418,7 @@ function splitIntoSentences(text) {
     const next = text[i + 1]
     if (next !== undefined && !/\s/.test(next)) continue
     const candidate = text.slice(start, i + 1).trim()
-    if (candidate.length < 8) continue
+    if (candidate.length < 28) continue
     out.push(candidate)
     start = i + 1
   }
@@ -1042,14 +1042,11 @@ class CallSession {
   /** Extracted verbatim so tests can replace it without a TTS service. */
   synth(text, epoch, sentenceLang) {
     const lang = sentenceLang || this.language || "english"
-    return this.synthChain.then(() =>
-      this.closed || epoch !== this.speechEpoch
-        ? null
-        : textToSpeechPcm8k(text, lang, this.voice).catch((e) => {
-            console.error("TTS error:", e.message)
-            return null
-          })
-    )
+    if (this.closed || epoch !== this.speechEpoch) return Promise.resolve(null)
+    return textToSpeechPcm8k(text, lang, this.voice).catch((e) => {
+      console.error("TTS error:", e.message)
+      return null
+    })
   }
 
   /** Extracted verbatim so tests can replace it without the Next.js app. */

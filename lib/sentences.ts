@@ -11,8 +11,9 @@
 const BOUNDARY = /[.!?…।॥]/
 
 /** Minimum characters before a boundary is allowed to end a sentence —
- *  keeps "Mr." / "Dr." / list numbering from producing confetti. */
-const MIN_SENTENCE_CHARS = 8
+ *  prevents tiny 1-2 word fragments ("Nenu Priya.", "Avunu sir!") from chopping
+ *  the voice into robotic stutters with falling pitch. */
+const MIN_SENTENCE_CHARS = 28
 
 /**
  * Splits accumulated stream text into complete sentences + the unfinished

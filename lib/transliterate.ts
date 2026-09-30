@@ -75,7 +75,13 @@ export function toTanglish(text: string): string {
     }
     // 3. Telugu modifiers
     else if (ch === "\u0C02") { // anusvara
-      out += "m"
+      const nextCh = text[i + 1]
+      // In Telugu phonetics, anusvara before stops (k, g, ch, j, t, d, n, s) sounds as 'n', before labials (p, b, m) as 'm'
+      if (nextCh && /[\u0C15-\u0C29\u0C36-\u0C39]/.test(nextCh)) {
+        out += "n"
+      } else {
+        out += "m"
+      }
     } else if (ch === "\u0C03") { // visarga
       out += "h"
     }
@@ -111,6 +117,9 @@ export function toTanglish(text: string): string {
   }
 
   return out
+    .replace(/(\w)mdi\b/gi, "$1ndi")
+    .replace(/\bamdi\b/gi, "andi")
+    .replace(/\bcheppamdi\b/gi, "cheppandi")
     .replace(/\bnumdi\b/gi, "nunchi")
     .replace(/\bnamaskaaram\b/gi, "namaskaram")
 }

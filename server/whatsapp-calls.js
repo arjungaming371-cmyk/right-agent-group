@@ -281,7 +281,7 @@ function splitIntoSentences(text) {
     const next = text[i + 1]
     if (next !== undefined && !/\s/.test(next)) continue
     const candidate = text.slice(start, i + 1).trim()
-    if (candidate.length < 8) continue
+    if (candidate.length < 28) continue
     out.push(candidate)
     start = i + 1
   }
@@ -994,9 +994,9 @@ class WhatsAppCallSession {
               this.outQueue = []
               break
             }
-            await sleep(40)
+            await sleep(20)
           }
-          if (!this.closed && epoch === this.speechEpoch) await sleep(200)
+          if (!this.closed && epoch === this.speechEpoch) await sleep(80)
         } finally {
           this.sendingAudio = false
           if (this.outQueue.length === 0) this.botTalking = false
@@ -1014,8 +1014,8 @@ class WhatsAppCallSession {
    * belongs to the same provider.
    */
   synth(text, epoch, sentenceLang) {
-    return this.synthChain.then(async () => {
-      if (this.closed || epoch !== this.speechEpoch) return null
+    if (this.closed || epoch !== this.speechEpoch) return Promise.resolve(null)
+    return (async () => {
       try {
         const t0 = Date.now()
         let override = this.voice || null
@@ -1046,7 +1046,7 @@ class WhatsAppCallSession {
         console.error("wa TTS error:", e.message)
         return null
       }
-    })
+    })()
   }
 
   async drainSpeech(epoch) {
