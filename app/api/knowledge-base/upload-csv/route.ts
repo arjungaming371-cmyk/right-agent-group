@@ -3,6 +3,7 @@ import { db } from "@/lib/db"
 import { requireModuleOrRole } from "@/lib/auth"
 import { logAudit } from "@/lib/audit"
 import { parseCsvToEntries } from "@/lib/kb-ingest"
+import { validateKbEntries } from "@/lib/kb-rules"
 
 // POST — bulk-import knowledge base entries from a CSV file.
 // Expected columns (case-insensitive, flexible naming): title/question/q,
@@ -32,6 +33,25 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "No valid rows found — need title/question and content/answer columns" }, { status: 400 })
   }
 
+  // 2026-09-30: script-compliance gate (lib/kb-rules.ts). The KB grounds
+  // Priya's live answers, so a CSV row promising "guaranteed approval" or a
+  // made-up phone number would become a live-call violation. Operator-
+  // authored CSV is held to the FULL strict rules — violations reject the
+  // whole upload with per-row reasons; warnings (e.g. an entry longer than
+  // the 800-char retrieval snippet) are accepted and echoed back.
+  const { violations, warnings } = validateKbEntries(entries)
+  if (violations.length > 0) {
+    return NextResponse.json(
+      {
+        error: "CSV rejected — some rows violate the call-script compliance rules",
+        violationCount: violations.length,
+        violations: violations.slice(0, 50),
+        total: entries.length,
+      },
+      { status: 422 }
+    )
+  }
+
   const rows = entries.map((entry) => ({
     title: entry.title,
     content: entry.content,
@@ -48,5 +68,5 @@ export async function POST(req: NextRequest) {
   }
 
   logAudit("knowledge base CSV imported", session.email, { filename: file.name, rows: entries.length, created })
-  return NextResponse.json({ ok: true, created, total: entries.length })
+  return NextResponse.json({ ok: true, created, total: entries.length, warnings: warnings.slice(0, 20) })
 }

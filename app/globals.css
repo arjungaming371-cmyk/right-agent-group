@@ -381,3 +381,42 @@ input[type="range"].audio-range-slider::-moz-range-track {
   background: transparent;
 }
 
+
+/* ---------------------------------------------------------------------------
+ * Motion & interaction polish (frontend smoothness pass)
+ * ------------------------------------------------------------------------- */
+
+/* Keep-alive view host enter animation: the data attribute flips
+   false → true on activation, which re-applies this rule and restarts the
+   animation — no JS key juggling, no remount. While parked (display:none)
+   the rule doesn't match, so nothing animates off-screen. */
+.view-host[data-view-active="true"] { animation: fadeInUp 0.25s cubic-bezier(0.16, 1, 0.3, 1); }
+
+/* Keyboard focus rings — focus-visible never fires on mouse clicks, so this
+   only appears for keyboard navigation. Matches the input focus glow. */
+button:focus-visible, a:focus-visible, [role="button"]:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 2px;
+}
+
+/* Brand-tinted text selection instead of the OS default */
+::selection { background: rgba(139, 124, 255, 0.32); }
+:root[data-theme="light"] ::selection { background: rgba(124, 106, 232, 0.25); }
+
+/* Primary buttons get a gentle lift on hover to pair with the existing
+   shadow deepening; pressed state returns to rest instantly. */
+.btn-primary:hover:not(:disabled) { transform: translateY(-1px); }
+.btn-primary:active:not(:disabled) { transform: translateY(0) scale(0.985); }
+
+/* Respect the OS "reduce motion" setting: kill decorative animation and
+   transitions for users sensitive to motion — state changes still apply,
+   just without movement. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

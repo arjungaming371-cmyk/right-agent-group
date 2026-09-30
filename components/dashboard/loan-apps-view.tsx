@@ -78,6 +78,10 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [search, setSearch] = useState(initialSearch || "")
+  // Keep-alive parity with leads-view: the view stays mounted across tab
+  // switches now, so a command-palette jump must re-seed the search box even
+  // when this view is already open (prop change instead of a remount).
+  useEffect(() => { if (initialSearch !== undefined) setSearch(initialSearch) }, [initialSearch])
   const [pendingEdits, setPendingEdits] = useState<EditRequest[]>([])
   const [reviewing, setReviewing] = useState<string | null>(null)
   const [historyFor, setHistoryFor] = useState<string | null>(null)

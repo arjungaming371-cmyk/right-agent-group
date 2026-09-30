@@ -1,5 +1,5 @@
 "use client"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import dynamic from "next/dynamic"
 import {
   Users, FileText, Phone, MessageCircle, Activity, ShieldCheck, UploadCloud,
@@ -7,6 +7,7 @@ import {
   Building2, Sparkles, Instagram, PhoneCall, AudioWaveform, type LucideIcon,
 } from "lucide-react"
 import { ToastProvider } from "../ui/toast"
+import { Skeleton, SkeletonList } from "../ui/skeleton"
 import CommandPalette from "../ui/command-palette"
 import LeadsView    from "./leads-view"
 
@@ -97,10 +98,20 @@ const BranchesView = dynamic(() => import("./branches-view"), {
   loading: () => <ViewFallback label="Branches & Staff AI" />,
 })
 const VoiceAssistant = dynamic(() => import("./voice-assistant"), { ssr: false })
-import { usePolling } from "@/lib/use-poll"
+import { usePolling, setActivePollingView, PollingViewContext } from "@/lib/use-poll"
 
+// Shimmer skeleton matching the list layouts every view opens with — the old
+// bare "Loading X…" text flashed jarringly against the finished UI.
 function ViewFallback({ label }: { label: string }) {
-  return <div style={{ padding: 24, color: "var(--text-muted)" }}>Loading {label}…</div>
+  return (
+    <div style={{ padding: 24 }} aria-label={`Loading ${label}`}>
+      <div style={{ marginBottom: 18, display: "flex", flexDirection: "column", gap: 9 }}>
+        <Skeleton w={190} h={16} />
+        <Skeleton w={280} h={11} />
+      </div>
+      <SkeletonList rows={6} />
+    </div>
+  )
 }
 
 export type ViewKey = "leads" | "loans" | "queue" | "voice" | "voice-studio" | "whatsapp" | "instagram" | "comms" | "calendar" | "security" | "upload" | "script" | "knowledge" | "analytics" | "branches" | "dev-logs" | "simulator"
@@ -205,6 +216,43 @@ export default function DashboardShell() {
   // actually needed (VoiceAssistant alone is a ~2k-line component).
   const [voiceAssistantEverOpened, setVoiceAssistantEverOpened] = useState(false)
   const [paletteEverOpened, setPaletteEverOpened] = useState(false)
+
+  // KEEP-ALIVE: once a view has been opened it stays mounted (hidden) for the
+  // rest of the session — switching tabs is instant, list scroll positions,
+  // search boxes and half-filled forms all survive. Unvisited views still
+  // cost nothing (never mounted, chunk never fetched). Parked views stop
+  // polling via PollingViewContext in lib/use-poll.ts, so visited views
+  // never multiply database load while sitting in the background.
+  const [visitedViews, setVisitedViews] = useState<Set<ViewKey>>(() => new Set([view]))
+  // Per-view scroll memory for the shared <main> scroller (effect below).
+  const mainRef = useRef<HTMLElement | null>(null)
+  const scrollMemory = useRef<Partial<Record<ViewKey, number>>>({})
+  const lastActiveView = useRef<ViewKey>(view)
+
+  useEffect(() => {
+    // Register the active view for the polling gate BEFORE anything else so
+    // the incoming view's ticks are allowed immediately.
+    setActivePollingView(view)
+    setVisitedViews(prev => (prev.has(view) ? prev : new Set(prev).add(view)))
+  }, [view])
+  // Leave a clean slate when the console unmounts (logout → /login).
+  useEffect(() => () => setActivePollingView(null), [])
+
+  // Save/restore the main scroller's position per view: parked views are
+  // display:none, so without this every view would inherit whatever scroll
+  // position the previous view left behind. Restore happens in a rAF, after
+  // the host flips visible and the browser has laid it out.
+  useEffect(() => {
+    if (lastActiveView.current === view) return
+    const el = mainRef.current
+    if (el) scrollMemory.current[lastActiveView.current] = el.scrollTop
+    lastActiveView.current = view
+    const raf = requestAnimationFrame(() => {
+      const m = mainRef.current
+      if (m) m.scrollTop = scrollMemory.current[view] ?? 0
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [view])
 
   // Global shortcuts: Ctrl+K for palette, Alt+V for Personal Voice Assistant
   useEffect(() => {
@@ -349,6 +397,31 @@ export default function DashboardShell() {
   function navigateFromPalette(target: ViewKey, search?: string) {
     setView(target)
     setSeedSearch(search ? { view: target, q: search } : null)
+  }
+
+  // One render switch shared by the keep-alive hosts — keep the props in
+  // lockstep with what each view needs (role, branch context, seeded search).
+  function renderView(k: ViewKey) {
+    switch (k) {
+      case "analytics":    return <AnalyticsView />
+      case "leads":        return <LeadsView role={role} initialSearch={seedSearch?.view === "leads" ? seedSearch.q : undefined} />
+      case "loans":        return <LoanAppsView role={role} initialSearch={seedSearch?.view === "loans" ? seedSearch.q : undefined} />
+      case "queue":        return <QueueView role={role} />
+      case "voice":        return <VoiceLogsView role={role} />
+      case "voice-studio": return <VoiceStudioView role={role} />
+      case "whatsapp":     return <WhatsAppView role={role} />
+      case "instagram":    return <InstagramView initialSearch={seedSearch?.view === "instagram" ? seedSearch.q : undefined} />
+      case "comms":        return <CommLogView />
+      case "calendar":     return <CalendarView role={role} />
+      case "security":     return <SecurityView role={role} />
+      case "upload":       return <UploadView role={role} />
+      case "script":       return <ScriptView />
+      case "branches":     return <BranchesView role={role} branchId={sessionBranchId} />
+      case "knowledge":    return <KnowledgeBaseView role={role} />
+      case "simulator":    return <OmnichannelTester />
+      case "dev-logs":     return role === "developer" ? <DeveloperLogsView userEmail={userEmail} /> : null
+      default:             return null
+    }
   }
 
   return (
@@ -570,25 +643,23 @@ export default function DashboardShell() {
           <NotificationBell onNavigate={(view) => setView(view)} />
         </header>
 
-        {/* Content */}
-        <main key={view} className="flex-1 overflow-auto p-3 md:p-6" style={{ animation: "fadeInUp 0.25s ease" }}>
-          {view === "analytics" && <AnalyticsView />}
-          {view === "leads"    && <LeadsView role={role} initialSearch={seedSearch?.view === "leads" ? seedSearch.q : undefined} />}
-          {view === "loans"    && <LoanAppsView role={role} initialSearch={seedSearch?.view === "loans" ? seedSearch.q : undefined} />}
-          {view === "queue"    && <QueueView role={role} />}
-          {view === "voice"    && <VoiceLogsView role={role} />}
-          {view === "voice-studio" && <VoiceStudioView role={role} />}
-          {view === "whatsapp" && <WhatsAppView role={role} />}
-          {view === "instagram" && <InstagramView initialSearch={seedSearch?.view === "instagram" ? seedSearch.q : undefined} />}
-          {view === "comms"    && <CommLogView />}
-          {view === "calendar" && <CalendarView role={role} />}
-          {view === "security" && <SecurityView role={role} />}
-          {view === "upload"   && <UploadView role={role} />}
-          {view === "script"   && <ScriptView />}
-          {view === "branches" && <BranchesView role={role} branchId={sessionBranchId} />}
-          {view === "knowledge" && <KnowledgeBaseView role={role} />}
-          {view === "simulator" && <OmnichannelTester />}
-          {view === "dev-logs" && role === "developer" && <DeveloperLogsView userEmail={userEmail} />}
+        {/* Content — keep-alive hosts: visited views stay mounted (hidden),
+            the active one is visible and plays its enter animation via the
+            data-view-active attribute flip in globals.css. The old
+            key={view} remounted everything on every switch: refetch, scroll
+            reset, lost form state, and a loading flash each time. */}
+        <main ref={mainRef} className="flex-1 overflow-auto p-3 md:p-6">
+          {[...visitedViews].map(k => (
+            <PollingViewContext.Provider key={k} value={k}>
+              <div
+                className="view-host"
+                data-view-active={k === view ? "true" : "false"}
+                style={{ display: k === view ? undefined : "none" }}
+              >
+                {renderView(k)}
+              </div>
+            </PollingViewContext.Provider>
+          ))}
         </main>
       </div>
       {/* Floating ops chatbot — back by popular demand. */}
