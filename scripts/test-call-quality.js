@@ -189,6 +189,38 @@ ok(!route.includes("function resolveSpokenLanguage"), "local (untested) language
 ok(route.includes("if (explicitSwitch && call?.lead_id)"), "lead language persist gated on EXPLICIT switch only")
 ok(!route.includes("resolveSpokenLanguage(speech, current)"), "old 2-arg call signature gone")
 
+// ---------------------------------------------------------------------------
+// "SAME FOR WHATSAPP CALLS" — the WhatsApp calling bridge shares ONE brain
+// with the Exotel voicebot (/api/calls/turn → handleTurn/handleTurnStream).
+// These contracts pin that every call-quality guarantee reaches WhatsApp
+// calls too, and that WhatsApp-specific context (chat-derived facts) is not
+// lost before the Lead Brain idle-scan distills it.
+// ---------------------------------------------------------------------------
+section("15. server/whatsapp-calls.js wiring — WhatsApp calls ride the same fixed brain")
+const wa = fs.readFileSync(path.join(ROOT, "server", "whatsapp-calls.js"), "utf8")
+ok(wa.includes("/api/calls/turn"), "WhatsApp bridge calls the SAME turn API as the Exotel voicebot")
+ok(wa.includes('event: "start"') && wa.includes('event: "turn"'), "start + turn events go through the shared brain")
+ok(wa.includes('source: "whatsapp_call"'), "WhatsApp calls tagged with source=whatsapp_call (lead + analytics)")
+ok(wa.includes("callTurnApiStream"), "WhatsApp turns use the streaming path (same instant-sentence pipeline)")
+ok((wa.match(/if \(ev\.language\) this\.language = ev\.language/g) || []).length >= 2, "session language follows the brain's per-turn language (no stale TTS voice)")
+ok(wa.includes("voiceProviders.transcribe(pcmToWav16k(pcm16k), this.language)"), "STT hint per utterance (mid-call language switching works)")
+
+section("16. WhatsApp-call context in the shared brain — grounding + tone + facts")
+ok(vc.includes('isWhatsAppCall ? "whatsapp" : "phone"'), "BOTH turn paths pass the WhatsApp channel fact to buildTurnInstructions")
+ok((vc.match(/isWhatsAppCall \? "whatsapp" : "phone"/g) || []).length === 2, "handleTurn AND handleTurnStream are WhatsApp-aware")
+ok(vc.includes("THIS CALL IS HAPPENING ON THE CUSTOMER'S WHATSAPP"), "WhatsApp grounding line: never re-ask the WhatsApp number on a WhatsApp call")
+ok(vc.includes('callSid?.startsWith("wacall-")'), "channel fact derived from wacall- sids in both turn paths")
+ok(llm.includes("CALL_TEMPERATURE"), "tone lock (temperature) applies to the call channel — shared by WhatsApp calls")
+
+section("17. lib/lead-brain.ts — unanalyzed WhatsApp chat reaches the call (no re-asking fresh chat facts)")
+const lb = fs.readFileSync(path.join(ROOT, "lib", "lead-brain.ts"), "utf8")
+ok(lb.includes("RECENT WHATSAPP CHAT"), "unanalyzed WhatsApp chat fallback block present in buildLeadBrief")
+ok(lb.includes("never re-ask it, never restart from scratch"), "chat block carries an explicit do-not-re-ask mandate")
+ok(lb.includes("$2::timestamptz IS NULL OR created_at > $2::timestamptz"), "chat fallback gated on last_analysis_at (no double injection after the idle-scan runs)")
+ok(lb.includes("lm.last_analysis_at"), "brief SELECT now reads last_analysis_at from lead_memory")
+ok(lb.includes("unanalyzedChatBrief) {"), "DO/DON'T no-re-ask line also fires on fresh chat context alone")
+ok(lb.includes('WHERE lead_id = $1\n          AND content IS NOT NULL'), "empty/media-only chat messages filtered out")
+
 console.log(`\n========================================`)
 console.log(`  RESULT: ${passed} passed, ${failed} failed`)
 console.log(`========================================`)
