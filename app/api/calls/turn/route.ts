@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { db, query } from "@/lib/db"
 import { startCall, handleTurn, handleTurnStream, correctLastSpokenReply } from "@/lib/voice-conversation"
 import { detectLanguage, type Language } from "@/lib/llm"
+import { normalizeCallLanguage, resolveSpokenLanguage } from "@/lib/call-facts"
 import { PHONE_MATCH_SQL } from "@/lib/phone"
 import { resolveBranchByCallerId, recordUsage, getBranchVoice } from "@/lib/branches"
 import { verifyServiceKey } from "@/lib/service-key"
@@ -32,28 +33,14 @@ export const dynamic = "force-dynamic"
 
 // Telugu is the business's home market and the default first language —
 // Priya opens in Telugu and switches when the caller speaks something else.
-function normalizeLanguage(input: unknown): Language {
-  return input === "hindi" || input === "telugu" || input === "english" ? input : "telugu"
-}
-
-// Mid-call language switching. STT runs in auto-detect mode, so the script of
-// the transcript tells us what the caller actually spoke: one Telugu or
-// Devanagari character is strong evidence (Whisper writes those scripts only
-// when it heard that language). Switching to ENGLISH needs a real sentence —
-// short fillers like "ok", "yes" appear inside Telugu/Hindi conversations all
-// the time and must not flip the call.
-function resolveSpokenLanguage(speech: string, current: Language): Language {
-  const text = speech.toLowerCase()
-  // Explicit keyword shift requests
-  if (/\b(telugu|telgu|tenglish|telegu)\b|తెలుగు|telugulo|telugula/i.test(text)) return "telugu"
-  if (/\b(hindi|hinglish|hind)\b|हिंदी|हिन्दी|hindimein|hindime/i.test(text)) return "hindi"
-  if (/\b(english|eng|inglish)\b|englishlo|englishmein/i.test(text)) return "english"
-
-  const detected = detectLanguage(speech)
-  if (detected === current) return current
-  if (detected === "english" && speech.trim().split(/\s+/).length < 3) return current
-  return detected
-}
+// The language rules live in lib/call-facts.ts (pure + unit-tested):
+// normalizeCallLanguage for unknown input; resolveSpokenLanguage for the
+// mid-call switch — EXPLICIT requests ("telugu lo matladu") switch
+// immediately, native-script/romanized-keyword evidence switches too, and a
+// bare English CANDIDATE now needs ≥6 words leaning on ≥3 English function
+// words. The old 3-word rule flipped the call's TTS voice on Tenglish
+// answers like "naa peru Suresh" (no keyword hit → 'english') mid-sentence,
+// and persisted the wrong language onto the lead.
 
 // Wire format from server/voicebot-server.js + server/whatsapp-calls.js.
 // Everything optional: the bridge only sets what the event needs.
@@ -103,7 +90,7 @@ export async function POST(req: NextRequest) {
         .single()
 
       let leadId: string = existing?.lead_id || ""
-      let language = normalizeLanguage(existing?.language)
+      let language = normalizeCallLanguage(existing?.language)
       let direction: "inbound" | "outbound" = existing?.direction === "inbound" ? "inbound" : "outbound"
       let branchId: string | null = existing?.branch_id || null
       // WhatsApp voice calls (wacall-* sids) arrive with the branch ALREADY
@@ -141,7 +128,7 @@ export async function POST(req: NextRequest) {
         const lead = found.rows[0]
         if (lead) {
           leadId = lead.id
-          if (lead.language) language = normalizeLanguage(lead.language)
+          if (lead.language) language = normalizeCallLanguage(lead.language)
         } else {
           // language telugu explicitly — belt-and-braces with the DB column
           // default (also telugu since the Tenglish-first change), so an old
@@ -181,16 +168,19 @@ export async function POST(req: NextRequest) {
         .single()
 
       // Prefer call row's language if already recorded/switched (prevents stale client state from reverting)
-      const current = normalizeLanguage(call?.language || body?.language)
-      const language = resolveSpokenLanguage(speech, current)
+      const current = normalizeCallLanguage(call?.language || body?.language)
+      const { language, explicit: explicitSwitch } = resolveSpokenLanguage(speech, current, detectLanguage)
       if (language !== current) {
         // Persist the switch — on the call row (so later turns and history stay
-        // consistent) AND on the lead (so their NEXT call greets them right).
+        // consistent) ALWAYS, and on the lead ONLY when the customer explicitly
+        // asked for the language: an auto-detected switch can be a one-off
+        // mishearing, and persisting it poisoned the NEXT call's greeting
+        // language too.
         // Logged, not silently swallowed: a failed persist made Priya flip
         // back to the old language on the very next turn with no trace.
         db.from("voice_calls").update({ language }).eq("twilio_call_sid", callSid).catch((e) =>
           console.error("language switch persist (call row) failed:", e instanceof Error ? e.message : e))
-        if (call?.lead_id) db.from("leads").update({ language }).eq("id", call.lead_id).catch((e) =>
+        if (explicitSwitch && call?.lead_id) db.from("leads").update({ language }).eq("id", call.lead_id).catch((e) =>
           console.error("language switch persist (lead) failed:", e instanceof Error ? e.message : e))
       }
 

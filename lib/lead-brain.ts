@@ -352,7 +352,7 @@ export async function buildLeadBrief(leadId: string): Promise<string> {
     const res = await query(
       `SELECT
          l.name, l.address, l.language, l.whatsapp_number, l.form_completed, l.product_interest, l.loan_amount,
-         lm.facts, lm.summary, lm.sentiment, lm.stage,
+         lm.facts, lm.summary, lm.sentiment, lm.stage, lm.last_analysis_at,
          (SELECT json_build_object(
             'id', la.id,
             'ref_number', la.ref_number,
@@ -404,6 +404,39 @@ export async function buildLeadBrief(leadId: string): Promise<string> {
           unanalyzedBrief = `RECENT CALL THAT GOT CUT SHORT (raw, not yet summarized — read it yourself, this is exactly what was already discussed, do not restart the conversation from scratch): ${clip(text, 600)}`
         }
       } catch {}
+    }
+
+    // UNANALYZED WHATSAPP CHAT fallback (2026-09-30, "same for WhatsApp
+    // calls"): WhatsApp chat memory is written by the IDLE SCAN — it waits
+    // for the thread to go quiet 10+ minutes AND for the 5-minute cron tick,
+    // so a chat that ended minutes ago can still be completely absent from
+    // lead_memory. A WhatsApp CALL inside that window would then re-ask the
+    // name / requirement / income the customer JUST typed in the chat — the
+    // exact "asking the same thing repeatedly" report, and one that cannot
+    // happen on the phone channel (calls are analyzed the moment they end).
+    // Same contract as the unanalyzed-call fallback above: raw recent chat
+    // lines, explicit do-not-re-ask framing, hard-capped. Gated on
+    // last_analysis_at so once the scan HAS run, the structured facts and
+    // summary carry the context (no double injection, no stale duplicates).
+    const unanalyzedChat = await query(
+      `SELECT direction, content FROM whatsapp_messages
+        WHERE lead_id = $1
+          AND content IS NOT NULL AND length(btrim(content)) > 0
+          AND created_at > now() - interval '24 hours'
+          AND ($2::timestamptz IS NULL OR created_at > $2::timestamptz)
+        ORDER BY created_at DESC
+        LIMIT 10`,
+      [leadId, row.last_analysis_at || null]
+    )
+    let unanalyzedChatBrief = ""
+    if (unanalyzedChat.rows.length) {
+      const text = unanalyzedChat.rows
+        .reverse()
+        .map((m: any) => `${m.direction === "inbound" ? "Customer" : "Priya"}: ${clip(m.content || "", 120)}`)
+        .join(" / ")
+      unanalyzedChatBrief =
+        `RECENT WHATSAPP CHAT (raw, not yet summarized — the customer said these things on WhatsApp chat, possibly just minutes ago; ` +
+        `treat every fact here as ALREADY KNOWN: never re-ask it, never restart from scratch, build on it naturally): ${clip(text, 700)}`
     }
     const facts: LeadFacts = row.facts || {}
     const stage: string = row.stage || "new"
@@ -458,6 +491,7 @@ export async function buildLeadBrief(leadId: string): Promise<string> {
     if (cleanSummary) lines.push(`RELATIONSHIP SUMMARY — ${clip(cleanSummary, 400)}`)
 
     if (unanalyzedBrief) lines.push(unanalyzedBrief)
+    if (unanalyzedChatBrief) lines.push(unanalyzedChatBrief)
 
     // LAST 3 INTERACTIONS
     if (interactions.length) {
@@ -477,7 +511,7 @@ export async function buildLeadBrief(leadId: string): Promise<string> {
     if (warnings.length) lines.push(`WARNINGS — ${warnings.join("; ")}`)
 
     // DO/DON'T
-    if (factLines.length || interactions.length || unanalyzedBrief) {
+    if (factLines.length || interactions.length || unanalyzedBrief || unanalyzedChatBrief) {
       lines.push(
         "DO/DON'T — Never re-ask a known fact — not even as a confirmation question. STATE known facts naturally in passing and move on. Reference past contact in ONE short phrase max, never recite this brief verbatim."
       )
