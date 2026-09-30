@@ -11,6 +11,7 @@ import { extractCallFacts, formatInCallFactsBlock } from "./call-facts"
 import { createNotification } from "./notifications"
 import { maybeProposeLoanEdit } from "./loan-edit-requests"
 import { currentDateTimeInstruction } from "./compliance"
+import { toTanglish } from "./transliterate"
 import {
   DEFAULT_VOICE_CLOSINGS,
   DEFAULT_VOICE_OPENERS,
@@ -739,6 +740,7 @@ export async function handleTurn(opts: {
   try {
     reply = (await chatWithLLM(messages, language, mergedInstructions || undefined, { channel: "call", branchId })).trim()
     if (!reply) reply = getVoiceOpenersSnapshot().cold[language]
+    reply = toTanglish(reply)
   } catch (e) {
     console.error("LLM error:", e)
     const closings = getVoiceClosingsSnapshot()
@@ -844,15 +846,17 @@ export async function handleTurnStream(
       await chatWithLLMStream(messages, language, mergedInstructions || undefined, (delta) => {
         pending += delta
         const { complete, rest } = splitSentences(pending)
-        for (const s of complete) onSentence(s)
+        for (const s of complete) onSentence(toTanglish(s))
         pending = rest
       }, "call", { branchId })
     ).trim()
     const tail = pending.trim()
-    if (tail) onSentence(tail)
+    if (tail) onSentence(toTanglish(tail))
     if (!reply) {
       reply = getVoiceOpenersSnapshot().cold[language]
-      onSentence(reply)
+      onSentence(toTanglish(reply))
+    } else {
+      reply = toTanglish(reply)
     }
   } catch (e) {
     console.error("LLM error:", e)

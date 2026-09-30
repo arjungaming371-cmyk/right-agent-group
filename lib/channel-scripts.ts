@@ -95,53 +95,53 @@ export const DEFAULT_VOICE_OPENERS: VoiceOpeners = {
     english:
       "Hello, good morning! This is Priya calling from Right Agent Group, Hyderabad — we help people get loans from over 20 banks without the running around. Do you have a minute? I'd love to know if you have any loan or financial need right now.",
     hindi:
-      "नमस्ते, good morning! मैं प्रिया बोल रही हूं Right Agent Group, Hyderabad से — हम बीस से ज़्यादा banks से loan दिलवाने में मदद करते हैं, बिना bank bank घूमे। एक minute है आपके पास? बताइए, आपको कोई loan या financial ज़रूरत है क्या अभी?",
+      "Namaste, good morning! Main Priya bol rahi hoon Right Agent Group, Hyderabad se — hum bees se zyada banks se loan dilwane mein madad karte hain, bina bank bank ghoome. Ek minute hai aapke paas? Batayein, aapko koi loan ya financial zaroorat hai kya abhi?",
     telugu:
-      "నమస్కారం! నేను Priya, Right Agent Group, Hyderabad నుండి call చేస్తున్నాను, మేము 20 plus banks తో మీకు best loan help చేస్తాం. ఒక్క minute time ఉందా sir, మీకేమైనా loan requirement ఉందా?",
+      "Namaskaram! Nenu Priya, Right Agent Group, Hyderabad nunchi call chestunnanu, memu twenty plus banks tho meeku best loan help chestam. Okka minute time unda sir, meekemaina loan requirement unda?",
   },
   coldWithName: {
     english: `Hello {name}! This is Priya calling from Right Agent Group, Hyderabad — we help people get loans from over 20 banks without the running around. Do you have a minute? I'd love to know if you have any loan need right now.`,
-    hindi: `नमस्ते {name} जी! मैं प्रिया बोल रही हूं, Right Agent Group, Hyderabad से — हम बीस से ज़्यादा banks से loan दिलवाने में मदद करते हैं। एक minute है आपके पास? बताइए, आपको कोई loan ज़रूरत है क्या अभी?`,
-    telugu: `నమస్కారం {name} గారు! నేను Priya, Right Agent Group, Hyderabad నుండి call చేస్తున్నాను, మేము 20 plus banks తో మీకు best loan help చేస్తాం. ఒక్క minute time ఉందా sir, ఏదైనా loan requirement ఉందా?`,
+    hindi: `Namaste {name} ji! Main Priya bol rahi hoon, Right Agent Group, Hyderabad se — hum bees se zyada banks se loan dilwane mein madad karte hain. Ek minute hai aapke paas? Batayein, aapko koi loan zaroorat hai kya abhi?`,
+    telugu: `Namaskaram {name} garu! Nenu Priya, Right Agent Group, Hyderabad nunchi call chestunnanu, memu twenty plus banks tho meeku best loan help chestam. Okka minute time unda sir, edaina loan requirement unda?`,
   },
   returning: {
     english:
       "Hello again! This is Priya from Right Agent Group, following up on your loan interest — do you have a minute?",
     hindi:
-      "नमस्ते! मैं प्रिया, Right Agent Group से, फिर से call कर रही हूं आपके loan interest के बारे में follow-up के लिए — एक minute है क्या?",
+      "Namaste! Main Priya, Right Agent Group se, phir se call kar rahi hoon aapke loan interest ke baare mein follow-up ke liye — ek minute hai kya?",
     telugu:
-      "నమస్కారం! నేను Priya, Right Agent Group నుండి మీ loan గురించి follow-up చేస్తున్నాను, ఒక్క minute time ఉందా sir?",
+      "Namaskaram! Nenu Priya, Right Agent Group nunchi mee loan gurinchi follow-up chestunnanu, okka minute time unda sir?",
   },
   returningWithName: {
     english: `Hello {name}! Priya here again from Right Agent Group. Just following up on our last conversation about your loan — do you have a moment?`,
-    hindi: `नमस्ते {name} जी! मैं प्रिया, Right Agent Group से, फिर से call कर रही हूं। आपके loan के बारे में follow-up करना था — एक minute है क्या?`,
-    telugu: `నమస్కారం {name} గారు! నేను Priya, Right Agent Group నుండి మళ్ళీ call చేస్తున్నాను, మీ loan గురించి follow-up చేద్దామని, ఒక్క minute time ఉందా sir?`,
+    hindi: `Namaste {name} ji! Main Priya, Right Agent Group se, phir se call kar rahi hoon. Aapke loan ke baare mein follow-up karna tha — ek minute hai kya?`,
+    telugu: `Namaskaram {name} garu! Nenu Priya, Right Agent Group nunchi malli call chestunnanu, mee loan gurinchi follow-up cheddamani, okka minute time unda sir?`,
   },
   inbound: {
     english:
       "Hello! Thank you for calling Right Agent Group, Hyderabad. This is Priya. How can I help you today?",
     hindi:
-      "नमस्ते! Right Agent Group, Hyderabad को call करने के लिए धन्यवाद। मैं प्रिया बोल रही हूं। बताइए, मैं आपकी क्या मदद कर सकती हूं?",
+      "Namaste! Right Agent Group, Hyderabad ko call karne ke liye dhanyawad. Main Priya bol rahi hoon. Batayein, main aapki kya madad kar sakti hoon?",
     telugu:
-      "నమస్కారం! Right Agent Group, Hyderabad కి call చేసినందుకు thanks sir. నేను Priya. చెప్పండి, మీకు ఎలా help చేయగలను?",
+      "Namaskaram! Right Agent Group, Hyderabad ki call chesinanduku thanks sir. Nenu Priya. Cheppandi, meeku ela help cheyagalanu?",
   },
   inboundWithName: {
     english: `Hello {name}! Thank you for calling Right Agent Group, Hyderabad. This is Priya. How can I help you today?`,
-    hindi: `नमस्ते {name} जी! Right Agent Group, Hyderabad को call करने के लिए धन्यवाद। मैं प्रिया बोल रही हूं। बताइए, मैं आपकी क्या मदद कर सकती हूं?`,
-    telugu: `నమస్కారం {name} గారు! Right Agent Group, Hyderabad కి call చేసినందుకు thanks. నేను Priya. చెప్పండి, మీకు ఎలా help చేయగలను?`,
+    hindi: `Namaste {name} ji! Right Agent Group, Hyderabad ko call karne ke liye dhanyawad. Main Priya bol rahi hoon. Batayein, main aapki kya madad kar sakti hoon?`,
+    telugu: `Namaskaram {name} garu! Right Agent Group, Hyderabad ki call chesinanduku thanks. Nenu Priya. Cheppandi, meeku ela help cheyagalanu?`,
   },
   whatsappCallback: {
     english:
       "Hello! This is Priya from Right Agent Group, Hyderabad — you had reached out to us on WhatsApp earlier, so I'm calling you back. Do you have a minute? I'd love to know what you were looking for.",
     hindi:
-      "नमस्ते! मैं प्रिया बोल रही हूं Right Agent Group, Hyderabad से — आपने पहले हमें WhatsApp पे reach out किया था, तो मैं आपको call back कर रही हूं। एक minute है? बताइए, आपको क्या चाहिए था?",
+      "Namaste! Main Priya bol rahi hoon Right Agent Group, Hyderabad se — aapne pehle humein WhatsApp pe reach out kiya tha, toh main aapko call back kar rahi hoon. Ek minute hai? Batayein, aapko kya chahiye tha?",
     telugu:
-      "నమస్కారం! నేను Priya, Right Agent Group, Hyderabad నుండి — మీరు ఇంతకుముందు మా WhatsApp లో contact అయ్యారు కాబట్టి call back చేస్తున్నాను. 1 minute time ఉందా sir?",
+      "Namaskaram! Nenu Priya, Right Agent Group, Hyderabad nunchi — meeru intakumundu maa WhatsApp lo contact ayyaru kabatti call back chestunnanu. One minute time unda sir?",
   },
   whatsappCallbackWithName: {
     english: `Hello {name}! Priya here from Right Agent Group — you had reached out to us on WhatsApp earlier, so I'm calling you back. Do you have a minute?`,
-    hindi: `नमस्ते {name} जी! मैं प्रिया, Right Agent Group से — आपने पहले हमें WhatsApp पे contact किया था, तो मैं call back कर रही हूं। एक minute है क्या?`,
-    telugu: `నమస్కారం {name} గారు! నేను Priya, Right Agent Group నుండి — మీరు ఇంతకుముందు మా WhatsApp లో contact అయ్యారు కాబట్టి call back చేస్తున్నాను. కొంచెం time ఉందా sir?`,
+    hindi: `Namaste {name} ji! Main Priya, Right Agent Group se — aapne pehle humein WhatsApp pe contact kiya tha, toh main call back kar rahi hoon. Ek minute hai kya?`,
+    telugu: `Namaskaram {name} garu! Nenu Priya, Right Agent Group nunchi — meeru intakumundu maa WhatsApp lo contact ayyaru kabatti call back chestunnanu. Konchem time unda sir?`,
   },
 }
 
@@ -153,23 +153,23 @@ export type VoiceClosings = Record<
 export const DEFAULT_VOICE_CLOSINGS: VoiceClosings = {
   qualified: {
     english: "Thank you! I'm sending a simple loan application on your WhatsApp right now — just fill it in, and our loan officer will personally consult you after that. Have a great day!",
-    hindi: "धन्यवाद! मैं अभी आपके WhatsApp पे एक simple loan application भेज रही हूं — बस उसको fill कर दीजिएगा, उसके बाद हमारे loan officer आपसे personally बात करके consult करेंगे। आपका दिन शुभ हो!",
-    telugu: "Thank you sir! నేను మీ WhatsApp కి simple loan application link పంపిస్తున్నాను, fill చేయండి. మా loan officer మీకు call చేసి discuss చేస్తారు. Have a great day sir, bye!",
+    hindi: "Dhanyawad! Main abhi aapke WhatsApp pe ek simple loan application bhej rahi hoon — bas usko fill kar dijiyega, uske baad hamare loan officer aapse personally baat karke consult karenge. Aapka din shubh ho!",
+    telugu: "Thank you sir! Nenu mee WhatsApp ki simple loan application link pampistunnanu, fill cheyandi. Maa loan officer meeku call chesi discuss chestaru. Have a great day sir, bye!",
   },
   goodbye: {
     english: "Thank you for your time! Have a great day. Goodbye!",
-    hindi: "आपके समय के लिए धन्यवाद! आपका दिन शुभ हो। नमस्ते!",
+    hindi: "Aapke samay ke liye dhanyawad! Aapka din shubh ho. Namaste!",
     telugu: "Thank you so much sir! Have a great day, bye!",
   },
   retry: {
     english: "Sorry, I had a small technical moment. Could you please share your name so I can send your loan application link?",
-    hindi: "माफ़ कीजिए, छोटी technical problem हुई। कृपया अपना नाम बताएं ताकि मैं आपका loan application link भेज सकूं।",
-    telugu: "Sorry sir, చిన్న technical issue వచ్చింది. దయచేసి మీ పేరు చెప్తారా, loan application link పంపిస్తాను.",
+    hindi: "Maaf kijiye, chhoti technical problem hui. Kripya apna naam batayein taaki main aapka loan application link bhej sakoon.",
+    telugu: "Sorry sir, chinna technical issue vachindi. Dayachesi mee peru cheptara, loan application link pampistanu.",
   },
   rateLimit: {
     english: "Sorry sir, we're having a brief network issue on our end. I'll have someone call you back in a few minutes to continue — thank you for your patience!",
-    hindi: "Sorry sir, हमारी तरफ से थोड़ी network problem आ रही है। कुछ minute में हम आपको वापस call करेंगे — धन्यवाद!",
-    telugu: "Sorry sir, కొంచెం network issue వచ్చింది. మేము 2 minutes లో మళ్ళీ call చేస్తాము — thank you sir!",
+    hindi: "Sorry sir, hamari taraf se thodi network problem aa rahi hai. Kuch minute mein hum aapko wapas call karenge — dhanyawad!",
+    telugu: "Sorry sir, konchem network issue vachindi. Memu two minutes lo malli call chestamu — thank you sir!",
   },
 }
 

@@ -4,6 +4,8 @@
  * so TTS engines pronounce them clearly in any language (Telugu, Hindi, English).
  */
 
+import { toTanglish } from "./transliterate"
+
 const ONES = [
   "", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
   "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen",
@@ -165,7 +167,7 @@ export function normalizeForTts(text: string): string {
   out = out.replace(/\*([^*]+)\*/g, "$1") // *single-asterisk* bold
   out = out.replace(/\p{Extended_Pictographic}/gu, "") // emoji
   out = out.replace(/[—–]/g, ", ") // dashes to gentle commas
-  out = out.replace(/\b1\s*minute\b/gi, (match, offset, str) => /[\u0C00-\u0C7F]/.test(str) ? "ఒక్క minute" : "one minute")
+  out = out.replace(/\b1\s*minute\b/gi, "okka minute")
   out = out.replace(/&/g, " and ")
   out = out.replace(/(\.{2,}|…)/g, ".") // ellipses to single period
 
@@ -173,6 +175,10 @@ export function normalizeForTts(text: string): string {
   out = normalizeNumbersToEnglishWords(out)
 
   out = out.replace(/rupees\s+rupees/gi, "rupees")
+
+  // Ensure output is strictly in English alphabets (Tanglish / Hinglish)
+  out = toTanglish(out)
+
   out = out.replace(/\s{2,}/g, " ").trim()
   return out
 }

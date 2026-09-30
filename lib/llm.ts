@@ -15,6 +15,7 @@
 export type Language = "english" | "hindi" | "telugu"
 
 import { DEFAULT_SCRIPTS as SHARED_DEFAULT_SCRIPTS } from "./default-scripts"
+import { toTanglish } from "./transliterate"
 
 const LLM_PROVIDER = (process.env.LLM_PROVIDER || "groq").toLowerCase()
 
@@ -108,36 +109,34 @@ const CALL_LANGUAGE_STYLES: Record<Language, string> = {
   english: LANGUAGE_STYLES.english,
   hindi: `
 
-CRITICAL OUTPUT FORMAT RULE — HINDI:
-- The customer speaks Hindi. Your reply MUST be written in real Devanagari script (देवनागरी) — this is spoken aloud by a text-to-speech voice, not read as text, so write it the way you'd naturally spell Hindi.
-- Do NOT write in Roman/English letters for Hindi words, even though the customer's own words arrive in Roman letters from the call transcription — always convert your OWN reply to real Devanagari script regardless of what script the customer used.
-- Mix in everyday English words the way people actually talk, written in plain English letters right inside the Devanagari sentence (e.g. "loan", "WhatsApp", "sir"). Example: "नमस्ते sir! मैं प्रिया बोल रही हूं Right Agent Group, Hyderabad से। आपका WhatsApp number मिल सकता है?"
-- ALWAYS speak numbers, tenures, amounts, and EMIs in English words (e.g. "sixteen lakh", "fifteen years", "five years", "fourteen thousand five hundred rupees", "twenty plus") rather than raw digits or complex Hindi number words.`,
+CRITICAL OUTPUT FORMAT RULE — HINDI (HINGLISH — ENGLISH ALPHABETS ONLY):
+- The customer speaks Hindi. Your reply MUST be written in natural spoken Hindi in English (Roman) alphabets ONLY (Hinglish), mixing everyday English words the way people actually talk. Example: "Namaste sir! Main Priya bol rahi hoon Right Agent Group, Hyderabad se. Aapka WhatsApp number mil sakta hai?"
+- STRICT SCRIPT RULE: You MUST write ONLY in English letters (A-Z, a-z). NEVER write in Devanagari script (देवनागरी). Absolutely zero Devanagari characters allowed.
+- ALWAYS speak numbers, tenures, amounts, and EMIs in English words (e.g. "sixteen lakh", "fifteen years", "five years", "fourteen thousand five hundred rupees", "twenty plus") rather than raw digits.`,
   telugu: `
 
-CRITICAL OUTPUT FORMAT RULE — TELUGU (NATIVE CONVERSATIONAL):
-- The customer speaks Telugu. Your reply MUST be written in natural, spoken Telugu script (తెలుగు లిపి) mixed with English loanwords, the way people talk in Hyderabad.
-- MANDATORY SCRIPT RULE: You MUST write Telugu words in real Telugu script (e.g. అవును, గుర్తుంది, కావాలా, చేస్తాము, చెప్పండి). NEVER write Telugu words in English/Latin letters (do NOT write 'kavali', 'gurthundi', 'cheppandi').
-- Mix in common English words in English letters (e.g. 'loan', 'education loan', 'home loan', 'EMI', 'WhatsApp', 'sir', 'link', 'office', 'thank you').
+CRITICAL OUTPUT FORMAT RULE — TELUGU (TANGLISH / TENGLISH — ENGLISH ALPHABETS ONLY):
+- The customer speaks Telugu. Your reply MUST be written in natural, spoken Telugu in English (Roman) alphabets ONLY (Tenglish/Tanglish), mixing everyday English loanwords the way people actually talk in Hyderabad.
+- MANDATORY SCRIPT RULE: You MUST write ONLY in the English/Roman alphabet (A-Z, a-z). NEVER write in Telugu script (Telugu characters). Absolutely NO Telugu script characters allowed under any circumstances. Every single word must be written in English alphabets!
+- SPELL PHONETICALLY IN ENGLISH LETTERS:
+  * "Avunu sir", "Gurthundi sir", "Kavala sir?", "Cheppandi sir", "Namaskaram sir", "Memu help chestamu".
+  * Common loanwords: 'loan', 'personal loan', 'education loan', 'home loan', 'EMI', 'WhatsApp', 'sir', 'link', 'office', 'thank you', 'documents'.
 - FLUENT CONVERSATIONAL RHYTHM & PRONUNCIATION:
   * Speak smoothly and confidently like a friendly loan advisor from Hyderabad.
-  * Use natural spoken phrases: "అవును sir", "ఖచ్చితంగా sir", "అయ్యో tension పడకండి sir", "ఒక్క minute sir".
-  * For numbers, ALWAYS speak them in English words: "sixteen lakh", "fourteen thousand five hundred", "twenty plus banks", "fifteen years", "five years". Never write raw digits like 16, 15, or 14500.
-  * Keep each sentence short, crisp, and complete so the voice sounds fluent and native.
-- DO NOT use bookish, robotic, or literal translation words:
-  * BAN: "గుర్తుంచుకోండి", "remember కదా" -> USE: "గుర్తుంది sir!" or "గుర్తుంది కదా sir!"
-  * BAN: "రుణం", "రుణాలు" -> USE: "loan" or "loans" (in English letters)
-  * BAN: "ధన్యవాదాలు" -> USE: "thank you sir" or "thanks" (in English letters)
-  * BAN: "సమయం" -> USE: "time" (in English letters)
-  * BAN: "శుభోదయం" -> USE: "good morning" (in English letters)
-  * BAN: "కార్యాలయం", "శాఖ" -> USE: "office" or "branch" (in English letters)
-  * BAN: "వివరాలు" -> USE: "details" (in English letters)
-  * BAN: "సరేనా?" in the middle of sentences or asking multiple questions in one turn -> Ask ONLY ONE clear question at the end!
-- Examples of natural responses:
-  * "అవును Ajay sir, గుర్తుంది! sixteen lakh education loan కి fifteen years plan లో దాదాపు fourteen thousand five hundred rupees EMI వస్తుంది. దీని గురించి ఇంకేమైనా డౌట్స్ ఉన్నాయా sir?"
-  * "Sure sir! నేను link మీ WhatsApp కి పంపిస్తాను, details fill చేయండి."
-  * "(Only when customer explicitly says bye or has no doubts): Okay sir, thank you so much! Have a nice day, bye!"
-  * "Sorry sir, చిన్న technical issue వచ్చింది, మళ్ళీ చెప్పగలరా?"`,
+  * Use natural spoken phrases: "Avunu sir", "Kachithamga sir", "Ayyo tension padakandi sir", "Okka minute sir".
+  * For numbers, ALWAYS speak them in English words: "sixteen lakh", "twenty five lakhs", "fourteen thousand five hundred", "twenty plus banks", "fifteen years", "five years", "nine point nine nine percent". Never write raw digits like 16, 25, or 14500.
+  * Keep each sentence short, crisp, and complete (under 25 words total, 1-2 sentences) so the voice sounds fluent and native.
+- DO NOT use bookish or robotic words:
+  * BAN: "dhanyavadalu" -> USE: "thank you sir" or "thanks"
+  * BAN: "samayam" -> USE: "time"
+  * BAN: "shubhodayam" -> USE: "good morning"
+  * BAN: "karyalayam" -> USE: "office" or "branch"
+  * BAN: Asking multiple questions in one turn -> Ask ONLY ONE clear question at the end!
+- Examples of natural Tenglish responses:
+  * "Avunu Suresh sir, gurthundi! Twenty five lakh personal loan ki fifteen years plan lo interest nine point nine nine percent untundi. Deeni gurinchi inka emaina doubts unnaya sir?"
+  * "Sure sir! Nenu link mee WhatsApp ki pampistanu, details fill cheyandi."
+  * "(Only when customer explicitly says bye or has no doubts): Okay sir, thank you so much! Have a great day, bye!"
+  * "Sorry sir, chinna technical issue vachindi, malli cheppagalara?"`,
 }
 
 // Brevity rules, keyed by CHANNEL rather than language, and appended in
@@ -580,7 +579,7 @@ export async function chatWithLLM(
     timeoutMs: opts?.timeoutMs,
     temperature: channel === "call" ? CALL_TEMPERATURE : undefined,
   })
-  if (channel === "call" || !NATIVE_SCRIPT_RE.test(reply)) return reply
+  if (!NATIVE_SCRIPT_RE.test(reply)) return reply
 
   // WhatsApp must stay in Roman letters — the ops team reads these on the
   // dashboard, and half of them can't read Telugu or Devanagari script.
@@ -607,7 +606,7 @@ export async function chatWithLLM(
   // unreadable reply still beats silence for the customer — but say so
   // loudly, because a pattern here means the prompt rule needs rethinking.
   console.error(`LANGUAGE: ${language} WhatsApp reply came back in native script twice; sending it anyway`)
-  return reply
+  return toTanglish(reply)
 }
 
 /**
