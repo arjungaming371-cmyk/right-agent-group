@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import crypto from "crypto"
-import pool, { query } from "@/lib/db"
+import pool, { query, db } from "@/lib/db"
 import { chatWithLLM, detectLanguage, type Language } from "@/lib/llm"
 import { sendWhatsAppText, downloadBranchWhatsAppMedia, answerWhatsAppCall, rejectWhatsAppCall, type BranchWhatsAppCtx } from "@/lib/whatsapp"
 import { finalizeWhatsAppCall, mapCallOutcome, callSidFor } from "@/lib/whatsapp-call-finalize"
@@ -269,6 +269,56 @@ async function handleInbound(msg: any, profileName: string | null, waBranch: Bra
       )
     }
     if (claim.rowCount === 0) return // already processed — stop before any media work
+  }
+
+  // ---- CALL PERMISSION REPLY (Meta business calling) ----
+  // The Allow / Don't allow tap on OUR call-permission request arrives as an
+  // interactive message (type "call_permission_reply"). It is a system
+  // event, not a customer utterance: letting it fall through to the text
+  // pipeline made Priya send a pointless AI reply seconds after the
+  // customer made a one-tap decision (and logged it as "[interactive
+  // message]"). Log the decision on the chat + the lead's comm log, then
+  // stop. The outbound dialer reads the RESULT live via Graph
+  // /call_permissions (lib/whatsapp.getCallPermission) — no extra column.
+  if (msg?.type === "interactive" && msg?.interactive?.type === "call_permission_reply") {
+    const reply = msg?.interactive?.call_permission_reply || {}
+    const accepted = String(reply?.response || "").toLowerCase() === "accept"
+    const permanent = !!reply?.is_permanent
+    const source = String(reply?.response_source || "user_action")
+    const label = accepted
+      ? permanent
+        ? "✅ Call permission granted — permanent. Priya can now WhatsApp-call this number."
+        : "✅ Call permission granted — Priya can now WhatsApp-call this number."
+      : "❌ Call permission declined — WhatsApp calling stays unavailable for this number (phone calls unaffected)."
+    const last10 = from.slice(-10)
+    try {
+      const found = await query(
+        `SELECT id FROM leads WHERE phone_key = $1
+         UNION ALL
+         SELECT id FROM (SELECT id FROM leads WHERE regexp_replace(phone, '\\D', '', 'g') LIKE '%' || $1 LIMIT 1) fallback
+         LIMIT 1`,
+        [last10]
+      ).catch(() => ({ rows: [] as any[] }))
+      const leadId: string | null = found.rows[0]?.id || null
+      if (waMessageId) {
+        await query(
+          `UPDATE whatsapp_messages SET content = $1, lead_id = COALESCE($2, lead_id) WHERE wa_message_id = $3 AND direction = 'inbound'`,
+          [label, leadId, waMessageId]
+        ).catch(() => {})
+      }
+      if (leadId) {
+        await db.from("comm_logs").insert({
+          lead_id: leadId,
+          type: "whatsapp",
+          summary: `${label} (source: ${source})`,
+          outcome: accepted ? "positive" : "neutral",
+        }).catch(() => {})
+      }
+      console.log(`🔐 WhatsApp call permission ${accepted ? "GRANTED" : "DECLINED"}${permanent ? " (permanent)" : ""} from=***${from.slice(-4)} source=${source}`)
+    } catch (e: any) {
+      console.error("wa call-permission reply log failed:", e?.message)
+    }
+    return // never reaches Priya's text pipeline
   }
 
   const text = await resolveInboundText(msg, waBranch)
@@ -612,8 +662,14 @@ type WhatsAppCallEvent = {
   id?: string
   from?: string
   to?: string
-  status?: string
-  status_code?: string
+  // Meta's documented terminate webhook carries status as an ARRAY of the
+  // statuses the call went through (e.g. ["Failed", "Completed"]) — parse
+  // the strongest entry, never String()-join it (see mapCallOutcome).
+  status?: string | string[]
+  status_code?: string | string[]
+  // "BUSINESS_INITIATED" on every event of a call WE placed (user-initiated
+  // events carry "USER_INITIATED" or omit the field on older versions).
+  direction?: string
   session?: { sdp?: string; sdp_type?: string }
   sdp?: { sdp?: string; type?: string }
 }
@@ -638,13 +694,26 @@ async function handleCallEvents(calls: WhatsAppCallEvent[], waBranch: BranchWhat
     const callId = call?.call_id ? String(call.call_id) : (call?.id ? String(call.id) : "")
     const event = String(call?.event || "")
 
-    if (event === "connect" && callId) {
+    // A BUSINESS-INITIATED call's ANSWER arrives as event "connect" too —
+    // with sdp_type "answer" and direction "BUSINESS_INITIATED" (Meta docs,
+    // Business-initiated calls → Part 3). It must NEVER enter the inbound
+    // branch below: that flow treats session.sdp as a fresh OFFER, bridges
+    // it to /whatsapp/connect, and on failure REJECTS the call — i.e. the
+    // webhook used to hang up the very outbound dials this module places.
+    const connectSdp = String(call?.session?.sdp || call?.sdp?.sdp || "")
+    const connectSdpType = String(call?.session?.sdp_type || call?.sdp?.type || "")
+    const isOutboundAnswer =
+      !!callId &&
+      !!connectSdp &&
+      (connectSdpType === "answer" || String(call?.direction || "").toUpperCase() === "BUSINESS_INITIATED")
+
+    if (event === "connect" && callId && !isOutboundAnswer) {
       const from = String(call?.from || "")
       const to = String(call?.to || "")
       // Meta puts the WebRTC offer in session.sdp (sdp_type "offer"); accept
       // both shapes defensively — some webhook versions nest differently.
-      const offerSdp = String(call?.session?.sdp || call?.sdp?.sdp || "")
-      const sdpType = String(call?.session?.sdp_type || call?.sdp?.type || "offer")
+      const offerSdp = connectSdp
+      const sdpType = connectSdpType || "offer"
       console.log(`📞 WhatsApp voice call connect from=***${from.slice(-4)} callId=***${callId.slice(-8)} branch=${waBranch?.id || "default"}`)
 
       if (!offerSdp) {
@@ -698,20 +767,26 @@ async function handleCallEvents(calls: WhatsAppCallEvent[], waBranch: BranchWhat
 
     // BUSINESS-INITIATED ANSWER: a call WE placed (via /api/calls/dial) was
     // picked up — Meta delivers the customer's WebRTC answer SDP here.
-    // Webhook versions differ on the event label ("accept", or "connect"
-    // re-used with sdp_type "answer"), so accept ANY event that carries an
-    // answer SDP. The matching offer is held on the voicebot under the
-    // call_id this event carries (registered at dial time).
+    // Documented shape (2026-06 docs): event "connect" + sdp_type "answer"
+    // + direction "BUSINESS_INITIATED"; older webhook versions used event
+    // "accept". isOutboundAnswer above already diverted the connect-shaped
+    // one around the inbound branch — this branch completes the negotiation.
+    // The matching offer is held on the voicebot under the call_id this
+    // event carries (registered at dial time).
     const outAnswerSdp = String(call?.session?.sdp || call?.sdp?.sdp || "")
     const outAnswerType = String(call?.session?.sdp_type || call?.sdp?.type || "")
-    if (callId && outAnswerSdp && (outAnswerType === "answer" || event === "accept")) {
+    if (callId && outAnswerSdp && (isOutboundAnswer || outAnswerType === "answer" || event === "accept")) {
       console.log(`📞 WhatsApp OUTBOUND call answered callId=***${callId.slice(-8)} (event="${event || "answer"}") — completing negotiation`)
       try {
         await bridgeToVoicebot("/whatsapp/outbound-accept", {
           callId,
           sdp: outAnswerSdp,
-          from: String(call?.from || ""),
-          to: String(call?.to || ""),
+          // In BUSINESS-INITIATED events `to` is the CUSTOMER (callee) and
+          // `from` is OUR business number — the voicebot session's `from`
+          // means "the customer's wa_id", so pass `to` (and the voicebot
+          // still falls back to the dial-time waId when this is empty).
+          from: String(call?.to || ""),
+          to: String(call?.from || ""),
         }, 10000)
         console.log(`✅ WhatsApp OUTBOUND call live (***${callId.slice(-8)}) — Priya is dialing out on WhatsApp`)
       } catch (e) {
@@ -724,18 +799,28 @@ async function handleCallEvents(calls: WhatsAppCallEvent[], waBranch: BranchWhat
     }
 
     if (event === "terminate" && callId) {
-      const from = String(call?.from || "")
-      const status = String(call?.status || call?.status_code || "")
-      const outcome = mapCallOutcome(status)
+      // Meta's terminate status may be a STRING or an ARRAY of statuses the
+      // call went through (["Failed", "Completed"]) — mapCallOutcome scans
+      // every entry with priority (completed > rejected > failed), so the
+      // strongest human signal wins. The RAW shape stays the queue-outcome
+      // detail for the operator.
+      const rawStatus: unknown = (call?.status ?? call?.status_code) as unknown
+      const statusDetail = Array.isArray(rawStatus) ? rawStatus.join(",") : String(rawStatus || "")
+      // Customer's wa_id for lead matching: in BUSINESS-INITIATED events
+      // `to` is the customer (we are the caller); in USER-INITIATED events
+      // `from` is. Never hardcode one side — the direction decides.
+      const bizInitiated = String(call?.direction || "").toUpperCase() === "BUSINESS_INITIATED"
+      const from = String((bizInitiated ? call?.to : call?.from) || call?.from || "")
+      const outcome = mapCallOutcome(rawStatus as string | string[] | null | undefined)
       const sid = callSidFor(callId)
-      console.log(`📴 WhatsApp call terminate callId=***${callId.slice(-8)} status=${status || "unknown"} outcome=${outcome}`)
+      console.log(`📴 WhatsApp call terminate callId=***${callId.slice(-8)} status=${statusDetail || "unknown"} outcome=${outcome}`)
 
       // 1) Tell the voicebot to tear the session down. The bridge awaits the
       //    voicebot's "end" report (duration → voice_calls) before returning,
       //    so the finalizer below always sees the real duration. The longer
       //    timeout covers the round trip into the app's own turn API.
       try {
-        await bridgeToVoicebot("/whatsapp/terminated", { callId, reason: status || "terminate" }, 15000)
+        await bridgeToVoicebot("/whatsapp/terminated", { callId, reason: statusDetail || "terminate" }, 15000)
       } catch (e) {
         // Voicebot down is NOT fatal here: the finalizer still logs the row
         // and sends missed-call follow-ups for calls that never connected.
@@ -781,7 +866,7 @@ async function handleCallEvents(calls: WhatsAppCallEvent[], waBranch: BranchWhat
       //    so the Call Queue radar shows the truth instead of counting every
       //    dialed row as "completed". Meta's raw terminate status is kept as
       //    the detail. First report wins; never fails the webhook.
-      await stampQueueCallOutcome({ callSid: sid, outcome, detail: status || null })
+      await stampQueueCallOutcome({ callSid: sid, outcome, detail: statusDetail || null })
       continue
     }
 

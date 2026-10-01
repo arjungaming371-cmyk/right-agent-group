@@ -173,7 +173,7 @@ export async function POST(req: NextRequest) {
         }, 5000).catch(() => {})
         return NextResponse.json({
           error: placed.error || "Meta rejected the call",
-          hint: "WhatsApp outbound calls need call permission: the lead must have called this number recently, or accepted a call-permission request. Also confirm Business Calling is enabled for the WABA number.",
+          hint: "WhatsApp outbound calls need call permission: the lead must have called this number recently, or tapped Allow on a call-permission request. Ask them with the shield button on the WhatsApp Calls tab (POST /api/whatsapp/call-permission), or fall back to a phone dial. Also confirm Business Calling is enabled for the WABA number.",
         }, { status: 502 })
       }
 

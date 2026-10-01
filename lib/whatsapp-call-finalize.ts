@@ -30,12 +30,30 @@ export function callSidFor(callId: string): string {
   return `wacall-${callId}`
 }
 
-/** Map Meta's terminate status to the funnel outcome vocabulary. */
-export function mapCallOutcome(status?: string | null): WhatsAppCallOutcome {
-  const s = String(status || "").toLowerCase()
-  if (s === "completed") return "resolved"
-  if (s === "rejected") return "rejected"
-  if (s === "failed") return "failed"
+/**
+ * Map Meta's terminate status to the funnel outcome vocabulary.
+ *
+ * Meta's documented terminate webhook can carry `status` as a single STRING
+ * or as an ARRAY of every status the call went through — e.g.
+ * `["Failed", "Completed"]` for a call that connected, was talked on and
+ * then ended (Business-initiated calls → Part 4, 2026-06 docs). Scanning a
+ * stringified array (`"failed,completed"`) used to fall through to
+ * "missed": a customer who had just finished a full conversation got the
+ * missed-call template and the queue counted the call as unanswered.
+ *
+ * Priority when several entries are present — the strongest HUMAN signal
+ * wins: completed (real talk happened) > rejected (they actively declined)
+ * > failed (network/carrier). Everything else (unanswered, busy, canceled,
+ * unknown) is a real miss.
+ */
+export function mapCallOutcome(status?: string | string[] | null): WhatsAppCallOutcome {
+  const entries = (Array.isArray(status) ? status : String(status || "").split(","))
+    .map((s) => String(s || "").toLowerCase().trim())
+    .filter(Boolean)
+  const has = (needle: string) => entries.some((s) => s === needle || s.startsWith(needle))
+  if (has("completed")) return "resolved"
+  if (has("rejected")) return "rejected"
+  if (has("failed")) return "failed"
   // unanswered, busy, canceled, anything unknown — treat as a real miss
   return "missed"
 }

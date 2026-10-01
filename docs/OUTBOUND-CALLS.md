@@ -10,9 +10,9 @@ answer. Every statement here matches the code as of 2026-09-26.
 
 | Situation | Channel | Why |
 |---|---|---|
-| Cold lead, never called you | **Phone** (Exotel) | WhatsApp business-initiated calls require Meta call permission the lead never gave. Phone needs nothing but DND clearance. |
-| Lead called your WhatsApp number in the last 30 days | **WhatsApp** (callback) | Meta grants implicit callback permission — calling them back is allowed and lands in the app they already used. |
-| Lead accepted a call-permission request (template flow) | **WhatsApp** | Explicit Meta permission. |
+| Cold lead, never called you | **Phone** (Exotel) — or ASK first | WhatsApp business-initiated calls need Meta call permission the lead never gave. Phone needs nothing but DND clearance. To go WhatsApp instead: send a call-permission request (`POST /api/whatsapp/call-permission`, or the shield button on the WhatsApp Calls tab) — inside the 24h service window it is a free-form interactive message; the lead taps **Allow**, and the channel unlocks. |
+| Lead called your WhatsApp number in the last 30 days | **WhatsApp** (callback) | Meta grants implicit callback permission — calling them back is allowed and lands in the app they already used, for FREE. The WhatsApp Calls tab's teal button does exactly this. |
+| Lead accepted a call-permission request | **WhatsApp** | Explicit Meta permission (interactive `call_permission_request` → webhook `call_permission_reply`). Requests expire after 7 days, and 4 consecutive unanswered calls revoke the permission — Meta's rule, not ours. |
 | You are not sure | **Smart Dial** (`auto`) | The code checks the WhatsApp-call history itself: callback-eligible → WhatsApp, else → phone. The toast tells you what it picked. |
 
 That logic lives in **one place**: `POST /api/calls/dial`
@@ -94,7 +94,11 @@ Priya on every turn — on BOTH channels.
 Terminal-status guarantees (the "ghost Ringing forever" bug class):
 
 - `lib/whatsapp-call-finalize.ts` writes the terminal status whenever a
-  terminate event arrives for an outbound call that never talked.
+  terminate event arrives for an outbound call that never talked. Meta's
+  terminate `status` may be a single string OR an array of the statuses the
+  call went through (`["Failed", "Completed"]`) — `mapCallOutcome` scans
+  every entry with priority (completed > rejected > failed), so a talked
+  call can never be finalized as a miss.
 - `GET /api/calls` runs a once-a-minute self-healing sweep that promotes any
   `ringing/initiated` outbound WhatsApp row older than 15 minutes to
   `no-answer` — a lost webhook can no longer leave a call "Ringing" forever.
@@ -182,7 +186,7 @@ talking to. The real duration is read from the voice_calls row first now.
 | Toast: "lead not found" / "another branch" | scope mismatch | dial route response |
 | Toast: compliance reason | DND / do-not-call / window | lead compliance panel |
 | Toast: quota | branch monthly cap | branches → usage |
-| WhatsApp dial → Meta error text | no call permission for that user, or Business Calling disabled on the WABA number | toast + app logs; fall back to phone |
+| WhatsApp dial → Meta error text | no call permission for that user, or Business Calling disabled on the WABA number (Graph 138006 at WABA level) | toast + app logs; ask permission (shield button / POST /api/whatsapp/call-permission) or fall back to phone |
 | WhatsApp dial → "voicebot did not return a call offer" | voicebot (pm2) down | `pm2 status`, voicebot logs |
 | WhatsApp row stuck "Ringing" (old rows) | pre-fix data or lost webhook — sweep self-heals after 15 min | Voice Logs, app logs |
 | Phone call, no status update | `EXOTEL_WEBHOOK_KEY` missing → makeCall refuses at dial time | app logs at dial time |

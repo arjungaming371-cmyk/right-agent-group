@@ -206,11 +206,99 @@ async function testLifecycleGuards() {
   ok("double cancel is a no-op", cancelOutboundOffer(offer.pendingId, "again") === false)
 }
 
+// ---- Static wiring contracts (2026-10-01 "WHATSAPP OUT CALLING") --------
+//
+// The outbound WEBRTC leg is proven live above; these pin the REST of the
+// loop — the webhook that must complete (not reject!) our dials, the
+// terminate-status parsing, Meta's call-permission wire formats, and the
+// operator surface on the WhatsApp Calls tab. Static source contracts, so a
+// future edit that re-breaks the routing fails here without any network.
+async function testOutboundWiringContracts() {
+  console.log("\n— outbound wiring contracts (webhook ↔ permission ↔ Calls tab)")
+  const fs = require("fs")
+  const path = require("path")
+  const read = (rel) => fs.readFileSync(path.join(__dirname, "..", rel), "utf8").replace(/\r\n/g, "\n")
+
+  // 1. THE routing fix: Meta delivers a business-initiated ANSWER as event
+  //    "connect" with sdp_type "answer" / direction BUSINESS_INITIATED. The
+  //    inbound branch must refuse it, and the outbound branch must accept it.
+  const route = read("app/api/whatsapp/route.ts")
+  ok("webhook detects the outbound answer shape",
+    route.includes("(connectSdpType === \"answer\" || String(call?.direction || \"\").toUpperCase() === \"BUSINESS_INITIATED\")"))
+  ok("inbound connect branch excludes outbound answers (!isOutboundAnswer)",
+    route.includes("if (event === \"connect\" && callId && !isOutboundAnswer) {"))
+  ok("outbound accept branch fires for connect-shaped answers too",
+    /if \(callId && outAnswerSdp && \(isOutboundAnswer \|\| outAnswerType === "answer" \|\| event === "accept"\)\)/.test(route))
+  ok("outbound accept bridges to /whatsapp/outbound-accept", route.includes("\"/whatsapp/outbound-accept\""))
+  ok("outbound accept passes the CUSTOMER (call.to) as the session's from",
+    route.includes("from: String(call?.to || \"\")"))
+
+  // 2. Terminate status: Meta sends a STRING or an ARRAY (["Failed",
+  //    "Completed"]). String()-joining an array read as "missed" a call the
+  //    customer had just finished — the wrong follow-up, the wrong redial.
+  ok("terminate passes the raw status (string OR array) to mapCallOutcome",
+    route.includes("mapCallOutcome(rawStatus as string | string[] | null | undefined)"))
+  ok("terminate picks the customer side by direction for lead matching",
+    route.includes("(bizInitiated ? call?.to : call?.from) || call?.from || \"\""))
+
+  // 3. mapCallOutcome priority: completed beats rejected beats failed.
+  const fin = read("lib/whatsapp-call-finalize.ts")
+  ok("mapCallOutcome accepts arrays", fin.includes("status?: string | string[] | null"))
+  const prio = fin.indexOf("has(\"completed\")")
+  ok("mapCallOutcome checks completed first (resolved)",
+    prio >= 0 && prio < fin.indexOf("has(\"rejected\")") && fin.indexOf("has(\"rejected\")") < fin.indexOf("has(\"failed\")"))
+
+  // 4. Call-permission wire formats (Meta Cloud API, verified 2026-10-01).
+  const wa = read("lib/whatsapp.ts")
+  ok("requestCallPermission sends interactive type call_permission_request",
+    wa.includes("type: \"call_permission_request\""))
+  ok("requestCallPermission carries action.name call_permission_request",
+    wa.includes("action: { name: \"call_permission_request\" }"))
+  ok("getCallPermission probes Graph /call_permissions?user_wa_id=",
+    wa.includes("/call_permissions?user_wa_id="))
+  ok("getCallPermission parses start_call + send_call_permission_request actions",
+    wa.includes("find(\"start_call\")") && wa.includes("find(\"send_call_permission_request\")"))
+
+  // 5. The permission tap arrives as an interactive message — it must NEVER
+  //    reach Priya's text pipeline (the AI would auto-reply to an Allow tap).
+  ok("webhook intercepts call_permission_reply before the AI pipeline",
+    route.indexOf("call_permission_reply") >= 0 &&
+    route.indexOf("call_permission_reply") < route.indexOf("const text = await resolveInboundText"))
+
+  // 6. The /api/whatsapp/call-permission route both legs.
+  const permRoute = read("app/api/whatsapp/call-permission/route.ts")
+  ok("call-permission route exports POST (send request) and GET (probe)",
+    /export async function POST/.test(permRoute) && /export async function GET/.test(permRoute))
+  ok("call-permission POST is DND-gated (business-initiated message)",
+    permRoute.includes("dndGate(phone)"))
+  ok("call-permission route scopes leads to the session branch",
+    permRoute.includes("lead belongs to another branch"))
+
+  // 7. The Calls tab: WhatsApp-first call back + ask-permission + toasts.
+  const cl = read("components/dashboard/whatsapp/calls-list.tsx")
+  ok("call back posts the chosen channel to the unified dialer",
+    cl.includes("body: JSON.stringify({ leadId: c.lead_id, channel })"))
+  ok("call back keeps the legacy /api/calls fallback for lead-less rows",
+    cl.includes("\"/api/calls\""))
+  ok("call back failures TOAST (used to console.error silently)", cl.includes("toast.error("))
+  ok("shield button sends the permission request", cl.includes("\"/api/whatsapp/call-permission\""))
+  ok("header icon calls back the most recent caller on WhatsApp",
+    cl.includes("callBack(target, \"whatsapp\")"))
+  ok("no dead header button left (the old onClick={() => {}} is gone)",
+    !cl.includes("onClick={() => {}}"))
+
+  // 8. Dial-time hint points at the permission flow.
+  const dial = read("app/api/calls/dial/route.ts")
+  ok("dial hint mentions the call-permission request path",
+    dial.includes("call-permission request") && dial.includes("call-permission"))
+}
+
 ;(async () => {
   try {
     const offer = await testOfferShape()
     await testOutboundCallFlow(offer)
     await testLifecycleGuards()
+    await testOutboundWiringContracts()
   } catch (e) {
     failures.push("suite crashed")
     console.error("  FAIL suite crashed:", e.stack || e.message)

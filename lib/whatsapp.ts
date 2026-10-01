@@ -185,6 +185,98 @@ export async function terminateWhatsAppCall(callId: string, branch?: BranchWhats
   return callPost({ action: "terminate", call_id: cleanId }, branch)
 }
 
+// ---- CALL PERMISSION (Meta's gate for business-initiated calls) ----
+//
+// Meta only lets a business RING a WhatsApp user who granted call
+// permission. It is granted three ways (Meta docs → Calling → User call
+// permissions):
+//   1. implicit callback — the user called us (temporary permission,
+//      what resolveChannel's 30-day probe approximates);
+//   2. a call-permission REQUEST the user accepts (below) — free-form
+//      inside the 24h customer-service window, or a template outside it;
+//   3. permanently, from our business profile in the user's WhatsApp.
+// Rules that matter operationally: a request expires after 7 days, a new
+// request invalidates the previous one, and 4 consecutive unanswered
+// business-initiated calls REVOKE the permission automatically.
+
+/**
+ * ASK a WhatsApp user for call permission (Meta Cloud API → messages →
+ * interactive type "call_permission_request"). The user sees an Allow /
+ * Don't allow prompt; their tap arrives on the messages webhook as
+ * interactive "call_permission_reply" (handled in app/api/whatsapp).
+ *
+ * This is a FREE-FORM message → Meta only delivers it inside the 24h
+ * customer-service window (the lead must have messaged us). Outside the
+ * window Meta refuses (131047) — surface that verbatim; the operator then
+ * sends any message first or uses an approved call-permission TEMPLATE.
+ * `to` is the customer's WhatsApp id (digits WITH country code, no "+").
+ */
+export async function requestCallPermission(
+  to: string,
+  bodyText: string,
+  branch?: BranchWhatsAppCtx
+): Promise<{ ok: boolean; id?: string; error?: string; status?: number }> {
+  if (!to) return { ok: false, error: "to (WhatsApp user id) is required" }
+  const text = String(bodyText || "").trim().slice(0, 600) ||
+    `Hi! May we call you on WhatsApp to discuss your loan enquiry? Tap Allow so our AI assistant Priya can reach you directly.`
+  return graphPost({
+    to,
+    recipient_type: "individual",
+    type: "interactive",
+    interactive: {
+      type: "call_permission_request",
+      action: { name: "call_permission_request" },
+      body: { text },
+    },
+  }, branch)
+}
+
+/**
+ * Check a user's CURRENT call permission + what actions Meta still allows
+ * (Cloud API → GET /call_permissions). Returns the raw permission status —
+ * "no_permission" | "temporary" | "permanent" — plus whether a call and/or
+ * a new permission request can be placed right now (Meta enforces rate
+ * limits on requests: e.g. max 1 per 24h and 2 per 7 days per user).
+ * A probe failure never throws to the caller — the Graph connect step
+ * remains the real gate at dial time.
+ */
+export async function getCallPermission(
+  to: string,
+  branch?: BranchWhatsAppCtx
+): Promise<{
+  ok: boolean
+  status?: "no_permission" | "temporary" | "permanent"
+  canStartCall?: boolean
+  canSendRequest?: boolean
+  error?: string
+}> {
+  const { token, phoneId, configured } = credsFor(branch)
+  if (!configured) {
+    return { ok: false, error: "WhatsApp Cloud API not configured — set WHATSAPP_TOKEN and WHATSAPP_PHONE_NUMBER_ID in .env" }
+  }
+  if (!to) return { ok: false, error: "to (WhatsApp user id) is required" }
+  try {
+    const res = await fetch(`${GRAPH}/${phoneId}/call_permissions?user_wa_id=${encodeURIComponent(to)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(10000),
+    })
+    const data: any = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      return { ok: false, error: data?.error?.message || `HTTP ${res.status}` }
+    }
+    const actions: any[] = Array.isArray(data?.actions) ? data.actions : []
+    const find = (name: string) => actions.find((a) => a?.action_name === name)
+    return {
+      ok: true,
+      status: data?.permission?.status || "no_permission",
+      canStartCall: !!find("start_call")?.can_perform_action,
+      canSendRequest: !!find("send_call_permission_request")?.can_perform_action,
+    }
+  } catch (e: any) {
+    return { ok: false, error: `Meta API unreachable: ${e.message}` }
+  }
+}
+
 /**
  * Place a BUSINESS-INITIATED WhatsApp call (Meta Business Calling API).
  *
