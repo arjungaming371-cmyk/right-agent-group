@@ -4,7 +4,7 @@ import dynamic from "next/dynamic"
 import {
   Users, FileText, Phone, MessageCircle, Activity, ShieldCheck, UploadCloud,
   ScrollText, LogOut, Mic, BarChart3, UserCog, Search, Menu, X, BookOpen,
-  Building2, Sparkles, Instagram, PhoneCall, AudioWaveform, type LucideIcon,
+  Building2, Sparkles, Instagram, PhoneCall, type LucideIcon,
 } from "lucide-react"
 import { ToastProvider } from "../ui/toast"
 import { Skeleton, SkeletonList } from "../ui/skeleton"
@@ -27,10 +27,6 @@ const QueueView = dynamic(() => import("./queue-view"), {
 const VoiceLogsView = dynamic(() => import("./voice-logs-view"), {
   ssr: false,
   loading: () => <ViewFallback label="Voice Logs" />,
-})
-const VoiceStudioView = dynamic(() => import("./voice-studio-view"), {
-  ssr: false,
-  loading: () => <ViewFallback label="Voice Studio" />,
 })
 const WhatsAppView  = dynamic(() => import("./whatsapp-view"), {
   ssr: false,
@@ -59,10 +55,6 @@ const ScriptView    = dynamic(() => import("./script-view"), {
 const KnowledgeBaseView = dynamic(() => import("./knowledge-base-view"), {
   ssr: false,
   loading: () => <ViewFallback label="Knowledge Base" />,
-})
-const OmnichannelTester = dynamic(() => import("./omnichannel-tester"), {
-  ssr: false,
-  loading: () => <ViewFallback label="AI Simulator" />,
 })
 
 // Floating ops chatbot (Executive Operations Commander) — drag bubble bottom-
@@ -114,7 +106,7 @@ function ViewFallback({ label }: { label: string }) {
   )
 }
 
-export type ViewKey = "leads" | "loans" | "queue" | "voice" | "voice-studio" | "whatsapp" | "instagram" | "comms" | "calendar" | "security" | "upload" | "script" | "knowledge" | "analytics" | "branches" | "dev-logs" | "simulator"
+export type ViewKey = "leads" | "loans" | "queue" | "voice" | "whatsapp" | "instagram" | "comms" | "calendar" | "security" | "upload" | "script" | "knowledge" | "analytics" | "branches" | "dev-logs"
 export type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
 
 const ROLE_LABEL: Record<Role, string> = { admin: "Administrator", agent: "Loan Officer", viewer: "Viewer", developer: "Administrator", branch_manager: "Branch Manager" }
@@ -138,10 +130,8 @@ const NAV_SECTIONS: NavSection[] = [
     title: "Engagement",
     items: [
       { key: "voice",    label: "Voice Logs",        icon: Phone,          roles: ["admin", "agent", "viewer", "branch_manager"] },
-      { key: "voice-studio", label: "Voice Studio",  icon: AudioWaveform,  roles: ["admin", "branch_manager", "developer"] },
       { key: "whatsapp", label: "WhatsApp Chat",     icon: MessageCircle,  roles: ["admin", "agent", "viewer", "branch_manager"] },
       { key: "instagram",label: "Instagram Chat",    icon: Instagram,      roles: ["admin", "agent", "viewer", "branch_manager"] },
-      { key: "simulator",label: "AI Simulator",      icon: Sparkles,       roles: ["admin", "agent", "viewer", "branch_manager", "developer"] },
       { key: "comms",    label: "Communication Log", icon: Activity,       roles: ["admin", "agent", "viewer", "branch_manager"] },
     ],
   },
@@ -168,10 +158,8 @@ const VIEW_TITLES: Record<ViewKey, { title: string; sub: string }> = {
   loans:    { title: "Loan Applications",  sub: "Incoming home & business loan enquiries" },
   queue:    { title: "Call Queue",         sub: "Bulk outbound calling — queue, radar, and controls" },
   voice:    { title: "Voice Logs",         sub: "Voice bot call activity and outcomes" },
-  "voice-studio": { title: "Voice Studio", sub: "Browse, audition, and clone Sarvam & Cartesia voices" },
   whatsapp: { title: "WhatsApp Chat",      sub: "Live customer conversations" },
   instagram:{ title: "Instagram Chat",     sub: "Direct messages and post comment auto-replies" },
-  simulator:{ title: "AI Script Simulator",sub: "Interactive testing chatbot for Calls, WhatsApp, and Instagram with real lead contexts" },
   comms:    { title: "Communication Log",  sub: "Automated calls and WhatsApp activity" },
   calendar: { title: "Calendar",           sub: "Upcoming calls and follow-up callbacks" },
   security: { title: "Security",           sub: "Access control and audit policy" },
@@ -408,7 +396,6 @@ export default function DashboardShell() {
       case "loans":        return <LoanAppsView role={role} initialSearch={seedSearch?.view === "loans" ? seedSearch.q : undefined} />
       case "queue":        return <QueueView role={role} />
       case "voice":        return <VoiceLogsView role={role} />
-      case "voice-studio": return <VoiceStudioView role={role} />
       case "whatsapp":     return <WhatsAppView role={role} />
       case "instagram":    return <InstagramView initialSearch={seedSearch?.view === "instagram" ? seedSearch.q : undefined} />
       case "comms":        return <CommLogView />
@@ -418,7 +405,6 @@ export default function DashboardShell() {
       case "script":       return <ScriptView />
       case "branches":     return <BranchesView role={role} branchId={sessionBranchId} />
       case "knowledge":    return <KnowledgeBaseView role={role} />
-      case "simulator":    return <OmnichannelTester />
       case "dev-logs":     return role === "developer" ? <DeveloperLogsView userEmail={userEmail} /> : null
       default:             return null
     }

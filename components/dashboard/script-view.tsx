@@ -3,8 +3,6 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { Lightbulb, Save, RotateCcw, CalendarClock, Timer, RefreshCw, Languages, Sparkles, Check, X, Phone, MessageSquare, Instagram, Info } from "lucide-react"
 import { formatDateTime } from "@/lib/utils"
 
-import OmnichannelTester from "./omnichannel-tester"
-
 type Script = {
   language: string
   content: string
@@ -35,14 +33,13 @@ const LANG_LABELS: Record<string, { label: string; short: string; desc: string }
 
 // Script Manager tabs — Base + the per-channel editable scripts
 // (ai_scripts keys handled by lib/channel-scripts.ts).
-type Tab = "base" | "voice" | "whatsapp" | "instagram" | "simulator"
+type Tab = "base" | "voice" | "whatsapp" | "instagram"
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode; desc: string }[] = [
   { id: "base", label: "Base Script", icon: <Languages size={14} strokeWidth={2} />, desc: "Priya's core persona, rules & qualification flow (all channels)" },
   { id: "voice", label: "Voice Calls", icon: <Phone size={14} strokeWidth={2} />, desc: "Spoken openers & closings for Phone + WhatsApp calls (English, Hindi, Telugu)" },
   { id: "whatsapp", label: "WhatsApp Fallbacks", icon: <MessageSquare size={14} strokeWidth={2} />, desc: "Free-form texts sent when a Meta template isn't approved yet (24h window)" },
   { id: "instagram", label: "Instagram", icon: <Instagram size={14} strokeWidth={2} />, desc: "DM persona & public comment reply prompts" },
-  { id: "simulator", label: "AI Chatbot Tester", icon: <Sparkles size={14} strokeWidth={2} />, desc: "Interactive testing chatbot for Calls, WhatsApp, and Instagram with real lead contexts" },
 ]
 
 const VOICE_LANGS: { id: "english" | "hindi" | "telugu"; label: string }[] = [
@@ -57,7 +54,6 @@ const TAB_KEYS: Record<Tab, string[]> = {
   voice: ["voice_openers", "voice_closings"],
   whatsapp: ["whatsapp_fallbacks"],
   instagram: ["instagram_dm", "instagram_comment"],
-  simulator: [],
 }
 
 const OPENER_FIELDS: { key: string; label: string; hint: string }[] = [
@@ -394,7 +390,6 @@ export default function ScriptView() {
   }
 
   function tabPayload(t: Tab): { language: string; content: string }[] {
-    if (t === "simulator") return []
     if (t === "voice") {
       return [
         { language: "voice_openers", content: JSON.stringify(voiceOpeners) },
@@ -847,7 +842,7 @@ export default function ScriptView() {
       )}
 
       {/* Channel-tab editor (voice / whatsapp / instagram) */}
-      {tab !== "base" && tab !== "simulator" && (
+      {tab !== "base" && (
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
         <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", background: "var(--bg-secondary)", flexWrap: "wrap", gap: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -910,18 +905,10 @@ export default function ScriptView() {
         </div>
       </div>
       )}
-
-      {/* AI Chatbot Tester Tab */}
-      {tab === "simulator" && (
-        <div style={{ height: "calc(100vh - 210px)", minHeight: 650 }}>
-          <OmnichannelTester />
-        </div>
-      )}
     </div>
   )
 
   function isDirtyTabFor(t: Tab): boolean {
-    if (t === "simulator") return false
     if (t === "base") return content !== original
     const payload = tabPayload(t)
     return payload.some((p) => p.content !== pristine[p.language])

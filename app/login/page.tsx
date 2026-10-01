@@ -101,9 +101,6 @@ export default async function LoginPage({
           <div className="text-[11.5px] text-[#64708c]">
             © {new Date().getFullYear()} Right Agent Group · Hyderabad
           </div>
-          <a href="/about" className="inline-flex text-[11.5px] text-[#8b7cff] hover:text-[#a5b0ff] transition">
-            About this Platform →
-          </a>
         </div>
       </section>
 

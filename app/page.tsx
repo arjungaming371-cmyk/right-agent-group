@@ -13,11 +13,11 @@ import EmiCalculator from "@/components/emi-calculator"
 // Until now "/" 302'd straight into the console, so every visitor's first
 // impression was a login wall. This page is the real landing: what Right
 // Agent Group is, the channels Priya works, how it works, the platform
-// behind it, compliance posture, FAQ — and two doors (customers → /apply,
-// staff → /login). Server-rendered, zero client JS, zero polling: LCP is
+// behind it, compliance posture, FAQ — and console login (/login).
+// Server-rendered, zero client JS, zero polling: LCP is
 // the markup itself.
 //
-// Copy discipline (mirrors /apply): capability claims only, NO invented
+// Copy discipline: capability claims only, NO invented
 // usage numbers or metrics we can't back up.
 
 export const metadata: Metadata = {
@@ -168,9 +168,8 @@ export default function HomePage() {
             <a href="#faq">FAQ</a>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <Link href="/login" className="rg-btn rg-btn-ghost rg-btn-sm">Sign in</Link>
-            <Link href="/apply" className="rg-btn rg-btn-primary rg-btn-sm">
-              Get started <ArrowRight size={15} strokeWidth={2.2} />
+            <Link href="/login" className="rg-btn rg-btn-primary rg-btn-sm">
+              Sign in <ArrowRight size={15} strokeWidth={2.2} />
             </Link>
           </div>
         </nav>
@@ -194,12 +193,12 @@ export default function HomePage() {
               already warm.
             </p>
             <div className="rg-hero-cta">
-              <Link href="/apply#voice" className="rg-btn rg-btn-primary">
-                <PhoneCall size={16} strokeWidth={2.1} /> Hear Priya live
-              </Link>
-              <Link href="/apply" className="rg-btn rg-btn-ghost">
+              <a href="#channels" className="rg-btn rg-btn-primary">
+                <PhoneCall size={16} strokeWidth={2.1} /> Explore channels
+              </a>
+              <a href="#platform" className="rg-btn rg-btn-ghost">
                 See the platform <ArrowRight size={15} strokeWidth={2.2} />
-              </Link>
+              </a>
             </div>
             <div className="rg-hero-stats">
               <div className="rg-stat"><b>3</b><span>languages, mid-conversation</span></div>
@@ -470,12 +469,12 @@ export default function HomePage() {
               your team — the whole demo takes less time than one missed call.
             </p>
             <div style={{ display: "flex", justifyContent: "center", flexWrap: "wrap", gap: 14 }}>
-              <Link href="/apply" className="rg-btn rg-btn-primary" style={{ padding: "13px 28px", fontSize: 15 }}>
-                Get started <ArrowRight size={16} strokeWidth={2.2} />
+              <Link href="/login" className="rg-btn rg-btn-primary" style={{ padding: "13px 28px", fontSize: 15 }}>
+                Console Sign In <ArrowRight size={16} strokeWidth={2.2} />
               </Link>
-              <Link href="/apply#voice" className="rg-btn rg-btn-ghost" style={{ padding: "13px 28px", fontSize: 15 }}>
-                <PhoneCall size={16} strokeWidth={2.1} /> Hear Priya live
-              </Link>
+              <a href="#channels" className="rg-btn rg-btn-ghost" style={{ padding: "13px 28px", fontSize: 15 }}>
+                <PhoneCall size={16} strokeWidth={2.1} /> Explore channels
+              </a>
             </div>
           </div>
         </section>
@@ -488,9 +487,9 @@ export default function HomePage() {
             <span style={{ fontSize: 12, color: "#4a5568" }}>© {new Date().getFullYear()} · Hyderabad</span>
           </div>
           <div className="rg-footer-links">
-            <Link href="/apply">Platform & pricing</Link>
-            <Link href="/about">About</Link>
-            <Link href="/apply#faq">FAQ</Link>
+            <a href="#platform">Platform</a>
+            <a href="#channels">Channels</a>
+            <a href="#faq">FAQ</a>
             <Link href="/login">Console sign in</Link>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12, color: "#4a5568" }}>
