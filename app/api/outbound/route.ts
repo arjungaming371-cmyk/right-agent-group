@@ -5,7 +5,16 @@ import { makeCall } from "@/lib/exotel"
 import { requireModuleOrRole } from "@/lib/auth"
 import { sessionBranchId, checkQuota, recordUsage } from "@/lib/branches"
 import { checkCallCompliance } from "@/lib/compliance"
+import { sanitizeText } from "@/lib/api-route"
 import { normalizePhone, phoneLast10, PHONE_MATCH_SQL } from "@/lib/phone"
+
+// "What should Priya talk about?" — the operator's agenda for this campaign.
+// Same field, same cap, as /api/calls/dial's instructions. Stamped on every
+// queued row; the bulk runner forwards it to placeOutboundCall({instructions})
+// so each dialed call's voice_calls row carries it for /api/calls/turn.
+function campaignTalkingPoints(v: unknown): string | null {
+  return sanitizeText(v, 1000) || null
+}
 
 export async function GET(req: NextRequest) {
   const session = await requireModuleOrRole(req, "voice", ["admin", "agent", "viewer", "branch_manager"])
@@ -98,6 +107,10 @@ export async function POST(req: NextRequest) {
   if (body.contacts && Array.isArray(body.contacts)) {
     let queued = 0
     let skipped = 0
+    // Campaign-level agenda from the CSV confirm modal / Add-Single form:
+    // one "What should Priya talk about?" text stamped on every queued row.
+    // A per-contact talking_points field (if a caller sends one) wins.
+    const campaignPoints = campaignTalkingPoints(body.talking_points)
     for (const contact of body.contacts) {
       if (!contact.phone) continue
       contact.phone = normalizePhone(contact.phone)
@@ -141,6 +154,7 @@ export async function POST(req: NextRequest) {
           language: contact.language || "telugu",
           product_interest: contact.product_interest,
           notes: (contact as Record<string, unknown>).notes as string | undefined || null,
+          talking_points: campaignTalkingPoints((contact as Record<string, unknown>).talking_points) ?? campaignPoints,
           lead_id: leadId || null,
           status: "pending",
           branch_id: branchId,
@@ -155,6 +169,10 @@ export async function POST(req: NextRequest) {
 
   // Single contact mode: { name, phone, language, ... } — call immediately
   const { name, language, product_interest, notes } = body
+  // Legacy immediate path keeps the same agenda contract as the queue: the
+  // voice_calls row gets `instructions` (what /api/calls/turn reads) and the
+  // queue row gets `talking_points` (what a re-queue of this row redials with).
+  const talkingPoints = campaignTalkingPoints(body.talking_points)
   const phone = normalizePhone(body.phone)
   if (!phone) return NextResponse.json({ error: "phone required" }, { status: 400 })
   const compliance = await checkCallCompliance({ phone })
@@ -183,19 +201,21 @@ export async function POST(req: NextRequest) {
     }
 
     // Trigger call immediately
-    const call = await makeCall(phone, leadId || "", language || "telugu", undefined, branchId)
+    const call = await makeCall(phone, leadId || "", language || "telugu", talkingPoints ?? undefined, branchId)
 
     await db.from("voice_calls").insert({
       lead_id: leadId, twilio_call_sid: call.sid,
       direction: "outbound", status: "initiated",
       language: language || "telugu", phone,
       branch_id: branchId,
+      instructions: talkingPoints,
     })
     if (branchId) recordUsage(branchId, "call")
 
     await db.from("outbound_queue").insert({
       name, phone, language: language || "telugu",
       product_interest, notes, lead_id: leadId,
+      talking_points: talkingPoints,
       status: "called",
       call_sid: call.sid,
       branch_id: branchId,

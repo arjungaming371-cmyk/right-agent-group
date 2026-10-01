@@ -22,7 +22,7 @@ type BulkRun = {
   concurrency: number
   current: string[]
 }
-type QueueRowView = { id: string; name: string | null; phone: string; language: string | null; status: string; created_at: string }
+type QueueRowView = { id: string; name: string | null; phone: string; language: string | null; status: string; talking_points?: string | null; created_at: string }
 
 const BULK_POLL_MS = 2500
 
@@ -36,6 +36,10 @@ export default function UploadView({ role = "admin" }: { role?: string }) {
   const [files, setFiles] = useState<UploadedFile[]>([])
   const [uploading, setUploading] = useState(false)
   const [queueForm, setQueueForm] = useState({ name: "", phone: "", language: "telugu", product_interest: "Home Loan", notes: "" })
+  // "What should Priya talk about?" — one agenda text for the whole batch
+  // (CSV confirm modal) or the single number; rides onto every queued row.
+  const [queueTalkPoints, setQueueTalkPoints] = useState("")
+  const [previewTalkPoints, setPreviewTalkPoints] = useState("")
   const [preview, setPreview] = useState<{ uploadId: string; contacts: Contact[] } | null>(null)
   const [confirming, setConfirming] = useState(false)
   const csvRef = useRef<HTMLInputElement>(null)
@@ -51,6 +55,9 @@ export default function UploadView({ role = "admin" }: { role?: string }) {
   // Bulk campaign console (entire-queue runner)
   const [bulkMode, setBulkMode] = useState<"next" | "all">("all")
   const [bulkConcurrency, setBulkConcurrency] = useState(3)
+  // Campaign agenda — sent on "Call Entire Queue": stamped across every
+  // pending row server-side before the runner claims them.
+  const [bulkTalkPoints, setBulkTalkPoints] = useState("")
   const [run, setRun] = useState<BulkRun | null>(null)
   const [queueCounts, setQueueCounts] = useState<Record<string, number>>({})
   const [queueRows, setQueueRows] = useState<QueueRowView[]>([])
@@ -129,12 +136,13 @@ export default function UploadView({ role = "admin" }: { role?: string }) {
       const res = await fetch("/api/outbound", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contacts: preview.contacts }),
+        body: JSON.stringify({ contacts: preview.contacts, talking_points: previewTalkPoints.trim() || undefined }),
       })
       const data = await res.json()
       if (res.ok) {
         const skippedNote = data.skipped ? ` — ${data.skipped} duplicate${data.skipped > 1 ? "s" : ""} skipped` : ""
         toast.success(`${data.queued} contacts queued${skippedNote} — use batch controls below to start calling`)
+        setPreviewTalkPoints("")
         load()
       } else {
         toast.error(data.error || "Queueing failed")
@@ -165,13 +173,14 @@ export default function UploadView({ role = "admin" }: { role?: string }) {
         language: queueForm.language,
         product_interest: queueForm.product_interest,
         notes: queueForm.notes,
-      }] }),
+      }], talking_points: queueTalkPoints.trim() || undefined }),
     })
     const d = await res.json()
     if (res.ok) {
       if (d.queued > 0) {
         toast.success(`Added to outbound queue${d.skipped ? " — was already queued, no duplicate created" : ""}`)
         setQueueForm({ name: "", phone: "", language: "telugu", product_interest: "Home Loan", notes: "" })
+        setQueueTalkPoints("")
       } else {
         toast.error("Already in the queue — each number can wait in the queue only once")
       }
@@ -211,12 +220,12 @@ export default function UploadView({ role = "admin" }: { role?: string }) {
       const res = await fetch("/api/outbound/process", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "start", concurrency: bulkConcurrency }),
+        body: JSON.stringify({ action: "start", concurrency: bulkConcurrency, talking_points: bulkTalkPoints.trim() || undefined }),
       })
       const data = await res.json()
       if (res.ok && data.paused) toast.info(data.reason || "Calling window is closed — the campaign cannot start right now")
       else if (res.ok) {
-        toast.success(`Bulk campaign started — Priya is dialing the entire queue, ${data.concurrency} call${data.concurrency > 1 ? "s" : ""} at a time`)
+        toast.success(`Bulk campaign started — Priya is dialing the entire queue, ${data.concurrency} call${data.concurrency > 1 ? "s" : ""} at a time${data.talkingPointsStamped ? ` · agenda applied to ${data.talkingPointsStamped} number${data.talkingPointsStamped === 1 ? "" : "s"}` : ""}`)
         await refreshBulkStatus()
       } else {
         toast.error(data.error || "Could not start the bulk campaign")
@@ -349,6 +358,23 @@ export default function UploadView({ role = "admin" }: { role?: string }) {
 
         {bulkMode === "all" ? (
           <>
+            {/* "What should Priya talk about?" — the campaign agenda box */}
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-secondary)", display: "block", marginBottom: 4 }}>
+                What should Priya talk about? <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>(optional)</span>
+              </label>
+              <textarea
+                value={bulkTalkPoints}
+                onChange={(e) => setBulkTalkPoints(e.target.value.slice(0, 1000))}
+                rows={2}
+                maxLength={1000}
+                placeholder="e.g. Introduce our new 8.5% home-loan balance-transfer offer, ask if their current EMI feels heavy, offer a free eligibility check — don't pitch personal loans"
+                style={{ width: "100%", fontSize: 13, lineHeight: 1.5, padding: "8px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", resize: "vertical" }}
+              />
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3 }}>
+                Priya opens with this agenda on every call in this run. Leave blank to keep the talking points set when the numbers were queued ({bulkTalkPoints.length}/1000).
+              </div>
+            </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 12, alignItems: "end", marginBottom: 14 }}>
               <div>
                 <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Calls at once (1–10)</label>
@@ -455,7 +481,14 @@ export default function UploadView({ role = "admin" }: { role?: string }) {
               <tbody>
                 {queueRows.map((r) => (
                   <tr key={r.id} style={{ borderBottom: "1px solid var(--border-light)" }}>
-                    <td style={{ padding: "10px 20px", fontSize: 13, fontWeight: 500 }}>{r.name || "—"}</td>
+                    <td style={{ padding: "10px 20px", fontSize: 13, fontWeight: 500 }}>
+                      {r.name || "—"}
+                      {r.talking_points && (
+                        <div title={r.talking_points} style={{ fontSize: 11, fontWeight: 400, color: "var(--text-muted)", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          Talk: {r.talking_points}
+                        </div>
+                      )}
+                    </td>
                     <td style={{ padding: "10px 20px", fontSize: 13, fontFamily: "monospace" }}>{r.phone}</td>
                     <td style={{ padding: "10px 20px", fontSize: 13, textTransform: "capitalize", color: "var(--text-secondary)" }}>{r.language || "—"}</td>
                     <td style={{ padding: "10px 20px" }}>
@@ -486,6 +519,22 @@ export default function UploadView({ role = "admin" }: { role?: string }) {
             <select value={queueForm.language} onChange={(e) => setQueueForm({ ...queueForm, language: e.target.value })}>
               <option value="telugu">Tenglish</option><option value="hindi">Hinglish</option><option value="english">English</option>
             </select>
+          </div>
+        </div>
+        <div style={{ marginBottom: 12 }}>
+          <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-secondary)", display: "block", marginBottom: 4 }}>
+            What should Priya talk about? <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>(optional)</span>
+          </label>
+          <textarea
+            value={queueTalkPoints}
+            onChange={(e) => setQueueTalkPoints(e.target.value.slice(0, 1000))}
+            rows={2}
+            maxLength={1000}
+            placeholder="e.g. Remind them about the pending application documents, offer a callback from a senior loan officer"
+            style={{ width: "100%", fontSize: 13, lineHeight: 1.5, padding: "8px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", resize: "vertical" }}
+          />
+          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3 }}>
+            Priya steers this call toward this agenda when the number is dialed ({queueTalkPoints.length}/1000).
           </div>
         </div>
         <button onClick={addToQueue} disabled={!queueForm.name || !queueForm.phone} style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", color: "var(--text-secondary)", borderRadius: 8, padding: "10px 24px", fontWeight: 600, fontSize: 14, opacity: !queueForm.name || !queueForm.phone ? 0.5 : 1 }}>
@@ -539,6 +588,19 @@ export default function UploadView({ role = "admin" }: { role?: string }) {
               {preview.contacts.length} contacts found. Confirm to add them to the outbound queue — no calls happen yet, use Batch Calling above to start dialing.
             </div>
             <div style={{ flex: 1, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 10, marginBottom: 16 }}>
+              <div style={{ padding: "10px 14px 0", borderBottom: "none" }}>
+                <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-secondary)", display: "block", marginBottom: 4 }}>
+                  What should Priya talk about? <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>(optional — applies to all {preview.contacts.length})</span>
+                </label>
+                <textarea
+                  value={previewTalkPoints}
+                  onChange={(e) => setPreviewTalkPoints(e.target.value.slice(0, 1000))}
+                  rows={2}
+                  maxLength={1000}
+                  placeholder="e.g. Introduce our new 8.5% home-loan balance-transfer offer and offer a free eligibility check"
+                  style={{ width: "100%", fontSize: 13, lineHeight: 1.5, padding: "8px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", resize: "vertical", marginBottom: 10 }}
+                />
+              </div>
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
                   <tr style={{ borderBottom: "1px solid var(--border)", position: "sticky", top: 0, background: "var(--bg-card)" }}>

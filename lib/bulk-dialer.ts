@@ -34,6 +34,11 @@ export type BulkQueueRow = {
   product_interest: string | null
   notes: string | null
   branch_id: string | null
+  // "What should Priya talk about?" (migration 2026-10-01_queue_talking_points).
+  // The engine itself stays agenda-agnostic — dialRow's implementation decides
+  // what to do with it; the app's dialQueueRow forwards it to
+  // placeOutboundCall({instructions}).
+  talking_points?: string | null
 }
 
 /** What one dial attempt concluded. A throw counts as "failed". */

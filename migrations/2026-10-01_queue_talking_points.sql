@@ -1,0 +1,30 @@
+-- 2026-10-01 — "What should Priya talk about?" for the Call Queue's bulk
+-- outbound campaigns.
+--
+-- THE GAP: the per-call talk points existed for single dials only. The
+-- dashboard's lead Call modal (/api/calls/dial {instructions}) persists the
+-- operator's agenda on voice_calls.instructions and /api/calls/turn reads it
+-- every turn — but a BULK campaign never carried it: the queue rows had no
+-- talking-points column, the batch queueing API dropped the field, the bulk
+-- runner dialed with `instructions` unset, and 500 queued customers got the
+-- generic script even when the operator launched the campaign with a
+-- specific offer to push.
+--
+-- This migration gives every outbound_queue row its own agenda text:
+--
+--   talking_points  the operator's "What should Priya talk about?" text
+--                   (≤1000 chars, sanitized at the API edge). Stamped at
+--                   queueing time (CSV confirm / Add Single Number) and
+--                   optionally re-stamped across all pending rows when a
+--                   campaign starts (Start Campaign textarea). dialQueueRow
+--                   forwards it to placeOutboundCall({instructions}), which
+--                   persists it on the voice_calls row — from there the
+--                   existing brain path (/api/calls/turn →
+--                   buildTurnInstructions) picks it up on BOTH channels
+--                   (Exotel phone + WhatsApp voice), identical to single
+--                   dials.
+--
+-- No backfill needed: existing rows simply have no agenda (NULL) and dial
+-- exactly as they did before.
+
+ALTER TABLE outbound_queue ADD COLUMN IF NOT EXISTS talking_points TEXT;
