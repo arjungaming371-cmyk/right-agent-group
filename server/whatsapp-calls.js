@@ -81,10 +81,10 @@ const WA_FRAME_BYTES = WA_FRAME_SAMPLES * 2
 const STT_RATE = parseInt(process.env.VOICEBOT_WA_STT_SAMPLE_RATE || "16000")
 const DSR = WA_RATE / STT_RATE   // decimation factor (3 at 16 kHz)
 
-// Endpointing — same numbers as the Exotel path (they were tuned live).
+// Endpointing — tuned for natural listening: 600ms gives fast turn-taking without dead air.
 const ENERGY_THRESHOLD = parseInt(process.env.VOICEBOT_WA_ENERGY_THRESHOLD || "300")
-const SILENCE_END_MS = 600
-const MIN_SPEECH_MS = 250
+const SILENCE_END_MS = parseInt(process.env.VOICEBOT_SILENCE_END_MS || "600")
+const MIN_SPEECH_MS = parseInt(process.env.VOICEBOT_MIN_SPEECH_MS || "250")
 const MAX_UTTERANCE_MS = 15000
 
 // Barge-in disabled by default so Priya finishes speaking without mid-call interruptions.
@@ -281,7 +281,7 @@ function splitIntoSentences(text) {
     const next = text[i + 1]
     if (next !== undefined && !/\s/.test(next)) continue
     const candidate = text.slice(start, i + 1).trim()
-    if (candidate.length < 28) continue
+    if (candidate.length < 8) continue
     out.push(candidate)
     start = i + 1
   }
@@ -531,6 +531,84 @@ async function createCallAnswer(offerSdp) {
     ssrc,
     remoteTrack,
   }
+}
+
+// Memo cache for WhatsApp call TTS (greetings, closings, common openers).
+const WA_TTS_CACHE_MAX = 256
+const WA_TTS_CACHE_MAX_CHARS = 300
+const waTtsCache = new Map()
+
+function waTtsCacheKey(text, language, voice) {
+  const v = voice?.speaker ? `${voice.provider || ""}:${voice.speaker}` : ""
+  return `${v}\u0000${language}\u0000${text}`
+}
+
+async function synthesizePcm48k(text, language, voice) {
+  const activeLang = language || "english"
+  const cacheable = text.length <= WA_TTS_CACHE_MAX_CHARS
+  const key = waTtsCacheKey(text, activeLang, voice)
+  if (cacheable) {
+    const hit = waTtsCache.get(key)
+    if (hit) {
+      console.log(`⏱ wa TTS: cached ("${text.slice(0, 40)}${text.length > 40 ? "…" : ""}")`)
+      return hit
+    }
+  }
+  const t0 = Date.now()
+  let override = voice || null
+  let audio
+  let providerUsed = WA_TTS_PROVIDER
+  if (WA_TTS_PROVIDER === "cartesia" && process.env.CARTESIA_API_KEY) {
+    const speaker = override?.provider === "cartesia" ? override.speaker : (process.env.CARTESIA_VOICE_ID || undefined)
+    try {
+      audio = await voiceProviders.cartesiaTts(text, activeLang, speaker)
+      providerUsed = "cartesia"
+    } catch (cartesiaErr) {
+      console.warn(`[WA] Cartesia TTS failed (${cartesiaErr.message}), falling back to Sarvam TTS`)
+      const sarvamSpeaker = override?.provider === "sarvam" ? override.speaker : undefined
+      audio = await voiceProviders.sarvamTts(text, activeLang, sarvamSpeaker)
+      providerUsed = "sarvam (fallback)"
+    }
+  } else {
+    const speaker = override?.provider === "sarvam" ? override.speaker : undefined
+    audio = await voiceProviders.sarvamTts(text, activeLang, speaker)
+    providerUsed = "sarvam"
+  }
+  const pcm48k = await wavToPcm(audio)
+  const inRate = wavSampleRate(audio)
+  console.log(`⏱ wa TTS (${providerUsed}): ${Date.now() - t0}ms (in @ ${inRate || "?"} Hz → ${(pcm48k.length / (WA_RATE * 2)).toFixed(1)}s @ 48k)`)
+  if (cacheable && pcm48k && pcm48k.length > 0) {
+    if (waTtsCache.size >= WA_TTS_CACHE_MAX) waTtsCache.delete(waTtsCache.keys().next().value)
+    waTtsCache.set(key, pcm48k)
+  }
+  return pcm48k
+}
+
+async function prewarmWa() {
+  const fixedLines = [
+    CLARIFY_PHRASE.telugu,
+    FALLBACK_PHRASE.telugu,
+    START_FALLBACK_PHRASE.telugu,
+    "సరే sir,",
+    "Sure sir,",
+    "అవును sir,",
+    "చెప్పండి sir,",
+    "హలో sir,",
+    "Okay sir,",
+    "Student loan,",
+    "Personal loan,",
+    "Home loan,",
+    "Business loan,",
+    "Twelve lakh rupees,",
+    "Fifteen lakh rupees,",
+  ]
+  for (const line of fixedLines) {
+    if (line) {
+      await synthesizePcm48k(line, "telugu").catch((e) => console.error("prewarm WA fixed line (te):", e.message))
+      await sleep(60)
+    }
+  }
+  console.log(`✓ WA fixed-line cache ready (${waTtsCache.size} phrases)`)
 }
 
 // ---------- Per-call session ----------
@@ -1008,45 +1086,15 @@ class WhatsAppCallSession {
   }
 
   /**
-   * Synthesize one sentence to 48 kHz PCM frames. TTS provider: Cartesia
-   * (default for WhatsApp) with automatic Sarvam fallback when Cartesia is
-   * not configured. The branch voice override's speaker is honoured when it
-   * belongs to the same provider.
+   * Synthesize one sentence to 48 kHz PCM frames with memory cache.
    */
   synth(text, epoch, sentenceLang) {
     if (this.closed || epoch !== this.speechEpoch) return Promise.resolve(null)
-    return (async () => {
-      try {
-        const t0 = Date.now()
-        let override = this.voice || null
-        let audio
-        let providerUsed = WA_TTS_PROVIDER
-        const activeLang = sentenceLang || this.language || "english"
-        if (WA_TTS_PROVIDER === "cartesia" && process.env.CARTESIA_API_KEY) {
-          const speaker = override?.provider === "cartesia" ? override.speaker : (process.env.CARTESIA_VOICE_ID || undefined)
-          try {
-            audio = await voiceProviders.cartesiaTts(text, activeLang, speaker)
-            providerUsed = "cartesia"
-          } catch (cartesiaErr) {
-            console.warn(`[WA] Cartesia TTS failed (${cartesiaErr.message}), falling back to Sarvam TTS`)
-            const sarvamSpeaker = override?.provider === "sarvam" ? override.speaker : undefined
-            audio = await voiceProviders.sarvamTts(text, activeLang, sarvamSpeaker)
-            providerUsed = "sarvam (fallback)"
-          }
-        } else {
-          const speaker = override?.provider === "sarvam" ? override.speaker : undefined
-          audio = await voiceProviders.sarvamTts(text, activeLang, speaker)
-          providerUsed = "sarvam"
-        }
-        const pcm48k = await wavToPcm(audio)
-        const inRate = wavSampleRate(audio)
-        console.log(`⏱ wa TTS (${providerUsed}): ${Date.now() - t0}ms (in @ ${inRate || "?"} Hz → ${(pcm48k.length / (WA_RATE * 2)).toFixed(1)}s @ 48k)`)
-        return pcm48k
-      } catch (e) {
-        console.error("wa TTS error:", e.message)
-        return null
-      }
-    })()
+    const activeLang = sentenceLang || this.language || "english"
+    return synthesizePcm48k(text, activeLang, this.voice).catch((e) => {
+      console.error("wa TTS error:", e.message)
+      return null
+    })
   }
 
   async drainSpeech(epoch) {
@@ -1475,6 +1523,7 @@ module.exports = {
   // speech-clarity + hangup tuning (test-locked, see constants above)
   createWaEncoder, WA_OPUS_BITRATE, OPUS_CTL_SET_APPLICATION, OPUS_APPLICATION_VOIP,
   WA_AUDIO_FILTER_CHAIN, BUSINESS_HANGUP,
+  prewarmWa,
 }
 
 // Sweep orphaned recording files (crash mid-call / lost finalize) once at

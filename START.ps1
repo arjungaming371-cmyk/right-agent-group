@@ -88,7 +88,7 @@ $waProcess = $null
 
 # Propagate internal auth settings from .env to child processes.
 $envLines = Get-Content "$ProjectDir\.env" -ErrorAction SilentlyContinue
-foreach ($name in @("WHATSAPP_SERVICE_KEY", "CF_TUNNEL_NAME", "VOICEBOT_BARGE_IN", "VOICEBOT_ENERGY_THRESHOLD", "VOICEBOT_TTS_VOLUME", "VOICEBOT_AUDIO_FILTER")) {
+foreach ($name in @("WHATSAPP_SERVICE_KEY", "CF_TUNNEL_NAME", "VOICEBOT_BARGE_IN", "VOICEBOT_ENERGY_THRESHOLD", "VOICEBOT_TTS_VOLUME", "VOICEBOT_AUDIO_FILTER", "VOICEBOT_SILENCE_END_MS", "SARVAM_TTS_PACE")) {
     $line = $envLines | Select-String "^\s*$name=" | Select-Object -First 1
     if ($line) {
         $val = $line.ToString().Split("=",2)[1].Split("#",2)[0].Trim()
@@ -112,19 +112,20 @@ New-Item -ItemType Directory -Force -Path $logsDir | Out-Null
 Write-Host "[4/6] Voice pipeline: cloud (STT: Sarvam Saaras | TTS: $ttsCallProvider) - no local services" -ForegroundColor Green
 
 # 4. Voicebot Server (port 3002 ws, port 3003 http) - the phone call brain
-Write-Host "[5/6] Starting Voicebot..." -ForegroundColor Yellow
-Stop-Port 3002
-Stop-Port 3003
-$vbProcess = Start-Process "node" -ArgumentList "server\voicebot-server.js" -WorkingDirectory $ProjectDir -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logsDir "voicebot.log") -RedirectStandardError (Join-Path $logsDir "voicebot.err.log")
-Start-Sleep -Seconds 1
-Write-Host "      OK Voicebot started (PID: $($vbProcess.Id)) - logs: logs\voicebot.log" -ForegroundColor Green
-
-# 6. Website (port 3000)
-Write-Host "[6/6] Starting Website..." -ForegroundColor Yellow
+# 5. Website (port 3000)
+Write-Host "[5/6] Starting Website..." -ForegroundColor Yellow
 Stop-Port 3000
 $webProcess = Start-Process "cmd" -ArgumentList "/c npm start" -WorkingDirectory $ProjectDir -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logsDir "website.log") -RedirectStandardError (Join-Path $logsDir "website.err.log")
 Start-Sleep -Seconds 5
 Write-Host "      OK Website started at http://localhost:3000" -ForegroundColor Green
+
+# 6. Voicebot (port 3002)
+Write-Host "[6/6] Starting Voicebot..." -ForegroundColor Yellow
+Stop-Port 3002
+Stop-Port 3003
+$vbProcess = Start-Process "node" -ArgumentList "server\voicebot-server.js" -WorkingDirectory $ProjectDir -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logsDir "voicebot.log") -RedirectStandardError (Join-Path $logsDir "voicebot.err.log")
+Start-Sleep -Seconds 2
+Write-Host "      OK Voicebot started (PID: $($vbProcess.Id)) - logs: logs\voicebot.log" -ForegroundColor Green
 
 # 6. Public tunnel
 # No domain yet -> scripts/tunnel-autofix.ps1 uses ngrok's reserved free

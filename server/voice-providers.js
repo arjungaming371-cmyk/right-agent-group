@@ -53,8 +53,8 @@ const SARVAM_TTS_SPEAKER_HINDI = process.env.SARVAM_TTS_SPEAKER_HINDI || "priya"
 const SARVAM_TTS_SPEAKER_ENGLISH = process.env.SARVAM_TTS_SPEAKER_ENGLISH || "priya"
 const SARVAM_TTS_SPEAKER = process.env.SARVAM_TTS_SPEAKER || ""
 const SARVAM_TTS_SAMPLE_RATE = parseInt(process.env.SARVAM_TTS_SAMPLE_RATE || "24000")
-// Pace 1.0 provides relaxed, natural human conversational flow without robotic rushing or clipping
-const SARVAM_TTS_PACE = parseFloat(process.env.SARVAM_TTS_PACE || "1.0")
+// Pace 1.08 provides natural, lively conversational pacing without dead air
+const SARVAM_TTS_PACE = parseFloat(process.env.SARVAM_TTS_PACE || "1.08")
 // Temperature 0.3 provides stable, warm melodic pitch without vocal wobble or falling voice
 const SARVAM_TTS_TEMPERATURE = parseFloat(process.env.SARVAM_TTS_TEMPERATURE || "0.3")
 

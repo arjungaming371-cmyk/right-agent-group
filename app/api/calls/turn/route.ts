@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db, query } from "@/lib/db"
-import { startCall, handleTurn, handleTurnStream, correctLastSpokenReply } from "@/lib/voice-conversation"
+import { startCall, handleTurn, handleTurnStream, correctLastSpokenReply, parseTranscriptHistory } from "@/lib/voice-conversation"
 import { detectLanguage, type Language } from "@/lib/llm"
 import { normalizeCallLanguage, resolveSpokenLanguage } from "@/lib/call-facts"
 import { PHONE_MATCH_SQL } from "@/lib/phone"
@@ -163,9 +163,11 @@ export async function POST(req: NextRequest) {
 
       const { data: call } = await db
         .from("voice_calls")
-        .select("lead_id, language, phone, instructions, direction, branch_id")
+        .select("lead_id, language, phone, instructions, direction, branch_id, transcript")
         .eq("twilio_call_sid", callSid)
         .single()
+
+      const history = parseTranscriptHistory(call?.transcript)
 
       // Prefer call row's language if already recorded/switched (prevents stale client state from reverting)
       const current = normalizeCallLanguage(call?.language || body?.language)
@@ -198,6 +200,7 @@ export async function POST(req: NextRequest) {
         // field (app/api/calls POST).
         instructions: (typeof body?.instructions === "string" ? body.instructions.slice(0, 1000) : undefined) || call?.instructions || undefined,
         branchId: call?.branch_id || null,
+        history,
       }
 
       // STREAMING MODE (body.stream === true): NDJSON, one object per line.

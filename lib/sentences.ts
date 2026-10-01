@@ -11,9 +11,9 @@
 const BOUNDARY = /[.!?…।॥]/
 
 /** Minimum characters before a boundary is allowed to end a sentence —
- *  prevents tiny 1-2 word fragments ("Nenu Priya.", "Avunu sir!") from chopping
- *  the voice into robotic stutters with falling pitch. */
-const MIN_SENTENCE_CHARS = 28
+ *  allows short acknowledgments ("సరే sir.", "Sure sir.") to flush immediately to TTS
+ *  while holding back sub-8 char abbreviations ("Dr.", "Mr.", "Rs."). */
+const MIN_SENTENCE_CHARS = 8
 
 // Outpero-grade FIRST-AUDIO latency (2026-09-30): the prompt training makes
 // Priya open every reply with a short acknowledgment joined to the main
@@ -24,7 +24,7 @@ const MIN_SENTENCE_CHARS = 28
 // clause. Subsequent emissions ignore commas entirely: mid-sentence commas
 // (lists, "sixteen, twenty") must never split the voice. The floor keeps
 // one-word false starts from reaching TTS.
-const FIRST_COMMA_FLUSH_CHARS = 10
+const FIRST_COMMA_FLUSH_CHARS = 7
 
 /**
  * Splits accumulated stream text into complete sentences + the unfinished
@@ -55,8 +55,7 @@ export function splitSentences(
         !commaFlushUsed &&
         complete.length === 0 &&
         start === 0 &&
-        i + 1 < text.length &&
-        /\s/.test(text[i + 1]) &&
+        (i + 1 >= text.length || /\s/.test(text[i + 1]) || /[\u0C00-\u0C7F\u0900-\u097F]/.test(text[i + 1])) &&
         i + 1 - start >= FIRST_COMMA_FLUSH_CHARS
       ) {
         const candidate = text.slice(start, i + 1).trim()

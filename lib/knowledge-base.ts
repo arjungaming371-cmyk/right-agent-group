@@ -42,13 +42,14 @@ function clip(s: string, n: number): string {
 // the obvious non-questions: greetings, acknowledgements, digit strings
 // (numbers/addresses being read out), and very short turns.
 const SKIP_PATTERNS =
-  /^(hi|hello|hey|yes|yeah|no|nope|ok|okay|sure|thanks|thank you|bye|goodbye|namaste|haan|theek hai|sare|avunu)\.?$/i
+  /^(hi|hello|hey|yes|yeah|no|nope|ok|okay|sure|thanks|thank you|bye|goodbye|namaste|haan|theek hai|sare|avunu|em levu|emi ledu|chalu|time undi|time undi cheppandi|aa time undi)\.?$/i
 
 function looksLikeQuestion(q: string): boolean {
   const t = q.trim()
   if (t.length < 4) return false
   if (SKIP_PATTERNS.test(t)) return false
   if (/^[\d\s\-+()]+$/.test(t)) return false // pure digits — a phone number, not a question
+  if (/^(?:oka\s+)?(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|twenty\s*five|fifty)\s*(?:lakhs?|lacs?|crores?|cr|thousand|k)?$/i.test(t)) return false
   return true
 }
 
@@ -86,8 +87,10 @@ export async function searchKnowledgeBase(userQuery: string): Promise<string> {
 
   try {
     const isIndicScript = /[ऀ-ॿఀ-౿]/.test(q)
-    if (!isIndicScript) {
-      const firstPass = await ftsSearch(q)
+    const cleanLatin = (q.match(/[A-Za-z]{3,}/g) || []).filter((w) => !SKIP_PATTERNS.test(w)).join(" ")
+    if (!isIndicScript || cleanLatin.length >= 3) {
+      const searchTarget = isIndicScript ? cleanLatin : q
+      const firstPass = await ftsSearch(searchTarget)
       if (firstPass.length > 0 && firstPass[0].rank >= MIN_RANK) {
         return formatHits(firstPass)
       }

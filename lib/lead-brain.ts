@@ -346,8 +346,19 @@ const FACT_KEYS = [
   "best_time_to_call", "family_references", "objections_raised", "competitors_mentioned",
 ] as const
 
+const _leadBriefCache = new Map<string, { brief: string; at: number }>()
+
+export function invalidateLeadBriefCache(leadId?: string) {
+  if (leadId) _leadBriefCache.delete(leadId)
+  else _leadBriefCache.clear()
+}
+
 export async function buildLeadBrief(leadId: string): Promise<string> {
   if (!isValidUUID(leadId)) return ""
+  const cached = _leadBriefCache.get(leadId)
+  if (cached && Date.now() - cached.at < 60_000) {
+    return cached.brief
+  }
   try {
     const res = await query(
       `SELECT
@@ -468,7 +479,7 @@ export async function buildLeadBrief(leadId: string): Promise<string> {
       lines.push(
         `LOAN APPLICATION ALREADY ON FILE (${[refNum, appType, appAmt, `status: ${appStatus}`].filter(Boolean).join(", ")}):\n` +
         `- The customer ALREADY submitted their loan application. NEVER say "we are sending you a loan application" or ask them to fill any form.\n` +
-        `- Acknowledge their submitted application directly. Answer any questions about process/rates, and confirm our loan officer is reviewing it and will call them.`
+        `- Acknowledge their submitted application directly if asked. Answer all caller questions (office visits, timings 9 AM to 6 PM, insurance, rates, process, eligibility) directly using the Knowledge Base. NEVER deflect by repeatedly saying our loan officer will review and call them.`
       )
     }
 
@@ -519,7 +530,9 @@ export async function buildLeadBrief(leadId: string): Promise<string> {
 
     let brief = lines.join("\n")
     if (brief.length > CHAR_BUDGET) brief = brief.slice(0, CHAR_BUDGET) + "…"
-    return brief ? `CROSS-CHANNEL LEAD BRIEF (internal — never read this aloud/verbatim):\n${brief}` : ""
+    const formatted = brief ? `CROSS-CHANNEL LEAD BRIEF (internal — never read this aloud/verbatim):\n${brief}` : ""
+    _leadBriefCache.set(leadId, { brief: formatted, at: Date.now() })
+    return formatted
   } catch (e: any) {
     console.error("buildLeadBrief error:", e.message)
     return ""

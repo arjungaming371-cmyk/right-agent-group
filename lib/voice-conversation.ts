@@ -115,7 +115,10 @@ export const CUSTOMER_BYE_RE = new RegExp(
   'no thanks?|no thank you|no sir thanks|no madam thanks|' +
   'em ledu|emi ledu|em ledhu|emi ledhu|em ledandi|emi ledandi|inka em ledu|inka emi ledu|inka em ledhu|inka emi ledhu|' +
   'doubts? em levu|doubts? emi levu|doubts? levu|doubts? levandi|doubts? levu sir|inka doubts? levu|doubt em ledu|doubt emi ledu|doubt ledu|' +
-  'chalu|chalandi|chalu sir|avunu chalu|aithe chalu|ithe chalu|saripothundi|saripoddi|' +
+  'chalu|chalandi|chalu sir|avunu chalu|aithe chalu|ithe chalu|saripothundi|saripoddi|chalu le|chalu mari|ippatiki chalu|' +
+  'chuse cheptanu|chusi cheptanu|repu cheptanu|tarvata cheptanu|repu call chesta|repu call chestanu|tarvata call chesta|repu matladathanu|' +
+  'repu vastaanu|repu vastanu|repu osthanu|book chesukondi|' +
+  'sare andi|sarle andi|sarle sir|sare sir|ok andi|okay andi|' +
   'anthe|anthena|anthe sir|anthey|anthe andi|kavalsindi anthe|' +
   'clear aindi|antha clear|antha clear aindi|clear ga undi|' +
   'untanu|untanu sir|untanandi|untanu mari|sare untanu|inka untanu|selavu|veedkolu|' +
@@ -124,11 +127,12 @@ export const CUSTOMER_BYE_RE = new RegExp(
   'sare bye|ok bye|okay bye|sare thank you|ok thank you|' +
   'koi doubt nahi|kuch nahi|nahi koi doubt nahi|sab clear hai|bas itna hi|itna hi|ho gaya|theek hai bye' +
   ')\\b|' +
-  '^(no|no sir|no madam|ledu|ledu sir|ledu madam|ledandi|ledu andi|nahi|nahi sir|thank you|thanks|thank you sir|thanks sir|thank you madam|dhanyavadalu)[.!? ]*$|' +
-  '^(లేదు|లేదండి|లేదు సర్|ఏం లేదు|ఏమీ లేదు|ధన్యవాదాలు|థాంక్యూ)[.!? ]*$|' +
+  '^(no|no sir|no madam|ledu|ledu sir|ledu madam|ledandi|ledu andi|nahi|nahi sir|thank you|thanks|thank you sir|thanks sir|thank you madam|dhanyavadalu|sare|sarle|sare andi|ok andi|okay andi)[.!? ]*$|' +
+  '^(లేదు|లేదండి|లేదు సర్|ఏం లేదు|ఏమీ లేదు|ధన్యవాదాలు|థాంక్యూ|సరే|సరే అండి|సరే సర్)[.!? ]*$|' +
   '\\b(sare|ok|okay)[\\s,]+(andi[\\s,]+)?(thank you|thanks)\\b|' +
   'రేపు మాట్లాడుదాం|సెలవు|ఉంటాను మరి|ఉంటాను|ఉంటానండి|పెట్టేస్తున్నాను|తర్వాత మాట్లాడుదాం|ఫోన్ పెట్టేస్తున్నా|వీడ్కోలు|' +
   'ఏం లేదు|ఏమీ లేదు|ఏం లేదండి|ఏమీ లేదండి|ఇంకేం లేదు|ఇంకేమీ లేదు|డౌట్స్ లేవు|డౌట్ లేదు|డౌట్స్ ఏమీ లేవు|డౌట్స్ ఏం లేవు|' +
+  'చూసి చెప్తాను|రేపు చెప్తాను|రేపు కాల్ చేస్తాను|రేపు వస్తాను|చాలు మరి|సరే అండి|సరే సర్|ఫోన్ కట్ చేయండి|ఫోన్ పెట్టండి|' +
   'చాలు|చాలండి|అంతే|సరిపోతుంది|అంతా క్లియర్|క్లియర్ అయింది|సరే బాయ్|ఓకే బాయ్|బాయ్|' +
   'अलविदा|बाय|कोई डाउट नहीं|कुछ नहीं|बस इतना ही|हो गया|फोन रख रहा हूँ|फोन रख रही हूँ',
   'i'
@@ -226,15 +230,12 @@ export async function startCall(
   return greetingFor(language, "cold", hasName ? name! : undefined)
 }
 
-async function getHistory(callSid: string): Promise<{ role: "user" | "model"; content: string }[]> {
+export function parseTranscriptHistory(rawTranscript: unknown): { role: "user" | "model"; content: string }[] {
   try {
-    const { data } = await db.from("voice_calls").select("transcript").eq("twilio_call_sid", callSid).single()
-    if (!data?.transcript) return []
-    const transcript = typeof data.transcript === "string" ? JSON.parse(data.transcript) : data.transcript
+    if (!rawTranscript) return []
+    const transcript = typeof rawTranscript === "string" ? JSON.parse(rawTranscript) : rawTranscript
     if (!Array.isArray(transcript)) return []
-    // FIX (2026-09-20): re-parsed + returned in full on EVERY turn — cap the
-    // working set (the reply path only ever uses the last 12 messages, and
-    // extraction now takes 12 too).
+    // Cap working set to last 40 turns
     return (transcript as { role?: unknown; text?: unknown }[])
       .slice(-40)
       .map((t) => ({ role: t.role === "ai" ? ("model" as const) : ("user" as const), content: typeof t.text === "string" ? t.text : "" }))
@@ -242,6 +243,37 @@ async function getHistory(callSid: string): Promise<{ role: "user" | "model"; co
   } catch {
     return []
   }
+}
+
+async function getHistory(callSid: string): Promise<{ role: "user" | "model"; content: string }[]> {
+  try {
+    const { data } = await db.from("voice_calls").select("transcript").eq("twilio_call_sid", callSid).single()
+    return parseTranscriptHistory(data?.transcript)
+  } catch {
+    return []
+  }
+}
+
+// In-memory 60s cache for finance rows (loan_amount, product_interest, facts)
+// so turns 2-10 in a live call do not query Postgres twice every turn.
+const _financeRowsCache = new Map<string, { at: number; data: any }>()
+
+export function invalidateFinanceRowsCache(leadId?: string) {
+  if (leadId) _financeRowsCache.delete(leadId)
+  else _financeRowsCache.clear()
+}
+
+async function getCachedFinanceRows(leadId: string) {
+  const cached = _financeRowsCache.get(leadId)
+  if (cached && Date.now() - cached.at < 60_000) {
+    return cached.data
+  }
+  const data = await Promise.all([
+    db.from("leads").select("loan_amount, product_interest").eq("id", leadId).single(),
+    db.from("lead_memory").select("facts").eq("lead_id", leadId).single(),
+  ])
+  _financeRowsCache.set(leadId, { at: Date.now(), data })
+  return data
 }
 
 // Returns the write promise so callers who need ordering guarantees (e.g.
@@ -329,12 +361,7 @@ function startTurnContext(leadId: string, speech: string) {
   return Promise.all([
     leadId ? buildLeadBrief(leadId).catch(() => "") : Promise.resolve(""),
     searchKnowledgeBase(speech).catch(() => ""),
-    leadId
-      ? Promise.all([
-          db.from("leads").select("loan_amount, product_interest").eq("id", leadId).single(),
-          db.from("lead_memory").select("facts").eq("lead_id", leadId).single(),
-        ]).catch(() => null)
-      : Promise.resolve(null),
+    leadId ? getCachedFinanceRows(leadId).catch(() => null) : Promise.resolve(null),
   ])
 }
 
@@ -434,24 +461,26 @@ async function buildTurnInstructions(
   if (customerMentionedFormFilled || hasAppOnRecord) {
     merged = [
       merged,
-      `=== LIVE STATE: LOAN APPLICATION IS ALREADY SUBMITTED (STRICT MANDATE) ===
-- The customer has ALREADY submitted their loan application (either confirmed in this call or on record in the database).
-- NEVER tell them: "we are sending you a loan application" or "please fill out the application" or "application link పంపిస్తున్నాము".
-- Under NO circumstances promise to send them a new loan application link.
-- State clearly that their application is received, and that our loan officer is reviewing it and will personally contact them with the next steps.`,
+      `=== LIVE STATE: LOAN APPLICATION ON FILE ===
+- The customer has ALREADY submitted their loan application. NEVER ask them to fill out another application or promise to send a new application link.
+- ANSWER ALL CALLER QUERIES DIRECTLY: Answer whatever the customer is asking (office visits, office timings 9 AM to 6 PM, insurance plans, rates, eligibility, documents, or products) directly using the Knowledge Base.
+- BANNED DEFLECTION: NEVER say "మా loan officer మీ profile review చేసి త్వరలోనే మీకు call చేస్తారు" or refuse to answer by deflecting to the loan officer. You are the knowledgeable advisor — answer their questions clearly now!`,
     ].filter(Boolean).join("\n\n")
   }
 
-  // Detect if customer explicitly stated their name in this call
+  // Detect if customer explicitly stated their name in this call OR already known from lead identity/opener
   const spokenNameMatch = speech.match(/\b(?:naa|my)\s+(?:full\s+)?name\s+(?:is\s+)?([A-Za-z\s]+)/i)
-  if (spokenNameMatch) {
-    const spokenName = spokenNameMatch[1].trim().split(/\s+/).slice(0, 3).join(" ")
-    if (spokenName && spokenName.length > 2 && !/prabhutvam|government|unknown/i.test(spokenName)) {
-      merged = [
-        merged,
-        `LIVE FACT: Customer just explicitly gave their name as "${spokenName}". Address them as ${spokenName} sir/madam. NEVER re-ask for their name.`,
-      ].filter(Boolean).join("\n\n")
-    }
+  const leadNameMatch = (brief || "").match(/IDENTITY\s*—\s*name:\s*([A-Za-z0-9_-]+)/i) || (history[0]?.content || "").match(/(?:నమస్కారం|namaskaram|hello|hi)\s+([A-Za-z]+)\s+garu/i)
+  const effectiveName = spokenNameMatch ? spokenNameMatch[1].trim().split(/\s+/).slice(0, 3).join(" ") : (leadNameMatch ? leadNameMatch[1].trim() : "")
+
+  if (effectiveName && effectiveName.length > 1 && !/prabhutvam|government|unknown/i.test(effectiveName)) {
+    merged = [
+      merged,
+      `=== CUSTOMER NAME IS ALREADY KNOWN ===
+- Customer name is ALREADY KNOWN as "${effectiveName}". Address them respectfully as ${effectiveName} sir/garu.
+- STRICT BAN: NEVER ask for their name, full name, or "మీ full name చెప్తారా". That step is DONE.
+- Move directly to discussing their loan requirement (purpose, amount, loan type).`,
+    ].filter(Boolean).join("\n\n")
   }
 
   // Live-call conversation rules — listen first, never rush the goodbye.
@@ -459,15 +488,26 @@ async function buildTurnInstructions(
   // ask if they have any doubts" after EVERY reply — that single line made
   // Priya stack a second question on top of every answer, every turn, which
   // read as robotic and pushed real questions out of the 1-2 sentence budget.
-  // Doubt-checking is now ONCE per reply at a natural pause, never stacked.
+  // Doubt-checking is asked AT MOST ONCE in the entire call, never repeated every turn.
+  const alreadyAskedDoubts = history.some(
+    (h) => h.role === "model" && /doubts?|help కావాలా|ప్రశ్నలు|సందేహాలు/i.test(h.content || "")
+  )
   merged = [
     merged,
-    `=== LIVE-CALL CONVERSATION RULES (LISTEN FIRST — NEVER RUSH THE GOODBYE) ===
-- You are on a live phone call. LISTEN PATIENTLY to the customer.
-- NEVER cut the call or say "Have a great day / Goodbye / Bye" after only one reply.
-- When the customer asks a doubt, answer it clearly and briefly (1 to 2 short sentences) using the knowledge context provided with this turn.
-- Ask whether they have more doubts AT MOST ONCE per reply, and ONLY at a natural pause (right after you answered something, or after they finished a complete thought). NEVER stack it on top of another question — one question per reply, always at the end.
-- ONLY conclude and say goodbye when the customer explicitly says they have no more doubts or says bye (e.g. "no doubts", "emi ledu", "chalu", "bye", "thank you").`,
+    `=== LIVE-CALL CONVERSATION RULES (LISTEN CLEARLY & STRICT SCRIPT/KB GROUNDING) ===
+- LISTEN TO WHAT THE CALLER IS SPEAKING CLEARLY:
+  * Listen attentively to the customer's full words before deciding your reply.
+  * First, address and answer EXACTLY what the customer just asked. Never ignore their question or jump to an unrelated script question.
+  * If the caller's speech was cut off or unclear, politely ask them once to repeat ("Sorry sir, నాకు సరిగా వినిపించలేదు, మళ్ళీ చెప్పగలరా?"), rather than assuming.
+- STRICT SCRIPT & KNOWLEDGE BASE GROUNDING (ZERO INVENTIONS / NEVER HALLUCINATE):
+  * Stick STRICTLY to the Company Script and the provided KNOWLEDGE BASE facts below.
+  * NEVER invent, guess, assume, or fabricate any detail, address, landmark, bank name, interest rate, policy, or requirement that is NOT explicitly stated in the Knowledge Base or Script.
+  * When asked about the office address or location, state ONLY the verified address from the Knowledge Base: "Office: 4-143 Mallikarjuna Complex, 5th Floor, Gandimaisamma X Road, Medchal District (above Masters GYM), Hyderabad." NEVER invent unverified places or landmarks (e.g. NEVER invent "Kalyan Nagar" or other fake locations).
+  * If the customer asks for any detail, direction, or policy not in your provided Knowledge Base, honestly state: "పూర్తి details మరియు exact location link మా loan officer మీకు WhatsApp లో పంపిస్తారు sir." (Our loan officer will share the full details and location on WhatsApp). NEVER fabricate an answer.
+- NATURAL TURN TAKING & CONCLUSION:
+  * When the customer asks a doubt or question, answer it clearly and briefly (1 to 2 short sentences) using the knowledge context provided with this turn.
+  * DOUBT QUESTION MANDATE: Ask whether they have more doubts AT MOST ONCE per reply (and only once in the entire call). ${alreadyAskedDoubts ? 'CRITICAL: You have ALREADY asked about doubts in this call. NEVER ask "దీని గురించి ఇంకా ఏమైనా doubts ఉన్నాయా sir?" or any doubt question again! Answer the question directly and stop.' : 'You may ask "దీని గురించి ఇంకా ఏమైనా doubts ఉన్నాయా sir?" at most once after an answer, but NEVER repeat it in later turns.'}
+  * CUT THE CALL WHEN FINISHED: When the customer says they are done, have no more doubts, says "sare", "chalu", "bye", or finishes the conversation, say a warm polite goodbye and conclude immediately!`,
   ].filter(Boolean).join("\n\n")
 
   // KNOWLEDGE BASE: unlike the Lead Brain brief above, this runs on EVERY
@@ -491,6 +531,7 @@ async function buildTurnInstructions(
     const detectedType = detectLoanType(conversationSoFar) || leadRow.data?.product_interest || null
     if (detectedType && detectedType !== leadRow.data?.product_interest) {
       db.from("leads").update({ product_interest: detectedType }).eq("id", leadId).catch(() => {})
+      invalidateFinanceRowsCache(leadId)
     }
 
     const rate = buildRateInstruction(speech, { loanType: detectedType })
@@ -692,6 +733,7 @@ export async function handleTurn(opts: {
   direction?: "inbound" | "outbound"
   /** Multi-branch: the branch the call belongs to (branch scripts + branding + per-branch WhatsApp). */
   branchId?: string | null
+  history?: { role: "user" | "model"; content: string }[]
 }): Promise<{ text: string; hangup: boolean }> {
   const { leadId, callSid, speech, language, callerPhone, instructions, direction, branchId } = opts
   // Channel fact: WhatsApp voice calls carry wacall-* sids (Meta's call id).
@@ -701,7 +743,7 @@ export async function handleTurn(opts: {
   // Fire the history-independent reads NOW, so they overlap the transcript
   // read instead of queueing behind it (see startTurnContext).
   const contextPromise = startTurnContext(leadId, speech)
-  const history = callSid ? await getHistory(callSid) : []
+  const history = opts.history || (callSid ? await getHistory(callSid) : [])
 
   // VOICEMAIL: only ever checked on the first thing heard after our own
   // OUTBOUND greeting (history empty) — a mid-call false match would risk
@@ -777,8 +819,10 @@ export async function handleTurn(opts: {
 
   const isCustomerEnding = CUSTOMER_BYE_RE.test((speech || "").trim())
   const isPriyaEnding = GOODBYE_RE.test(reply)
-  const customerHasEnded = isCustomerEnding || history.some(h => (h.role === "user" || (h as any).role === "customer") && CUSTOMER_BYE_RE.test(h.content || ""))
-  const hangup = isCustomerEnding || (isPriyaEnding && customerHasEnded)
+  const hangup = isCustomerEnding || isPriyaEnding
+  if (hangup && callSid) {
+    db.from("voice_calls").update({ status: "completed" }).eq("twilio_call_sid", callSid).catch(() => {})
+  }
   return { text: reply, hangup }
 }
 
@@ -802,6 +846,7 @@ export async function handleTurnStream(
     direction?: "inbound" | "outbound"
     /** Multi-branch: the branch the call belongs to (branch scripts + branding + per-branch WhatsApp). */
     branchId?: string | null
+    history?: { role: "user" | "model"; content: string }[]
   },
   onSentence: (sentence: string) => void
 ): Promise<{ hangup: boolean }> {
@@ -813,7 +858,7 @@ export async function handleTurnStream(
   // read instead of queueing behind it (see startTurnContext). This is the
   // live-call path — every millisecond here is silence on the caller's ear.
   const contextPromise = startTurnContext(leadId, speech)
-  const history = callSid ? await getHistory(callSid) : []
+  const history = opts.history || (callSid ? await getHistory(callSid) : [])
 
   // VOICEMAIL: see handleTurn's identical check for why this is restricted
   // to the first turn of an outbound call only.
@@ -899,7 +944,9 @@ export async function handleTurnStream(
 
   const isCustomerEnding = CUSTOMER_BYE_RE.test((speech || "").trim())
   const isPriyaEnding = GOODBYE_RE.test(reply)
-  const customerHasEnded = isCustomerEnding || history.some(h => (h.role === "user" || (h as any).role === "customer") && CUSTOMER_BYE_RE.test(h.content || ""))
-  const hangup = isCustomerEnding || (isPriyaEnding && customerHasEnded)
+  const hangup = isCustomerEnding || isPriyaEnding
+  if (hangup && callSid) {
+    db.from("voice_calls").update({ status: "completed" }).eq("twilio_call_sid", callSid).catch(() => {})
+  }
   return { hangup }
 }

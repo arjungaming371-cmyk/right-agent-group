@@ -70,12 +70,9 @@ const SAMPLE_RATE = 8000
 const BYTES_PER_SAMPLE = 2
 const FRAME_MS = 20
 const FRAME_BYTES = (SAMPLE_RATE * BYTES_PER_SAMPLE * FRAME_MS) / 1000 // 320
-// Trimmed from 800ms for faster turn-taking — this delay is pure dead air
-// before STT/LLM/TTS even start, on EVERY utterance. Real tradeoff: a caller
-// who pauses mid-thought for longer than this gets cut off early. Raise it
-// back toward 800ms if real calls start showing utterances split mid-sentence.
-const SILENCE_END_MS = 600      // this much silence after speech = end of utterance
-const MIN_SPEECH_MS = 250       // ignore blips shorter than this
+// Trimmed to 600ms for fast conversational turn-taking with zero dead air.
+const SILENCE_END_MS = parseInt(process.env.VOICEBOT_SILENCE_END_MS || "600")      // this much silence after speech = end of utterance
+const MIN_SPEECH_MS = parseInt(process.env.VOICEBOT_MIN_SPEECH_MS || "250")       // ignore blips shorter than this
 const MAX_UTTERANCE_MS = 15000  // hard cap per utterance
 // avg abs amplitude (0..32767) above this counts as speech. 500 was too high for
 // real phone lines — quieter callers never crossed it. 300 is a safer default;
@@ -275,11 +272,11 @@ function audioToPcm8k(audio) {
   })
 }
 
-// Memo cache for FIXED phrases (greetings, closings, clarify prompts). These
+// Memo cache for FIXED phrases (greetings, closings, clarify prompts, common openers). These
 // are byte-identical on every call, so re-paying the TTS round-trip +
 // ffmpeg convert for them is pure dead air on the caller's ear. Capped and
 // length-limited so an LLM reply (never identical twice) can't grow it.
-const TTS_CACHE_MAX = 64
+const TTS_CACHE_MAX = 256
 const TTS_CACHE_MAX_CHARS = 300
 const ttsCache = new Map()
 
@@ -332,24 +329,58 @@ async function prewarm() {
       headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
       body: JSON.stringify({ event: "end", callSid: "__prewarm__", duration: 0 }),
     }).catch((e) => console.error("prewarm app:", e.message)),
+    fetch(`${APP_URL}/api/calls/turn`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+      body: JSON.stringify({ event: "turn", callSid: "__prewarm__", speech: "Namaskaram", language: "telugu", stream: true }),
+    }).then((r) => r.text()).catch((e) => console.error("prewarm turn stream:", e.message)),
   ]
   await Promise.allSettled(jobs)
-  // Prewarm every fixed caller-facing line into the TTS cache: clarify
-  // phrases, pipeline-failure fallbacks, and start fallbacks. If the TTS
-  // service dies mid-day, these STILL play from cache on the next call —
-  // the caller hears an apology instead of unexplained silence.
-  const fixedLines = [
-    ...Object.values(CLARIFY_PHRASE),
-    ...Object.values(FALLBACK_PHRASE),
-    ...Object.values(START_FALLBACK_PHRASE),
+  // Prewarm caller-facing lines into the TTS cache: clarify
+  // phrases, pipeline-failure fallbacks, and start fallbacks.
+  // Paced sequentially with small sleep to never trigger Sarvam 429 concurrency rate limits:
+  const fixedLinesTelugu = [
+    CLARIFY_PHRASE.telugu,
+    FALLBACK_PHRASE.telugu,
+    START_FALLBACK_PHRASE.telugu,
+    "సరే sir,",
+    "Sure sir,",
+    "అవును sir,",
+    "చెప్పండి sir,",
+    "హలో sir,",
+    "Okay sir,",
+    "Student loan,",
+    "Personal loan,",
+    "Home loan,",
+    "Business loan,",
+    "Twelve lakh rupees,",
+    "Fifteen lakh rupees,",
+    "Ten lakh rupees,",
+    "Twenty lakh rupees,",
   ]
-  await Promise.allSettled(fixedLines.map((line) =>
-    textToSpeechPcm8k(line, "telugu").catch((e) => console.error("prewarm fixed line (te):", e.message))))
-  await Promise.allSettled(fixedLines.map((line) =>
-    textToSpeechPcm8k(line, "english").catch((e) => console.error("prewarm fixed line (en):", e.message))))
-  await Promise.allSettled(fixedLines.map((line) =>
-    textToSpeechPcm8k(line, "hindi").catch((e) => console.error("prewarm fixed line (hi):", e.message))))
+  for (const line of fixedLinesTelugu) {
+    if (line) {
+      await textToSpeechPcm8k(line, "telugu").catch((e) => console.error("prewarm fixed line (te):", e.message))
+      await sleep(60)
+    }
+  }
+
+  const fixedLinesEnglish = [
+    CLARIFY_PHRASE.english,
+    FALLBACK_PHRASE.english,
+    START_FALLBACK_PHRASE.english,
+  ]
+  for (const line of fixedLinesEnglish) {
+    if (line) {
+      await textToSpeechPcm8k(line, "english").catch((e) => console.error("prewarm fixed line (en):", e.message))
+      await sleep(60)
+    }
+  }
+
   console.log(`✓ fixed-line cache ready (${ttsCache.size} phrases)`)
+  if (typeof waCalls.prewarmWa === "function") {
+    await waCalls.prewarmWa().catch((e) => console.error("prewarm WA error:", e.message))
+  }
 }
 
 // ---------- Bridge to the Next.js app (Priya's brain) ----------
@@ -418,7 +449,7 @@ function splitIntoSentences(text) {
     const next = text[i + 1]
     if (next !== undefined && !/\s/.test(next)) continue
     const candidate = text.slice(start, i + 1).trim()
-    if (candidate.length < 28) continue
+    if (candidate.length < 8) continue
     out.push(candidate)
     start = i + 1
   }
