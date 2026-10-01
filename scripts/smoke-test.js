@@ -34,7 +34,7 @@ const REQUIRED = {
   comm_logs: ["id","lead_id","type","summary","outcome","created_at"],
   // branch_id is the multi-tenant column every leads/loans/outbound query
   // filters on — a DB missing it breaks scoping silently, so it's REQUIRED.
-  outbound_queue: ["id","lead_id","name","phone","language","product_interest","notes","status","call_sid","scheduled_at","called_at","created_at","branch_id","claimed_at"],
+  outbound_queue: ["id","lead_id","name","phone","language","product_interest","notes","status","call_sid","scheduled_at","called_at","created_at","branch_id","claimed_at","talking_points"],
   uploaded_files: ["id","filename","file_path","type","row_count","processed","status","uploaded_by","created_at"],
   security_settings: ["key","enabled","updated_at"],
   audit_logs: ["id","action","performed_by","metadata","created_at"],
