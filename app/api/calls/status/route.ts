@@ -7,6 +7,7 @@ import { rateLimit, clientIp } from "@/lib/rate-limit"
 import { runPostCallAnalysis } from "@/lib/lead-brain"
 import { verifyExotelWebhookKey } from "@/lib/exotel-webhook-auth"
 import { maybeRequeueMissed } from "@/lib/auto-retry"
+import { stampQueueCallOutcome } from "@/lib/queue-outcome"
 
 export async function POST(req: NextRequest) {
   try {
@@ -72,6 +73,13 @@ export async function POST(req: NextRequest) {
     // to pending (+2h by default, capped). Fire-and-forget — must never slow
     // or fail the webhook; the helper swallows its own errors.
     maybeRequeueMissed({ callSid, outcome, duration }).catch(() => {})
+
+    // Queue outcome feedback (2026-10-01): stamp the REAL result onto the
+    // outbound_queue row, so the Call Queue view + Campaign Radar can show
+    // answered vs no-answer instead of counting every dialed row as
+    // "completed". First terminal report wins (idempotent under Exotel's
+    // webhook retries); fire-and-forget like the requeue above.
+    stampQueueCallOutcome({ callSid, outcome, detail: callStatus }).catch(() => {})
 
     // Transcript arrives as jsonb (array) but tolerate the string form. The
     // previous inline JSON.parse threw on malformed strings and — being

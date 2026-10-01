@@ -8,7 +8,7 @@ import {
 import { formatDateTime } from "@/lib/utils"
 import { usePolling } from "@/lib/use-poll"
 import { useToast } from "../ui/toast"
-import { statusGroup, isRequeueable, STATUS_GROUP_COLORS, dedupeQueueRows, type QueueStatusGroup } from "@/lib/dialer-logic"
+import { statusGroup, isRequeueable, outcomeGroup, STATUS_GROUP_COLORS, dedupeQueueRows, type QueueStatusGroup } from "@/lib/dialer-logic"
 import { phoneLast10 } from "@/lib/phone"
 
 type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
@@ -29,10 +29,13 @@ type QueueItem = {
   cancelled_at: string | null
   cancelled_by: string | null
   call_sid: string | null
+  outcome: string | null
+  outcome_at: string | null
+  outcome_detail: string | null
   created_at: string
 }
 
-// Live runner snapshot — GET /api/outbound/process { run, queue }
+// Live runner snapshot — GET /api/outbound/process { run, queue, outcomes }
 type RunStatus = {
   runId: string
   running: boolean
@@ -44,6 +47,7 @@ type RunStatus = {
   waves: number
   concurrency: number
   current: string[]
+  startedAt: number
 }
 
 type TabId = "all" | QueueStatusGroup
@@ -76,6 +80,22 @@ function scheduledLabel(iso: string | null): string {
   return formatDateTime(iso)
 }
 
+// What actually happened to a dialed row (outcome feedback loop,
+// 2026-10-01). status 'called' only ever meant "we dialed" — the outcome
+// columns carry the terminal webhook's verdict. The chip shows the truth
+// instead of counting every dial as "completed".
+const OUTCOME_META: Record<string, { label: string; color: string }> = {
+  answered: { label: "Answered", color: "var(--accent-green)" },
+  no_answer: { label: "No answer", color: "var(--accent-yellow)" },
+  declined: { label: "Declined", color: "var(--accent-violet)" },
+  dial_failed: { label: "Dial failed", color: "var(--accent-red)" },
+}
+
+function outcomeMeta(outcome: string | null | undefined) {
+  const g = outcomeGroup(outcome)
+  return (g && OUTCOME_META[g]) || { label: "Dialed", color: "var(--text-muted)" }
+}
+
 export default function QueueView({ role }: { role: Role }) {
   // Row-level operations (dial now, cancel, requeue, bulk select) — agents
   // are allowed; the cancel/requeue/dial APIs all accept agent.
@@ -89,6 +109,7 @@ export default function QueueView({ role }: { role: Role }) {
   const [items, setItems] = useState<QueueItem[]>([])
   const [total, setTotal] = useState(0)
   const [counts, setCounts] = useState<Record<string, number>>({})
+  const [outcomes, setOutcomes] = useState<Record<string, number>>({})
   const [run, setRun] = useState<RunStatus | null>(null)
   const [settings, setSettings] = useState<{ concurrency: number; autoRetry: boolean; retryDelayMinutes: number; maxRetries: number } | null>(null)
   const [tab, setTab] = useState<TabId>("all")
@@ -108,6 +129,24 @@ export default function QueueView({ role }: { role: Role }) {
   const planned = done + g("pending")
   const pct = planned > 0 ? Math.round((done / planned) * 100) : 0
   const running = !!run?.running
+
+  // Live ETA for the radar: average wave time so far × remaining waves.
+  // Deliberately conservative arithmetic from REAL throughput (waves actually
+  // completed), not wishful per-call estimates — dialing pauses, human
+  // handoffs and window closures all slow waves and the ETA follows.
+  const etaMin = useMemo(() => {
+    if (!running || !run || run.waves < 1 || !run.startedAt) return null
+    const pending = g("pending")
+    if (pending <= 0) return null
+    const elapsedMin = (Date.now() - run.startedAt) / 60000
+    if (!(elapsedMin > 0.2)) return null // <12s in: no meaningful rate yet
+    const avgWaveMin = elapsedMin / run.waves
+    const remainingWaves = Math.ceil(pending / Math.max(1, run.concurrency))
+    const eta = Math.ceil(remainingWaves * avgWaveMin)
+    if (!Number.isFinite(eta) || eta <= 0) return null
+    return Math.min(eta, 24 * 60)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [running, run, counts])
 
   // Per-contact counts keyed by LAST-10 digits — raw phone strings differ by
   // formatting ("+91 98765 43210" vs "9876543210" are the same contact), so
@@ -145,6 +184,7 @@ export default function QueueView({ role }: { role: Role }) {
         const d = await runRes.json()
         setRun(d.run || null)
         setCounts(d.queue || {})
+        setOutcomes(d.outcomes || {})
       }
       if (listRes.ok) {
         const d = await listRes.json()
@@ -392,8 +432,23 @@ export default function QueueView({ role }: { role: Role }) {
               <span style={{ width: 8, height: 8, borderRadius: 4, background: g("dialing") > 0 || running ? "var(--accent-blue)" : "var(--text-muted)", display: "inline-block", animation: g("dialing") > 0 || running ? "pulse-dot 1.4s infinite" : "none" }} />
               <strong style={{ color: "var(--text-primary)" }}>{g("dialing")}</strong> <span style={{ color: "var(--text-muted)" }}>dialing now</span>
             </span>
-            <span><strong style={{ color: "var(--accent-green)" }}>{g("called")}</strong> <span style={{ color: "var(--text-muted)" }}>completed</span></span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <strong style={{ color: "var(--accent-green)" }}>{g("called")}</strong> <span style={{ color: "var(--text-muted)" }}>dialed</span>
+              {/* Outcome feedback loop (2026-10-01): "dialed" no longer hides
+                  the truth — the terminal webhooks stamp each row and the
+                  radar splits dialed into answered / no-answer / declined. */}
+              {(outcomes.answered || outcomes.no_answer || outcomes.rejected || outcomes.failed || outcomes.dialed) && (
+                <span style={{ display: "inline-flex", gap: 8, alignItems: "center", fontSize: 11.5 }}>
+                  <span title="answered — a human talked" style={{ color: "var(--accent-green)" }}>✓ {outcomes.answered || 0} answered</span>
+                  {(outcomes.no_answer || 0) > 0 && <span title="rang out / busy" style={{ color: "var(--accent-yellow)" }}>{outcomes.no_answer} no-answer</span>}
+                  {(outcomes.rejected || 0) > 0 && <span title="lead declined the call" style={{ color: "var(--accent-violet)" }}>{outcomes.rejected} declined</span>}
+                  {(outcomes.failed || 0) > 0 && <span title="call never went out (provider/network)" style={{ color: "var(--accent-red)" }}>{outcomes.failed} failed</span>}
+                  {(outcomes.dialed || 0) > 0 && <span title="still waiting for the terminal webhook" style={{ color: "var(--text-muted)" }}>{outcomes.dialed} in flight</span>}
+                </span>
+              )}
+            </span>
             <span><strong style={{ color: "var(--accent-yellow)" }}>{g("pending")}</strong> <span style={{ color: "var(--text-muted)" }}>pending</span></span>
+            {etaMin !== null && <span title="estimated from real waves-per-minute throughput so far"><strong style={{ color: "var(--text-primary)" }}>~{etaMin >= 60 ? `${(etaMin / 60).toFixed(etaMin % 60 === 0 ? 0 : 1)}h` : `${etaMin}m`}</strong> <span style={{ color: "var(--text-muted)" }}>left</span></span>}
             <span><strong style={{ color: "var(--accent-red)" }}>{g("failed")}</strong> <span style={{ color: "var(--text-muted)" }}>failed</span></span>
             <span><strong style={{ color: "var(--accent-violet)" }}>{g("skipped")}</strong> <span style={{ color: "var(--text-muted)" }}>skipped</span></span>
             <span><strong style={{ color: "var(--text-muted)" }}>{g("cancelled")}</strong> <span style={{ color: "var(--text-muted)" }}>cancelled</span></span>
@@ -624,6 +679,26 @@ export default function QueueView({ role }: { role: Role }) {
                       )}
                       {group === "cancelled" && item.cancelled_by && (
                         <div style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 2 }}>by {item.cancelled_by}</div>
+                      )}
+                      {group === "called" && (() => {
+                        const om = outcomeMeta(item.outcome)
+                        return (
+                          <div style={{ marginTop: 2 }}>
+                            <span
+                              title={[
+                                item.outcome ? `Terminal result: ${item.outcome}` : "Dialed — waiting for the terminal webhook",
+                                item.outcome_at ? `reported ${formatDateTime(item.outcome_at)}` : null,
+                                item.outcome_detail || null,
+                              ].filter(Boolean).join(" · ")}
+                              style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10.5, fontWeight: 700, color: om.color, background: `${om.color}14`, border: `1px solid ${om.color}30`, borderRadius: 5, padding: "1px 6px", textTransform: "uppercase", letterSpacing: "0.03em" }}
+                            >
+                              {om.label}
+                            </span>
+                          </div>
+                        )
+                      })()}
+                      {group === "failed" && item.outcome_detail && (
+                        <div title={item.outcome_detail} style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 2, maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.outcome_detail}</div>
                       )}
                     </td>
                     <td style={{ padding: "12px 14px" }}>

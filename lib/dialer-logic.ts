@@ -100,6 +100,31 @@ export function isRequeueable(status: string): boolean {
 }
 
 /**
+ * Outcome vocabulary for dialed rows (the Call Queue's "what actually
+ * happened" feedback loop, 2026-10-01). A queue row's status stops at
+ * 'called' (= dialed); the REAL result arrives later from the terminal
+ * webhooks and is stamped onto the row by lib/queue-outcome.ts.
+ *
+ * outcome uses the funnel vocabulary voice_calls.outcome already speaks:
+ *   resolved | missed | rejected | failed  (+ null = dialed, no news yet)
+ *
+ * outcomeGroup folds that into the four chips the Call Queue view shows:
+ *   answered (a human talked) · no_answer (rang out / busy) ·
+ *   declined (lead rejected the WhatsApp call) · dial_failed (provider/
+ *   network failure — the call never really went out) · null → dialed.
+ */
+export type QueueOutcomeGroup = "answered" | "no_answer" | "declined" | "dial_failed"
+
+export function outcomeGroup(outcome: string | null | undefined): QueueOutcomeGroup | null {
+  const o = String(outcome || "").toLowerCase()
+  if (o === "resolved") return "answered"
+  if (o === "missed") return "no_answer"
+  if (o === "rejected") return "declined"
+  if (o === "failed") return "dial_failed"
+  return null
+}
+
+/**
  * Collapse queue rows to ONE entry per phone (last-10 digits, so "+91 98765
  * 43210" and "9876543210" are the same contact). The FIRST occurrence in the
  * given order wins — the listing feeds rows newest-first (priority DESC,

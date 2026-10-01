@@ -140,14 +140,38 @@ once per call, atomically claimed (`followup_sent`).
 `POST /api/outbound {contacts:[…]}` (CSV upload) → `outbound_queue` rows
 `pending`. `POST /api/outbound/process` (admin/branch_manager) claims rows
 **atomically** (`FOR UPDATE SKIP LOCKED`, 10-min reaper for crashed runs) and
-dials phone only, in bounded concurrency, with per-row compliance skipping
-(`skipped_dnd`, `skipped_outside_window`, …) written on the queue row.
+dials per row channel (`phone` / `whatsapp_voice` / `auto`), in bounded
+concurrency, with per-row compliance skipping (`skipped_dnd`,
+`skipped_outside_window`, …) written on the queue row.
 
 Queue statuses: `pending → dialing → called | failed | skipped_*`.
 
-Why the queue is phone-only by design: a CSV campaign is cold outreach, and
-cold WhatsApp calls are Meta-gated per user. WhatsApp outbound is for
-*callbacks* — which the unified dialer handles one lead at a time.
+Cold WhatsApp calls are Meta-gated per user, so CSV campaigns default to
+phone; `whatsapp_voice`/`auto` rows fall back to phone when Meta refuses
+(the DialError text is stamped on the row's `outcome_detail`).
+
+### Outcome feedback loop (2026-10-01)
+
+`called` on a queue row means **dialed**, not answered. The REAL result is
+stamped onto the row by `lib/queue-outcome.ts` from the two terminal
+webhooks — Exotel `/api/calls/status` and the WhatsApp `terminate` event —
+as `outcome` (resolved / missed / rejected / failed) + `outcome_at` +
+`outcome_detail` (the raw provider status or Meta's rejection text). A
+dial-time failure (DialError) stamps `failed` with the operator-facing
+reason immediately. First report wins (idempotent under webhook retries);
+re-queue / reset-failed / auto-redial clear the stamp so the next attempt
+starts clean. The Call Queue view shows the verdict as a chip under the
+status, the Campaign Radar splits "dialed" into answered / no-answer /
+declined / in-flight, and the CSV export carries the three columns.
+Deployment needs `node scripts/run-migrations.js` once
+(`2026-10-01_call_queue_outcomes.sql` — also backfills existing campaigns
+from voice_calls).
+
+The auto-redial fix in the same change: the WhatsApp terminate path used to
+pass a hardcoded `duration: 0` into the requeue decision even though the
+voicebot had already reported real talk time — an odd terminate status
+mapped to "missed" could re-queue a customer Priya had JUST finished
+talking to. The real duration is read from the voice_calls row first now.
 
 ---
 

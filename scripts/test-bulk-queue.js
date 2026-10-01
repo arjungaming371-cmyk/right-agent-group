@@ -151,6 +151,34 @@ try {
   eq(dl.dedupeQueueRows(singles).unique.length, 2, "distinct numbers are untouched")
   const fmts = [{ phone: "+91-99008-88099" }, { phone: "09900888099" }, { phone: "919900888099" }]
   eq(dl.dedupeQueueRows(fmts).unique.length, 1, "trunk-prefix / 91-prefix / dashed formats all collapse to one")
+
+  // ── 7. Outcome grouping (queue outcome feedback loop, 2026-10-01) ──
+  section("outcomeGroup: terminal webhook verdicts fold into four chips")
+  eq(dl.outcomeGroup("resolved"), "answered", "resolved → answered (a human talked)")
+  eq(dl.outcomeGroup("missed"), "no_answer", "missed → no_answer (rang out / busy)")
+  eq(dl.outcomeGroup("rejected"), "declined", "rejected → declined (WhatsApp decline)")
+  eq(dl.outcomeGroup("failed"), "dial_failed", "failed → dial_failed (never really went out)")
+  eq(dl.outcomeGroup(null), null, "null → dialed, no verdict yet (webhook in flight)")
+  eq(dl.outcomeGroup(undefined), null, "undefined → dialed")
+  eq(dl.outcomeGroup(""), null, "empty → dialed")
+  eq(dl.outcomeGroup("RESOLVED"), "answered", "case-insensitive (provider casing)")
+  eq(dl.outcomeGroup("some_new_future_outcome"), null, "unknown outcomes stay untyped (detail column carries them)")
+
+  // The auto-retry × outcome interaction contract: a stamped outcome and
+  // shouldAutoRetry must agree — exactly the no_answer/declined outcomes
+  // auto-redial, answered/dial_failed never do.
+  section("outcome × auto-retry: the queue only re-dials what a human failed to answer")
+  const RETRYABLE_GROUPS = new Set(["no_answer", "declined"])
+  for (const [outcome, group] of [
+    ["resolved", "answered"], ["missed", "no_answer"],
+    ["rejected", "declined"], ["failed", "dial_failed"],
+  ]) {
+    eq(
+      RETRYABLE_GROUPS.has(dl.outcomeGroup(outcome)),
+      dl.shouldAutoRetry(outcome, 0, 0, 2),
+      `${outcome} (${group}): outcomeGroup and shouldAutoRetry agree`
+    )
+  }
 } catch (e) {
   failed++
   console.error("❌ SUITE ERROR:", e.message)

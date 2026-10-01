@@ -65,7 +65,8 @@ export async function POST(req: NextRequest) {
      )
      UPDATE outbound_queue q
         SET status = 'pending', scheduled_at = $2, claimed_at = NULL,
-            cancelled_at = NULL, cancelled_by = NULL
+            cancelled_at = NULL, cancelled_by = NULL,
+            outcome = NULL, outcome_at = NULL, outcome_detail = NULL
        FROM picked
       WHERE q.id = picked.id
         AND NOT EXISTS (

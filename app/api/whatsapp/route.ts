@@ -18,6 +18,7 @@ import { currentDateTimeInstruction } from "@/lib/compliance"
 import { rateLimit, clientIp } from "@/lib/rate-limit"
 import { bridgeToVoicebot } from "@/lib/voicebot-bridge"
 import { maybeRequeueMissed } from "@/lib/auto-retry"
+import { stampQueueCallOutcome } from "@/lib/queue-outcome"
 
 export const dynamic = "force-dynamic"
 
@@ -752,11 +753,35 @@ async function handleCallEvents(calls: WhatsAppCallEvent[], waBranch: BranchWhat
       // 3) Bulk-dialer auto-retry (Feature 4): a queued outbound WhatsApp
       //    call that ended rejected/unanswered with zero talk time goes back
       //    to pending (+retryDelay), capped by the dialer settings.
+      //    FIX (2026-10-01): duration used to be hardcoded 0 here while the
+      //    bridge above had ALREADY awaited the voicebot's end report — so
+      //    the real talk time sat on the voice_calls row and was ignored.
+      //    A terminate event with an odd status maps to outcome "missed"
+      //    (mapCallOutcome), and shouldAutoRetry(missed, 0, …) re-queued
+      //    customers Priya had JUST finished talking to. Read the row's
+      //    real duration before deciding.
+      let realDuration = 0
       try {
-        await maybeRequeueMissed({ callSid: sid, outcome, duration: 0 })
+        const durRes = await query(
+          `SELECT COALESCE(duration, 0)::int AS duration, outcome FROM voice_calls WHERE twilio_call_sid = $1 LIMIT 1`,
+          [sid]
+        )
+        realDuration = Number((durRes.rows[0] as { duration?: number } | undefined)?.duration) || 0
+      } catch (e) {
+        console.error("wa auto-requeue duration lookup failed:", e instanceof Error ? e.message : e)
+      }
+      try {
+        await maybeRequeueMissed({ callSid: sid, outcome, duration: realDuration })
       } catch (e) {
         console.error("wa auto-requeue error:", e instanceof Error ? e.message : e)
       }
+
+      // 4) Queue outcome feedback (2026-10-01): stamp the REAL result onto
+      //    the outbound_queue row (answered / no-answer / declined / failed)
+      //    so the Call Queue radar shows the truth instead of counting every
+      //    dialed row as "completed". Meta's raw terminate status is kept as
+      //    the detail. First report wins; never fails the webhook.
+      await stampQueueCallOutcome({ callSid: sid, outcome, detail: status || null })
       continue
     }
 

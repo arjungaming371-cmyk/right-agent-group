@@ -57,7 +57,8 @@ export async function maybeRequeueMissed(opts: {
                 called_at = NULL,
                 claimed_at = NULL,
                 cancelled_at = NULL,
-                cancelled_by = NULL
+                cancelled_by = NULL,
+                outcome = NULL, outcome_at = NULL, outcome_detail = NULL
           WHERE id = $1 AND retry_count = $3
           RETURNING retry_count, scheduled_at`,
         [queueRow.id, String(settings.retryDelayMinutes), retryCount]
