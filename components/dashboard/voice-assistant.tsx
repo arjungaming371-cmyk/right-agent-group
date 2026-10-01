@@ -207,6 +207,10 @@ export default function VoiceAssistant({
   role = "agent",
 }: VoiceAssistantProps) {
   const toast = useToast()
+  // FIX (2026-10-01): "Approve & Execute" was rendered for every role but the
+  // server hard-gates POST /api/assistant/action to admins (developer passes
+  // via the requireRole bypass) — most staff got a guaranteed 403 toast.
+  const canExecuteActions = role === "admin" || role === "developer"
   const [state, setState] = useState<"idle" | "listening" | "thinking" | "speaking">("idle")
   const [language, setLanguage] = useState<VoiceAssistantLanguage>("english")
   const [continuousMode, setContinuousMode] = useState(true)
@@ -1583,7 +1587,9 @@ export default function VoiceAssistant({
                   </div>
                 </div>
 
-                {!actionDone ? (
+                {!canExecuteActions ? (
+                  <span style={{ fontSize: 11.5, fontWeight: 600, color: "#94a3b8", whiteSpace: "nowrap" }}>Admin only</span>
+                ) : !actionDone ? (
                   <button
                     onClick={() => executeAction(pendingProposal)}
                     disabled={executingAction}
@@ -1721,23 +1727,27 @@ export default function VoiceAssistant({
                               {m.actionProposal.description || "Dashboard modification requested"}
                             </div>
                           </div>
-                          <button
-                            onClick={() => { if (m.actionProposal) void executeAction(m.actionProposal) }}
-                            disabled={executingAction}
-                            style={{
-                              background: "linear-gradient(135deg, #6366f1 0%, #a855f7 100%)",
-                              border: "none",
-                              color: "#fff",
-                              padding: "6px 12px",
-                              borderRadius: 7,
-                              fontSize: 11.5,
-                              fontWeight: 700,
-                              cursor: "pointer",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            {executingAction ? "Executing..." : "Execute"}
-                          </button>
+                          {canExecuteActions ? (
+                            <button
+                              onClick={() => { if (m.actionProposal) void executeAction(m.actionProposal) }}
+                              disabled={executingAction}
+                              style={{
+                                background: "linear-gradient(135deg, #6366f1 0%, #a855f7 100%)",
+                                border: "none",
+                                color: "#fff",
+                                padding: "6px 12px",
+                                borderRadius: 7,
+                                fontSize: 11.5,
+                                fontWeight: 700,
+                                cursor: "pointer",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {executingAction ? "Executing..." : "Execute"}
+                            </button>
+                          ) : (
+                            <span style={{ fontSize: 11, fontWeight: 600, color: "#94a3b8", whiteSpace: "nowrap" }}>Admin only</span>
+                          )}
                         </div>
                       )}
                     </div>

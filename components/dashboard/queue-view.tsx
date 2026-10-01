@@ -110,6 +110,19 @@ export default function QueueView({ role }: { role: Role }) {
   const [total, setTotal] = useState(0)
   const [counts, setCounts] = useState<Record<string, number>>({})
   const [outcomes, setOutcomes] = useState<Record<string, number>>({})
+  // FIX (2026-10-01): the API groups the 'called' rows by the RAW stamped
+  // outcome (resolved / missed / rejected / failed / dialed) — the radar used
+  // to read answered / no_answer, keys the server never sends, so "✓ N
+  // answered" was permanently 0 and no-answer rows were invisible. Translate
+  // once here with the same outcomeGroup() the row chips use.
+  const outcomeChips = useMemo(() => {
+    const m: Record<string, number> = { answered: 0, no_answer: 0, declined: 0, dial_failed: 0, dialed: 0 }
+    for (const [k, v] of Object.entries(outcomes || {})) {
+      const key = k === "dialed" ? "dialed" : outcomeGroup(k)
+      if (key) m[key] = (m[key] || 0) + (v || 0)
+    }
+    return m
+  }, [outcomes])
   const [run, setRun] = useState<RunStatus | null>(null)
   const [settings, setSettings] = useState<{ concurrency: number; autoRetry: boolean; retryDelayMinutes: number; maxRetries: number } | null>(null)
   const [tab, setTab] = useState<TabId>("all")
@@ -437,15 +450,15 @@ export default function QueueView({ role }: { role: Role }) {
               {/* Outcome feedback loop (2026-10-01): "dialed" no longer hides
                   the truth — the terminal webhooks stamp each row and the
                   radar splits dialed into answered / no-answer / declined. */}
-              {(outcomes.answered || outcomes.no_answer || outcomes.rejected || outcomes.failed || outcomes.dialed) && (
+              {(outcomeChips.answered || outcomeChips.no_answer || outcomeChips.declined || outcomeChips.dial_failed || outcomeChips.dialed) ? (
                 <span style={{ display: "inline-flex", gap: 8, alignItems: "center", fontSize: 11.5 }}>
-                  <span title="answered — a human talked" style={{ color: "var(--accent-green)" }}>✓ {outcomes.answered || 0} answered</span>
-                  {(outcomes.no_answer || 0) > 0 && <span title="rang out / busy" style={{ color: "var(--accent-yellow)" }}>{outcomes.no_answer} no-answer</span>}
-                  {(outcomes.rejected || 0) > 0 && <span title="lead declined the call" style={{ color: "var(--accent-violet)" }}>{outcomes.rejected} declined</span>}
-                  {(outcomes.failed || 0) > 0 && <span title="call never went out (provider/network)" style={{ color: "var(--accent-red)" }}>{outcomes.failed} failed</span>}
-                  {(outcomes.dialed || 0) > 0 && <span title="still waiting for the terminal webhook" style={{ color: "var(--text-muted)" }}>{outcomes.dialed} in flight</span>}
+                  <span title="answered — a human talked" style={{ color: "var(--accent-green)" }}>✓ {outcomeChips.answered} answered</span>
+                  {outcomeChips.no_answer > 0 && <span title="rang out / busy" style={{ color: "var(--accent-yellow)" }}>{outcomeChips.no_answer} no-answer</span>}
+                  {outcomeChips.declined > 0 && <span title="lead declined the call" style={{ color: "var(--accent-violet)" }}>{outcomeChips.declined} declined</span>}
+                  {outcomeChips.dial_failed > 0 && <span title="call never went out (provider/network)" style={{ color: "var(--accent-red)" }}>{outcomeChips.dial_failed} failed</span>}
+                  {outcomeChips.dialed > 0 && <span title="still waiting for the terminal webhook" style={{ color: "var(--text-muted)" }}>{outcomeChips.dialed} in flight</span>}
                 </span>
-              )}
+              ) : null}
             </span>
             <span><strong style={{ color: "var(--accent-yellow)" }}>{g("pending")}</strong> <span style={{ color: "var(--text-muted)" }}>pending</span></span>
             {etaMin !== null && <span title="estimated from real waves-per-minute throughput so far"><strong style={{ color: "var(--text-primary)" }}>~{etaMin >= 60 ? `${(etaMin / 60).toFixed(etaMin % 60 === 0 ? 0 : 1)}h` : `${etaMin}m`}</strong> <span style={{ color: "var(--text-muted)" }}>left</span></span>}

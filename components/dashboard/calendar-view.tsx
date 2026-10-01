@@ -45,11 +45,15 @@ export default function CalendarView({ role }: { role: Role }) {
 
   async function load() {
     setLoading(true)
-    const from = toDateKey(monthCursor)
-    const toMonth = new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1)
-    const to = toDateKey(toMonth)
+    // FIX (2026-10-01): the window used to be sent as browser-local YYYY-MM-DD
+    // keys while the DB compares timestamptz in ITS session timezone — on a
+    // UTC server with IST users, callbacks near a month boundary rendered in
+    // no month at all (fetched for June, bucketed into the July 1 cell).
+    // Full UTC instants of the LOCAL month bounds make the window exact.
+    const from = new Date(monthCursor.getFullYear(), monthCursor.getMonth(), 1).toISOString()
+    const to = new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1).toISOString()
     const [cr, lr] = await Promise.all([
-      fetch(`/api/leads/callbacks?from=${from}&to=${to}`),
+      fetch(`/api/leads/callbacks?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
       fetch("/api/leads"),
     ])
     if (cr.ok) setCallbacks(await cr.json())

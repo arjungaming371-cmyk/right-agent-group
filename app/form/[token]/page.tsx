@@ -99,6 +99,16 @@ export default function ApplicationFormPage() {
         return
       }
       const data = await tokenRes.json()
+      // FIX (2026-10-01): the server answers { valid:false, used:true } for a
+      // consumed link, and the old code checked valid FIRST — so every
+      // customer who had already submitted saw "Link not valid" and the
+      // "Already submitted" screen was unreachable dead code.
+      if (data.used) {
+        // server deliberately omits the lead (PII) on a consumed link
+        setValid(true)
+        setAlreadyUsed(true)
+        return
+      }
       if (!data.valid) {
         setValid(false)
         return
@@ -130,6 +140,10 @@ export default function ApplicationFormPage() {
     // Validate standard required fields based on admin config
     if (!form.customer_name?.trim()) return setError("Please enter your full name")
     if (!form.whatsapp_number?.trim()) return setError("Please enter your WhatsApp number")
+    // FIX (2026-10-01): Email has a Required toggle in the form customizer and
+    // a red asterisk in the UI, but nothing validated it — applications
+    // silently arrived without an email even when admins marked it required.
+    if (config.required_fields?.email && !form.email?.trim()) return setError("Please enter your email address")
     
     if (config.required_fields?.loan_amount && !form.loan_amount) return setError("Please enter the loan amount")
     if (config.required_fields?.loan_tenure && !form.loan_tenure) return setError("Please enter the loan tenure")

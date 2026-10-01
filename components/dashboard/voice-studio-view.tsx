@@ -116,7 +116,19 @@ export default function VoiceStudioView({ role }: { role: Role }) {
 
   const allVoices = useMemo<VoiceOption[]>(() => {
     if (!catalog) return []
-    return [...catalog.custom, ...catalog.sarvam, ...catalog.cartesia]
+    // FIX (2026-10-01): when a Sarvam account voice shares an id with a
+    // static preset (priya, shubh, …) the same voice appeared as TWO cards
+    // AND produced duplicate React keys (`provider:voiceId`). Dedupe with
+    // custom/synced rows winning over the static preset row.
+    const seen = new Set<string>()
+    const out: VoiceOption[] = []
+    for (const v of [...catalog.custom, ...catalog.sarvam, ...catalog.cartesia]) {
+      const k = `${v.provider}:${v.voiceId}`
+      if (seen.has(k)) continue
+      seen.add(k)
+      out.push(v)
+    }
+    return out
   }, [catalog])
 
   const filtered = useMemo(() => {

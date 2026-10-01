@@ -455,8 +455,20 @@ class SelectBuilder<Row = any> implements PromiseLike<DbResult<Row>> {
             const leads: Record<string, unknown> = {}
             const clean: Record<string, unknown> = {}
             for (const k in row) {
-              if (k.startsWith("lead_")) leads[k.replace("lead_", "")] = row[k]
-              else clean[k] = row[k]
+              // FIX (2026-10-01): hoist ONLY the aliases THIS query created
+              // from the embed spec (l.<col> AS lead_<col>). The base table
+              // can own lead_-prefixed columns of its own (voice_calls.lead_id,
+              // whatsapp_messages.lead_id) — blanket "lead_" hoisting used to
+              // STEAL those into leads.id and delete them from the row, so
+              // every voice_calls row silently lost its lead reference and
+              // the Calls tab's "AI call back" always fell back to the
+              // unattributed legacy path.
+              const base = k.slice("lead_".length)
+              if (k.startsWith("lead_") && (this.joinLeadCols as readonly string[]).includes(base)) {
+                leads[base] = row[k]
+              } else {
+                clean[k] = row[k]
+              }
             }
             clean.leads = leads
             return clean

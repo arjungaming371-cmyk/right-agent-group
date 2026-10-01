@@ -84,17 +84,27 @@ export async function POST(req: NextRequest) {
 
     const res = await query(
       `INSERT INTO branches (org_id, name, code, region, status,
-         exotel_caller_id, whatsapp_phone_number_id, whatsapp_display_name,
+         exotel_sid, exotel_api_key, exotel_api_token, exotel_flow_app_id,
+         exotel_caller_id, whatsapp_phone_number_id, whatsapp_token, whatsapp_display_name,
          instagram_account_id, instagram_token,
          brand_name, brand_logo_url, brand_primary_color, brand_tagline,
          monthly_call_limit, monthly_whatsapp_limit, max_ai_employees)
-       VALUES ($1,$2,$3,$4,'active',$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+       VALUES ($1,$2,$3,$4,'active',$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
        RETURNING *`,
       [
         orgId, name, code,
         body?.region ? String(body.region).slice(0, 80) : null,
+        // FIX (2026-10-01): the create form sends these five credential
+        // fields but the INSERT silently dropped them — a newly created
+        // branch always dialed/chatted on the company account until someone
+        // re-opened Edit and typed every secret again.
+        body?.exotel_sid ? String(body.exotel_sid).trim() : null,
+        body?.exotel_api_key ? String(body.exotel_api_key).trim() : null,
+        body?.exotel_api_token ? String(body.exotel_api_token).trim() : null,
+        body?.exotel_flow_app_id ? String(body.exotel_flow_app_id).trim() : null,
         body?.exotel_caller_id ? String(body.exotel_caller_id).trim() : null,
         body?.whatsapp_phone_number_id ? String(body.whatsapp_phone_number_id).trim() : null,
+        body?.whatsapp_token ? String(body.whatsapp_token).trim() : null,
         body?.whatsapp_display_name ? String(body.whatsapp_display_name).slice(0, 80) : null,
         body?.instagram_account_id ? String(body.instagram_account_id).trim() : null,
         body?.instagram_token ? String(body.instagram_token).trim() : null,
