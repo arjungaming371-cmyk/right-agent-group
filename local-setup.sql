@@ -914,3 +914,13 @@ CREATE TABLE IF NOT EXISTS custom_voices (
 
 CREATE INDEX IF NOT EXISTS idx_custom_voices_provider ON custom_voices (provider);
 CREATE INDEX IF NOT EXISTS idx_custom_voices_org      ON custom_voices (org_id);
+
+-- ============================================================
+-- "What should Priya talk about?" for the Call Queue
+-- (2026-10-01_queue_talking_points) — Mirrors the migration; safe to re-run.
+-- Per-row agenda text for bulk outbound campaigns: stamped at queueing time
+-- (CSV confirm / Add Single Number) or at campaign start; dialQueueRow
+-- forwards it to placeOutboundCall({instructions}) → voice_calls.instructions
+-- → /api/calls/turn feeds it to Priya every turn (both channels).
+-- ============================================================
+ALTER TABLE outbound_queue ADD COLUMN IF NOT EXISTS talking_points TEXT;

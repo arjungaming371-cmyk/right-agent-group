@@ -9,6 +9,7 @@ import { getBulkDialer, BulkQueueRow, DialOutcome } from "@/lib/bulk-dialer"
 import { placeOutboundCall, DialError } from "@/lib/outbound-dial"
 import { getDialerSettings } from "@/lib/dialer-settings"
 import { nextWindowStartMs } from "@/lib/dialer-logic"
+import { sanitizeText } from "@/lib/api-route"
 
 // Shape of an outbound_queue row actually used by the dialer —
 // replaces the previous untyped `item: any` without forcing `unknown`
@@ -17,6 +18,8 @@ type QueueRow = BulkQueueRow & {
   // 2026-09-26 bulk upgrade columns (migration 2026-09-26_bulk_queue_upgrade)
   channel?: string | null
   retry_count?: number | null
+  // "What should Priya talk about?" (migration 2026-10-01_queue_talking_points)
+  talking_points?: string | null
 }
 
 /**
@@ -47,7 +50,7 @@ async function claimPendingRows(branchId: string | null, limit: number): Promise
        LIMIT $2
        FOR UPDATE SKIP LOCKED
      )
-     RETURNING id, lead_id, phone, name, language, product_interest, notes, branch_id, channel, retry_count`,
+     RETURNING id, lead_id, phone, name, language, product_interest, notes, branch_id, channel, retry_count, talking_points`,
     [branchId, limit]
   ).catch(async (e) => {
     if (!((e as { code?: unknown })?.code === "42703")) throw e // claimed_at column not added yet → claim without reaper support
@@ -60,7 +63,7 @@ async function claimPendingRows(branchId: string | null, limit: number): Promise
          LIMIT $2
          FOR UPDATE SKIP LOCKED
        )
-       RETURNING id, lead_id, phone, name, language, product_interest, notes, branch_id, channel, retry_count`,
+       RETURNING id, lead_id, phone, name, language, product_interest, notes, branch_id, channel, retry_count, talking_points`,
       [branchId, limit]
     )
   })
@@ -130,6 +133,13 @@ async function dialQueueRow(item: QueueRow, branchId: string | null): Promise<Di
       language: item.language || "telugu",
       requested,
       branchId: item.branch_id || branchId,
+      // "What should Priya talk about?" — the row's agenda (stamped at
+      // queueing time or at campaign start) rides into placeOutboundCall,
+      // which persists it on the voice_calls row where /api/calls/turn reads
+      // it EVERY TURN. The bulk path used to drop this — bulk-dialed leads
+      // got the generic script even when the operator launched the campaign
+      // with a specific offer to push.
+      instructions: item.talking_points ?? null,
     })
     const callBranch = item.branch_id || branchId
     if (callBranch) recordUsage(callBranch, "call")
@@ -270,16 +280,37 @@ export async function POST(req: NextRequest) {
   }
 
   // ---- Campaign protocol (bulk calling console) --------------------------
-  // { action: "start", concurrency? }  → drain the ENTIRE pending queue in
-  //   the background; returns immediately, progress via GET.
+  // { action: "start", concurrency?, talking_points? }  → drain the ENTIRE
+  //   pending queue in the background; returns immediately, progress via GET.
   if (body.action === "start") {
+    // "What should Priya talk about?" (optional): when the operator types an
+    // agenda here, it is stamped across EVERY pending row in scope BEFORE the
+    // runner claims anything — so a new offer can be pushed to an existing
+    // queue without re-uploading the CSV. Left blank, each row keeps the
+    // talking points it was queued with (per-row values are never cleared
+    // from here).
+    const campaignPoints = sanitizeText(body.talking_points, 1000)
+    let stamped = 0
+    if (campaignPoints) {
+      const stamp = await query(
+        `UPDATE outbound_queue SET talking_points = $2
+          WHERE status = 'pending' AND ($1::uuid IS NULL OR branch_id = $1)`,
+        [branchId, campaignPoints]
+      ).catch((e) => {
+        // Column not migrated yet → the campaign still runs, just without the
+        // agenda (rows dialed exactly as before the feature existed).
+        console.error("talking_points stamp failed (migration 2026-10-01_queue_talking_points applied?):", (e as Error)?.message)
+        return null
+      })
+      stamped = stamp?.rowCount ?? 0
+    }
     // Concurrency default comes from the persisted dialer settings (the
     // Call Queue slider) — live for every campaign without a redeploy.
     const settings = await getDialerSettings()
     const res = await dialer.start({ concurrency: body.concurrency ?? settings.concurrency })
     if (!res.ok) return NextResponse.json({ error: res.reason }, { status: 409 })
-    logAudit("bulk campaign started", session.email, { branchId, concurrency: dialer.status().concurrency })
-    return NextResponse.json({ started: true, runId: res.runId, concurrency: dialer.status().concurrency })
+    logAudit("bulk campaign started", session.email, { branchId, concurrency: dialer.status().concurrency, talkingPointsStamped: stamped, talkingPoints: campaignPoints ? campaignPoints.slice(0, 200) : undefined })
+    return NextResponse.json({ started: true, runId: res.runId, concurrency: dialer.status().concurrency, talkingPointsStamped: stamped })
   }
 
   // ---- Legacy one-shot dial ({ concurrency, limit }) ---------------------

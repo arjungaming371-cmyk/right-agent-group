@@ -200,5 +200,72 @@ section("res.ok discipline: developer logs + loan status + branch mutations")
   ok(bv.split("Network error — try again").length >= 2, "branch status toggle surfaces failures")
 }
 
+// ── 17. Call Queue talking points — "What should Priya talk about?" ────────
+// The agenda must survive EVERY hop: queue entry (CSV confirm / Add Single /
+// campaign start) → outbound_queue.talking_points → claimPendingRows RETURNING
+// → dialQueueRow → placeOutboundCall({instructions}) → voice_calls.instructions
+// → /api/calls/turn → buildTurnInstructions framing. The bulk path used to
+// drop the field entirely (single dials kept it, campaigns lost it).
+section("call-queue talking points: the agenda rides queue rows into Priya's brain")
+{
+  // Schema: migration + rollback + local-setup mirror.
+  const mig = read("migrations/2026-10-01_queue_talking_points.sql")
+  has(mig, "ALTER TABLE outbound_queue ADD COLUMN IF NOT EXISTS talking_points TEXT;", "migration adds outbound_queue.talking_points")
+  has(read("migrations/2026-10-01_queue_talking_points_rollback.sql"), "ALTER TABLE outbound_queue DROP COLUMN IF EXISTS talking_points;", "rollback drops the column")
+  has(read("local-setup.sql"), "ALTER TABLE outbound_queue ADD COLUMN IF NOT EXISTS talking_points TEXT;", "local-setup mirrors the column")
+
+  // Queue entry — batch mode stamps the campaign agenda on every row.
+  const ob = read("app/api/outbound/route.ts")
+  has(ob, "function campaignTalkingPoints(v: unknown): string | null", "sanitize helper: 1000-char cap, null when blank")
+  has(ob, "const campaignPoints = campaignTalkingPoints(body.talking_points)", "batch mode reads the campaign-level agenda")
+  has(ob, "talking_points: campaignTalkingPoints((contact as Record<string, unknown>).talking_points) ?? campaignPoints,", "per-contact agenda wins over the campaign-level text")
+  has(ob, "talking_points: talkingPoints,", "single mode stamps the queue row")
+  has(ob, "instructions: talkingPoints,", "single mode persists voice_calls.instructions (what /api/calls/turn reads)")
+
+  // Runner — claim → dial → start-stamp.
+  const pr = read("app/api/outbound/process/route.ts")
+  ok(
+    (pr.match(/retry_count, talking_points`/g) || []).length === 2,
+    "BOTH claim queries RETURNING include talking_points (primary + reaper fallback)"
+  )
+  has(pr, "instructions: item.talking_points ?? null,", "dialQueueRow forwards the row's agenda to placeOutboundCall")
+  has(pr, "const campaignPoints = sanitizeText(body.talking_points, 1000)", "start action reads + caps the campaign agenda")
+  has(pr, "UPDATE outbound_queue SET talking_points = $2\n          WHERE status = 'pending' AND ($1::uuid IS NULL OR branch_id = $1)", "start stamps every pending row in scope BEFORE the runner claims them")
+  ok(pr.indexOf("const campaignPoints = sanitizeText(body.talking_points, 1000)") < pr.indexOf("await dialer.start("), "stamping happens BEFORE dialer.start() (claimed rows must already carry the agenda)")
+  ok(
+    pr.indexOf("console.error(\"talking_points stamp failed") > -1,
+    "stamp failure degrades to agenda-less dialing instead of blocking the campaign"
+  )
+
+  // The dial leg persists instructions for BOTH channels (WhatsApp + phone).
+  const od = read("lib/outbound-dial.ts")
+  ok(
+    (od.match(/instructions: opts\.instructions \?\? null,/g) || []).length === 2,
+    "placeOutboundCall persists instructions on BOTH channel inserts (whatsapp + phone)"
+  )
+
+  // Brain — the raw agenda is framed, never read like Priya's own thought.
+  const vc = read("lib/voice-conversation.ts")
+  has(vc, "WHAT THIS CALL IS ABOUT", "buildTurnInstructions frames the agenda explicitly")
+  has(vc, "never recite them word-for-word", "anti-robotic-recital rule present")
+  ok(!/let merged = instructions \|\| ""/.test(vc), "no raw unlabeled instructions left (used to read like Priya's own thought)")
+
+  // Call Queue UI — the textarea exists and start/dial-now both send it.
+  const qv = read("components/dashboard/queue-view.tsx")
+  ok((qv.match(/What should Priya talk about\?/g) || []).length >= 1, "Call Queue shows the agenda box")
+  has(qv, "talking_points: talkPoints.trim() || undefined", "Start Campaign sends the agenda")
+  has(qv, "instructions: item.talking_points || undefined", "Dial now keeps the row's agenda")
+  has(qv, "talking_points?: string | null", "QueueItem type carries the field for per-row display")
+  has(qv, "Talk: {item.talking_points}", "queue table shows the agenda under the phone")
+
+  // Upload console — same agenda on CSV confirm, single add and bulk start.
+  const uv = read("components/dashboard/upload-view.tsx")
+  ok((uv.match(/What should Priya talk about\? <span/g) || []).length === 3, "all three entry surfaces show the agenda box (CSV modal, single form, bulk panel)")
+  has(uv, "talking_points: previewTalkPoints.trim() || undefined", "CSV confirm sends the agenda")
+  has(uv, "talking_points: queueTalkPoints.trim() || undefined", "Add Single sends the agenda")
+  has(uv, "talking_points: bulkTalkPoints.trim() || undefined", "Call Entire Queue sends the agenda")
+  has(uv, "Talk: {r.talking_points}", "upload queue table shows the agenda")
+}
+
 console.log(`\n${passed} passed, ${failed} failed`)
 process.exit(failed ? 1 : 0)

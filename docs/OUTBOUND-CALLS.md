@@ -150,6 +150,22 @@ concurrency, with per-row compliance skipping (`skipped_dnd`,
 
 Queue statuses: `pending → dialing → called | failed | skipped_*`.
 
+### Talking points — "What should Priya talk about?" (2026-10-01)
+
+Every queue row carries `talking_points` — the operator's agenda for the
+call. It is stamped at queueing time (CSV confirm modal / Add Single Number
+send one campaign-level text with the contacts), or across every pending row
+when a campaign starts (`Start Campaign` textarea on the Call Queue view and
+the Upload console → `POST /api/outbound/process {action:"start",
+talking_points}` — a new offer can be pushed to an existing queue without
+re-uploading the CSV). Left blank at start, rows keep what they were queued
+with. The runner forwards the row's text to `placeOutboundCall({instructions})`,
+which persists it on the voice_calls row — from there the EXISTING brain path
+(`/api/calls/turn` → `buildTurnInstructions`) feeds it to Priya EVERY TURN on
+both channels, framed as "WHAT THIS CALL IS ABOUT" with a never-recite-verbatim
+rule. "Dial now" on a queue row sends the same agenda through `/api/calls/dial`.
+Migration: `2026-10-01_queue_talking_points.sql` (`outbound_queue.talking_points`).
+
 Cold WhatsApp calls are Meta-gated per user, so CSV campaigns default to
 phone; `whatsapp_voice`/`auto` rows fall back to phone when Meta refuses
 (the DialError text is stamped on the row's `outcome_detail`).
@@ -204,5 +220,5 @@ talking to. The real duration is read from the voice_calls row first now.
 | `NEXT_PUBLIC_APP_URL` | base URL Exotel calls back to |
 
 Deployment after pulling this code: `git pull && npm install (root) &&
-pm2 restart all`. No DB migration is required — every feature here uses
-existing columns.
+pm2 restart all`. Talking points need one migration:
+`node scripts/run-migrations.js` (adds `outbound_queue.talking_points`).

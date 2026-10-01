@@ -385,7 +385,17 @@ async function buildTurnInstructions(
   // "don't re-ask known facts" instruction needs to stay in context for the
   // whole call, not just the open. One cheap query (lib/lead-brain.ts), no
   // live LLM analysis.
-  let merged = instructions || ""
+  //
+  // OPERATOR AGENDA ("What should Priya talk about?"): the instructions text
+  // arrives from the voice_calls row (single dials via /api/calls/dial, bulk
+  // campaigns via the Call Queue runner) RAW — an unlabeled operator note the
+  // model reads like its own thought. Frame it as THE AGENDA for this call
+  // and forbid word-for-word recital, so she weaves it into the script
+  // naturally instead of robotic monologuing. Both turn paths (blocking +
+  // streaming) and both channels (phone + WhatsApp) pass through here.
+  let merged = instructions
+    ? `WHAT THIS CALL IS ABOUT — the operator's talking points for THIS call. Work them into the conversation naturally (never recite them word-for-word), open by steering toward this agenda, and stay on it unless the customer redirects:\n${instructions}`
+    : ""
 
   // DATE/TIME AWARENESS: without this the model has no idea what the real
   // date/time is — can't correctly say "today"/"tomorrow", the right

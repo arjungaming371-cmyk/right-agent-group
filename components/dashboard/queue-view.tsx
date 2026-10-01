@@ -32,6 +32,10 @@ type QueueItem = {
   outcome: string | null
   outcome_at: string | null
   outcome_detail: string | null
+  // "What should Priya talk about?" — the row's agenda (migration
+  // 2026-10-01_queue_talking_points); shown under the phone so the operator
+  // can verify what Priya will pitch before starting the campaign.
+  talking_points?: string | null
   created_at: string
 }
 
@@ -134,6 +138,12 @@ export default function QueueView({ role }: { role: Role }) {
   // arrives priority DESC, created_at DESC); "Show history" reveals every
   // entry for the full audit trail. Nothing is deleted from the database.
   const [showAll, setShowAll] = useState(false)
+  // "What should Priya talk about?" — the campaign agenda. Sent on Start
+  // Campaign: the server stamps it across every pending row BEFORE the
+  // runner claims them, so a new offer can be pushed to an existing queue
+  // without re-uploading the CSV. Left blank → rows keep the agenda they
+  // were queued with.
+  const [talkPoints, setTalkPoints] = useState("")
 
   const shown = items.filter((i) => statusGroup(i.status) === tab)
   const g = (k: QueueStatusGroup) => counts[k] || 0
@@ -253,7 +263,11 @@ export default function QueueView({ role }: { role: Role }) {
       const res = await fetch("/api/outbound/process", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(action === "start" ? { action, concurrency: settings?.concurrency } : { action }),
+        body: JSON.stringify(
+          action === "start"
+            ? { action, concurrency: settings?.concurrency, talking_points: talkPoints.trim() || undefined }
+            : { action }
+        ),
       })
       const d = await res.json()
       if (!res.ok) {
@@ -264,7 +278,7 @@ export default function QueueView({ role }: { role: Role }) {
         toast.info(d.reason || "Paused — outside the calling window. Rows stay pending and resume automatically.")
         return
       }
-      if (action === "start") toast.success(`Campaign started — ${d.concurrency} call${d.concurrency === 1 ? "" : "s"} at a time`)
+      if (action === "start") toast.success(`Campaign started — ${d.concurrency} call${d.concurrency === 1 ? "" : "s"} at a time${d.talkingPointsStamped ? ` · agenda applied to ${d.talkingPointsStamped} call${d.talkingPointsStamped === 1 ? "" : "s"}` : ""}`)
       else toast.info("Stop requested — the current wave finishes, the rest stay pending")
       await load(true)
     } catch {
@@ -381,7 +395,9 @@ export default function QueueView({ role }: { role: Role }) {
       const res = await fetch("/api/calls/dial", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ leadId: item.lead_id, channel: item.channel === "whatsapp_voice" ? "whatsapp" : item.channel === "auto" ? "auto" : "phone" }),
+        // Dial now keeps the row's agenda — a manual one-off dial of a queued
+        // contact must pitch the same thing the campaign would have.
+        body: JSON.stringify({ leadId: item.lead_id, channel: item.channel === "whatsapp_voice" ? "whatsapp" : item.channel === "auto" ? "auto" : "phone", instructions: item.talking_points || undefined }),
       })
       const d = await res.json()
       if (res.ok) toast.success(`Dialing ${item.name || item.phone} on ${d.channel === "whatsapp" ? "WhatsApp" : "phone"} now`)
@@ -472,6 +488,25 @@ export default function QueueView({ role }: { role: Role }) {
                   ●●● {p.replace(/\d(?=\d{4})/g, "•")}
                 </span>
               ))}
+            </div>
+          )}
+          {/* "What should Priya talk about?" — the campaign agenda box */}
+          {canRunCampaign && !running && (
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-secondary)", display: "block", marginBottom: 4 }}>
+                What should Priya talk about? <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>(optional)</span>
+              </label>
+              <textarea
+                value={talkPoints}
+                onChange={(e) => setTalkPoints(e.target.value.slice(0, 1000))}
+                rows={2}
+                maxLength={1000}
+                placeholder="e.g. Introduce our new 8.5% home-loan balance-transfer offer, ask if their current EMI feels heavy, offer a free eligibility check — don't pitch personal loans"
+                style={{ width: "100%", fontSize: 13, lineHeight: 1.5, padding: "8px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", resize: "vertical" }}
+              />
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3 }}>
+                Priya opens with this agenda on every call in this run. Leave blank to keep the talking points set when the numbers were queued ({talkPoints.length}/1000).
+              </div>
             </div>
           )}
           <div style={{ marginTop: 14, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
@@ -661,6 +696,11 @@ export default function QueueView({ role }: { role: Role }) {
                         )}
                       </div>
                       <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{item.phone}</div>
+                      {item.talking_points && (
+                        <div title={item.talking_points} style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3, maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          Talk: {item.talking_points}
+                        </div>
+                      )}
                     </td>
                     <td style={{ padding: "12px 14px" }}>
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: ch.color, background: `${ch.color}14`, border: `1px solid ${ch.color}30`, borderRadius: 6, padding: "3px 8px" }}>
