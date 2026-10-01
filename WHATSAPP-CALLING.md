@@ -155,16 +155,41 @@ Key files:
 | `server/whatsapp-calls.js` | WebRTC answer + per-call session (endpointing, barge-in, TTS pipeline, duration report) |
 | `server/voicebot-server.js` | mounts the loopback HTTP bridge (`/whatsapp/connect`, `/whatsapp/terminated`, `/health`) |
 | `app/api/whatsapp/route.ts` | `calls` field handling: bridge, pre_accept/accept, terminate finalize |
-| `lib/whatsapp.ts` | Graph API call control (`answer/reject/terminateWhatsAppCall`) |
+| `lib/whatsapp.ts` | Graph API call control (`answer/reject/terminateWhatsAppCall`, `placeWhatsAppCall`, `requestCallPermission`, `getCallPermission`) |
 | `lib/whatsapp-call-finalize.ts` | post-call flow (bubble row, follow-ups, sentiment, summary, Lead Brain) |
 | `app/api/calls/turn/route.ts` | unchanged contract + `branchId`/`source` passthrough for WhatsApp calls |
 
-## Outbound (business-initiated) WhatsApp calls — deliberately not implemented
+## Outbound (business-initiated) WhatsApp calls — implemented, Meta-permission-gated
 
-Meta requires a **call-permission template** flow before a business may ring
-a customer (the customer must accept a consent template), pricing is
-per-minute, and the user experience is heavier. Inbound calls are free and
-are this business's actual flow, so the integration is inbound-only. The
-call-control helpers in `lib/whatsapp.ts` (`terminateWhatsAppCall`) and the
-voicebot's session registry already cover what an outbound flow would need
-if it's ever added.
+> This section used to say outbound was "deliberately not implemented" —
+> that was stale. The full business-initiated machine shipped 2026-09-26
+> and is documented in **docs/OUTBOUND-CALLS.md**.
+
+Meta only lets a business RING a WhatsApp user who granted **call
+permission**. It is granted three ways:
+
+1. **Implicit callback** — the user called our number (temporary
+   permission). `POST /api/calls/dial` probes this itself (any inbound
+   `wacall-*` row in the last 30 days) for the `auto` channel.
+2. **Explicit request** — we send Meta's interactive
+   `call_permission_request`; the user sees **Allow / Don't allow**.
+   Free-form inside the 24h customer-service window
+   (`POST /api/whatsapp/call-permission`, or the shield button on the
+   WhatsApp Calls tab); an approved call-permission *template* is needed
+   outside it. Their tap lands on the webhook as
+   `call_permission_reply` and is logged on the chat + comm log. A request
+   expires after 7 days, and 4 consecutive unanswered calls revoke
+   permission automatically.
+3. **Permanent grant** — the user flips it on our business profile.
+
+The wire path: the voicebot holds a werift SDP offer
+(`/whatsapp/outbound-offer`), the dial route POSTs it to Graph
+`action=connect` (response `calls[0].id` is the call_id), Meta rings the
+lead, and the answer arrives on the webhook as event `connect` with
+`sdp_type: "answer"` + `direction: "BUSINESS_INITIATED"` — which completes
+the negotiation on `/whatsapp/outbound-accept`. The terminate webhook then
+carries the outcome (its `status` may be an ARRAY like
+`["Failed", "Completed"]` — parse the strongest entry). WABA-level refusal
+(error 138006) means Business Calling is not enabled on the number; a
+per-user refusal means missing call permission — the dashboard surfaces
+Meta's raw text and the dialer hint points at the shield button.

@@ -91,7 +91,10 @@ export default function CommandPalette({ open, onClose, onNavigate, allowedViews
         })
       }
       for (const a of loans) {
-        const { matches, score } = smartMatch(needle, [a.customer_name, a.whatsapp_number, a.loan_type, a.city, a.pan, a.aadhaar])
+        // FIX (2026-10-01): the loan rows carry pan_number / aadhaar_number —
+        // the old reads targeted phantom field names, so searching a loan by
+        // PAN or Aadhaar silently returned nothing.
+        const { matches, score } = smartMatch(needle, [a.customer_name, a.whatsapp_number, a.loan_type, a.city, a.pan_number, a.aadhaar_number])
         if (!matches) continue
         out.push({
           result: { id: `loan-${a.id}`, group: "Loan Applications", title: a.customer_name, sub: `${a.loan_type || "Loan"}${a.loan_amount ? " · ₹" + Number(a.loan_amount).toLocaleString("en-IN") : ""}${a.city ? " · " + a.city : ""}`, view: "loans", search: a.customer_name, icon: FileText },

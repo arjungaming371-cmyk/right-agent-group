@@ -169,6 +169,15 @@ export default function BranchesView({ role, branchId }: { role: string; branchI
       payload.monthly_call_limit = payload.monthly_call_limit || null
       payload.monthly_whatsapp_limit = payload.monthly_whatsapp_limit || null
       payload.max_ai_employees = payload.max_ai_employees || null
+      // FIX (2026-10-01): the four write-only secret inputs are deliberately
+      // never prefilled ("configured — type to replace"), so they used to
+      // submit "" and the PATCH cleared the stored Exotel key/token and the
+      // WhatsApp/Instagram tokens on EVERY routine edit (rename, quota
+      // change, rebrand) — calls and chats for that branch then broke until
+      // every secret was re-typed. Blank = keep what's stored.
+      for (const secret of ["exotel_api_key", "exotel_api_token", "whatsapp_token", "instagram_token"]) {
+        if (!String(payload[secret] || "").trim()) delete payload[secret]
+      }
       const isNew = editing === "new"
       const id = isNew ? null : (editing as Branch).id
       const r = await fetch(isNew ? "/api/branches" : `/api/branches/${id}`, {
@@ -183,17 +192,34 @@ export default function BranchesView({ role, branchId }: { role: string; branchI
   }
 
   async function toggleBranchStatus(b: Branch) {
-    await fetch(`/api/branches/${b.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: b.status === "active" ? "suspended" : "active" }),
-    })
+    try {
+      const r = await fetch(`/api/branches/${b.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: b.status === "active" ? "suspended" : "active" }),
+      })
+      // FIX: was fire-and-forget — a 401/403 silently did nothing.
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}))
+        setError(d.error || `Could not ${b.status === "active" ? "suspend" : "activate"} ${b.name}`)
+        return
+      }
+    } catch { setError("Network error — try again"); return }
     loadBranches()
   }
 
   async function deleteBranch(b: Branch) {
     if (!confirm(`Delete branch "${b.name}"? Its leads/calls stay in the database but lose their branch.`)) return
-    await fetch(`/api/branches/${b.id}`, { method: "DELETE" })
+    try {
+      const r = await fetch(`/api/branches/${b.id}`, { method: "DELETE" })
+      // FIX: the server's actionable 409 ("still has N team member(s) and N
+      // lead(s)…") used to be swallowed — the UI just did nothing.
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}))
+        setError(d.error || `Could not delete ${b.name}`)
+        return
+      }
+    } catch { setError("Network error — try again"); return }
     loadBranches()
   }
 

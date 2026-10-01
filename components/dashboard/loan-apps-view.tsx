@@ -153,7 +153,19 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
   const selected = apps.find((a) => a.id === selectedId) || null
 
   async function markStatus(id: string, status: string) {
-    await fetch("/api/loans", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, status }) })
+    // FIX (2026-10-01): was fire-and-forget — a 401/404/500 silently reverted
+    // the select on the next reload with no feedback.
+    try {
+      const r = await fetch("/api/loans", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, status }) })
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}))
+        toast.error(d.error || "Could not update the loan status")
+        return
+      }
+    } catch {
+      toast.error("Network error — status not saved")
+      return
+    }
     load(true)
   }
 

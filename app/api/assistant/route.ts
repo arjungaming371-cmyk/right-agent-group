@@ -364,7 +364,11 @@ function sanitizeHistory(raw: unknown): { role: "user" | "assistant"; content: s
     const m = item as { role?: unknown; content?: unknown }
     const content = typeof m.content === "string" ? m.content.slice(0, 4000).trim() : ""
     if (!content) continue
-    out.push({ role: m.role === "assistant" ? "assistant" : "user", content })
+    // FIX (2026-10-01): QuickChat sends prior AI turns with role "model"
+    // (Gemini-style) while this widget sends "assistant" — anything that
+    // wasn't exactly "assistant" was coerced to USER, so the model saw its
+    // own previous answers as if the operator had said them.
+    out.push({ role: m.role === "assistant" || m.role === "model" ? "assistant" : "user", content })
   }
   return out
 }
@@ -409,7 +413,9 @@ export async function POST(req: NextRequest) {
     const parsed = (body ?? {}) as { message?: unknown; history?: unknown; chatId?: unknown; attachment?: unknown }
     const message = typeof parsed.message === "string" ? parsed.message : ""
     if (!message.trim() || message.length > 5000) {
-      return NextResponse.json({ reply: "Please send a valid message." }, { status: 400 })
+      // FIX: error envelope normalized to { error } — the 400 used { reply },
+      // a shape no error handler reads.
+      return NextResponse.json({ error: "Please send a valid message." }, { status: 400 })
     }
     const history = sanitizeHistory(parsed.history)
     const chatId = typeof parsed.chatId === "string" ? parsed.chatId : null

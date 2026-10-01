@@ -15,6 +15,7 @@ export const dynamic = "force-dynamic"
 
 const COLUMNS = [
   "name", "phone", "language", "channel", "priority", "status", "retry_count",
+  "outcome", "outcome_at", "outcome_detail",
   "scheduled_at", "called_at", "cancelled_at", "cancelled_by", "call_sid",
   "product_interest", "created_at",
 ]

@@ -300,7 +300,13 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
       message: inputMsg.trim(),
       leadId: activeConv?.lead_id || null,
       type: replyType,
-      commentId: activeConv?.last_type === "comment" ? messages.find((m) => m.comment_id)?.comment_id : undefined,
+      // FIX (2026-10-01): messages arrive oldest-first and outbound comment
+      // replies ALSO carry comment_id — .find() used to reply under the
+      // OLDEST comment (often an old post). Target the prospect's latest
+      // INBOUND comment instead.
+      commentId: activeConv?.last_type === "comment"
+        ? [...messages].reverse().find((m) => m.direction === "inbound" && m.comment_id)?.comment_id
+        : undefined,
       username: activeConv?.ig_username || undefined,
     }
 

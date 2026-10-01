@@ -189,7 +189,11 @@ export default function UploadView({ role = "admin" }: { role?: string }) {
         body: JSON.stringify({ concurrency: batchMode === "sequential" ? 1 : concurrency, limit: callLimit }),
       })
       const data = await res.json()
-      if (res.ok) toast.success(`Dialed ${data.called}/${data.total} calls (${data.failed} failed)`)
+      // FIX (2026-10-01): outside the calling window the server answers
+      // {paused:true} — this used to toast "Dialed undefined/undefined calls
+      // (undefined failed)" as a success.
+      if (res.ok && data.paused) toast.info(data.reason || "Calling window is closed — queue paused, resumes automatically")
+      else if (res.ok) toast.success(`Dialed ${data.called}/${data.total} calls (${data.failed} failed)`)
       else toast.error(data.error || "Batch calling failed")
     } catch {
       // Network failure — surface it, the busy state must always reset.
@@ -210,7 +214,8 @@ export default function UploadView({ role = "admin" }: { role?: string }) {
         body: JSON.stringify({ action: "start", concurrency: bulkConcurrency }),
       })
       const data = await res.json()
-      if (res.ok) {
+      if (res.ok && data.paused) toast.info(data.reason || "Calling window is closed — the campaign cannot start right now")
+      else if (res.ok) {
         toast.success(`Bulk campaign started — Priya is dialing the entire queue, ${data.concurrency} call${data.concurrency > 1 ? "s" : ""} at a time`)
         await refreshBulkStatus()
       } else {

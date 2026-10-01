@@ -6,7 +6,7 @@ import { sessionBranchId, checkQuota, recordUsage } from "@/lib/branches"
 import { logAudit } from "@/lib/audit"
 import { checkCallCompliance, isWithinCallingWindow } from "@/lib/compliance"
 import { getBulkDialer, BulkQueueRow, DialOutcome } from "@/lib/bulk-dialer"
-import { placeOutboundCall } from "@/lib/outbound-dial"
+import { placeOutboundCall, DialError } from "@/lib/outbound-dial"
 import { getDialerSettings } from "@/lib/dialer-settings"
 import { nextWindowStartMs } from "@/lib/dialer-logic"
 
@@ -110,7 +110,7 @@ async function dialQueueRow(item: QueueRow, branchId: string | null): Promise<Di
         // past 19:00; now the campaign resumes by itself at 8:00 IST.
         const nextOpen = new Date(nextWindowStartMs(Date.now()))
         await db.from("outbound_queue")
-          .update({ status: "pending", scheduled_at: nextOpen.toISOString(), claimed_at: null })
+          .update({ status: "pending", scheduled_at: nextOpen.toISOString(), claimed_at: null, outcome: null, outcome_at: null, outcome_detail: null })
           .eq("id", item.id)
         return "skipped" // deferred, not lost
       }
@@ -141,8 +141,15 @@ async function dialQueueRow(item: QueueRow, branchId: string | null): Promise<Di
     return "called"
   } catch (e) {
     console.error(`Failed to call ${item.phone}:`, e)
+    // 2026-10-01: the row used to say just "failed" — WHY it failed (Meta's
+    // raw connect rejection, voicebot down, bad number …) was lost with the
+    // exception object. Record the operator-facing reason on the row so the
+    // Call Queue view can show it (the same text /api/calls/dial toasts).
+    const detail = e instanceof DialError
+      ? [e.message, e.hint].filter(Boolean).join(" — ")
+      : e instanceof Error ? e.message : String(e)
     await db.from("outbound_queue")
-      .update({ status: "failed" })
+      .update({ status: "failed", outcome: "failed", outcome_at: new Date().toISOString(), outcome_detail: detail.slice(0, 300) })
       .eq("id", item.id)
       .catch(() => {})
     return "failed"
@@ -188,6 +195,21 @@ export async function GET(req: NextRequest) {
     [branchId]
   ).catch(() => ({ rows: [] as { status: string; n: number }[] }))
 
+  // Outcome breakdown for dialed rows (2026-10-01): the radar's "completed"
+  // counter used to include every row the dialer PLACED — answered and
+  // never-picked-up alike. Grouping the 'called' rows by their stamped
+  // outcome lets the radar show the truth: "84 answered · 12 no-answer".
+  // Rows without a stamp yet count as 'dialed' (webhook still in flight).
+  const outcomeRows = await query(
+    `SELECT COALESCE(outcome, 'dialed') AS outcome, count(*)::int AS n
+       FROM outbound_queue
+      WHERE status = 'called' AND ($1::uuid IS NULL OR branch_id = $1)
+      GROUP BY COALESCE(outcome, 'dialed')`,
+    [branchId]
+  ).catch(() => ({ rows: [] as { outcome: string; n: number }[] }))
+  const outcomes: Record<string, number> = {}
+  for (const r of outcomeRows.rows as { outcome: string; n: number }[]) outcomes[r.outcome] = r.n
+
   const queue: Record<string, number> = {}
   for (const r of counts.rows as { status: string; n: number }[]) {
     // The DB stores specific skip reasons (skipped_do_not_call /
@@ -202,7 +224,7 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ run, queue })
+  return NextResponse.json({ run, queue, outcomes })
 }
 
 export async function POST(req: NextRequest) {
@@ -211,18 +233,41 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}))
   // The dialer only ever works the session's own branch queue (null = HQ = all).
   const branchId = sessionBranchId(session)
+  const dialer = getBulkDialer(branchKey(branchId), bulkDialerDeps(branchId))
 
   // PAUSE/RESUME (bulk plan Feature 2): outside the calling window the
   // runner refuses to claim anything and rows STAY pending — a running or
   // starting campaign simply cannot fire, and it resumes by itself at the
   // next window open. Nothing is skipped, nothing is lost.
+  // FIX (2026-10-01): the guard used to sit ABOVE the whole action router,
+  // so {action:"stop"} and {action:"reset-failed"} returned {paused:true}
+  // too — outside the window, Stop reported "No campaign is running" while
+  // a campaign COULD still be mid-wave and Retry-failed silently did
+  // nothing. Control actions now run first; only DIALING is window-gated.
+  if (body.action === "stop") {
+    const stopped = dialer.stop()
+    if (stopped) logAudit("bulk campaign stop requested", session.email, { branchId })
+    return NextResponse.json({ ok: true, stopped })
+  }
+
+  if (body.action === "reset-failed") {
+    const res = await query(
+      `UPDATE outbound_queue SET status = 'pending', claimed_at = NULL,
+              outcome = NULL, outcome_at = NULL, outcome_detail = NULL
+       WHERE status = 'failed' AND ($1::uuid IS NULL OR branch_id = $1)`,
+      [branchId]
+    )
+    const reset = res.rowCount ?? 0
+    if (reset > 0) logAudit("bulk queue failed rows reset", session.email, { branchId, reset })
+    return NextResponse.json({ ok: true, reset })
+  }
+
   if (!(await isWithinCallingWindow())) {
     return NextResponse.json({
       paused: true,
       reason: "Outside the permitted calling window — queue paused, rows stay pending and resume automatically",
     })
   }
-  const dialer = getBulkDialer(branchKey(branchId), bulkDialerDeps(branchId))
 
   // ---- Campaign protocol (bulk calling console) --------------------------
   // { action: "start", concurrency? }  → drain the ENTIRE pending queue in
@@ -235,28 +280,6 @@ export async function POST(req: NextRequest) {
     if (!res.ok) return NextResponse.json({ error: res.reason }, { status: 409 })
     logAudit("bulk campaign started", session.email, { branchId, concurrency: dialer.status().concurrency })
     return NextResponse.json({ started: true, runId: res.runId, concurrency: dialer.status().concurrency })
-  }
-
-  // { action: "stop" } → finish the in-flight wave, leave the rest pending.
-  if (body.action === "stop") {
-    const stopped = dialer.stop()
-    if (stopped) logAudit("bulk campaign stop requested", session.email, { branchId })
-    return NextResponse.json({ ok: true, stopped })
-  }
-
-  // { action: "reset-failed" } → push failed rows back to 'pending' so a
-  // campaign (or one-shot dialer) tries them again — the "Retry failed"
-  // button. Skipped_* rows are deliberately NOT retried: DND/outside-window
-  // are compliance decisions, not glitches.
-  if (body.action === "reset-failed") {
-    const res = await query(
-      `UPDATE outbound_queue SET status = 'pending', claimed_at = NULL
-       WHERE status = 'failed' AND ($1::uuid IS NULL OR branch_id = $1)`,
-      [branchId]
-    )
-    const reset = res.rowCount ?? 0
-    if (reset > 0) logAudit("bulk queue failed rows reset", session.email, { branchId, reset })
-    return NextResponse.json({ ok: true, reset })
   }
 
   // ---- Legacy one-shot dial ({ concurrency, limit }) ---------------------

@@ -9,19 +9,27 @@
 //   • red name + missed arrow for unanswered, teal arrows for in/out
 //   • tap a row → opens that lead's chat (call bubble + full history live
 //     there) — this is the "management" hop
-//   • phone button → AI call back via Exotel (WhatsApp business-initiated
-//     calls aren't offered by Meta yet — permission-template gated)
+//   • WhatsApp button → AI calls them back ON WHATSAPP through the unified
+//     dialer (POST /api/calls/dial, channel whatsapp): a lead who called us
+//     in the last 30 days is Meta callback-permitted, and WhatsApp calls are
+//     FREE versus per-minute phone airtime. Meta refusals surface verbatim.
+//   • phone button → same dialer on the phone line (fallback when Meta
+//     refuses, e.g. callback window expired)
+//   • shield button → sends Meta's call-permission REQUEST (interactive
+//     call_permission_request) so leads who never called us can Allow
+//     WhatsApp calls — POST /api/whatsapp/call-permission
 //
 // Data source: GET /api/calls?channel=whatsapp (branch-scoped).
 
 import { Fragment, useEffect, useMemo, useState } from "react"
 import {
   Search, Phone, PhoneIncoming, PhoneOutgoing, PhoneMissed,
-  RefreshCw, Video, Play, Pause,
+  RefreshCw, Video, Play, Pause, ShieldCheck,
 } from "lucide-react"
 import { WA, WA_FONT, type Lead } from "./palette"
 import { Avatar, IconBtn } from "./bits"
 import { WhatsAppGlyph } from "./chat-list"
+import { useToast } from "../../ui/toast"
 
 export type CallRow = {
   id: string
@@ -88,6 +96,10 @@ export default function CallsList({
   const [filter, setFilter] = useState<"all" | "missed">("all")
   const [search, setSearch] = useState("")
   const [loading, setLoading] = useState(true)
+  // in-flight per-row action (call back / ask permission) — the button must
+  // show it, and a second click must not double-place a call
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const toast = useToast()
   // explicit error state (staff spec) — a 500/401 body used to be silently
   // swallowed and the tab showed a stale list with no hint anything was wrong
   const [loadError, setLoadError] = useState(false)
@@ -160,31 +172,73 @@ export default function CallsList({
     } as Lead)
   }
 
-  // AI call back over the phone line (Meta gates business-initiated
-  // WhatsApp calls) — through the UNIFIED dialer so this path gets the same
-  // compliance/quota/comm-log treatment as every other outbound dial.
-  // The dialer is lead-scoped; a rare row with no lead (unmatched missed-call
-  // bubble) falls back to the legacy phone endpoint, which matches/creates
-  // the lead from the number itself.
-  async function callBack(c: CallRow) {
+  // AI call back through the UNIFIED dialer (POST /api/calls/dial) so this
+  // path gets the same compliance/quota/comm-log treatment as every other
+  // outbound dial. Channel-aware:
+  //   • "whatsapp" — the row IS a WhatsApp call, so the lead called us and
+  //     Meta's callback window applies; WhatsApp calls are free.
+  //   • "phone"    — the line fallback for when Meta refuses.
+  // A row with no lead (unmatched missed-call bubble) falls back to the
+  // legacy phone endpoint, which matches/creates the lead from the number.
+  // FAILURES TOAST — the old code only console.error'ed, so a refused dial
+  // looked exactly like a button that did nothing.
+  async function callBack(c: CallRow, channel: "whatsapp" | "phone") {
     const phone = c.phone || c.leads?.phone
     if (!phone) return
+    setBusyId(`${channel}-${c.id}`)
     try {
       const res = c.lead_id
         ? await fetch("/api/calls/dial", {
             method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ leadId: c.lead_id, channel: "phone" }),
+            body: JSON.stringify({ leadId: c.lead_id, channel }),
           })
         : await fetch("/api/calls", {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ phone, language: c.language || "telugu" }),
           })
+      const d = await res.json().catch(() => ({}))
       if (!res.ok) {
-        const d = await res.json().catch(() => ({}))
-        console.error("call back failed:", d?.error || res.status)
+        const permissionShaped = channel === "whatsapp" && /permission|130416|130476|not allowed|not permitted/i.test(String(d?.error || ""))
+        toast.error(
+          permissionShaped
+            ? `WhatsApp refused the call: ${d?.error || "no call permission"}. Use the phone button, or tap the shield to ASK them for WhatsApp call permission.`
+            : d?.error || `Call failed (${res.status})`
+        )
+        return
       }
+      toast.success(channel === "whatsapp"
+        ? `WhatsApp call placed — Priya is ringing ${c.leads?.name || phone} in WhatsApp (free)`
+        : `Phone call placed — Priya is dialing ${c.leads?.name || phone} now. Track it in Voice Logs.`)
+      load()
     } catch {
-      console.error("call back failed: network error")
+      toast.error("Call failed — check your connection and try again")
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  // Ask the lead for WhatsApp call permission (Meta interactive
+  // call_permission_request). Works when the lead messaged us inside the
+  // 24h window; outside it Meta refuses and the toast carries the reason.
+  async function askPermission(c: CallRow) {
+    if (!c.lead_id) return
+    setBusyId(`perm-${c.id}`)
+    try {
+      const res = await fetch("/api/whatsapp/call-permission", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ leadId: c.lead_id }),
+      })
+      const d = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toast.error(d?.message || d?.error || `Permission request failed (${res.status})`)
+        return
+      }
+      toast.success(`Permission request sent — ${c.leads?.name || "they"} will see an Allow / Don't allow prompt in WhatsApp`)
+      load()
+    } catch {
+      toast.error("Permission request failed — check your connection")
+    } finally {
+      setBusyId(null)
     }
   }
 
@@ -202,8 +256,18 @@ export default function CallsList({
         <div style={{ fontSize: 21, fontWeight: 700, color: WA.textPrimary }}>Calls</div>
         <div style={{ display: "flex", gap: 4 }}>
           <IconBtn title="Refresh" onClick={() => { setLoading(true); load(); onRefresh() }}><RefreshCw size={17} /></IconBtn>
-          <IconBtn title="WhatsApp business-initiated calling needs Meta's permission template — AI call back uses the phone line" onClick={() => {}}>
-            <Video size={19} style={{ opacity: 0.35, cursor: "not-allowed" }} />
+          {/* WhatsApp-native behaviour: the header call icon calls back the
+              most recent caller — on WhatsApp (callback-permitted + free). */}
+          <IconBtn
+            title={rows.length ? `WhatsApp call back ${rows[0]?.leads?.name || rows[0]?.phone || "the most recent caller"}` : "No WhatsApp calls to call back yet"}
+            onClick={() => {
+              const target = rows.find((r) => r.lead_id)
+              if (!target) { toast.error("No WhatsApp call has a matching lead yet — open the chat first"); return }
+              if (busyId) return
+              callBack(target, "whatsapp")
+            }}
+          >
+            <Video size={19} style={{ opacity: rows.length ? 1 : 0.35 }} />
           </IconBtn>
         </div>
       </div>
@@ -332,16 +396,37 @@ export default function CallsList({
                 </button>
               )}
 
-              {/* AI call back over the phone line (Meta gates business-initiated
-                  WhatsApp calling behind a permission template, honestly
-                  disabled until that's approved) */}
+              {/* AI call back — channel-explicit, both through /api/calls/dial.
+                  WhatsApp (teal glyph): callback-permitted + free.
+                  Phone (grey): the fallback line.
+                  Shield: ask for WhatsApp call permission (business-initiated
+                  calling needs the lead's Allow when they never called us). */}
               <button
-                title="AI call back (phone line)"
-                onClick={(e) => { e.stopPropagation(); callBack(c) }}
-                style={{ background: "transparent", border: 0, cursor: "pointer", padding: 6, borderRadius: "50%", display: "flex" }}
+                title={busyId === `whatsapp-${c.id}` ? "Placing WhatsApp call…" : "AI call back on WhatsApp (free)"}
+                disabled={!!busyId}
+                onClick={(e) => { e.stopPropagation(); callBack(c, "whatsapp") }}
+                style={{ background: "transparent", border: 0, cursor: busyId ? "wait" : "pointer", padding: 6, borderRadius: "50%", display: "flex", opacity: busyId && busyId !== `whatsapp-${c.id}` ? 0.5 : 1 }}
+              >
+                <WhatsAppGlyph size={17} color={WA.tealBright} />
+              </button>
+              <button
+                title={busyId === `phone-${c.id}` ? "Placing phone call…" : "AI call back on the phone line"}
+                disabled={!!busyId}
+                onClick={(e) => { e.stopPropagation(); callBack(c, "phone") }}
+                style={{ background: "transparent", border: 0, cursor: busyId ? "wait" : "pointer", padding: 6, borderRadius: "50%", display: "flex" }}
               >
                 <Phone size={17} style={{ color: WA.teal }} />
               </button>
+              {c.lead_id && (
+                <button
+                  title={busyId === `perm-${c.id}` ? "Sending permission request…" : "Ask for WhatsApp call permission"}
+                  disabled={!!busyId}
+                  onClick={(e) => { e.stopPropagation(); askPermission(c) }}
+                  style={{ background: "transparent", border: 0, cursor: busyId ? "wait" : "pointer", padding: 6, borderRadius: "50%", display: "flex" }}
+                >
+                  <ShieldCheck size={17} style={{ color: WA.textSecondary }} />
+                </button>
+              )}
             </div>
 
             {isPlaying && (

@@ -443,6 +443,11 @@ export default function WhatsAppView({ role }: { role: Role }) {
     setForwarding(null)
     try {
       const body: Record<string, any> = { to: target.phone, message: msg.msg_type && msg.msg_type !== "text" ? "" : msg.content }
+      // FIX (2026-10-01): leadId was never sent, so the forwarded message was
+      // persisted with lead_id = NULL — the customer received it but it never
+      // appeared in the target chat (history is read strictly by lead) and no
+      // comm-log entry was written.
+      body.leadId = target.id
       if (msg.media_id && msg.msg_type && !["text", "location"].includes(msg.msg_type)) {
         body.mediaId = msg.media_id
         body.mediaKind = msg.msg_type

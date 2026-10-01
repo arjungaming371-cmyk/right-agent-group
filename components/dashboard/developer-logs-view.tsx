@@ -26,6 +26,9 @@ export default function DeveloperLogsView({ userEmail }: { userEmail: string }) 
     async function loadLogs() {
       try {
         const res = await fetch("/api/developer/logs")
+        // FIX (2026-10-01): a 401/500 used to be read as data and rendered as
+        // "No activity yet", masking auth/server failures as an empty log.
+        if (!res.ok) return
         const data = await res.json()
         setLogs(data.logs || [])
         setLastLogin(data.lastLogin || null)
