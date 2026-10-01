@@ -46,10 +46,9 @@ type RunStatus = {
   current: string[]
 }
 
-type TabId = "all" | QueueStatusGroup
+type TabId = QueueStatusGroup
 
 const TABS: { id: TabId; label: string }[] = [
-  { id: "all", label: "All" },
   { id: "pending", label: "Pending" },
   { id: "dialing", label: "Dialing" },
   { id: "called", label: "Completed" },
@@ -91,7 +90,7 @@ export default function QueueView({ role }: { role: Role }) {
   const [counts, setCounts] = useState<Record<string, number>>({})
   const [run, setRun] = useState<RunStatus | null>(null)
   const [settings, setSettings] = useState<{ concurrency: number; autoRetry: boolean; retryDelayMinutes: number; maxRetries: number } | null>(null)
-  const [tab, setTab] = useState<TabId>("all")
+  const [tab, setTab] = useState<TabId>("pending")
   const [loading, setLoading] = useState(true)
   const [acting, setActing] = useState(false)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
@@ -102,7 +101,7 @@ export default function QueueView({ role }: { role: Role }) {
   // entry for the full audit trail. Nothing is deleted from the database.
   const [showAll, setShowAll] = useState(false)
 
-  const shown = tab === "all" ? items : items.filter((i) => statusGroup(i.status) === tab)
+  const shown = items.filter((i) => statusGroup(i.status) === tab)
   const g = (k: QueueStatusGroup) => counts[k] || 0
   const done = g("called") + g("failed") + g("skipped") + g("cancelled")
   const planned = done + g("pending")
@@ -139,7 +138,7 @@ export default function QueueView({ role }: { role: Role }) {
       // rows come filtered from the paginated listing.
       const [runRes, listRes] = await Promise.all([
         fetch("/api/outbound/process"),
-        fetch(`/api/outbound?status=${tab === "all" ? "" : tab}&limit=200`),
+        fetch(`/api/outbound?status=${tab}&limit=200`),
       ])
       if (runRes.ok) {
         const d = await runRes.json()
@@ -487,7 +486,7 @@ export default function QueueView({ role }: { role: Role }) {
         <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
           {TABS.map((t) => {
             const active = tab === t.id
-            const n = t.id === "all" ? Object.values(counts).reduce((s, v) => s + v, 0) : g(t.id as QueueStatusGroup)
+            const n = g(t.id)
             return (
               <button
                 key={t.id}
