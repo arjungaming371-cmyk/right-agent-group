@@ -1382,6 +1382,13 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
             })}
           </tbody>
         </table>
+        {leads.length >= 200 && (
+          // The server caps the list at 200 rows (default LIMIT) — if the page
+          // is exactly full, say so instead of silently hiding the rest.
+          <div style={{ padding: "10px 16px", fontSize: 11.5, color: "var(--text-muted)", textAlign: "center", borderTop: "1px solid var(--border-light)" }}>
+            Showing the first {leads.length} leads — refine the search or filters to narrow further.
+          </div>
+        )}
         </div>
       </div>
 

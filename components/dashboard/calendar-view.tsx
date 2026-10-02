@@ -2,7 +2,7 @@
 
 type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
 import { useEffect, useState } from "react"
-import { CalendarClock, ChevronLeft, ChevronRight, Phone, RotateCcw, X } from "lucide-react"
+import { CalendarClock, ChevronLeft, ChevronRight, Phone, PhoneCall, RotateCcw, X } from "lucide-react"
 import { useToast } from "../ui/toast"
 import { SkeletonList } from "../ui/skeleton"
 
@@ -36,6 +36,10 @@ export default function CalendarView({ role }: { role: Role }) {
   const [leads, setLeads] = useState<Lead[]>([])
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<Callback | null>(null)
+  const [calling, setCalling] = useState(false)
+
+  // Priya-dial is role-gated the same way as the Needs Human queue.
+  const canCall = role === "admin" || role === "agent" || role === "branch_manager" || role === "developer"
 
   const [scheduling, setScheduling] = useState(false)
   const [scheduleLeadId, setScheduleLeadId] = useState("")
@@ -65,6 +69,28 @@ export default function CalendarView({ role }: { role: Role }) {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [monthCursor])
+
+  async function callWithPriya(leadId: string) {
+    setCalling(true)
+    try {
+      const res = await fetch("/api/calls/dial", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ leadId, channel: "auto" }),
+      })
+      const d = await res.json().catch(() => ({}))
+      if (res.ok) {
+        toast.success("Priya is calling them now")
+        setSelected(null)
+      } else {
+        toast.error(d.error || "Call could not be placed")
+      }
+    } catch {
+      toast.error("Call could not be placed — check your connection and try again")
+    } finally {
+      setCalling(false)
+    }
+  }
 
   async function saveCallback(leadId: string, callbackAt: string | null, note: string | null) {
     setSaving(true)
@@ -115,6 +141,18 @@ export default function CalendarView({ role }: { role: Role }) {
   const todayKey = toDateKey(new Date())
   const monthLabel = monthCursor.toLocaleDateString([], { month: "long", year: "numeric" })
 
+  // Month summary + the mobile agenda source (upcoming, soonest first).
+  const nowMs = Date.now()
+  const upcomingCallbacks = callbacks
+    .filter((cb) => new Date(cb.callback_at).getTime() >= nowMs)
+    .sort((a, b) => new Date(a.callback_at).getTime() - new Date(b.callback_at).getTime())
+  const todayCallbacks = callbacksByDay[todayKey] || []
+  const chipStyle: React.CSSProperties = {
+    fontSize: 11.5, fontWeight: 600, padding: "4px 10px", borderRadius: 999,
+    background: "var(--overlay-chip)", color: "var(--text-secondary)",
+    border: "1px solid var(--border-light)", whiteSpace: "nowrap",
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
@@ -144,8 +182,22 @@ export default function CalendarView({ role }: { role: Role }) {
         </div>
       </div>
 
-      {/* Month grid */}
-      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
+      {/* Month summary strip */}
+      {callbacks.length > 0 && (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: -6 }}>
+          <span style={chipStyle}>{callbacks.length} scheduled this month</span>
+          <span style={chipStyle}>{upcomingCallbacks.length} upcoming</span>
+          {todayCallbacks.length > 0 && (
+            <span style={{ ...chipStyle, color: "var(--accent-violet)", borderColor: "rgba(139,124,255,0.4)", background: "rgba(139,124,255,0.1)" }}>
+              {todayCallbacks.length} today
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Month grid (desktop/tablet — a 7-column grid is unreadable on a
+          phone, which gets the agenda list below instead) */}
+      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }} className="hidden md:block">
         <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", borderBottom: "1px solid var(--border)" }}>
           {WEEKDAY_LABELS.map((w) => (
             <div key={w} style={{ padding: "10px 8px", fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textAlign: "center", letterSpacing: "0.05em" }}>
@@ -208,6 +260,36 @@ export default function CalendarView({ role }: { role: Role }) {
         )}
       </div>
 
+      {/* Mobile agenda — upcoming callbacks, soonest first (the 7-column
+          grid above is hidden on phones) */}
+      <div className="md:hidden" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {loading && (
+          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: 16 }}>
+            <SkeletonList rows={4} />
+          </div>
+        )}
+        {!loading && upcomingCallbacks.length === 0 && (
+          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: 28, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
+            No upcoming callbacks this month.
+          </div>
+        )}
+        {!loading && upcomingCallbacks.map((cb) => (
+          <button
+            key={cb.id}
+            onClick={() => setSelected(cb)}
+            style={{ textAlign: "left", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 14px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}
+          >
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: 600, fontSize: 13, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cb.name}</div>
+              <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 1 }}>{cb.phone}</div>
+            </div>
+            <div style={{ flexShrink: 0, fontSize: 12.5, fontWeight: 700, color: "var(--accent-violet)" }}>
+              {new Date(cb.callback_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+            </div>
+          </button>
+        ))}
+      </div>
+
       {/* Callback detail modal */}
       {selected && (
         <div
@@ -215,7 +297,7 @@ export default function CalendarView({ role }: { role: Role }) {
           onClick={() => setSelected(null)}
         >
           <div
-            style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, padding: 28, width: 440 }}
+            style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, padding: 28, width: "min(440px, calc(100vw - 32px))", maxHeight: "calc(100vh - 48px)", overflowY: "auto" }}
             onClick={(e) => e.stopPropagation()}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
@@ -249,18 +331,30 @@ export default function CalendarView({ role }: { role: Role }) {
             </div>
 
             {canEdit && (
-              <div style={{ display: "flex", gap: 10 }}>
-                <a href={`tel:${selected.phone}`} className="btn-primary" style={{ flex: 1, height: 36, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontSize: 13, textDecoration: "none" }}>
-                  <Phone size={13} strokeWidth={2} /> Call now
-                </a>
-                <button
-                  disabled={saving}
-                  onClick={() => { if (window.confirm("Clear the scheduled callback for this lead?")) saveCallback(selected.id, null, null) }}
-                  className="btn-ghost"
-                  style={{ flex: 1, height: 36, fontSize: 13 }}
-                >
-                  Clear callback
-                </button>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {canCall && (
+                  <button
+                    disabled={calling}
+                    onClick={() => callWithPriya(selected.id)}
+                    className="btn-primary"
+                    style={{ height: 38, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontSize: 13 }}
+                  >
+                    <PhoneCall size={14} strokeWidth={2} /> {calling ? "Dialing…" : "Call with Priya"}
+                  </button>
+                )}
+                <div style={{ display: "flex", gap: 10 }}>
+                  <a href={`tel:${selected.phone}`} className="btn-ghost" style={{ flex: 1, height: 36, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontSize: 13, textDecoration: "none" }}>
+                    <Phone size={13} strokeWidth={2} /> Dial from my phone
+                  </a>
+                  <button
+                    disabled={saving}
+                    onClick={() => { if (window.confirm("Clear the scheduled callback for this lead?")) saveCallback(selected.id, null, null) }}
+                    className="btn-ghost"
+                    style={{ flex: 1, height: 36, fontSize: 13 }}
+                  >
+                    Clear callback
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -274,7 +368,7 @@ export default function CalendarView({ role }: { role: Role }) {
           onClick={() => setScheduling(false)}
         >
           <div
-            style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, padding: 28, width: 440 }}
+            style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, padding: 28, width: "min(440px, calc(100vw - 32px))", maxHeight: "calc(100vh - 48px)", overflowY: "auto" }}
             onClick={(e) => e.stopPropagation()}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
