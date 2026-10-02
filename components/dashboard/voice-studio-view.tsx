@@ -512,7 +512,7 @@ export default function VoiceStudioView({ role }: { role: Role }) {
               <div style={{ fontWeight: 700, fontSize: 14, color: "var(--text-primary)", marginBottom: 8 }}>What happens after cloning</div>
               1. The voice appears in the <strong>Library</strong> with a CLONE badge.<br />
               2. Audition it in Telugu, Hindi, and English with ▶.<br />
-              3. Assign it to an AI Employee in <strong>Branches &amp; Staff AI</strong> — live calls, dashboard speech, and previews all switch to it.<br />
+              3. The live call voice stays the deployment default unless an AI Employee voice is configured — Library previews always use the voice you pick.<br />
               4. Delete anytime — removed at the provider and hidden in the app, with the audit trail kept.
             </div>
           </div>

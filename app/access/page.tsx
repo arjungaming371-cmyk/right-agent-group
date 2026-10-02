@@ -9,7 +9,9 @@ import { ArrowLeft, LogOut, Shield, UserCog, Eye, UserPlus, Users, Trash2, Build
 import { ToastProvider, useToast } from "@/components/ui/toast"
 import { SkeletonList } from "@/components/ui/skeleton"
 import type { RoleDefinition } from "@/components/dashboard/role-manager-modal"
-import type { BranchOption } from "@/components/dashboard/branch-manager-modal"
+// BranchOption moved here 2026-10-03 — branch-manager-modal.tsx was deleted
+// along with the Branches & Staff AI console (owner decision).
+type BranchOption = { id: string; name: string; code: string; region?: string | null }
 import { ModulePicker, ALL_MODULES } from "@/components/dashboard/module-picker"
 import { VoiceDictation } from "@/components/ui/voice-dictation"
 import ThemeSwitcher from "@/components/dashboard/theme-switcher"
