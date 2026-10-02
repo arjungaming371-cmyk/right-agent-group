@@ -286,7 +286,14 @@ export async function requireRole(req: Request, roles: Role[]): Promise<Session 
 
 /**
  * Reads the session and checks if the user has access to a specific module key OR one of the allowed base roles.
- * If allowed_modules is explicitly set for the user, it takes precedence over role defaults.
+ *
+ * SECURITY MODEL (two independent layers — never let one grant the other):
+ *   1. CAPABILITY (base role): decides read vs write power. A viewer-based
+ *      custom role can never pass a write gate, no matter which modules it
+ *      was granted.
+ *   2. VISIBILITY (allowed_modules allotment): when explicitly set, it can
+ *      only NARROW what the user may touch — it can never EXPAND a
+ *      capability the base role does not have.
  */
 export async function requireModuleOrRole(
   req: Request,
@@ -297,12 +304,12 @@ export async function requireModuleOrRole(
   if (!session) return null
   if (session.role === "developer") return session
 
+  if (!allowedRoles.includes(session.role)) return null
+
   if (session.allowedModules !== null && session.allowedModules !== undefined) {
-    if (session.allowedModules.includes(moduleKey)) return session
-    return null
+    if (!session.allowedModules.includes(moduleKey)) return null
   }
 
-  if (allowedRoles.includes(session.role)) return session
-  return null
+  return session
 }
 

@@ -26,6 +26,19 @@ const PUBLIC_PREFIXES = [
   "/api/form/",
   "/api/apply",
   "/api/warmup",
+  // Public marketing site (2026-10 product upgrade) + its demo APIs.
+  // /api/demo + /api/demo/chat are rate-limited + consent/anti-abuse gated
+  // inside their routes (lib/rate-limit.ts, honeypot, fixed demo context).
+  "/demo",
+  "/pricing",
+  "/security",
+  "/privacy",
+  "/terms",
+  "/product",
+  "/ai-employees",
+  "/integrations",
+  "/help",
+  "/api/demo",
 ]
 
 // EXACT matches only — everything else stays session-protected.

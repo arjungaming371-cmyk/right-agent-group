@@ -5,6 +5,7 @@ import {
   Users, FileText, Phone, MessageCircle, Activity, ShieldCheck, UploadCloud,
   ScrollText, LogOut, Mic, BarChart3, UserCog, Search, Menu, X, BookOpen,
   Building2, Sparkles, Instagram, PhoneCall, AudioWaveform, type LucideIcon,
+  BellRing, HeartPulse, CalendarDays,
 } from "lucide-react"
 import { ToastProvider } from "../ui/toast"
 import { Skeleton, SkeletonList } from "../ui/skeleton"
@@ -97,6 +98,14 @@ const BranchesView = dynamic(() => import("./branches-view"), {
   ssr: false,
   loading: () => <ViewFallback label="Branches & Staff AI" />,
 })
+const AttentionView = dynamic(() => import("./attention-view"), {
+  ssr: false,
+  loading: () => <ViewFallback label="Needs Human" />,
+})
+const SystemHealthView = dynamic(() => import("./system-health-view"), {
+  ssr: false,
+  loading: () => <ViewFallback label="System Health" />,
+})
 const VoiceAssistant = dynamic(() => import("./voice-assistant"), { ssr: false })
 import { usePolling, setActivePollingView, PollingViewContext } from "@/lib/use-poll"
 
@@ -114,7 +123,7 @@ function ViewFallback({ label }: { label: string }) {
   )
 }
 
-export type ViewKey = "leads" | "loans" | "queue" | "voice" | "voice-studio" | "whatsapp" | "instagram" | "comms" | "calendar" | "security" | "upload" | "script" | "knowledge" | "analytics" | "branches" | "dev-logs" | "simulator"
+export type ViewKey = "leads" | "loans" | "queue" | "voice" | "voice-studio" | "whatsapp" | "instagram" | "comms" | "calendar" | "security" | "upload" | "script" | "knowledge" | "analytics" | "branches" | "dev-logs" | "simulator" | "attention" | "system"
 export type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
 
 const ROLE_LABEL: Record<Role, string> = { admin: "Administrator", agent: "Loan Officer", viewer: "Viewer", developer: "Administrator", branch_manager: "Branch Manager" }
@@ -129,9 +138,11 @@ const NAV_SECTIONS: NavSection[] = [
     title: "Overview",
     items: [
       { key: "analytics", label: "Analytics",        icon: BarChart3, roles: ["admin", "agent", "viewer", "branch_manager"] },
+      { key: "attention", label: "Needs Human",      icon: BellRing,  roles: ["admin", "agent", "branch_manager"] },
       { key: "leads",     label: "Leads",             icon: Users,     roles: ["admin", "agent", "viewer", "branch_manager"] },
       { key: "loans",     label: "Loan Applications", icon: FileText,  roles: ["admin", "agent", "viewer", "branch_manager"] },
       { key: "queue",     label: "Call Queue",        icon: PhoneCall, roles: ["admin", "agent", "viewer", "branch_manager"] },
+      { key: "calendar",  label: "Calendar",          icon: CalendarDays, roles: ["admin", "agent", "viewer", "branch_manager"] },
     ],
   },
   {
@@ -149,6 +160,8 @@ const NAV_SECTIONS: NavSection[] = [
     title: "System",
     items: [
       { key: "security", label: "Security",       icon: ShieldCheck,  roles: ["admin", "developer"] },
+      { key: "branches", label: "Branches & Staff AI", icon: Building2, roles: ["admin", "developer"] },
+      { key: "system",   label: "System Health",  icon: HeartPulse,   roles: ["admin", "developer"] },
       { key: "upload",   label: "Upload & Data",  icon: UploadCloud,  roles: ["admin", "agent", "viewer", "branch_manager"] },
       { key: "script",   label: "Priya's Script", icon: ScrollText,   roles: ["admin", "agent", "viewer", "branch_manager"] },
       { key: "knowledge",label: "Knowledge Base", icon: BookOpen,     roles: ["admin", "agent", "viewer", "branch_manager"] },
@@ -164,6 +177,7 @@ const NAV_SECTIONS: NavSection[] = [
 
 const VIEW_TITLES: Record<ViewKey, { title: string; sub: string }> = {
   analytics: { title: "Analytics",         sub: "Performance across calls, leads, and WhatsApp" },
+  attention: { title: "Needs Human",        sub: "Customers who asked for a person — or need one" },
   leads:    { title: "Leads",              sub: "Pipeline and qualified prospects" },
   loans:    { title: "Loan Applications",  sub: "Incoming home & business loan enquiries" },
   queue:    { title: "Call Queue",         sub: "Bulk outbound calling — queue, radar, and controls" },
@@ -178,6 +192,7 @@ const VIEW_TITLES: Record<ViewKey, { title: string; sub: string }> = {
   upload:   { title: "Upload & Data",      sub: "Upload contacts, scripts, and files for AI campaigns" },
   script:   { title: "Priya's Script",     sub: "View and edit what Priya says on every call" },
   branches: { title: "Branches & Staff AI", sub: "Sub-accounts, AI Employees, per-branch scripts, quotas, and billing meters" },
+  system:   { title: "System Health",       sub: "Providers, voice server, database — live status and recent failures" },
   knowledge:{ title: "Knowledge Base",     sub: "Facts Priya can pull into any call or chat, on any turn" },
   "dev-logs": { title: "Activity Logs",   sub: "Your activity, login history, and system events" },
 }
@@ -196,7 +211,8 @@ function StatusPill({ icon: Icon, label }: { icon: LucideIcon; label: string }) 
 }
 
 export default function DashboardShell() {
-  const [view, setView] = useState<ViewKey>("leads")
+  // Owner-focused default: the console opens on business outcomes, not a list.
+  const [view, setView] = useState<ViewKey>("analytics")
   const [counts, setCounts] = useState({ leads: 0, loans: 0, whatsapp: 0, queue: 0 })
   const [userEmail, setUserEmail] = useState("")
   const [role, setRole] = useState<Role>("viewer") // safest default until the real role loads
@@ -316,7 +332,44 @@ export default function DashboardShell() {
         }).catch(() => {})
       }
     }).catch(() => {})
+    // AI kill-switch banner — every user sees it, so nobody wonders why
+    // campaigns are not dialing. Re-checked on the same 60s cycle as the
+    // status pill (loadAiPause below) so a pause flip shows up fast.
+    loadAiPause()
   }, [])
+
+  // AI AUTOMATION PAUSED — resolved for THIS session's branch scope: global
+  // toggles OR this branch's entry in the per-branch map.
+  const [aiPauseState, setAiPauseState] = useState<{
+    calls: boolean; messages: boolean; branches: Record<string, { calls?: boolean; messages?: boolean }>; reason: string | null
+  } | null>(null)
+
+  async function loadAiPause() {
+    try {
+      const res = await fetch("/api/ai-pause")
+      if (!res.ok) { setAiPauseState(null); return }
+      const d = await res.json()
+      setAiPauseState({
+        calls: !!d.calls,
+        messages: !!d.messages,
+        branches: d.branches && typeof d.branches === "object" ? d.branches : {},
+        reason: d.reason ?? null,
+      })
+    } catch {
+      setAiPauseState(null)
+    }
+  }
+  usePolling(loadAiPause, 60000)
+
+  const branchAiPause = (() => {
+    if (!aiPauseState) return null
+    const b = sessionBranchId ? aiPauseState.branches[sessionBranchId] : undefined
+    return {
+      calls: aiPauseState.calls || !!b?.calls,
+      messages: aiPauseState.messages || !!b?.messages,
+      reason: aiPauseState.reason,
+    }
+  })()
 
   async function switchBranch(id: string | null) {
     await fetch("/api/auth/branch", {
@@ -403,7 +456,7 @@ export default function DashboardShell() {
   // lockstep with what each view needs (role, branch context, seeded search).
   function renderView(k: ViewKey) {
     switch (k) {
-      case "analytics":    return <AnalyticsView />
+      case "analytics":    return <AnalyticsView role={role} />
       case "leads":        return <LeadsView role={role} initialSearch={seedSearch?.view === "leads" ? seedSearch.q : undefined} />
       case "loans":        return <LoanAppsView role={role} initialSearch={seedSearch?.view === "loans" ? seedSearch.q : undefined} />
       case "queue":        return <QueueView role={role} />
@@ -417,6 +470,8 @@ export default function DashboardShell() {
       case "upload":       return <UploadView role={role} />
       case "script":       return <ScriptView />
       case "branches":     return <BranchesView role={role} branchId={sessionBranchId} />
+      case "attention":    return <AttentionView role={role} />
+      case "system":       return <SystemHealthView />
       case "knowledge":    return <KnowledgeBaseView role={role} />
       case "simulator":    return <OmnichannelTester />
       case "dev-logs":     return role === "developer" ? <DeveloperLogsView userEmail={userEmail} /> : null
@@ -455,7 +510,7 @@ export default function DashboardShell() {
         {/* Brand */}
         <div className="flex h-16 items-center justify-between border-b border-[var(--border-light)] px-4">
           <button
-            onClick={() => { setView("leads"); setMobileNavOpen(false) }}
+            onClick={() => { setView("analytics"); setMobileNavOpen(false) }}
             className="flex items-center gap-2.5 min-w-0 flex-1 text-left cursor-pointer hover:opacity-90 transition-opacity"
             title="Right Agent Group — Operations Console"
           >
@@ -642,6 +697,31 @@ export default function DashboardShell() {
           <ThemeSwitcher />
           <NotificationBell onNavigate={(view) => setView(view)} />
         </header>
+
+        {/* AI AUTOMATION PAUSED — prominent, unmissable, role-wide. */}
+        {branchAiPause && (branchAiPause.calls || branchAiPause.messages) && (
+          <div
+            role="alert"
+            className="flex flex-shrink-0 items-center gap-3 border-b px-4 py-2.5 md:px-6"
+            style={{ background: "rgba(220,38,38,0.12)", borderColor: "rgba(220,38,38,0.35)" }}
+          >
+            <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md" style={{ background: "rgba(220,38,38,0.25)" }}>
+              <HeartPulse size={14} style={{ color: "#f87171" }} />
+            </span>
+            <div className="min-w-0 flex-1 leading-tight">
+              <div className="text-[13px] font-bold tracking-wide" style={{ color: "#fca5a5" }}>
+                AI AUTOMATION PAUSED — {[
+                  branchAiPause.calls ? "outbound calls" : null,
+                  branchAiPause.messages ? "automated messages" : null,
+                ].filter(Boolean).join(" + ").toUpperCase()}
+              </div>
+              <div className="truncate text-[11px]" style={{ color: "rgba(252,165,165,0.75)" }}>
+                {branchAiPause.reason ? `Reason: ${branchAiPause.reason} — ` : ""}
+                Resume in Security → Pause AI. Manual human actions are unaffected.
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Content — keep-alive hosts: visited views stay mounted (hidden),
             the active one is visible and plays its enter animation via the
