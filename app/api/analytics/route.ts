@@ -29,16 +29,17 @@ export async function GET(req: NextRequest) {
   const params = branchId ? [branchId] : []
   // B() wraps a predicate with the branch filter when one applies.
   const B = (col: string) => (branchId ? `${col} = $1` : "TRUE")
+  const dayParam = branchId ? "$2" : "$1"
 
   try {
     const [callsByDay, funnel, languageSplit, sentiment, callsByHour, totals] = await Promise.all([
       query(
         `
         SELECT to_char(d.day, 'Mon DD') AS day, COALESCE(c.count, 0)::int AS count
-        FROM generate_series(CURRENT_DATE - ($2::int - 1) * interval '1 day', CURRENT_DATE, interval '1 day') d(day)
+        FROM generate_series(CURRENT_DATE - (${dayParam}::int - 1) * interval '1 day', CURRENT_DATE, interval '1 day') d(day)
         LEFT JOIN (
           SELECT date_trunc('day', created_at) AS day, count(*) AS count
-          FROM voice_calls WHERE created_at > now() - ($2::int * interval '1 day') AND ${B("branch_id")}
+          FROM voice_calls WHERE created_at > now() - (${dayParam}::int * interval '1 day') AND ${B("branch_id")}
           GROUP BY 1
         ) c ON c.day = d.day
         ORDER BY d.day
