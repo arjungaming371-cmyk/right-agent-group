@@ -4,9 +4,10 @@ import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from "recharts"
-import { Users, Phone, BadgeCheck, Timer, Mail, CheckCircle2, RotateCcw, PhoneOutgoing, TrendingUp, UserPlus, FileText, BellRing, ClipboardList } from "lucide-react"
+import { Users, Phone, BadgeCheck, Timer, Mail, CheckCircle2, RotateCcw, PhoneOutgoing, TrendingUp, UserPlus, FileText, BellRing, ClipboardList, MessageCircle, PhoneCall } from "lucide-react"
 import { formatPct } from "@/lib/maths"
 import OnboardingCard from "./onboarding-card"
+import { SkeletonList } from "../ui/skeleton"
 
 // Validated (scripts/validate_palette.js, dark surface) — fixed order, never cycled.
 const CAT = { blue: "var(--accent-blue)", aqua: "var(--accent-green)", violet: "var(--accent-violet)" }
@@ -95,7 +96,17 @@ export default function AnalyticsView({ role = "admin" }: { role?: "admin" | "ag
   }
 
   if (loading) {
-    return <div style={{ padding: 60, textAlign: "center", color: "var(--text-muted)" }}>Loading analytics…</div>
+    // Skeleton matching the tile+chart layout — the bare "Loading analytics…"
+    // text flashed jarringly against the finished dashboard.
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <div style={{ ...CARD, padding: 20 }}><SkeletonList rows={7} /></div>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-[1.6fr_1fr]">
+          <div style={{ ...CARD, padding: 20 }}><SkeletonList rows={4} /></div>
+          <div style={{ ...CARD, padding: 20 }}><SkeletonList rows={4} /></div>
+        </div>
+      </div>
+    )
   }
 
   // A failed load must not render as an eternal "Loading analytics…" — say
@@ -112,7 +123,11 @@ export default function AnalyticsView({ role = "admin" }: { role?: "admin" | "ag
   }
 
   if (!data) {
-    return <div style={{ padding: 60, textAlign: "center", color: "var(--text-muted)" }}>Loading analytics…</div>
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <div style={{ ...CARD, padding: 20 }}><SkeletonList rows={7} /></div>
+      </div>
+    )
   }
 
   const { totals, funnel, rates } = data
@@ -184,10 +199,14 @@ export default function AnalyticsView({ role = "admin" }: { role?: "admin" | "ag
         <StatTile icon={BellRing} label="Needs Human" value={String(totals.needs_human ?? 0)} tone={STATUS.critical} />
       </div>
 
-      {/* Detail tiles */}
+      {/* Detail tiles — every figure here comes straight from the analytics
+          payload; connect/resolution rates were computed but never shown. */}
       <div className="grid grid-cols-2 gap-3 md:flex md:flex-wrap md:gap-4">
         <StatTile icon={Users} label="Total Leads" value={String(totals.total_leads)} tone={CAT.violet} />
+        <StatTile icon={MessageCircle} label="WhatsApp Messages" value={String(totals.total_messages)} tone={CAT.aqua} />
         <StatTile icon={TrendingUp} label="Lead → Qualified" value={formatPct(rates.conversionRate)} tone={CAT.violet} />
+        <StatTile icon={PhoneCall} label="Connect Rate" value={formatPct(rates.connectRate)} tone={CAT.blue} />
+        <StatTile icon={CheckCircle2} label="Resolution Rate" value={formatPct(rates.resolutionRate)} tone={STATUS.good} />
         <StatTile icon={Timer} label="Avg. Call Length" value={`${Math.floor(avgDur / 60)}m ${avgDur % 60}s`} tone={CAT.aqua} />
       </div>
 

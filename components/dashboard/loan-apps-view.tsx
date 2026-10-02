@@ -87,6 +87,9 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
   const [historyFor, setHistoryFor] = useState<string | null>(null)
   const [history, setHistory] = useState<EditRequest[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
+  // Quick status lane — the owner usually reviews ONE bucket (pending first);
+  // search alone made them scroll the whole list to find it.
+  const [statusFilter, setStatusFilter] = useState<string>("all")
 
   // Modals state
   const [showAddModal, setShowAddModal] = useState(false)
@@ -149,7 +152,9 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
     a.pan_number,
     a.aadhaar_number,
     a.notes,
-  ])
+  ]).filter((a) => statusFilter === "all" || a.status === statusFilter)
+  const statusCounts: Record<string, number> = { all: apps.length }
+  for (const a of apps) statusCounts[a.status] = (statusCounts[a.status] || 0) + 1
   const selected = apps.find((a) => a.id === selectedId) || null
 
   async function markStatus(id: string, status: string) {
@@ -346,6 +351,30 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
                 />
               </div>
             </div>
+            {/* Status lanes — one tap to the bucket the owner actually reviews */}
+            <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 10 }}>
+              {(["all", "pending", "under_review", "approved", "rejected"] as const).map((st) => {
+                const active = statusFilter === st
+                const c = STATUS_COLORS[st]
+                const count = statusCounts[st] || 0
+                return (
+                  <button
+                    key={st}
+                    onClick={() => setStatusFilter(st)}
+                    style={{
+                      height: 24, padding: "0 9px", borderRadius: 6, fontSize: 11, fontWeight: 600,
+                      cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5,
+                      border: `1px solid ${active && c ? c.color : "var(--border)"}`,
+                      background: active && c ? c.bg : "transparent",
+                      color: active && c ? c.color : "var(--text-muted)",
+                    }}
+                  >
+                    {st === "all" ? "All" : (c?.label || st)}
+                    <span style={{ fontSize: 10, opacity: 0.85 }}>{count}</span>
+                  </button>
+                )
+              })}
+            </div>
           </div>
 
           <div style={{ flex: 1, overflowY: "auto" }}>
@@ -382,6 +411,11 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
                 </div>
               </div>
             ))}
+            {!loading && filtered.length > 0 && (
+              <div style={{ padding: "10px 16px", fontSize: 11, color: "var(--text-muted)", textAlign: "center" }}>
+                Showing {filtered.length} of {apps.length} application{apps.length === 1 ? "" : "s"}
+              </div>
+            )}
           </div>
         </div>
 
