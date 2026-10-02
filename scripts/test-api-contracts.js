@@ -101,12 +101,13 @@ section("app/api/branches POST: create persists the 5 credential fields")
     has(br, `body?.${col} ? String(body.${col}).trim() : null`, `create reads ${col}`)
   }
   has(br, "exotel_sid, exotel_api_key, exotel_api_token, exotel_flow_app_id,", "INSERT column list carries the credential columns")
-  const bv = read("components/dashboard/branches-view.tsx")
-  has(
-    bv,
-    'for (const secret of ["exotel_api_key", "exotel_api_token", "whatsapp_token", "instagram_token"])',
-    "blank write-only secrets are stripped client-side (PATCH no longer wipes stored secrets)"
-  )
+  // 2026-10-03: the Branches & Staff AI console (and its client-side blank
+  // secret stripper) was removed per owner decision. The guarantee now rests
+  // on the backend contract alone: a secret field is only written when the
+  // key is EXPLICITLY present in the PATCH body — omitted = stored value kept.
+  const bpatch = read("app/api/branches/[id]/route.ts")
+  ok(bpatch.includes('if ("exotel_api_key" in (body || {}))'), "branch PATCH only writes a secret when explicitly sent — omitted field keeps the stored secret")
+  has(bpatch, "Secret fields are write-only", "write-only secret contract is documented on the route")
 }
 
 // ── 7. API key tester — Exotel is a real provider ──────────────────────────
@@ -191,13 +192,10 @@ section("calendar-view.tsx: month bounds sent as UTC instants of LOCAL month")
 }
 
 // ── 16. Silent failures now surface ────────────────────────────────────────
-section("res.ok discipline: developer logs + loan status + branch mutations")
+section("res.ok discipline: developer logs + loan status")
 {
   has(read("components/dashboard/developer-logs-view.tsx"), "if (!res.ok) return", "developer logs: 401/500 no longer renders as 'No activity yet'")
   has(read("components/dashboard/loan-apps-view.tsx"), "if (!r.ok) {\n        const d = await r.json().catch(() => ({}))\n        toast.error(d.error || \"Could not update the loan status\")", "loan PATCH failures toast instead of silently reverting")
-  const bv = read("components/dashboard/branches-view.tsx")
-  ok(bv.split("Could not delete").length >= 2, "branch delete surfaces the server's 409 blocker message")
-  ok(bv.split("Network error — try again").length >= 2, "branch status toggle surfaces failures")
 }
 
 // ── 17. Call Queue talking points — "What should Priya talk about?" ────────

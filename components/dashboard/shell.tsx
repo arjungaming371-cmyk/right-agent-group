@@ -4,7 +4,7 @@ import dynamic from "next/dynamic"
 import {
   Users, FileText, Phone, MessageCircle, Activity, ShieldCheck, UploadCloud,
   ScrollText, LogOut, Mic, BarChart3, UserCog, Search, Menu, X, BookOpen,
-  Building2, Sparkles, Instagram, PhoneCall, type LucideIcon,
+  Sparkles, Instagram, PhoneCall, type LucideIcon,
   BellRing, HeartPulse, CalendarDays,
 } from "lucide-react"
 import { ToastProvider } from "../ui/toast"
@@ -86,10 +86,6 @@ const CalendarView = dynamic(() => import("./calendar-view"), {
   loading: () => <ViewFallback label="Calendar" />,
 })
 const ProfileModal = dynamic(() => import("./profile-modal"), { ssr: false })
-const BranchesView = dynamic(() => import("./branches-view"), {
-  ssr: false,
-  loading: () => <ViewFallback label="Branches & Staff AI" />,
-})
 const AttentionView = dynamic(() => import("./attention-view"), {
   ssr: false,
   loading: () => <ViewFallback label="Needs Human" />,
@@ -115,7 +111,10 @@ function ViewFallback({ label }: { label: string }) {
   )
 }
 
-export type ViewKey = "leads" | "loans" | "queue" | "voice" | "whatsapp" | "instagram" | "comms" | "calendar" | "security" | "upload" | "script" | "knowledge" | "analytics" | "branches" | "dev-logs" | "attention" | "system"
+// NOTE 2026-10-03: the Branches & Staff AI console was removed per owner
+// decision — the multi-branch backend (session scoping, per-branch script
+// fallback, usage meters) stays intact, just with no management UI.
+export type ViewKey = "leads" | "loans" | "queue" | "voice" | "whatsapp" | "instagram" | "comms" | "calendar" | "security" | "upload" | "script" | "knowledge" | "analytics" | "dev-logs" | "attention" | "system"
 export type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
 
 const ROLE_LABEL: Record<Role, string> = { admin: "Administrator", agent: "Loan Officer", viewer: "Viewer", developer: "Administrator", branch_manager: "Branch Manager" }
@@ -150,7 +149,6 @@ const NAV_SECTIONS: NavSection[] = [
     title: "System",
     items: [
       { key: "security", label: "Security",       icon: ShieldCheck,  roles: ["admin", "developer"] },
-      { key: "branches", label: "Branches & Staff AI", icon: Building2, roles: ["admin", "developer"] },
       { key: "system",   label: "System Health",  icon: HeartPulse,   roles: ["admin", "developer"] },
       { key: "upload",   label: "Upload & Data",  icon: UploadCloud,  roles: ["admin", "agent", "viewer", "branch_manager"] },
       { key: "script",   label: "Priya's Script", icon: ScrollText,   roles: ["admin", "agent", "viewer", "branch_manager"] },
@@ -179,7 +177,6 @@ const VIEW_TITLES: Record<ViewKey, { title: string; sub: string }> = {
   security: { title: "Security",           sub: "Access control and audit policy" },
   upload:   { title: "Upload & Data",      sub: "Upload contacts, scripts, and files for AI campaigns" },
   script:   { title: "Priya's Script",     sub: "View and edit what Priya says on every call" },
-  branches: { title: "Branches & Staff AI", sub: "Sub-accounts, AI Employees, per-branch scripts, quotas, and billing meters" },
   system:   { title: "System Health",       sub: "Providers, voice server, database — live status and recent failures" },
   knowledge:{ title: "Knowledge Base",     sub: "Facts Priya can pull into any call or chat, on any turn" },
   "dev-logs": { title: "Activity Logs",   sub: "Your activity, login history, and system events" },
@@ -456,7 +453,6 @@ export default function DashboardShell() {
       case "security":     return <SecurityView role={role} />
       case "upload":       return <UploadView role={role} />
       case "script":       return <ScriptView />
-      case "branches":     return <BranchesView role={role} branchId={sessionBranchId} />
       case "attention":    return <AttentionView role={role} />
       case "system":       return <SystemHealthView />
       case "knowledge":    return <KnowledgeBaseView role={role} />

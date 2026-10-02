@@ -1,5 +1,13 @@
 # Multi-Branch (Multi-Tenant) Architecture
 
+> **STATUS 2026-10-03 — management console removed.** Per owner decision, the
+> **Branches & Staff AI** dashboard view was taken out of the product. The
+> multi-branch BACKEND stays fully intact and production-safe: session branch
+> scoping, per-branch script fallback, quotas, usage meters, white-label
+> branding, and the `/api/branches` + `/api/ai-employees` APIs all still work.
+> Branch data can no longer be edited from the UI — manage it via the APIs or
+> the database if a deployment ever needs it again.
+
 One parent account runs the whole company; every branch is a sub-account with
 its own phone number, WhatsApp number, branding, staff, and limits — while
 billing stays centralized at the top.
@@ -20,14 +28,14 @@ organizations  (parent account — owns billing)
 
 | Requirement | Implementation |
 |---|---|
-| **One parent admin account views/manages all branches** | `admin` role (ADMIN_EMAIL) sees every branch. Branch switcher in the dashboard topbar ("All branches (HQ)" ↔ any branch) re-issues the session with the active scope. Management UI: **Branches & Staff AI** view (`/api/branches`). |
+| **One parent admin account views/manages all branches** | `admin` role (ADMIN_EMAIL) sees every branch. Branch switcher in the dashboard topbar ("All branches (HQ)" ↔ any branch) re-issues the session with the active scope. Management console removed 2026-10-03 — manage via `/api/branches`. |
 | **Each branch gets its own sub-account + DLT-approved number** | `branches` table carries the branch's own `exotel_caller_id` (the DLT-approved ExoPhone) and optionally its own Exotel account (`exotel_sid/api_key/api_token`). Outbound calls dial with `CallerId = branch number`; inbound calls are routed to the branch by matching the CALLED number (`/api/calls/turn` start event, last-10-digits match). |
-| **AI Employees shared across branches or dedicated** | `ai_employees` table with `scope = 'shared' \| 'dedicated'` + `branch_ai_employees` assignment rows. The Branches view lets you toggle which branches a dedicated employee serves. |
-| **Centralized billing: parent pays for all branches** | There is ONE Sarvam/Exotel/Meta account set at the deployment level — the parent pays. `branch_usage` meters every branch's consumption (calls, talk-time, WhatsApp sends, STT seconds, TTS characters) so the admin can allocate the shared invoice per branch: **Branches & Staff AI → Usage & Billing**. |
+| **AI Employees shared across branches or dedicated** | `ai_employees` table with `scope = 'shared' \| 'dedicated'` + `branch_ai_employees` assignment rows (toggle assignments via `PATCH /api/ai-employees/[id]`). |
+| **Centralized billing: parent pays for all branches** | There is ONE Sarvam/Exotel/Meta account set at the deployment level — the parent pays. `branch_usage` meters every branch's consumption (calls, talk-time, WhatsApp sends, STT seconds, TTS characters) so the shared invoice can be allocated per branch (`GET /api/branches/usage`). |
 | **Decentralized operations: branch managers see only their branch** | New `branch_manager` role. `allowed_emails.branch_id` pins a user to a branch at invite time (Team Access page); the session carries `branchId` and EVERY data route filters/stamps by it (leads, calls, WhatsApp, loans, uploads, analytics, exports). Branch managers cannot switch branches (`/api/auth/branch` is admin-only). |
 | **White-label: each branch has its own branding** | `branches.brand_name / brand_logo_url / brand_primary_color / brand_tagline`. Served publicly (safe fields only) by `GET /api/branding?branch=…`; the AI persona speaks for the branch brand (branch context block in the system prompt) and WhatsApp fallback texts are branded per branch. |
 | **Per-branch usage limits and quotas** | `branches.monthly_call_limit` / `monthly_whatsapp_limit`. Enforced by `checkQuota()` BEFORE every outbound call and business-initiated WhatsApp template send; a `suspended` branch is blocked from all outreach. Exceeding a limit returns a clear 403 in the dashboard and silently blocks auto-sends (logged). |
-| **Per-branch script customization** | `branch_scripts` (branch → employee → language) with 3-level fallback: **branch+employee override → branch-wide override → org-level `ai_scripts`**. Edit per branch in **Branches & Staff AI → Scripts**. Applied on BOTH channels: calls (`getSystemPrompt`) and WhatsApp replies. |
+| **Per-branch script customization** | `branch_scripts` (branch → employee → language) with 3-level fallback: **branch+employee override → branch-wide override → org-level `ai_scripts`**. Applied on BOTH channels: calls (`getSystemPrompt`) and WhatsApp replies. |
 
 ## WhatsApp — "ALSO WHATSAPP"
 
@@ -35,7 +43,7 @@ Every branch can carry its **own WABA number**:
 
 1. In Meta WhatsApp Manager, add the branch's phone number to your WABA
    (or a separate WABA) and create a permanent System User token for it.
-2. In the dashboard (**Branches & Staff AI → Edit branch**) set:
+2. Set the branch's WhatsApp fields via `PATCH /api/branches/[id]`:
    - `whatsapp_phone_number_id` (the Phone Number ID from WhatsApp Manager)
    - `whatsapp_token`
    - `whatsapp_display_name`
@@ -61,9 +69,9 @@ npm run db:setup                     # fresh installs
 # or on an existing DB:
 psql "$DATABASE_URL" -f migrations/2026-09-16_multi_branch.sql
 
-# 2. Restart the app. The dashboard gains:
-#    - "Branches & Staff AI" in the System section (admin + branch managers)
-#    - a branch switcher in the topbar (admins)
+# 2. Restart the app. Backend branch features come online (no dashboard
+#    console since 2026-10-03):
+#    - a branch switcher in the topbar (admins, only when >1 branch exists)
 
 # 3. Create branches and set numbers/branding/quotas.
 

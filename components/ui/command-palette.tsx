@@ -37,7 +37,7 @@ const VIEW_ACTIONS: { key: ViewKey; label: string }[] = [
   { key: "upload", label: "Upload & Data" },
   { key: "script", label: "Priya's Script" },
   { key: "knowledge", label: "Knowledge Base" },
-  { key: "branches", label: "Branches & Staff AI" },
+  // "branches" removed 2026-10-03 — Branches & Staff AI console taken out per owner decision.
   { key: "dev-logs", label: "Activity Logs" },
 ]
 

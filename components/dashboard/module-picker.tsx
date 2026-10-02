@@ -32,9 +32,9 @@ export const ALL_MODULES: ModuleOption[] = [
   // couldn't render, and vice versa (2026-09-26 audit: key drift).
   { key: "security", label: "Security", section: "System", description: "Access controls, calling window, DND & audit log" },
   { key: "calendar", label: "Calendar", section: "Overview", description: "Follow-up calendar & scheduled callbacks" },
-  // 2026-10-03: the Branches & Staff AI console (branch CRUD, AI Employees,
-  // per-branch scripts, quotas) finally got a nav entry — grantable here too.
-  { key: "branches", label: "Branches & Staff AI", section: "System", description: "Branches, AI Employees, per-branch scripts & quotas" },
+  // 2026-10-03: the Branches & Staff AI console was removed per owner
+  // decision — no longer grantable from this picker. Legacy grants of the
+  // branches key stored in existing team configs stay valid server-side.
 ]
 
 export const SECTIONS = ["Overview", "Engagement", "System"] as const
