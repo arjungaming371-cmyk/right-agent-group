@@ -9,6 +9,7 @@ import {
   type BranchInstagramCtx,
 } from "@/lib/instagram"
 import { detectFrustration, flagFrustratedInstagram } from "@/lib/frustration"
+import { isAiPaused } from "@/lib/ai-pause"
 import { buildLeadBrief } from "@/lib/lead-brain"
 import { searchKnowledgeBase } from "@/lib/knowledge-base"
 import { buildEmiInstruction, buildRateInstruction, detectLoanType } from "@/lib/finance"
@@ -348,6 +349,10 @@ async function handleInboundDM(messaging: any, igBranch: BranchInstagramCtx = nu
       dtInfo,
     })
 
+    // AI KILL SWITCH: the "messages" pause stops automated DM replies —
+    // the inbound message is already stored and a human can reply manually.
+    if (await isAiPaused("messages", branchId)) return
+
     const aiReply = await chatWithLLM(
       [...history, { role: "user", content: text }],
       "english",
@@ -470,6 +475,10 @@ async function handleInboundComment(val: any, igBranch: BranchInstagramCtx = nul
 
   // Trigger Priya AI Response (Public Reply + Private DM Reply)
   try {
+    // AI KILL SWITCH: the "messages" pause also stops public comment
+    // auto-replies (the comment row is already stored above).
+    if (await isAiPaused("messages", branchId)) return
+
     const kbContext = await searchKnowledgeBase(text).catch(() => "")
 
     // Public reply + private DM opener are dashboard-editable (Script

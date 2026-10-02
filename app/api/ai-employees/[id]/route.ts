@@ -2,6 +2,7 @@ import { apiError } from "@/lib/api-error"
 import { NextRequest, NextResponse } from "next/server"
 import pool, { query } from "@/lib/db"
 import { requireRole } from "@/lib/auth"
+import { logAudit } from "@/lib/audit"
 
 export const dynamic = "force-dynamic"
 
@@ -71,6 +72,16 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 
     const employee = (await query(`SELECT * FROM ai_employees WHERE id = $1`, [id])).rows[0]
     if (!employee) return NextResponse.json({ error: "not found" }, { status: 404 })
+
+    // Audit trail: who changed which AI employee (pause/resume gets a
+    // dedicated action so it stands out in the security log).
+    const pausedTurn = typeof body?.is_active === "boolean"
+    logAudit(
+      pausedTurn ? (body.is_active ? "ai employee resumed" : "ai employee paused") : "ai employee updated",
+      session.email,
+      { id, name: employee.name, changed: sets.length ? sets : undefined, branches: Array.isArray(body?.branchIds) ? body.branchIds.length : undefined }
+    )
+
     return NextResponse.json(employee)
   } catch (e: any) {
     return apiError(e)
@@ -85,6 +96,7 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
     // Soft-delete: branch_scripts reference employees; deactivating keeps the
     // override rows meaningful and the audit trail intact.
     await query(`UPDATE ai_employees SET is_active = false, updated_at = now() WHERE id = $1`, [id])
+    logAudit("ai employee deactivated", session.email, { id })
     return NextResponse.json({ ok: true })
   } catch (e: any) {
     return apiError(e)

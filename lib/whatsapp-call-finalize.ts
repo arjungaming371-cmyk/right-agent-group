@@ -18,6 +18,7 @@ import { generateLeadSummary } from "@/lib/llm"
 import { sendCallFollowUp, sendMissedCallFollowUp, branchWhatsAppCtx } from "@/lib/whatsapp"
 import { refreshLeadScore } from "@/lib/scoring"
 import { runPostCallAnalysis } from "@/lib/lead-brain"
+import { isAiPaused } from "@/lib/ai-pause"
 
 export type WhatsAppCallOutcome = "resolved" | "missed" | "rejected" | "failed"
 
@@ -281,7 +282,10 @@ export async function finalizeWhatsAppCall(opts: {
   // call_followup; missed/busy → missed_call_followup; failed → nothing.
   // The claim is conditional on the SAME followup_sent flag the Exotel path
   // uses, so both networks share one guard.
-  if (!call?.followup_sent && outcome !== "failed") {
+  // AI KILL SWITCH: the "messages" toggle suppresses this automated template
+  // send (followup_sent stays false — an agent can still message manually).
+  const followupBranchId = call?.branch_id || opts.branchIdFromWebhook || null
+  if (!call?.followup_sent && outcome !== "failed" && !(await isAiPaused("messages", followupBranchId))) {
     let claimWon = false
     if (call) {
       try {

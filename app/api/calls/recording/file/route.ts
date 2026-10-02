@@ -4,6 +4,8 @@ import { Readable } from "stream"
 import { isSecurityEnabled } from "@/lib/security"
 import { requireModuleOrRole } from "@/lib/auth"
 import { safeRecordingPath } from "@/lib/recordings"
+import { query } from "@/lib/db"
+import { sessionBranchId } from "@/lib/branches"
 
 export const dynamic = "force-dynamic"
 
@@ -33,6 +35,27 @@ export async function GET(req: NextRequest) {
   const name = req.nextUrl.searchParams.get("name") || ""
   const filePath = safeRecordingPath(name)
   if (!filePath) return NextResponse.json({ error: "invalid recording name" }, { status: 400 })
+
+  // BRANCH SCOPE: recordings belong to a call; a call belongs to a branch.
+  // A branch-scoped session may only open recordings whose voice_calls row
+  // sits in its own branch. Unknown/legacy recordings (row missing) stay
+  // reachable — the filenames are unguessable call SIDs, and admins (no
+  // branch scope) always pass.
+  const ownBranchId = sessionBranchId(session)
+  if (ownBranchId) {
+    const sid = name.replace(/\.(mp3|wav)$/i, "")
+    try {
+      const call = await query(`SELECT branch_id FROM voice_calls WHERE twilio_call_sid = $1 LIMIT 1`, [sid])
+      if (call.rows[0]?.branch_id && call.rows[0].branch_id !== ownBranchId) {
+        return NextResponse.json({ error: "recording not found" }, { status: 404 })
+      }
+    } catch {
+      // voice_calls unavailable — fail closed for restricted roles below admin.
+      if (session.role !== "admin" && session.role !== "developer") {
+        return NextResponse.json({ error: "recording unavailable" }, { status: 503 })
+      }
+    }
+  }
 
   let size = 0
   try {

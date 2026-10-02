@@ -12,7 +12,20 @@ export async function GET(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   // Branch-scoped users get their branch's numbers only — the analytics
   // view IS the branch P&L picture for decentralized operations.
-  const branchId = sessionBranchId(session)
+  let branchId = sessionBranchId(session)
+
+  // Date-range filter (?days=7|14|30, default 14 — the historical window).
+  const daysRaw = Number(req.nextUrl.searchParams.get("days") || 14)
+  const days = [7, 14, 30].includes(daysRaw) ? daysRaw : 14
+
+  // Explicit branch filter for parents (admin/developer) — ?branch=<uuid> or
+  // "all" to combine every branch. Branch-scoped roles can never widen.
+  const branchParam = req.nextUrl.searchParams.get("branch")
+  if (!branchId && (session.role === "admin" || session.role === "developer")) {
+    if (branchParam && branchParam !== "all" && /^[0-9a-f-]{36}$/i.test(branchParam)) branchId = branchParam
+    else if (branchParam === "all") branchId = null
+  }
+
   const params = branchId ? [branchId] : []
   // B() wraps a predicate with the branch filter when one applies.
   const B = (col: string) => (branchId ? `${col} = $1` : "TRUE")
@@ -22,15 +35,15 @@ export async function GET(req: NextRequest) {
       query(
         `
         SELECT to_char(d.day, 'Mon DD') AS day, COALESCE(c.count, 0)::int AS count
-        FROM generate_series(CURRENT_DATE - interval '13 days', CURRENT_DATE, interval '1 day') d(day)
+        FROM generate_series(CURRENT_DATE - ($2::int - 1) * interval '1 day', CURRENT_DATE, interval '1 day') d(day)
         LEFT JOIN (
           SELECT date_trunc('day', created_at) AS day, count(*) AS count
-          FROM voice_calls WHERE created_at > now() - interval '14 days' AND ${B("branch_id")}
+          FROM voice_calls WHERE created_at > now() - ($2::int * interval '1 day') AND ${B("branch_id")}
           GROUP BY 1
         ) c ON c.day = d.day
         ORDER BY d.day
       `,
-        params
+        branchId ? [branchId, days] : [days]
       ),
       query(
         `
@@ -62,7 +75,11 @@ export async function GET(req: NextRequest) {
           (SELECT count(*) FROM leads WHERE ${B("branch_id")} AND status = 'qualified')                 AS qualified_leads,
           (SELECT COALESCE(avg(duration), 0)::int FROM voice_calls WHERE ${B("branch_id")} AND duration > 0) AS avg_duration,
           (SELECT count(*) FROM voice_calls WHERE ${B("branch_id")} AND duration > 0)                   AS connected_calls,
-          (SELECT count(*) FROM voice_calls WHERE ${B("branch_id")} AND (outcome = 'resolved' OR status = 'completed')) AS resolved_calls
+          (SELECT count(*) FROM voice_calls WHERE ${B("branch_id")} AND (outcome = 'resolved' OR status = 'completed')) AS resolved_calls,
+          (SELECT count(*) FROM voice_calls WHERE ${B("branch_id")} AND outcome = 'needs_human')         AS needs_human,
+          (SELECT count(*) FROM leads WHERE ${B("branch_id")} AND callback_at IS NOT NULL AND callback_at < now() + interval '1 day') AS followups_due,
+          (SELECT count(*) FROM leads WHERE ${B("branch_id")} AND created_at > now() - interval '7 days')             AS new_leads_7d,
+          (SELECT count(*) FROM loan_applications WHERE ${B("branch_id")})                              AS applications
       `,
         params
       ),

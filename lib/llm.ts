@@ -22,6 +22,7 @@ import { DEFAULT_SCRIPTS as SHARED_DEFAULT_SCRIPTS } from "./default-scripts"
 // Only the WHATSAPP Roman-guard fallback uses this now — native-script call
 // replies must NEVER pass through it (see CALL_LANGUAGE_STYLES above).
 import { toTanglish } from "./transliterate"
+import { recordProviderHealth } from "./provider-health"
 
 const LLM_PROVIDER = (process.env.LLM_PROVIDER || "sarvam").toLowerCase()
 
@@ -585,13 +586,16 @@ async function runCompletion(messages: ChatMessage[], opts: CompletionOpts): Pro
   assertGroqConfigured()
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), opts.timeoutMs)
+  const startedAt = Date.now()
   try {
     const text = await groqChatRequest(messages, opts, controller.signal)
     if (!text.trim()) throw new Error("Empty Groq response")
     const cleaned = text.replace(/<think>[\s\S]*?<\/think>/g, "").trim()
     if (!cleaned) throw new Error("Empty Groq response after removing think tags")
+    recordProviderHealth(`llm-${ACTIVE_LLM_PROVIDER}`, true, null, Date.now() - startedAt)
     return cleaned
   } catch (e: any) {
+    recordProviderHealth(`llm-${ACTIVE_LLM_PROVIDER}`, false, e?.message, Date.now() - startedAt)
     console.error("Groq error:", e.message)
     throw e
   } finally {
@@ -608,11 +612,14 @@ async function runCompletionStream(messages: ChatMessage[], opts: CompletionOpts
   assertGroqConfigured()
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), opts.timeoutMs)
+  const startedAt = Date.now()
   try {
     const text = await groqChatStream(messages, opts, controller.signal, onChunk)
     if (!text.trim()) throw new Error("Empty Groq response")
+    recordProviderHealth(`llm-${ACTIVE_LLM_PROVIDER}`, true, null, Date.now() - startedAt)
     return text.trim()
   } catch (e: any) {
+    recordProviderHealth(`llm-${ACTIVE_LLM_PROVIDER}`, false, e?.message, Date.now() - startedAt)
     console.error("Groq stream error:", e.message)
     throw e
   } finally {

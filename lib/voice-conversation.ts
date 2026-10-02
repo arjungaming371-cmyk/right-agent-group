@@ -10,6 +10,7 @@ import { detectFrustration, flagFrustratedCall, detectHumanRequest, flagHumanReq
 import { extractCallFacts, formatInCallFactsBlock } from "./call-facts"
 import { createNotification } from "./notifications"
 import { maybeProposeLoanEdit } from "./loan-edit-requests"
+import { isAiPaused } from "./ai-pause"
 import { currentDateTimeInstruction } from "./compliance"
 import {
   DEFAULT_VOICE_CLOSINGS,
@@ -674,7 +675,10 @@ async function completeLeadIfReady(opts: {
     // complete the lead while this line still had null, creating a form link
     // that was never sent.
     const waNumber = effectiveWhatsapp
-    if (waNumber) {
+    // AI KILL SWITCH: the "messages" toggle also stops the AI-decided
+    // application link — the lead is completed (above), only the automated
+    // send is suppressed, and an agent can send the link manually.
+    if (waNumber && !(await isAiPaused("messages", branchId))) {
       // Per-branch WhatsApp: the link goes out from the BRANCH's WABA number
       // (branded with the branch's name), or the company number when the
       // branch has none.

@@ -4,8 +4,9 @@ import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from "recharts"
-import { Users, Phone, BadgeCheck, Timer, Mail, CheckCircle2, RotateCcw, PhoneOutgoing, TrendingUp } from "lucide-react"
+import { Users, Phone, BadgeCheck, Timer, Mail, CheckCircle2, RotateCcw, PhoneOutgoing, TrendingUp, UserPlus, FileText, BellRing, ClipboardList } from "lucide-react"
 import { formatPct } from "@/lib/maths"
+import OnboardingCard from "./onboarding-card"
 
 // Validated (scripts/validate_palette.js, dark surface) — fixed order, never cycled.
 const CAT = { blue: "var(--accent-blue)", aqua: "var(--accent-green)", violet: "var(--accent-violet)" }
@@ -17,7 +18,7 @@ type Analytics = {
   languageSplit: { language: string; count: number }[]
   sentiment: { sentiment: string; count: number }[]
   callsByHour: { hour: number; count: number }[]
-  totals: { total_leads: number; total_calls: number; total_messages: number; qualified_leads: number; avg_duration: number }
+  totals: { total_leads: number; total_calls: number; total_messages: number; qualified_leads: number; avg_duration: number; connected_calls?: number; needs_human?: number; followups_due?: number; new_leads_7d?: number; applications?: number }
   rates: { connectRate: number; resolutionRate: number; conversionRate: number; qualificationToApply: number }
 }
 
@@ -39,17 +40,29 @@ function StatTile({ icon: Icon, label, value, tone }: { icon: any; label: string
   )
 }
 
-export default function AnalyticsView() {
+export default function AnalyticsView({ role = "admin" }: { role?: "admin" | "agent" | "viewer" | "developer" | "branch_manager" }) {
   const [data, setData] = useState<Analytics | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
   const [sentMsg, setSentMsg] = useState<string | null>(null)
+  // Owner filters: date range + branch (branch select only for parents).
+  const [days, setDays] = useState<7 | 14 | 30>(14)
+  const [branchId, setBranchId] = useState<string>("all")
+  const [branches, setBranches] = useState<{ id: string; name: string }[]>([])
+
+  useEffect(() => {
+    fetch("/api/branches").then(r => (r.ok ? r.json() : null)).then(list => {
+      if (Array.isArray(list)) setBranches(list.map((b: any) => ({ id: b.id, name: b.name })))
+    }).catch(() => {})
+  }, [])
 
   async function load() {
     setLoading(true)
     try {
-      const res = await fetch("/api/analytics")
+      const qs = new URLSearchParams({ days: String(days) })
+      if (role === "admin" || role === "developer") qs.set("branch", branchId)
+      const res = await fetch(`/api/analytics?${qs.toString()}`)
       if (res.ok) {
         setData(await res.json())
         setLoadError(null)
@@ -62,7 +75,7 @@ export default function AnalyticsView() {
       setLoading(false)
     }
   }
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [days, branchId])
 
   async function emailReport() {
     setSending(true)
@@ -125,23 +138,55 @@ export default function AnalyticsView() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {/* Header row with digest trigger */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <div style={{ flex: 1, fontSize: 12.5, color: "var(--text-mute)" }}>
+      {/* Onboarding checklist — "Complete your setup" (auto-hides when done) */}
+      <OnboardingCard />
+
+      {/* Header row: filters + digest trigger */}
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12 }}>
+        <div style={{ flex: 1, minWidth: 160, fontSize: 12.5, color: "var(--text-mute)" }}>
           {sentMsg || "Live performance data across calls, leads, and WhatsApp."}
         </div>
+        <select
+          value={days}
+          onChange={e => setDays(Number(e.target.value) as 7 | 14 | 30)}
+          aria-label="Date range"
+          style={{ height: 34, borderRadius: 10, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", fontSize: 12.5, padding: "0 10px" }}
+        >
+          <option value={7}>Last 7 days</option>
+          <option value={14}>Last 14 days</option>
+          <option value={30}>Last 30 days</option>
+        </select>
+        {(role === "admin" || role === "developer") && branches.length > 1 && (
+          <select
+            value={branchId}
+            onChange={e => setBranchId(e.target.value)}
+            aria-label="Branch filter"
+            style={{ height: 34, borderRadius: 10, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", fontSize: 12.5, padding: "0 10px", maxWidth: 190 }}
+          >
+            <option value="all">All branches</option>
+            {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        )}
         <button onClick={emailReport} disabled={sending} className="btn-ghost" style={{ height: 34 }}>
           {sending ? <CheckCircle2 size={13} strokeWidth={2} /> : <Mail size={13} strokeWidth={1.9} />}
           {sending ? "Sending…" : "Email me this report"}
         </button>
       </div>
 
-      {/* Stat tiles */}
+      {/* Owner outcome tiles — the business picture first */}
+      <div className="grid grid-cols-2 gap-3 md:flex md:flex-wrap md:gap-4">
+        <StatTile icon={UserPlus} label="New Leads (7d)" value={String(totals.new_leads_7d ?? 0)} tone={CAT.violet} />
+        <StatTile icon={Phone} label="AI Calls" value={String(totals.total_calls)} tone={CAT.blue} />
+        <StatTile icon={PhoneOutgoing} label="Answered" value={String(totals.connected_calls ?? 0)} tone={CAT.aqua} />
+        <StatTile icon={BadgeCheck} label="Qualified" value={String(totals.qualified_leads)} tone={STATUS.good} />
+        <StatTile icon={FileText} label="Applications" value={String(totals.applications ?? 0)} tone={CAT.violet} />
+        <StatTile icon={ClipboardList} label="Follow-ups Due" value={String(totals.followups_due ?? 0)} tone={STATUS.serious} />
+        <StatTile icon={BellRing} label="Needs Human" value={String(totals.needs_human ?? 0)} tone={STATUS.critical} />
+      </div>
+
+      {/* Detail tiles */}
       <div className="grid grid-cols-2 gap-3 md:flex md:flex-wrap md:gap-4">
         <StatTile icon={Users} label="Total Leads" value={String(totals.total_leads)} tone={CAT.violet} />
-        <StatTile icon={Phone} label="Total Calls" value={String(totals.total_calls)} tone={CAT.blue} />
-        <StatTile icon={PhoneOutgoing} label="Connect Rate" value={formatPct(rates.connectRate)} tone={CAT.aqua} />
-        <StatTile icon={BadgeCheck} label="Qualified" value={String(totals.qualified_leads)} tone={STATUS.good} />
         <StatTile icon={TrendingUp} label="Lead → Qualified" value={formatPct(rates.conversionRate)} tone={CAT.violet} />
         <StatTile icon={Timer} label="Avg. Call Length" value={`${Math.floor(avgDur / 60)}m ${avgDur % 60}s`} tone={CAT.aqua} />
       </div>
@@ -150,7 +195,7 @@ export default function AnalyticsView() {
         {/* Calls per day */}
         <div style={CARD}>
           <div style={{ fontSize: 13.5, fontWeight: 700, marginBottom: 4 }}>Calls per day</div>
-          <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginBottom: 14 }}>Last 14 days</div>
+          <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginBottom: 14 }}>Last {days} days</div>
           <ResponsiveContainer width="100%" height={220}>
             <AreaChart data={data.callsByDay} margin={{ left: -20, right: 8 }}>
               <defs>

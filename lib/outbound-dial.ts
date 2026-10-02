@@ -89,6 +89,8 @@ export async function resolveChannel(requested: RequestedChannel, leadId: string
   }
 }
 
+import { isAiPaused, aiPauseMessage, type AiPauseKind } from "./ai-pause"
+
 export async function placeOutboundCall(opts: {
   phone: string
   leadId: string | null
@@ -105,6 +107,14 @@ export async function placeOutboundCall(opts: {
   const phone = normalizePhone(opts.phone)
   const branchId = opts.branchId ?? null
   if (!phone) throw new DialError("lead has no callable phone number", 400)
+
+  // AI KILL SWITCH — the single chokepoint for BOTH channels. Everything
+  // that makes Priya dial an outbound call (manual dial, bulk runner,
+  // one-shot legacy loop, WhatsApp business-initiated) funnels through
+  // here, so one check guards them all. Global OR branch scope.
+  if (await isAiPaused("calls", branchId)) {
+    throw new DialError(aiPauseMessage("calls"), 503)
+  }
 
   const channel = await resolveChannel(opts.requested, leadId || "")
 

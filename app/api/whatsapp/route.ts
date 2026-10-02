@@ -19,6 +19,7 @@ import { rateLimit, clientIp } from "@/lib/rate-limit"
 import { bridgeToVoicebot } from "@/lib/voicebot-bridge"
 import { maybeRequeueMissed } from "@/lib/auto-retry"
 import { stampQueueCallOutcome } from "@/lib/queue-outcome"
+import { isAiPaused } from "@/lib/ai-pause"
 
 export const dynamic = "force-dynamic"
 
@@ -468,6 +469,10 @@ async function handleInbound(msg: any, profileName: string | null, waBranch: Bra
 
   // ---- 3. AI auto-reply (isolated — failure never loses the message) ----
   // FREE: replies inside the 24h service window cost nothing on the Cloud API.
+  // AI KILL SWITCH: the "messages" toggle stops AUTOMATED replies here. The
+  // inbound message is still stored (above) and agents can answer manually —
+  // pausing automation never blocks a human conversation.
+  if (await isAiPaused("messages", waBranch?.id || null)) return
   let aiReply: string | null = null
   try {
     const lang = detectLanguage(text) as Language

@@ -7,6 +7,7 @@ import { logAudit } from "@/lib/audit"
 import { checkCallCompliance, isWithinCallingWindow } from "@/lib/compliance"
 import { getBulkDialer, BulkQueueRow, DialOutcome } from "@/lib/bulk-dialer"
 import { placeOutboundCall, DialError } from "@/lib/outbound-dial"
+import { isAiPaused, aiPauseMessage } from "@/lib/ai-pause"
 import { getDialerSettings } from "@/lib/dialer-settings"
 import { nextWindowStartMs } from "@/lib/dialer-logic"
 import { sanitizeText } from "@/lib/api-route"
@@ -277,6 +278,13 @@ export async function POST(req: NextRequest) {
       paused: true,
       reason: "Outside the permitted calling window — queue paused, rows stay pending and resume automatically",
     })
+  }
+
+  // AI KILL SWITCH (global or this branch): no new dials. Control actions
+  // above still work so the operator can stop/reset while paused. Rows stay
+  // pending — resuming the switch lets the campaign continue untouched.
+  if (await isAiPaused("calls", branchId)) {
+    return NextResponse.json({ paused: true, reason: aiPauseMessage("calls") })
   }
 
   // ---- Campaign protocol (bulk calling console) --------------------------

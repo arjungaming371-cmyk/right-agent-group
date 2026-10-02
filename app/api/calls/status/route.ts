@@ -8,6 +8,7 @@ import { runPostCallAnalysis } from "@/lib/lead-brain"
 import { verifyExotelWebhookKey } from "@/lib/exotel-webhook-auth"
 import { maybeRequeueMissed } from "@/lib/auto-retry"
 import { stampQueueCallOutcome } from "@/lib/queue-outcome"
+import { isAiPaused } from "@/lib/ai-pause"
 
 export async function POST(req: NextRequest) {
   try {
@@ -131,7 +132,9 @@ export async function POST(req: NextRequest) {
     // two retries could both read followup_sent=false and both send. The
     // conditional UPDATE claims the follow-up atomically — only the retry
     // that flips the flag gets to send.
-    if (!call.followup_sent) {
+    // AI KILL SWITCH: the "messages" toggle suppresses this automated send
+    // (followup_sent stays unclaimed; agents can still message manually).
+    if (!call.followup_sent && !(await isAiPaused("messages", typeof call.branch_id === "string" ? call.branch_id : null))) {
       let claimWon = false
       try {
         const claim = await query(

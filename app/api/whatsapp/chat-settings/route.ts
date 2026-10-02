@@ -41,6 +41,9 @@ export async function PATCH(req: NextRequest) {
         { status: 501 }
       )
     }
-    return NextResponse.json({ error: e.message }, { status: 500 })
+    // Never leak raw Postgres errors to the client — log server-side, return a generic message.
+    console.error("chat-settings update failed:", e?.message)
+    return NextResponse.json({ error: "Could not update chat settings. Please try again." }, { status: 500 })
   }
 }
+

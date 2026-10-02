@@ -46,6 +46,7 @@ import { db } from "@/lib/db"
 import { makeCall } from "@/lib/exotel"
 import { requireModuleOrRole } from "@/lib/auth"
 import { sessionBranchId, checkQuota, recordUsage } from "@/lib/branches"
+import { isAiPaused, aiPauseMessage } from "@/lib/ai-pause"
 import { branchWhatsAppCtx, placeWhatsAppCall } from "@/lib/whatsapp"
 import { checkCallCompliance } from "@/lib/compliance"
 import { normalizePhone } from "@/lib/phone"
@@ -70,6 +71,11 @@ export async function POST(req: NextRequest) {
   const session = await requireModuleOrRole(req, "voice", ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const branchId = sessionBranchId(session)
+
+  // AI KILL SWITCH: a manual dial is still Priya calling — it obeys the pause.
+  if (await isAiPaused("calls", branchId)) {
+    return NextResponse.json({ error: aiPauseMessage("calls"), paused: true }, { status: 503 })
+  }
 
   let body: { leadId?: string; channel?: string; instructions?: string }
   try {

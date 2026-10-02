@@ -2,6 +2,7 @@ import { apiError } from "@/lib/api-error"
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
 import { requireRole } from "@/lib/auth"
+import { logAudit } from "@/lib/audit"
 
 export const dynamic = "force-dynamic"
 
@@ -54,8 +55,13 @@ export async function GET() {
   return NextResponse.json(DEFAULT_CONFIG)
 }
 
+// SECURITY: the WhatsApp loan form schema is ORG-GLOBAL (single
+// form_configs row shared by every branch). Writing it changes the
+// customer-facing form for ALL branches — dropping a required field here
+// silently weakens lead capture everywhere. Only admin/developer may
+// write it; branch managers keep read access via the same public GET.
 export async function POST(req: NextRequest) {
-  const session = await requireRole(req, ["admin", "branch_manager"])
+  const session = await requireRole(req, ["admin"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   try {
@@ -71,6 +77,10 @@ export async function POST(req: NextRequest) {
        ON CONFLICT (id) DO UPDATE SET config = $1, updated_at = now()`,
       [JSON.stringify(merged)]
     )
+
+    logAudit("loan form config updated", session.email, {
+      fields: Object.keys(merged?.enabled_fields || {}).length,
+    })
 
     return NextResponse.json({ ok: true, config: merged })
   } catch (e: any) {

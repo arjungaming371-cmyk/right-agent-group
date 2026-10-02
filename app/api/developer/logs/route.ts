@@ -69,6 +69,7 @@ export async function GET(req: NextRequest) {
     })
   } catch (err: any) {
     console.error("Developer logs error:", err)
-    return NextResponse.json({ logs: [], lastLogin: null, error: err.message }, { status: 500 })
+    // Generic message to the client — raw error stays in server logs only.
+    return NextResponse.json({ logs: [], lastLogin: null, error: "Could not load developer logs. Please try again." }, { status: 500 })
   }
 }

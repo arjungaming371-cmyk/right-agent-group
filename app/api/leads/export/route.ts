@@ -4,6 +4,8 @@ import { requireModuleOrRole } from "@/lib/auth"
 import { sessionBranchId } from "@/lib/branches"
 import { toCsv } from "@/lib/csv"
 import { withRoute } from "@/lib/api-route"
+import { rateLimit } from "@/lib/rate-limit"
+import { logAudit } from "@/lib/audit"
 
 export const dynamic = "force-dynamic"
 
@@ -20,11 +22,19 @@ export const GET = withRoute("leads/export", async (req: NextRequest) => {
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const branchId = sessionBranchId(session)
 
+  // Exports move the whole branch dataset out of the platform — throttle
+  // them and write them to the audit trail.
+  if (!rateLimit(`export:${session.email}`, 6, 60_000)) {
+    return NextResponse.json({ error: "Too many exports in a minute — please wait and retry." }, { status: 429 })
+  }
+
   const res = branchId
     ? await query(`SELECT ${COLUMNS.join(", ")} FROM leads WHERE branch_id = $1 ORDER BY created_at DESC`, [branchId])
     : await query(`SELECT ${COLUMNS.join(", ")} FROM leads ORDER BY created_at DESC`)
   const csv = toCsv(res.rows, COLUMNS)
   const filename = `leads-${new Date().toISOString().slice(0, 10)}.csv`
+
+  logAudit("leads exported", session.email, { rows: res.rows.length, branch: branchId ?? "all" })
 
   return new NextResponse(csv, {
     headers: {

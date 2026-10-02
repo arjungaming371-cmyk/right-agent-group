@@ -11,7 +11,10 @@ export const dynamic = "force-dynamic"
 //
 //   GET   → the current settings (every voice-module role can see them)
 //   PATCH → update { concurrency?, autoRetry?, retryDelayMinutes?, maxRetries? }
-//           (admin / branch_manager only)
+//           (admin / developer ONLY — dialer_settings is deployment-global,
+//            so a branch_manager must never be able to change it:
+//            they would alter concurrency/retry policy for EVERY branch,
+//            not just their own)
 
 export async function GET(req: NextRequest) {
   const session = await requireModuleOrRole(req, "voice", ["admin", "agent", "viewer", "branch_manager"])
@@ -20,7 +23,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const session = await requireModuleOrRole(req, "voice", ["admin", "branch_manager"])
+  const session = await requireModuleOrRole(req, "voice", ["admin"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const body = (await req.json().catch(() => ({}))) as Partial<DialerSettings>
   const updated = await setDialerSettings(

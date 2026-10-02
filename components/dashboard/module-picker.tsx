@@ -13,6 +13,7 @@ export type ModuleOption = {
 export const ALL_MODULES: ModuleOption[] = [
   // Overview
   { key: "analytics", label: "Analytics", section: "Overview", description: "Performance metrics & conversion charts" },
+  { key: "attention", label: "Needs Human", section: "Overview", description: "Escalation queue — customers who asked for a person" },
   { key: "leads", label: "Leads", section: "Overview", description: "Prospect pipeline & lead status tracking" },
   { key: "loans", label: "Loan Applications", section: "Overview", description: "Loan applications & enquiry files" },
 
@@ -31,6 +32,9 @@ export const ALL_MODULES: ModuleOption[] = [
   // couldn't render, and vice versa (2026-09-26 audit: key drift).
   { key: "security", label: "Security", section: "System", description: "Access controls, calling window, DND & audit log" },
   { key: "calendar", label: "Calendar", section: "Overview", description: "Follow-up calendar & scheduled callbacks" },
+  // 2026-10-03: the Branches & Staff AI console (branch CRUD, AI Employees,
+  // per-branch scripts, quotas) finally got a nav entry — grantable here too.
+  { key: "branches", label: "Branches & Staff AI", section: "System", description: "Branches, AI Employees, per-branch scripts & quotas" },
 ]
 
 export const SECTIONS = ["Overview", "Engagement", "System"] as const
