@@ -35,6 +35,18 @@
   --radius-lg: 14px;
   --radius-md: 10px;
   --radius-sm: 7px;
+  /* Theme-tunable derived values (accent-attached glows, page tints, scrollbar,
+     focus ring). Components never read these directly — they live on the base
+     rules below — but every [data-theme] block can override them so things
+     like the primary-button glow match that theme's accent instead of
+     glowing the default violet-blue under a green/blurple button. */
+  --body-glow-1: rgba(139,124,255,0.07);
+  --body-glow-2: rgba(56,189,248,0.055);
+  --focus-ring: 0 0 0 3px rgba(91,124,250,0.16);
+  --shadow-btn: 0 4px 16px -4px rgba(91,124,250,0.5), inset 0 1px 0 rgba(255,255,255,0.18);
+  --shadow-btn-hover: 0 6px 22px -4px rgba(91,124,250,0.6), inset 0 1px 0 rgba(255,255,255,0.18);
+  --scrollbar-thumb: #232c42;
+  --scrollbar-thumb-hover: #2e3a56;
 }
 
 /* ---------- Themes ----------
@@ -46,6 +58,8 @@
 
 /* Midnight — OLED-friendly near-black, same accents as Dark */
 :root[data-theme="midnight"] {
+  --scrollbar-thumb: #2a2a2a;
+  --scrollbar-thumb-hover: #3a3a3a;
   --bg-primary: #000000;
   --bg-secondary: #050505;
   --bg-card: #0a0a0a;
@@ -68,6 +82,10 @@
   --accent-cyan: #22d3ee;
   --gradient-brand: linear-gradient(135deg, #10b981 0%, #14b8a6 45%, #38bdf8 100%);
   --shadow-glow: 0 8px 32px -8px rgba(16,185,129,0.4);
+  --focus-ring: 0 0 0 3px rgba(20,184,166,0.2);
+  --shadow-btn: 0 4px 16px -4px rgba(16,185,129,0.45), inset 0 1px 0 rgba(255,255,255,0.18);
+  --shadow-btn-hover: 0 6px 22px -4px rgba(16,185,129,0.55), inset 0 1px 0 rgba(255,255,255,0.18);
+  --body-glow-1: rgba(16,185,129,0.05);
 }
 
 /* Light — a genuine light mode, not a lightened dark theme */
@@ -105,18 +123,230 @@
   --gradient-brand: linear-gradient(135deg, #7c6ae8 0%, #4a6cf0 45%, #1791c4 100%);
   --shadow-soft: 0 1px 2px rgba(20,25,45,0.06), 0 10px 28px -14px rgba(20,25,45,0.14);
   --shadow-glow: 0 8px 28px -10px rgba(74,108,240,0.25);
+  --focus-ring: 0 0 0 3px rgba(74,108,240,0.18);
+  --shadow-btn: 0 4px 16px -4px rgba(74,108,240,0.4), inset 0 1px 0 rgba(255,255,255,0.18);
+  --shadow-btn-hover: 0 6px 22px -4px rgba(74,108,240,0.5), inset 0 1px 0 rgba(255,255,255,0.18);
 }
-:root[data-theme="light"] body {
-  background: radial-gradient(1100px 550px at 12% -8%, rgba(124,106,232,0.05), transparent 60%),
-              radial-gradient(900px 480px at 105% -5%, rgba(23,145,196,0.04), transparent 55%),
-              var(--bg-primary);
+
+/* Light-side shared rules. Every light colorScheme gets these via
+   data-colorscheme (set by lib/theme.ts) — individual light themes only
+   declare their palette above and may fine-tune the glow tints. */
+:root[data-colorscheme="light"] {
+  --body-glow-1: rgba(124,106,232,0.05);
+  --body-glow-2: rgba(23,145,196,0.04);
+  --scrollbar-thumb: #d5d9e4;
+  --scrollbar-thumb-hover: #c2c7d6;
 }
-:root[data-theme="light"] .glass {
+:root[data-colorscheme="light"] .glass {
   background: rgba(255,255,255,0.85);
   border: 1px solid rgba(20,25,45,0.06);
 }
-:root[data-theme="light"] ::-webkit-scrollbar-thumb { background: #d5d9e4; }
-:root[data-theme="light"] ::-webkit-scrollbar-thumb:hover { background: #c2c7d6; }
+
+/* --------------------------------------------------------------------------
+ * Popular themes — the most-copied design languages on the web, added by
+ * owner request. Registry lives in lib/theme.ts; each block only overrides
+ * what actually changes.
+ * -------------------------------------------------------------------------- */
+
+/* Stripe — the iconic SaaS light look: near-white navy-tinted surfaces,
+   blurple primary, Stripe-slate text. */
+:root[data-theme="stripe"] {
+  --bg-primary: #f6f9fc;
+  --bg-secondary: #ffffff;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f6f9fc;
+  --bg-sidebar: #ffffff;
+  --border: #e3e8ee;
+  --border-light: #eef2f6;
+  --text-primary: #0a2540;
+  --text-secondary: #425466;
+  --text-muted: #6b7c93;
+  --accent-blue: #635bff;
+  --accent-blue-dim: #4f45d6;
+  --accent-violet: #7a73ff;
+  --accent-green: #0e6245;
+  --accent-red: #df1b41;
+  --accent-yellow: #9a6a00;
+  --accent-purple: #7d7af8;
+  --accent-cyan: #0570de;
+  --gradient-brand: linear-gradient(135deg, #7a73ff 0%, #635bff 45%, #0570de 100%);
+  --overlay-soft: rgba(10,37,64,0.025);
+  --overlay-hover: rgba(10,37,64,0.05);
+  --overlay-chip: rgba(10,37,64,0.06);
+  --overlay-line: rgba(10,37,64,0.09);
+  --shadow-soft: 0 1px 2px rgba(10,37,64,0.06), 0 10px 28px -14px rgba(10,37,64,0.14);
+  --shadow-glow: 0 8px 28px -10px rgba(99,91,255,0.3);
+  --focus-ring: 0 0 0 3px rgba(99,91,255,0.18);
+  --shadow-btn: 0 4px 16px -4px rgba(99,91,255,0.5), inset 0 1px 0 rgba(255,255,255,0.18);
+  --shadow-btn-hover: 0 6px 22px -4px rgba(99,91,255,0.6), inset 0 1px 0 rgba(255,255,255,0.18);
+  --body-glow-1: rgba(99,91,255,0.05);
+  --body-glow-2: rgba(5,112,222,0.04);
+}
+
+/* Linear — the dark SaaS standard: charcoal surfaces, indigo #5e6ad2 glow. */
+:root[data-theme="linear"] {
+  --bg-primary: #0f1011;
+  --bg-secondary: #141517;
+  --bg-card: #191a1d;
+  --bg-card-hover: #1f2024;
+  --bg-sidebar: #0c0d0e;
+  --border: #232529;
+  --border-light: #1b1d21;
+  --text-primary: #f7f8f8;
+  --text-secondary: #8a8f98;
+  --text-muted: #7e838c;
+  --accent-blue: #5e6ad2;
+  --accent-blue-dim: #4c5abd;
+  --accent-violet: #828fff;
+  --accent-green: #4cb782;
+  --accent-red: #eb5757;
+  --accent-yellow: #f2c94c;
+  --accent-purple: #a78bfa;
+  --accent-cyan: #4ea7fc;
+  --gradient-brand: linear-gradient(135deg, #828fff 0%, #5e6ad2 50%, #4ea7fc 100%);
+  --shadow-glow: 0 8px 32px -8px rgba(94,106,210,0.4);
+  --focus-ring: 0 0 0 3px rgba(94,106,210,0.22);
+  --shadow-btn: 0 4px 16px -4px rgba(94,106,210,0.45), inset 0 1px 0 rgba(255,255,255,0.14);
+  --shadow-btn-hover: 0 6px 22px -4px rgba(94,106,210,0.55), inset 0 1px 0 rgba(255,255,255,0.14);
+  --scrollbar-thumb: #2a2c31;
+  --scrollbar-thumb-hover: #35373d;
+  --body-glow-1: rgba(94,106,210,0.06);
+  --body-glow-2: rgba(78,167,252,0.04);
+}
+
+/* Notion — warm paper minimalism: near-white warm grays, ink text,
+   restrained saturated accents used sparingly. */
+:root[data-theme="notion"] {
+  --bg-primary: #f7f7f5;
+  --bg-secondary: #ffffff;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f1f1ef;
+  --bg-sidebar: #fbfbfa;
+  --border: #e9e9e7;
+  --border-light: #f1f1ef;
+  --text-primary: #37352f;
+  --text-secondary: #5a5952;
+  --text-muted: #6d6c66;
+  --accent-blue: #1b73d0;
+  --accent-blue-dim: #1463b4;
+  --accent-violet: #6940a5;
+  --accent-green: #0f7b6c;
+  --accent-red: #cf3a35;
+  --accent-yellow: #9f6b00;
+  --accent-purple: #6940a5;
+  --accent-cyan: #178fa8;
+  --gradient-brand: linear-gradient(135deg, #2383e2 0%, #6940a5 100%);
+  --overlay-soft: rgba(37,35,29,0.025);
+  --overlay-hover: rgba(37,35,29,0.05);
+  --overlay-chip: rgba(37,35,29,0.06);
+  --overlay-line: rgba(37,35,29,0.09);
+  --shadow-soft: 0 1px 2px rgba(15,15,15,0.04), 0 8px 24px -12px rgba(15,15,15,0.1);
+  --shadow-glow: 0 8px 28px -10px rgba(35,131,226,0.22);
+  --focus-ring: 0 0 0 3px rgba(35,131,226,0.16);
+  --shadow-btn: 0 4px 14px -4px rgba(35,131,226,0.4), inset 0 1px 0 rgba(255,255,255,0.15);
+  --shadow-btn-hover: 0 6px 20px -4px rgba(35,131,226,0.5), inset 0 1px 0 rgba(255,255,255,0.15);
+  --body-glow-1: rgba(55,53,47,0.035);
+  --body-glow-2: rgba(55,53,47,0.02);
+}
+
+/* Vercel — mono black: pure neutral grays on black with the classic
+   #0070f3 blue / #7928ca violet signature. */
+:root[data-theme="vercel"] {
+  --bg-primary: #000000;
+  --bg-secondary: #0a0a0a;
+  --bg-card: #111111;
+  --bg-card-hover: #1a1a1a;
+  --bg-sidebar: #000000;
+  --border: #262626;
+  --border-light: #1a1a1a;
+  --text-primary: #ffffff;
+  --text-secondary: #a1a1a1;
+  --text-muted: #8f8f8f;
+  --accent-blue: #0070f3;
+  --accent-blue-dim: #0058bd;
+  --accent-violet: #7928ca;
+  --accent-green: #29d398;
+  --accent-red: #e5484d;
+  --accent-yellow: #f5a623;
+  --accent-purple: #9945ff;
+  --accent-cyan: #50e3c2;
+  --gradient-brand: linear-gradient(135deg, #007cf0 0%, #7928ca 100%);
+  --shadow-glow: 0 8px 32px -8px rgba(0,112,243,0.35);
+  --focus-ring: 0 0 0 3px rgba(0,112,243,0.22);
+  --shadow-btn: 0 4px 16px -4px rgba(0,112,243,0.4), inset 0 1px 0 rgba(255,255,255,0.14);
+  --shadow-btn-hover: 0 6px 22px -4px rgba(0,112,243,0.5), inset 0 1px 0 rgba(255,255,255,0.14);
+  --scrollbar-thumb: #333333;
+  --scrollbar-thumb-hover: #404040;
+  --body-glow-1: rgba(0,124,240,0.06);
+  --body-glow-2: rgba(121,40,202,0.05);
+}
+
+/* Tailwind — the dev-docs look: slate surfaces, sky-700 link blue for
+   readable small text, sky→cyan brand gradient (fills only). */
+:root[data-theme="tailwind"] {
+  --bg-primary: #f8fafc;
+  --bg-secondary: #ffffff;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f1f5f9;
+  --bg-sidebar: #ffffff;
+  --border: #e2e8f0;
+  --border-light: #eef2f7;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #64748b;
+  --accent-blue: #0369a1;
+  --accent-blue-dim: #075985;
+  --accent-violet: #7c3aed;
+  --accent-green: #047857;
+  --accent-red: #dc2626;
+  --accent-yellow: #b45309;
+  --accent-purple: #7c3aed;
+  --accent-cyan: #0e7490;
+  --gradient-brand: linear-gradient(135deg, #0ea5e9 0%, #06b6d4 55%, #2dd4bf 100%);
+  --overlay-soft: rgba(15,23,42,0.025);
+  --overlay-hover: rgba(15,23,42,0.05);
+  --overlay-chip: rgba(15,23,42,0.06);
+  --overlay-line: rgba(15,23,42,0.09);
+  --shadow-soft: 0 1px 2px rgba(15,23,42,0.05), 0 10px 28px -14px rgba(15,23,42,0.12);
+  --shadow-glow: 0 8px 28px -10px rgba(14,165,233,0.28);
+  --focus-ring: 0 0 0 3px rgba(14,165,233,0.2);
+  --shadow-btn: 0 4px 16px -4px rgba(14,165,233,0.45), inset 0 1px 0 rgba(255,255,255,0.2);
+  --shadow-btn-hover: 0 6px 22px -4px rgba(14,165,233,0.55), inset 0 1px 0 rgba(255,255,255,0.2);
+  --body-glow-1: rgba(14,165,233,0.05);
+  --body-glow-2: rgba(124,58,237,0.04);
+}
+
+/* Discord — the community-app dark: warm charcoal surfaces, blurple
+   primary, fuchsia secondary. */
+:root[data-theme="discord"] {
+  --bg-primary: #1e1f22;
+  --bg-secondary: #2b2d31;
+  --bg-card: #313338;
+  --bg-card-hover: #383a40;
+  --bg-sidebar: #1e1f22;
+  --border: #3f4147;
+  --border-light: #2c2e33;
+  --text-primary: #f2f3f5;
+  --text-secondary: #b5bac1;
+  --text-muted: #949ba4;
+  --accent-blue: #5865f2;
+  --accent-blue-dim: #4752c4;
+  --accent-violet: #7983f5;
+  --accent-green: #2dc770;
+  --accent-red: #ed4245;
+  --accent-yellow: #f0b232;
+  --accent-purple: #eb459e;
+  --accent-cyan: #00a8fc;
+  --gradient-brand: linear-gradient(135deg, #7983f5 0%, #5865f2 40%, #eb459e 100%);
+  --shadow-glow: 0 8px 32px -8px rgba(88,101,242,0.4);
+  --focus-ring: 0 0 0 3px rgba(88,101,242,0.24);
+  --shadow-btn: 0 4px 16px -4px rgba(88,101,242,0.5), inset 0 1px 0 rgba(255,255,255,0.14);
+  --shadow-btn-hover: 0 6px 22px -4px rgba(88,101,242,0.6), inset 0 1px 0 rgba(255,255,255,0.14);
+  --scrollbar-thumb: #45474e;
+  --scrollbar-thumb-hover: #52555c;
+  --body-glow-1: rgba(88,101,242,0.05);
+  --body-glow-2: rgba(235,69,158,0.035);
+}
 
 /* Base resets & element defaults — layered so Tailwind utilities always win */
 @layer base {
@@ -126,8 +356,8 @@
 
   body {
     background:
-      radial-gradient(1100px 550px at 12% -8%, rgba(139,124,255,0.07), transparent 60%),
-      radial-gradient(900px 480px at 105% -5%, rgba(56,189,248,0.055), transparent 55%),
+      radial-gradient(1100px 550px at 12% -8%, var(--body-glow-1), transparent 60%),
+      radial-gradient(900px 480px at 105% -5%, var(--body-glow-2), transparent 55%),
       var(--bg-primary);
     color: var(--text-primary);
     font-family: var(--font-inter), -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -140,8 +370,8 @@
 
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: #232c42; border-radius: 999px; }
-  ::-webkit-scrollbar-thumb:hover { background: #2e3a56; }
+  ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 999px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
 
   input, select, textarea {
     background: var(--bg-secondary);
@@ -158,7 +388,7 @@
   input:hover, select:hover, textarea:hover { border-color: #273148; }
   input:focus, select:focus, textarea:focus {
     border-color: var(--accent-blue);
-    box-shadow: 0 0 0 3px rgba(91,124,250,0.16);
+    box-shadow: var(--focus-ring);
     background: var(--bg-card);
   }
   input::placeholder, textarea::placeholder { color: var(--text-muted); }
@@ -197,10 +427,10 @@
     background: var(--gradient-brand);
     color: #fff; border: none; border-radius: 10px;
     font-weight: 600; font-size: 13px; padding: 0 16px; height: 36px;
-    box-shadow: 0 4px 16px -4px rgba(91,124,250,0.5), inset 0 1px 0 rgba(255,255,255,0.18);
+    box-shadow: var(--shadow-btn);
     white-space: nowrap;
   }
-  .btn-primary:hover { filter: brightness(1.08); box-shadow: 0 6px 22px -4px rgba(91,124,250,0.6), inset 0 1px 0 rgba(255,255,255,0.18); }
+  .btn-primary:hover { filter: brightness(1.08); box-shadow: var(--shadow-btn-hover); }
   .btn-primary:disabled { opacity: 0.45; filter: none; }
 
   .btn-ghost {
@@ -402,7 +632,7 @@ button:focus-visible, a:focus-visible, [role="button"]:focus-visible,
 
 /* Brand-tinted text selection instead of the OS default */
 ::selection { background: rgba(139, 124, 255, 0.32); }
-:root[data-theme="light"] ::selection { background: rgba(124, 106, 232, 0.25); }
+:root[data-colorscheme="light"] ::selection { background: rgba(124, 106, 232, 0.25); }
 
 /* Primary buttons get a gentle lift on hover to pair with the existing
    shadow deepening; pressed state returns to rest instantly. */
