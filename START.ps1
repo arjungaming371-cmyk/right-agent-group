@@ -34,7 +34,13 @@ $envLinesPre = Get-Content "$ProjectDir\.env" -ErrorAction SilentlyContinue
 function Read-EnvValue($name) {
     $line = $envLinesPre | Select-String "^\s*$name=" | Select-Object -First 1
     if (-not $line) { return "" }
-    return $line.ToString().Split("=",2)[1].Split("#",2)[0].Trim()
+    $val = $line.ToString().Split("=",2)[1].Trim()
+    $idx = $val.IndexOf(" #")
+    if ($idx -ne -1) { $val = $val.Substring(0, $idx).Trim() }
+    if (($val.StartsWith('"') -and $val.EndsWith('"')) -or ($val.StartsWith("'") -and $val.EndsWith("'"))) {
+        $val = $val.Substring(1, $val.Length - 2)
+    }
+    return $val
 }
 $ttsCallProvider = (Read-EnvValue "TTS_CALL_PROVIDER").ToLower()
 $llmProvider = (Read-EnvValue "LLM_PROVIDER").ToLower()
@@ -116,16 +122,38 @@ Write-Host "[4/6] Voice pipeline: cloud (STT: Sarvam Saaras | TTS: $ttsCallProvi
 Write-Host "[5/6] Starting Website..." -ForegroundColor Yellow
 Stop-Port 3000
 $webProcess = Start-Process "cmd" -ArgumentList "/c npm start" -WorkingDirectory $ProjectDir -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logsDir "website.log") -RedirectStandardError (Join-Path $logsDir "website.err.log")
-Start-Sleep -Seconds 5
-Write-Host "      OK Website started at http://localhost:3000" -ForegroundColor Green
+$webOk = $false
+for ($i = 0; $i -lt 15; $i++) {
+    Start-Sleep -Seconds 1
+    try {
+        $res = Invoke-WebRequest -Uri "http://localhost:3000" -TimeoutSec 2 -UseBasicParsing -ErrorAction Stop
+        if ($res.StatusCode -eq 200) { $webOk = $true; break }
+    } catch {}
+}
+if ($webOk) {
+    Write-Host "      OK Website started at http://localhost:3000" -ForegroundColor Green
+} else {
+    Write-Host "      WARN Website took longer than 15s to respond (check logs\website.err.log)" -ForegroundColor Yellow
+}
 
 # 6. Voicebot (port 3002)
 Write-Host "[6/6] Starting Voicebot..." -ForegroundColor Yellow
 Stop-Port 3002
 Stop-Port 3003
 $vbProcess = Start-Process "node" -ArgumentList "server\voicebot-server.js" -WorkingDirectory $ProjectDir -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logsDir "voicebot.log") -RedirectStandardError (Join-Path $logsDir "voicebot.err.log")
-Start-Sleep -Seconds 2
-Write-Host "      OK Voicebot started (PID: $($vbProcess.Id)) - logs: logs\voicebot.log" -ForegroundColor Green
+$vbOk = $false
+for ($i = 0; $i -lt 30; $i++) {
+    Start-Sleep -Seconds 1
+    try {
+        $res = Invoke-WebRequest -Uri "http://127.0.0.1:3003/health" -TimeoutSec 2 -UseBasicParsing -ErrorAction Stop
+        if ($res.StatusCode -eq 200) { $vbOk = $true; break }
+    } catch {}
+}
+if ($vbOk) {
+    Write-Host "      OK Voicebot started (PID: $($vbProcess.Id)) - logs: logs\voicebot.log" -ForegroundColor Green
+} else {
+    Write-Host "      WARN Voicebot started but health check timed out - logs: logs\voicebot.err.log" -ForegroundColor Yellow
+}
 
 # 6. Public tunnel
 # No domain yet -> scripts/tunnel-autofix.ps1 uses ngrok's reserved free
@@ -176,14 +204,21 @@ try {
             Invoke-WebRequest -Uri "http://localhost:3000" -TimeoutSec 3 -ErrorAction Stop | Out-Null
         } catch {
             Write-Host "  Website down - restarting..." -ForegroundColor Yellow
+            Stop-Port 3000
             Stop-Process -Id $webProcess.Id -Force -ErrorAction SilentlyContinue
-            $webProcess = Start-Process "cmd" -ArgumentList "/c npm start" -WorkingDirectory $ProjectDir -WindowStyle Hidden -PassThru
+            $webProcess = Start-Process "cmd" -ArgumentList "/c npm start" -WorkingDirectory $ProjectDir -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logsDir "website.log") -RedirectStandardError (Join-Path $logsDir "website.err.log")
+            Start-Sleep -Seconds 5
             Write-Host "  Website restarted" -ForegroundColor Green
         }
     }
 } finally {
     Write-Host ""
     Write-Host "Stopping all services..." -ForegroundColor Yellow
+    Stop-Port 3000
+    Stop-Port 3002
+    Stop-Port 3003
+    Stop-Port 3005
+    Get-Process ngrok -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
     foreach ($p in @($waProcess, $vbProcess, $webProcess, $cfProcess)) {
         if ($p) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
     }

@@ -591,7 +591,15 @@ async function synthesize(text, language, voiceOverride) {
       return sarvamTts(text, language, vo?.provider === "sarvam" ? vo.speaker : undefined)
     }
   }
-  return sarvamTts(text, language, vo?.provider === "sarvam" ? vo.speaker : undefined)
+  try {
+    return await sarvamTts(text, language, vo?.provider === "sarvam" ? vo.speaker : undefined)
+  } catch (e) {
+    if (CARTESIA_API_KEY && (CARTESIA_VOICE_ID || vo?.speaker)) {
+      console.warn(`[synthesize] Sarvam TTS failed (${e.message}), falling back to Cartesia TTS`)
+      return cartesiaTts(text, language, vo?.provider === "cartesia" ? vo.speaker : undefined)
+    }
+    throw e
+  }
 }
 
 /** Boot-time config validation — fail fast with a message that names the fix. */

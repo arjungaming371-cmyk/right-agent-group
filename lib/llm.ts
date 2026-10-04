@@ -421,8 +421,8 @@ type CompletionOpts = {
   model?: string
 }
 
-function groqBody(messages: ChatMessage[], opts: CompletionOpts, stream: boolean) {
-  if (ACTIVE_LLM_PROVIDER === "sarvam") {
+function groqBodyForProvider(provider: "sarvam" | "groq", messages: ChatMessage[], opts: CompletionOpts, stream: boolean) {
+  if (provider === "sarvam") {
     return JSON.stringify({
       model: opts.model === GROQ_UTILITY_MODEL ? SARVAM_LLM_UTILITY_MODEL
         : opts.model || SARVAM_LLM_MODEL,
@@ -454,6 +454,10 @@ function groqBody(messages: ChatMessage[], opts: CompletionOpts, stream: boolean
     // prompts start with "Return ONLY valid JSON", so this is safe to map.
     ...(opts.json && !isReasoning ? { response_format: { type: "json_object" } } : {}),
   })
+}
+
+function groqBody(messages: ChatMessage[], opts: CompletionOpts, stream: boolean) {
+  return groqBodyForProvider(ACTIVE_LLM_PROVIDER, messages, opts, stream)
 }
 
 // Sarvam's chat endpoint is OpenAI-compatible — the SAME request/stream
@@ -490,7 +494,7 @@ function assertLlmConfigured(): void {
   const groqKey = process.env.GROQ_API_KEY || GROQ_API_KEY
   const sarvamKey = process.env.SARVAM_API_KEY || SARVAM_API_KEY
   if (ACTIVE_LLM_PROVIDER === "sarvam") {
-    if (!sarvamKey) throw new Error("LLM provider sarvam but SARVAM_API_KEY is not set — the AI brain cannot run without it")
+    if (!sarvamKey && !groqKey) throw new Error("LLM provider sarvam but neither SARVAM_API_KEY nor GROQ_API_KEY is set — the AI brain cannot run without it")
     return
   }
   if (!groqKey) throw new Error("GROQ_API_KEY is not set — the AI brain cannot run without it")
@@ -500,12 +504,33 @@ function assertLlmConfigured(): void {
 const assertGroqConfigured = assertLlmConfigured
 
 async function groqChatRequest(messages: ChatMessage[], opts: CompletionOpts, signal: AbortSignal): Promise<string> {
-  const res = await fetch(llmEndpoint(), {
+  const groqKey = process.env.GROQ_API_KEY || GROQ_API_KEY
+  let res = await fetch(llmEndpoint(), {
     method: "POST",
     headers: llmHeaders(),
     signal,
     body: groqBody(messages, opts, false),
   })
+  if (!res.ok && ACTIVE_LLM_PROVIDER === "sarvam" && groqKey) {
+    const errorText = await res.text().catch(() => "")
+    console.warn(`⚠️ Sarvam LLM failed (HTTP ${res.status}: ${errorText.slice(0, 100)}) — auto-falling back to Groq`)
+    res = await fetch(`${GROQ_URL}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${groqKey}`,
+      },
+      signal,
+      body: groqBodyForProvider("groq", messages, opts, false),
+    })
+    if (!res.ok) throw new Error(`Groq fallback HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`)
+    const data = await res.json()
+    const tokens = data?.usage?.total_tokens
+    if (tokens) {
+      import("./system-keys").then(m => m.recordTokenUsage("groq", tokens)).catch(() => {})
+    }
+    return data?.choices?.[0]?.message?.content || ""
+  }
   if (!res.ok) throw new Error(`${ACTIVE_LLM_PROVIDER} HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`)
   const data = await res.json()
   const tokens = data?.usage?.total_tokens
@@ -522,12 +547,26 @@ async function groqChatStream(
   signal: AbortSignal,
   onChunk: (delta: string) => void
 ): Promise<string> {
-  const res = await fetch(llmEndpoint(), {
+  const groqKey = process.env.GROQ_API_KEY || GROQ_API_KEY
+  let res = await fetch(llmEndpoint(), {
     method: "POST",
     headers: llmHeaders(),
     signal,
     body: groqBody(messages, opts, true),
   })
+  if (!res.ok && ACTIVE_LLM_PROVIDER === "sarvam" && groqKey) {
+    const errorText = await res.text().catch(() => "")
+    console.warn(`⚠️ Sarvam LLM streaming failed (HTTP ${res.status}: ${errorText.slice(0, 100)}) — auto-falling back to Groq`)
+    res = await fetch(`${GROQ_URL}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${groqKey}`,
+      },
+      signal,
+      body: groqBodyForProvider("groq", messages, opts, true),
+    })
+  }
   if (!res.ok || !res.body) throw new Error(`${ACTIVE_LLM_PROVIDER} HTTP ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`)
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
@@ -1291,12 +1330,42 @@ export async function checkLLMHealth(): Promise<{ ok: boolean; message: string }
       )
       const failed = results.filter((r) => !r.ok)
       if (failed.length === 0) return { ok: true, message: `Sarvam ready with ${models.join(" + ")}` }
+      const groqKey = process.env.GROQ_API_KEY || GROQ_API_KEY
+      if (groqKey) {
+        try {
+          const groqRes = await fetch(`${GROQ_URL}/models/${GROQ_MODEL}`, {
+            headers: { Authorization: `Bearer ${groqKey}` },
+            signal: AbortSignal.timeout(5000),
+          })
+          if (groqRes.ok) {
+            return {
+              ok: true,
+              message: `Groq active (fallback: Sarvam returned ${failed.map((f) => `HTTP ${f.status || f.error}`).join(", ")})`,
+            }
+          }
+        } catch {}
+      }
       return {
         ok: false,
         message: failed.map((f) => `${f.model}: ${f.error || `HTTP ${f.status}`}`).join("; ") +
           " — check SARVAM_API_KEY / SARVAM_LLM_MODEL",
       }
     } catch (e: any) {
+      const groqKey = process.env.GROQ_API_KEY || GROQ_API_KEY
+      if (groqKey) {
+        try {
+          const groqRes = await fetch(`${GROQ_URL}/models/${GROQ_MODEL}`, {
+            headers: { Authorization: `Bearer ${groqKey}` },
+            signal: AbortSignal.timeout(5000),
+          })
+          if (groqRes.ok) {
+            return {
+              ok: true,
+              message: `Groq active (fallback: Cannot reach Sarvam: ${e.message})`,
+            }
+          }
+        } catch {}
+      }
       return { ok: false, message: `Cannot reach Sarvam: ${e.message}` }
     }
   }

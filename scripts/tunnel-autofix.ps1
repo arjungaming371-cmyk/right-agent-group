@@ -96,7 +96,7 @@ Write-Host "      OK ngrok tunnel URL: $url (stable - same every restart)" -Fore
 $reachable = $false
 for ($i = 0; $i -lt 10; $i++) {
     try {
-        $ping = Invoke-WebRequest -UseBasicParsing -TimeoutSec 10 -Uri "$url/api/whatsapp?hub.mode=subscribe&hub.verify_token=$verify&hub.challenge=selfping"
+        $ping = Invoke-WebRequest -UseBasicParsing -TimeoutSec 10 -Headers @{ "ngrok-skip-browser-warning" = "1" } -Uri "$url/api/whatsapp?hub.mode=subscribe&hub.verify_token=$verify&hub.challenge=selfping"
         if ($ping.Content -eq "selfping") { $reachable = $true; break }
     } catch {}
     Start-Sleep -Seconds 3
