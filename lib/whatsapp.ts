@@ -19,6 +19,7 @@
 
 import fs from "fs"
 import path from "path"
+import crypto from "crypto"
 import { getWhatsAppFallbackTemplates, renderTemplate } from "./channel-scripts"
 
 const GRAPH = "https://graph.facebook.com/v21.0"
@@ -692,6 +693,84 @@ export async function sendApplicationLink(
   const fallback = await sendWhatsAppText(number, message, branch)
   if (fallback.ok) return { ok: true }
   return { ok: false, error: `Template: ${result.error} | Fallback: ${fallback.error}` }
+}
+
+// ---------------------------------------------------------------------------
+// Chat-requested application links — the customer asked for the form IN a
+// conversation that is already open (WhatsApp chat / Instagram DM), so the
+// reply is an in-window FREE-FORM message, not a business-initiated template.
+// Shared by app/api/whatsapp and app/api/instagram (see lib/application-request.ts
+// for the request detection).
+// ---------------------------------------------------------------------------
+
+/** Mints a one-time form token bound to the lead (14-day TTL; pre-migration
+ * DBs without form_links.expires_at fall back to no TTL). Same pattern the
+ * operator send-form route and IG promotion use. */
+export async function createOneTimeFormToken(leadId: string): Promise<string> {
+  const { query } = await import("./db")
+  const token = crypto.randomUUID()
+  try {
+    await query(
+      `INSERT INTO form_links (token, lead_id, expires_at) VALUES ($1, $2, now() + interval '14 days')`,
+      [token, leadId]
+    )
+  } catch (e: any) {
+    if (e?.code !== "42703") throw e
+    await query(`INSERT INTO form_links (token, lead_id) VALUES ($1, $2)`, [token, leadId])
+  }
+  return token
+}
+
+/** The free-form "here is your application link" text — same copy the
+ * template fallback uses (dashboard-editable, carries the no-OTP compliance
+ * line). Used for in-window chat replies and the Instagram DM. */
+export function formLinkMessage(name: string, token: string, brand?: string | null): string {
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || ""
+  const formBase = (process.env.APPLICATION_FORM_URL || (appUrl ? `${appUrl}/form` : "")).replace(/\/$/, "")
+  const link = formBase ? `${formBase}/${token}` : `/form/${token}`
+  const t = getWhatsAppFallbackTemplates()
+  return renderTemplate(t.formLink, {
+    name: name || "there",
+    brand: brand || defaultBranding(),
+    link,
+  })
+}
+
+/** Free-form delivery of the application link inside an open WhatsApp
+ * conversation. NOT DND-gated on purpose — same rule as every other
+ * inbound-conversation reply (the customer messaged us first; FIXES 4.1). */
+export async function sendApplicationLinkText(
+  to: string,
+  name: string,
+  token: string,
+  branch?: BranchWhatsAppCtx
+): Promise<{ ok: boolean; error?: string }> {
+  const number = normalizeNumber(to)
+  if (!isValidNormalizedNumber(number)) return { ok: false, error: `Invalid number: ${to}` }
+  return sendWhatsAppText(number, formLinkMessage(name, token, branch?.brandName), branch)
+}
+
+/** True when ANY form-link message went out for this lead in the last
+ * `hours` hours (voice auto-send, operator send, IG promotion, or a previous
+ * chat request). The chat auto-send stays quiet within that window — the
+ * customer already has a live link; re-sending would mint a fresh token
+ * each time and spam the thread. */
+export async function recentFormLinkSent(leadId: string, hours = 6): Promise<boolean> {
+  try {
+    const { query } = await import("./db")
+    const res = await query(
+      `SELECT 1 FROM comm_logs
+         WHERE lead_id = $1
+           AND outcome IN ('sent', 'pending')
+           AND summary ILIKE '%form link%'
+           AND created_at > now() - ($2 || ' hours')::interval
+         LIMIT 1`,
+      [leadId, String(hours)]
+    )
+    return res.rows.length > 0
+  } catch {
+    return false // log table missing/unavailable → never block the send on a logging failure
+  }
 }
 
 /**

@@ -14,7 +14,7 @@
 
 import { query } from "./db"
 
-export type NotificationType = "loan_application" | "escalation" | "login" | "whatsapp_message" | "loan_edit_request"
+export type NotificationType = "loan_application" | "escalation" | "login" | "whatsapp_message" | "loan_edit_request" | "instagram_message"
 
 /** Fire-and-forget: never throws, never blocks the caller's real work. */
 export async function createNotification(opts: {

@@ -3,6 +3,8 @@ import crypto from "crypto"
 import pool, { query, db } from "@/lib/db"
 import { chatWithLLM, detectLanguage, type Language } from "@/lib/llm"
 import { sendWhatsAppText, downloadBranchWhatsAppMedia, answerWhatsAppCall, rejectWhatsAppCall, type BranchWhatsAppCtx } from "@/lib/whatsapp"
+import { createOneTimeFormToken, recentFormLinkSent, sendApplicationLinkText } from "@/lib/whatsapp"
+import { detectApplicationRequest } from "@/lib/application-request"
 import { finalizeWhatsAppCall, mapCallOutcome, callSidFor } from "@/lib/whatsapp-call-finalize"
 import { resolveBranchByWhatsAppPhoneId, type BranchRow } from "@/lib/branches"
 import { buildLeadBrief } from "@/lib/lead-brain"
@@ -520,7 +522,11 @@ async function handleInbound(msg: any, profileName: string | null, waBranch: Bra
       "NEVER ask for their WhatsApp number — the number they are texting you from RIGHT NOW " +
       "is their WhatsApp number, you already have it. If the base script's goal mentions " +
       "collecting a WhatsApp number, treat that as already done on this channel — do not ask, " +
-      "do not confirm it, just skip straight to name and city if those are still missing."
+      "do not confirm it, just skip straight to name and city if those are still missing. " +
+      "If the customer explicitly asks for the loan application, application form, or the link: " +
+      "confirm it is DONE — say the form was just sent right here in this chat (the system " +
+      "delivers it automatically with your reply). Never say you will send it later, never " +
+      "point them to email or another app."
 
     // OPERATOR REQUEST — shape this reply exactly like the call path does
     // (see lib/default-scripts.ts SPEAK TO A HUMAN + lib/frustration.ts).
@@ -622,6 +628,50 @@ async function handleInbound(msg: any, profileName: string | null, waBranch: Bra
       // without touching pm2 logs (expired token, 24h window 131047…).
       [lead.id, `WA: "${text.slice(0, 60)}" → AI replied${sent.ok ? "" : ` — FAILED: ${sent.error || "unknown error"}`}`, sent.ok ? "replied" : "reply_failed"]
     ).catch(() => {})
+  }
+
+  // ---- 5. AUTO APPLICATION LINK — the customer explicitly asked for it ----
+  // Fires ONLY on an explicit request (lib/application-request.ts is
+  // deliberately conservative) so a chat about rates or documents never
+  // sprays forms. In-window FREE-FORM reply: no template cost, no DND gate
+  // (inbound-conversation replies are ungated by design — FIXES 4.1).
+  // Deduped: if ANY form-link message already went out for this lead in the
+  // last 6 hours (voice auto-send, operator send, IG promotion, a previous
+  // chat request), they already hold a live one-time link — don't mint and
+  // message a fresh token on every ask.
+  try {
+    if (detectApplicationRequest(text) && !(await recentFormLinkSent(lead.id))) {
+      const token = await createOneTimeFormToken(lead.id)
+      const linkResult = await sendApplicationLinkText(from, lead.name || "there", token, waBranch)
+      // Mirror the operator send-form route: mark the lead as "form sent,
+      // not yet filled" so the Leads table stays truthful.
+      await db.from("leads").update({ form_completed: false, updated_at: new Date().toISOString() }).eq("id", lead.id)
+      await query(
+        `INSERT INTO whatsapp_messages (lead_id, phone_number, direction, content, status, branch_id)
+         VALUES ($1, $2, 'outbound', $3, $4, $5)`,
+        [lead.id, `+${from}`, "Loan application form link (auto — requested in chat)", linkResult.ok ? "sent" : "failed", waBranch?.id || null]
+      ).catch(() => {})
+      await query(
+        `INSERT INTO comm_logs (lead_id, type, summary, outcome) VALUES ($1, 'whatsapp', $2, $3)`,
+        [lead.id,
+          linkResult.ok
+            ? `Loan application form link sent on WhatsApp — requested in chat`
+            : `Loan application form link send FAILED (requested in chat): ${linkResult.error || "unknown error"}`,
+          linkResult.ok ? "sent" : "failed"]
+      ).catch(() => {})
+      if (!linkResult.ok) {
+        // Priya just said "the form is in this chat" — if it did not go out,
+        // the operator must share it manually before the customer gives up.
+        createNotification({
+          type: "whatsapp_message",
+          title: "Chat-requested form link FAILED — share manually",
+          body: `${lead.name || `+${from}`} asked for the application in chat but the send failed (${linkResult.error || "unknown"}). Open the lead and use Send form link.`,
+          linkView: "leads",
+        })
+      }
+    }
+  } catch (e: any) {
+    console.error("auto application link error (non-fatal):", e?.message || e)
   }
 
   refreshLeadScore(lead.id).catch(() => {})

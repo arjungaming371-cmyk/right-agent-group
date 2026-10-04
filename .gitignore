@@ -39,3 +39,4 @@ server/tts-service/__pycache__/
 server/tts-service/venv/
 scripts/.channel-build/
 scripts/.ig-build/
+scripts/.appreq-build/

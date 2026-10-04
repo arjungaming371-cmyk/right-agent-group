@@ -16,6 +16,15 @@ import { buildEmiInstruction, buildRateInstruction, detectLoanType } from "@/lib
 import { currentDateTimeInstruction } from "@/lib/compliance"
 import { extractIndianMobile } from "@/lib/phone"
 import { promoteInstagramLead } from "@/lib/ig-promote"
+import { detectApplicationRequest } from "@/lib/application-request"
+import {
+  branchWhatsAppCtx,
+  createOneTimeFormToken,
+  formLinkMessage,
+  recentFormLinkSent,
+  sendApplicationLink,
+} from "@/lib/whatsapp"
+import { createNotification } from "@/lib/notifications"
 import {
   getInstagramCommentTemplates,
   getInstagramDmTemplate,
@@ -386,6 +395,93 @@ async function handleInboundDM(messaging: any, igBranch: BranchInstagramCtx = nu
             [leadId, text, aiReply]
           ).catch(() => {})
         }
+      }
+    }
+
+    // ---- AUTO APPLICATION LINK — requested explicitly in the DM ----
+    // The deliverable Priya promises when someone asks for the application:
+    //   • lead already has a number → the REAL one-time link goes on
+    //     WhatsApp (template — exactly what IG promotion sends); if that
+    //     template send fails, the URL is dropped straight in the DM so the
+    //     customer still gets the form.
+    //   • no number yet (social prospect) → the form link is delivered IN
+    //     this DM (free-form, in-window). The form itself collects the
+    //     customer's WhatsApp number and backfills the lead on submit
+    //     (app/api/form/[token] backfill), so nothing is lost.
+    // Deduped + kill-switched: recentFormLinkSent keeps a 6h cool-down per
+    // lead; the isAiPaused("messages") return above gates this whole path.
+    if (leadId && detectApplicationRequest(text)) {
+      try {
+        const leadInfo = await query(
+          `SELECT name, phone, whatsapp_number, branch_id FROM leads WHERE id = $1`,
+          [leadId]
+        )
+        const leadRow = leadInfo.rows[0]
+        if (leadRow && !(await recentFormLinkSent(leadId))) {
+          const token = await createOneTimeFormToken(leadId)
+          const phoneOnFile = leadRow.whatsapp_number || leadRow.phone
+          if (phoneOnFile) {
+            const waBranch = await branchWhatsAppCtx(leadRow.branch_id)
+            const waRes = await sendApplicationLink(phoneOnFile, leadRow.name || "there", token, waBranch)
+            if (waRes.ok) {
+              await query(
+                `INSERT INTO comm_logs (lead_id, type, summary, outcome) VALUES ($1, 'whatsapp', $2, 'sent')`,
+                [leadId, `Loan application form link sent on WhatsApp — requested in Instagram DM`]
+              ).catch(() => {})
+            } else {
+              // Template send failed → hand the URL over in the DM itself.
+              const dmText = formLinkMessage(leadRow.name || "there", token)
+              const dmRes = await sendInstagramText(senderId, dmText, igBranch)
+              await query(
+                `INSERT INTO instagram_messages (lead_id, ig_user_id, direction, type, content, status, branch_id)
+                 VALUES ($1, $2, 'outbound', 'dm', $3, $4, $5)`,
+                [leadId, senderId, dmText, dmRes.ok ? "sent" : "failed", branchId]
+              ).catch(() => {})
+              await query(
+                `INSERT INTO comm_logs (lead_id, type, summary, outcome) VALUES ($1, 'instagram', $2, $3)`,
+                [leadId,
+                  dmRes.ok
+                    ? `WhatsApp template failed (${waRes.error || "unknown"}) — application form link sent in the DM instead`
+                    : `Loan application form link send FAILED (requested in DM): WhatsApp: ${waRes.error || "unknown"} | DM: ${dmRes.error || "unknown"}`,
+                  dmRes.ok ? "sent" : "failed"]
+              ).catch(() => {})
+              if (!dmRes.ok) {
+                createNotification({
+                  type: "instagram_message",
+                  title: "DM-requested form link FAILED — share manually",
+                  body: `${leadRow.name || "Instagram prospect"} asked for the application in DM but both sends failed. Generate a link from the lead page and reply manually.`,
+                  linkView: "leads",
+                })
+              }
+            }
+          } else {
+            const dmText = formLinkMessage(leadRow.name || "there", token)
+            const dmRes = await sendInstagramText(senderId, dmText, igBranch)
+            await query(
+              `INSERT INTO instagram_messages (lead_id, ig_user_id, direction, type, content, status, branch_id)
+               VALUES ($1, $2, 'outbound', 'dm', $3, $4, $5)`,
+              [leadId, senderId, dmText, dmRes.ok ? "sent" : "failed", branchId]
+            ).catch(() => {})
+            await query(
+              `INSERT INTO comm_logs (lead_id, type, summary, outcome) VALUES ($1, 'instagram', $2, $3)`,
+              [leadId,
+                dmRes.ok
+                  ? `Loan application form link sent in the Instagram DM (no number on file yet — form collects it on submit)`
+                  : `Loan application form link send FAILED (requested in DM): ${dmRes.error || "unknown error"}`,
+                dmRes.ok ? "sent" : "failed"]
+            ).catch(() => {})
+            if (!dmRes.ok) {
+              createNotification({
+                type: "instagram_message",
+                title: "DM-requested form link FAILED — share manually",
+                body: `${leadRow.name || "Instagram prospect"} asked for the application in DM but the send failed (${dmRes.error || "unknown"}). Generate a link from the lead page and reply manually.`,
+                linkView: "leads",
+              })
+            }
+          }
+        }
+      } catch (e: any) {
+        console.warn("IG auto application link error (non-fatal):", e?.message || e)
       }
     }
   } catch (e: any) {
