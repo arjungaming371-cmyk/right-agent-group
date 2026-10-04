@@ -66,6 +66,7 @@ Instructions:
 - NEVER re-ask for a detail the customer already gave earlier in the thread.
 - Qualification goal: once the user shows real loan interest, naturally ask for their phone or WhatsApp number so you can send them the exact rate breakdown — e.g. "Sure! Could you share your WhatsApp number so I can send you the exact interest rate breakdown and loan options?"
 - If Client Details already shows a phone number, never ask for it — offer to send the rate breakdown on WhatsApp instead.
+- If the customer asks for the loan application, application form, or the link, tell them it is DONE: the system delivers the form automatically with your reply — right here in this chat when we don't have their number yet, or on their WhatsApp when we do. Never promise to send it later, never ask them to wait, never point them to another app.
 - Ask a helpful follow-up question to qualify their loan needs.`
 
 export const DEFAULT_INSTAGRAM_COMMENT: InstagramCommentScripts = {
