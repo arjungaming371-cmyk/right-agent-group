@@ -8,12 +8,11 @@
   --bg-sidebar: #070a12;
   --border: #1c2437;
   --border-light: #161d2e;
-  --text-primary: #eef1f7;
-  --text-secondary: #9aa5bd;
-  /* Lifted from #64708c: that only reached ~3.7:1 on a card and dipped
-     under 3:1 on hover-tinted rows, and this variable carries a lot of
-     small secondary text. */
-  --text-muted: #727e9c;
+  --text-primary: #ffffff;
+  --text-secondary: #cbd5e1;
+  /* Lifted to high-contrast crisp white/slate for high readability in dark theme */
+  --text-muted: #94a3b8;
+  --text-mute: #94a3b8;
   --accent-blue: #5b7cfa;
   --accent-blue-dim: #3d5af1;
   --accent-violet: #8b7cff;
@@ -68,8 +67,9 @@
   --border: #1f1f1f;
   --border-light: #161616;
   --text-primary: #ffffff;
-  --text-secondary: #a3a3a3;
-  --text-muted: #6b6b6b;
+  --text-secondary: #d4d4d4;
+  --text-muted: #a3a3a3;
+  --text-mute: #a3a3a3;
   --shadow-soft: 0 1px 2px rgba(0,0,0,0.7), 0 10px 32px -12px rgba(0,0,0,0.8);
 }
 
@@ -192,9 +192,10 @@
   --bg-sidebar: #0c0d0e;
   --border: #232529;
   --border-light: #1b1d21;
-  --text-primary: #f7f8f8;
-  --text-secondary: #8a8f98;
-  --text-muted: #7e838c;
+  --text-primary: #ffffff;
+  --text-secondary: #d1d5db;
+  --text-muted: #9ca3af;
+  --text-mute: #9ca3af;
   --accent-blue: #5e6ad2;
   --accent-blue-dim: #4c5abd;
   --accent-violet: #828fff;
@@ -260,8 +261,9 @@
   --border: #262626;
   --border-light: #1a1a1a;
   --text-primary: #ffffff;
-  --text-secondary: #a1a1a1;
-  --text-muted: #8f8f8f;
+  --text-secondary: #d4d4d4;
+  --text-muted: #a3a3a3;
+  --text-mute: #a3a3a3;
   --accent-blue: #0070f3;
   --accent-blue-dim: #0058bd;
   --accent-violet: #7928ca;
@@ -326,9 +328,10 @@
   --bg-sidebar: #1e1f22;
   --border: #3f4147;
   --border-light: #2c2e33;
-  --text-primary: #f2f3f5;
-  --text-secondary: #b5bac1;
-  --text-muted: #949ba4;
+  --text-primary: #ffffff;
+  --text-secondary: #e2e5e8;
+  --text-muted: #b5bac1;
+  --text-mute: #b5bac1;
   --accent-blue: #5865f2;
   --accent-blue-dim: #4752c4;
   --accent-violet: #7983f5;
