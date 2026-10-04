@@ -51,15 +51,18 @@ export default function CommandPalette({ open, onClose, onNavigate, allowedViews
   const listRef = useRef<HTMLDivElement>(null)
 
   // Fetch fresh data each time the palette opens (cheap: three list endpoints).
+  // PERF (2026-10-05): each fetch used to pull the endpoint's full default
+  // page (leads 200, calls 100) on EVERY open — bounded explicitly here so
+  // the palette never pays for more type-ahead data than it renders.
   useEffect(() => {
     if (!open) return
     setQ("")
     setActive(0)
     setTimeout(() => inputRef.current?.focus(), 10)
     Promise.all([
-      fetch("/api/leads").then(r => (r.ok ? r.json() : [])),
-      fetch("/api/loans").then(r => (r.ok ? r.json() : [])),
-      fetch("/api/calls").then(r => (r.ok ? r.json() : [])),
+      fetch("/api/leads?limit=200").then(r => (r.ok ? r.json() : [])),
+      fetch("/api/loans?limit=200").then(r => (r.ok ? r.json() : [])),
+      fetch("/api/calls?limit=100").then(r => (r.ok ? r.json() : [])),
     ]).then(([l, lo, c]) => {
       setLeads(Array.isArray(l) ? l : [])
       setLoans(Array.isArray(lo) ? lo : [])

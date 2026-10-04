@@ -33,8 +33,8 @@ export const GET = withRoute("outbound/export", async (req: NextRequest) => {
   }
 
   const res = branchId
-    ? await query(`SELECT ${COLUMNS.join(", ")} FROM outbound_queue WHERE branch_id = $1 ORDER BY created_at DESC`, [branchId])
-    : await query(`SELECT ${COLUMNS.join(", ")} FROM outbound_queue ORDER BY created_at DESC`)
+    ? await query(`SELECT ${COLUMNS.join(", ")} FROM outbound_queue WHERE branch_id = $1 ORDER BY created_at DESC LIMIT 50000`, [branchId])
+    : await query(`SELECT ${COLUMNS.join(", ")} FROM outbound_queue ORDER BY created_at DESC LIMIT 50000`)
   const csv = toCsv(res.rows, COLUMNS)
   const filename = `outbound-queue-${new Date().toISOString().slice(0, 10)}.csv`
 

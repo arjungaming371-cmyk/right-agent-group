@@ -32,10 +32,14 @@ export async function GET(
   // Resolve the branch's credentials when the caller told us which branch the
   // media belongs to — media ids are WABA-scoped, so the env token alone
   // cannot download media that arrived on a branch number.
+  // SECURITY (2026-10-05): the ?branch= hint is honored ONLY for admin/developer
+  // sessions now — a branch-scoped session used to be able to pass another
+  // branch's UUID and read media with THAT branch's WABA token.
   let ctx: BranchWhatsAppCtx = null
   const branchHint = new URL(req.url).searchParams.get("branch")
   const sessionBranch = sessionBranchId(session)
-  const wantedBranch = branchHint || sessionBranch || null
+  const isPrivileged = session.role === "admin" || session.role === "developer"
+  const wantedBranch = (isPrivileged ? branchHint : null) || sessionBranch || null
   if (wantedBranch) {
     try {
       const b = await query(

@@ -19,8 +19,15 @@ export async function POST(req: NextRequest) {
       ).catch(() => {})
     }
   } catch {}
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || new URL(req.url).origin
-  const res = NextResponse.redirect(`${appUrl}/login`, { status: 303 })
+  // SECURITY (2026-10-05): the redirect target used to fall back to the
+  // request origin — attacker-controlled Host header. The OAuth callback
+  // fails closed in exactly this situation; logout now does too. When
+  // NEXT_PUBLIC_APP_URL is unset we clear the cookie and answer a plain
+  // JSON ok instead of bouncing anywhere.
+  const configured = (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "")
+  const res = configured
+    ? NextResponse.redirect(`${configured}/login`, { status: 303 })
+    : NextResponse.json({ ok: true })
   res.cookies.set(SESSION_COOKIE, "", { httpOnly: true, path: "/", maxAge: 0 })
   return res
 }

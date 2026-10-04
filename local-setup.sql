@@ -878,6 +878,20 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_outbound_queue_active_phone
   ON outbound_queue (right(regexp_replace(phone, '\D', '', 'g'), 10))
   WHERE status IN ('pending', 'dialing');
 
+-- Performance indexes (2026-10-05 pass — mirrored in
+-- migrations/2026-10-05_perf_indexes.sql for existing installs).
+CREATE INDEX IF NOT EXISTS idx_comm_logs_created
+  ON comm_logs (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_comm_logs_alerts_needs_human
+  ON comm_logs (created_at DESC)
+  WHERE type = 'alert' AND outcome = 'needs_human';
+CREATE INDEX IF NOT EXISTS idx_outbound_queue_call_sid
+  ON outbound_queue (call_sid)
+  WHERE call_sid IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_outbound_queue_dialing_claimed
+  ON outbound_queue (claimed_at)
+  WHERE status = 'dialing';
+
 CREATE TABLE IF NOT EXISTS dialer_settings (
   key        TEXT PRIMARY KEY,
   value      TEXT NOT NULL,

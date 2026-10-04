@@ -264,22 +264,36 @@ export async function PATCH(req: NextRequest) {
   const session = await requireModuleOrRole(req, "leads", ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const { id, ...updates } = await req.json()
-  delete updates.branch_id // branch moves are an admin action via /api/branches, not a lead edit
+  // SECURITY (2026-10-05): mass-assignment allowlist — PATCH used to spread
+  // arbitrary body keys into the update (POST got the WRITABLE guard in
+  // 2026-09-20 but PATCH was missed), letting a crafted payload overwrite
+  // internal columns (score, lead_code, created_at, callback_at, pinned,
+  // form_completed, ig_user_id, search_vector…). Same allowlist as POST,
+  // plus updated_at which this route stamps itself.
+  const WRITABLE = new Set([
+    "name", "phone", "whatsapp_number", "email", "language", "product_interest",
+    "loan_amount", "notes", "address", "source", "status", "instagram_handle",
+  ])
+  const cleanUpdates: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(updates)) {
+    if (WRITABLE.has(k)) cleanUpdates[k] = v
+  }
   // Instagram Separation (2026-09-26): promotion state can only change
   // through the promote path (lib/ig-promote.ts), never via a raw PATCH —
   // otherwise any lead edit form (or crafted payload) could flip the lane
   // flags and push a phone-less prospect into the dialer pipeline.
-  delete updates.is_social_prospect
-  delete updates.promoted_to_crm_at
-  delete updates.ig_phone_extracted
+  // (Covered by the allowlist above; the deletes below are belt-and-braces.)
+  delete cleanUpdates.is_social_prospect
+  delete cleanUpdates.promoted_to_crm_at
+  delete cleanUpdates.ig_phone_extracted
   // Branch-scoped users may only update leads inside their branch.
   const branchId = sessionBranchId(session)
-  let leadQuery = db.from("leads").update({ ...updates, updated_at: new Date().toISOString() })
+  let leadQuery = db.from("leads").update({ ...cleanUpdates, updated_at: new Date().toISOString() })
   if (branchId) leadQuery = leadQuery.eq("branch_id", branchId)
   const { data, error } = await leadQuery.eq("id", id).select().single()
   if (error) return apiError(error)
   if (!data) return NextResponse.json({ error: "lead not found in your branch" }, { status: 404 })
-  logAudit("lead updated", session.email, { leadId: id, fields: Object.keys(updates) })
+  logAudit("lead updated", session.email, { leadId: id, fields: Object.keys(cleanUpdates) })
   return NextResponse.json(data)
 }
 

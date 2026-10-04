@@ -32,6 +32,7 @@ import {
   SendHorizontal,
 } from "lucide-react"
 import { useToast } from "../ui/toast"
+import { ClickableRow } from "../ui/interactive"
 import { usePolling } from "@/lib/use-poll"
 import VoiceDictation from "../ui/voice-dictation"
 import { smartFilter } from "@/lib/smart-search"
@@ -166,6 +167,7 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
   const [activeIgUserId, setActiveIgUserId] = useState<string | null>(null)
   const [messages, setMessages] = useState<Msg[]>([])
   const [loading, setLoading] = useState(true)
+  const [igLoadError, setIgLoadError] = useState<string | null>(null)
   const [loadingMsgs, setLoadingMsgs] = useState(false)
   const [search, setSearch] = useState(initialSearch)
   const [tabFilter, setTabFilter] = useState<FilterTab>("all")
@@ -206,9 +208,14 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
         if (!activeIgUserId && data && data.length > 0) {
           setActiveIgUserId(data[0].ig_user_id)
         }
+        setIgLoadError(null)
+      } else {
+        // FIX (2026-10-05): a failed fetch used to be indistinguishable from
+        // an empty inbox — surface a retry instead of "no conversations".
+        setIgLoadError("Couldn't load Instagram conversations.")
       }
     } catch {
-      // ignore transient fetch error
+      setIgLoadError("Couldn't load Instagram conversations.")
     } finally {
       setLoading(false)
     }
@@ -506,7 +513,7 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
             />
             {search && (
               <button
-                onClick={() => setSearch("")}
+                onClick={() => setSearch("")} aria-label="Clear search"
                 style={{ background: "none", border: "none", color: IG_THEME.textMuted, cursor: "pointer", padding: 0 }}
               >
                 <X size={13} />
@@ -581,6 +588,11 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
               <RefreshCw size={18} className="animate-spin" style={{ margin: "0 auto 8px", opacity: 0.6 }} />
               Loading conversations...
             </div>
+          ) : igLoadError && filteredConversations.length === 0 ? (
+            <div style={{ padding: "40px 20px", textAlign: "center", fontSize: 13 }}>
+              <div style={{ color: "var(--accent-red)", fontWeight: 500, marginBottom: 10 }}>{igLoadError}</div>
+              <button className="btn-ghost" style={{ height: 32, padding: "0 14px", margin: "0 auto" }} onClick={loadConversations}>Retry</button>
+            </div>
           ) : filteredConversations.length === 0 ? (
             <div style={{ padding: "40px 20px", textAlign: "center", color: IG_THEME.textMuted, fontSize: 13 }}>
               <Instagram size={28} style={{ opacity: 0.25, margin: "0 auto 8px" }} />
@@ -593,12 +605,13 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
               const isComment = conv.last_type === "comment"
 
               return (
-                <div
+                <ClickableRow
                   key={conv.ig_user_id}
-                  onClick={() => {
+                  onActivate={() => {
                     setActiveIgUserId(conv.ig_user_id)
                     setMobileDetailOpen(true)
                   }}
+                  label={`Open conversation with ${title}`}
                   style={{
                     display: "flex",
                     alignItems: "center",
@@ -709,7 +722,7 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
                       ) : null}
                     </div>
                   </div>
-                </div>
+                </ClickableRow>
               )
             })
           )}

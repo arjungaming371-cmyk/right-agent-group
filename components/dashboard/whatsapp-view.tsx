@@ -40,6 +40,10 @@ export default function WhatsAppView({ role }: { role: Role }) {
   const [text, setText]             = useState("")
   const [sending, setSending]       = useState(false)
   const [ready, setReady]           = useState<boolean | null>(null)
+  // FIX (2026-10-05): a failed conversation fetch used to render as the
+  // "No conversations yet" empty state — indistinguishable from a genuinely
+  // empty inbox during a WhatsApp-service outage. Track it explicitly.
+  const [waLoadError, setWaLoadError] = useState<string | null>(null)
   const [showInfo, setShowInfo]     = useState(false)
   const [tab, setTab]               = useState<ListTab>("all")
   const [archivedOpen, setArchivedOpen] = useState(false)
@@ -146,6 +150,12 @@ export default function WhatsAppView({ role }: { role: Role }) {
       }
       if (archivedRes.ok) applyLeads(await archivedRes.json(), true)
 
+      if (!activeRes.ok || !archivedRes.ok) {
+        setWaLoadError("Couldn't load conversations. Check your connection and retry.")
+      } else {
+        setWaLoadError(null)
+      }
+
       // alert on FRESH messages (unread went up since the last look) —
       // the same trigger real WhatsApp uses for its sound + notification.
       // Never beep when the user is focused INSIDE the chat that received
@@ -164,7 +174,9 @@ export default function WhatsAppView({ role }: { role: Role }) {
         }
       }
       prevUnreadRef.current = total
-    } catch {}
+    } catch {
+      setWaLoadError("Couldn't load conversations. Check your connection and retry.")
+    }
   }, [soundOn, notifOn, beep])
 
   // 30s hidden-tab poll — complements the visible-time polls above (which
@@ -593,6 +605,7 @@ export default function WhatsAppView({ role }: { role: Role }) {
                 onToggleNotifs={toggleNotifs}
                 soundOn={soundOn}
                 onToggleSound={toggleSound}
+                loadError={waLoadError}
               />
             ) : (
               <CallsList

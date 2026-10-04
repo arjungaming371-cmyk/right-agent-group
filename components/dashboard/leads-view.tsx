@@ -11,6 +11,7 @@ import { formatCurrency, timeAgo, formatDateTime } from "@/lib/utils"
 import { pctOf } from "@/lib/maths"
 import { usePolling } from "@/lib/use-poll"
 import { useToast } from "../ui/toast"
+import { useEscapeDismiss } from "../ui/interactive"
 import { Skeleton } from "../ui/skeleton"
 import LeadMemoryModal from "./lead-memory-modal"
 import VoiceDictation from "../ui/voice-dictation"
@@ -204,6 +205,9 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
   const [interestedFilter, setInterestedFilter] = useState("all")
 
   const [showAdd, setShowAdd] = useState(false)
+  // A11y (2026-10-05): console modals close on Escape, matching the
+  // marketing nav behavior.
+  useEscapeDismiss(showAdd, () => setShowAdd(false))
   const [form, setForm] = useState({ name: "", phone: "", address: "", product_interest: "Home Loan", loan_amount: "", language: "telugu" })
 
   const [callTarget, setCallTarget] = useState<Lead | null>(null)
@@ -247,6 +251,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
   const [editingNameValue, setEditingNameValue] = useState<string>("")
   const [savingNameId, setSavingNameId] = useState<string | null>(null)
   const [editModalLead, setEditModalLead] = useState<Lead | null>(null)
+  useEscapeDismiss(!!editModalLead, () => setEditModalLead(null))
   const [editForm, setEditForm] = useState<{
     name: string
     phone: string
@@ -1412,7 +1417,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
       {/* Add-to-Call-Queue modal */}
       {showQueueModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={() => !queueBusy && setShowQueueModal(false)}>
-          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, padding: 28, width: 460 }} onClick={(e) => e.stopPropagation()}>
+          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, padding: 28, width: "min(460px, calc(100vw - 32px))" }} onClick={(e) => e.stopPropagation()}>
             <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 4 }}>Add {selectedIds.length} lead{selectedIds.length === 1 ? "" : "s"} to Call Queue</div>
             <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 18 }}>Priya dials them through the bulk dialer — nothing is dialed until a campaign is started.</div>
 
@@ -1457,7 +1462,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
       {/* Convert-to-CRM-Lead modal (Instagram Prospects lane) */}
       {convertTarget && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={() => !convertBusy && setConvertTarget(null)}>
-          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, padding: 28, width: 450 }} onClick={(e) => e.stopPropagation()}>
+          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, padding: 28, width: "min(450px, calc(100vw - 32px))" }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
               <SocialAvatar name={convertTarget.name} handle={convertTarget.instagram_handle} />
               <div>
@@ -1568,7 +1573,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
       {/* Edit Lead Modal */}
       {editModalLead && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}>
-          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, padding: 28, width: 460, maxWidth: "100%", maxHeight: "90vh", overflowY: "auto" }}>
+          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, padding: 28, width: "min(460px, 100%)", maxHeight: "90vh", overflowY: "auto" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
               <div>
                 <div style={{ fontWeight: 700, fontSize: 16 }}>Edit Lead Details</div>
@@ -1699,7 +1704,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
       {/* Call instructions modal */}
       {callTarget && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, padding: 28, width: 460 }}>
+          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, padding: 28, width: "min(460px, calc(100vw - 32px))" }}>
             <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 4 }}>Call {callTarget.name}</div>
             <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16 }}>{callTarget.phone}</div>
             <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>What should Priya talk about? (optional)</label>

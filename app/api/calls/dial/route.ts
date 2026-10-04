@@ -50,6 +50,7 @@ import { isAiPaused, aiPauseMessage } from "@/lib/ai-pause"
 import { branchWhatsAppCtx, placeWhatsAppCall } from "@/lib/whatsapp"
 import { checkCallCompliance } from "@/lib/compliance"
 import { normalizePhone } from "@/lib/phone"
+import { assertNoActiveDial } from "@/lib/outbound-dial"
 import { bridgeToVoicebot } from "@/lib/voicebot-bridge"
 import { sanitizeText } from "@/lib/api-route"
 
@@ -152,7 +153,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: quota.reason }, { status: 403 })
   }
 
-  // 4) Dial.
+  // 4) Double-dial guard (2026-10-05): a manual dial during a live campaign
+  //    — or a double-click — used to ring the customer twice at once.
+  try {
+    await assertNoActiveDial(phone)
+  } catch (e) {
+    if (e instanceof Error && "status" in e) {
+      return NextResponse.json({ error: e.message }, { status: (e as { status: number }).status })
+    }
+    throw e
+  }
+
+  // 4b) Dial.
   try {
     if (channel === "whatsapp") {
       const waId = toWaId(phone)

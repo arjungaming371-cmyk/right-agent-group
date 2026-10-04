@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
 import { chatWithSystemPromptStream } from "@/lib/llm"
-import { getSessionFromRequest } from "@/lib/auth"
+import { getLiveSession } from "@/lib/auth"
+import { sessionBranchId } from "@/lib/branches"
 import { rateLimit } from "@/lib/rate-limit"
 import {
   ACCURACY_RULES,
@@ -77,13 +78,30 @@ RULES:
 // (one user could occupy ~half the 25-connection pool; two concurrent users
 // starved the live-call path that shares the pool). An ops summary is fine
 // with 45s staleness.
-let _snapshotCache: { text: string; at: number } | null = null
 const SNAPSHOT_TTL_MS = 45_000
 
-async function getStatsSnapshot(): Promise<string> {
-  if (_snapshotCache && Date.now() - _snapshotCache.at < SNAPSHOT_TTL_MS) {
-    return _snapshotCache.text
+// SECURITY (2026-10-05): the snapshot cache used to be a single global value —
+// fine while every caller saw the whole company, but now that the snapshot is
+// branch-scoped and role-redacted, reusing one user's snapshot for another
+// would LEAK cross-branch data. Cache per (branch scope × admin visibility).
+const _snapshotCacheMap = new Map<string, { text: string; at: number }>()
+
+/**
+ * Branch-scoped WHERE fragment: when branchId is null (admin/developer viewing
+ * the whole company) the predicate is always true; otherwise it pins the query
+ * to the caller's branch — mirroring the /api/leads list scoping.
+ */
+function branchFilter(startIdx: number, col = "branch_id"): { sql: string; idx: number } {
+  return { sql: `$${startIdx}::uuid IS NULL OR ${col} = $${startIdx}`, idx: startIdx + 1 }
+}
+
+async function getStatsSnapshot(branchId: string | null, includeAdminData: boolean): Promise<string> {
+  const cacheKey = `${branchId ?? "all"}:${includeAdminData ? "admin" : "scoped"}`
+  const cached = _snapshotCacheMap.get(cacheKey)
+  if (cached && Date.now() - cached.at < SNAPSHOT_TTL_MS) {
+    return cached.text
   }
+  const bf = branchFilter(1)
   const [
     leadStatusBreakdown,
     leadsToday,
@@ -107,43 +125,57 @@ async function getStatsSnapshot(): Promise<string> {
     teamRoster,
     currentScript,
   ] = await Promise.all([
-    query(`SELECT status, COUNT(*)::int AS n FROM leads GROUP BY status ORDER BY n DESC`),
-    query(`SELECT COUNT(*)::int AS n FROM leads WHERE created_at > now() - interval '1 day'`),
-    query(`SELECT COUNT(*)::int AS n FROM leads`),
-    query(`SELECT name, phone, status, interested, score, product_interest FROM leads ORDER BY created_at DESC LIMIT 8`),
-    query(`SELECT status, COUNT(*)::int AS n FROM loan_applications GROUP BY status ORDER BY n DESC`),
-    query(`SELECT customer_name, loan_type, loan_amount, status, submitted_at FROM loan_applications ORDER BY submitted_at DESC LIMIT 6`),
-    query(`SELECT COUNT(*)::int AS n FROM voice_calls WHERE created_at > now() - interval '1 day'`),
-    query(`SELECT COALESCE(outcome, status) AS outcome, COUNT(*)::int AS n FROM voice_calls GROUP BY COALESCE(outcome, status) ORDER BY n DESC`),
+    query(`SELECT status, COUNT(*)::int AS n FROM leads WHERE ${bf.sql} GROUP BY status ORDER BY n DESC`, [branchId]),
+    query(`SELECT COUNT(*)::int AS n FROM leads WHERE ${bf.sql} AND created_at > now() - interval '1 day'`, [branchId]),
+    query(`SELECT COUNT(*)::int AS n FROM leads WHERE ${bf.sql}`, [branchId]),
+    query(`SELECT name, phone, status, interested, score, product_interest FROM leads WHERE ${bf.sql} ORDER BY created_at DESC LIMIT 8`, [branchId]),
+    query(`SELECT status, COUNT(*)::int AS n FROM loan_applications WHERE ${bf.sql} GROUP BY status ORDER BY n DESC`, [branchId]),
+    query(`SELECT customer_name, loan_type, loan_amount, status, submitted_at FROM loan_applications WHERE ${bf.sql} ORDER BY submitted_at DESC LIMIT 6`, [branchId]),
+    query(`SELECT COUNT(*)::int AS n FROM voice_calls WHERE ${bf.sql} AND created_at > now() - interval '1 day'`, [branchId]),
+    query(`SELECT COALESCE(outcome, status) AS outcome, COUNT(*)::int AS n FROM voice_calls WHERE ${bf.sql} GROUP BY COALESCE(outcome, status) ORDER BY n DESC`, [branchId]),
     query(
       `SELECT language, COUNT(*)::int AS n FROM voice_calls
-       WHERE (outcome = 'resolved' OR status = 'completed') AND language IS NOT NULL
-       GROUP BY language ORDER BY n DESC LIMIT 1`
+       WHERE ${bf.sql} AND (outcome = 'resolved' OR status = 'completed') AND language IS NOT NULL
+       GROUP BY language ORDER BY n DESC LIMIT 1`,
+      [branchId]
     ),
     query(
       `SELECT v.phone, l.name AS lead_name, v.direction, v.outcome, v.sentiment, v.duration, v.created_at
-       FROM voice_calls v LEFT JOIN leads l ON v.lead_id = l.id ORDER BY v.created_at DESC LIMIT 6`
+       FROM voice_calls v LEFT JOIN leads l ON v.lead_id = l.id WHERE ${bf.sql.replace(/branch_id/, "v.branch_id")} ORDER BY v.created_at DESC LIMIT 6`,
+      [branchId]
     ),
-    query(`SELECT COUNT(*)::int AS n FROM whatsapp_messages WHERE direction = 'inbound' AND status = 'received'`).catch(() => ({ rows: [{ n: null }] })),
-    query(`SELECT COUNT(*)::int AS n FROM whatsapp_messages`),
+    query(`SELECT COUNT(*)::int AS n FROM whatsapp_messages WHERE ${bf.sql} AND direction = 'inbound' AND status = 'received'`, [branchId]).catch(() => ({ rows: [{ n: null }] })),
+    query(`SELECT COUNT(*)::int AS n FROM whatsapp_messages WHERE ${bf.sql}`, [branchId]),
     query(
       `SELECT l.name AS lead_name, w.content, w.created_at FROM whatsapp_messages w
-       LEFT JOIN leads l ON w.lead_id = l.id WHERE w.direction = 'inbound' ORDER BY w.created_at DESC LIMIT 6`
+       LEFT JOIN leads l ON w.lead_id = l.id WHERE ${bf.sql.replace(/branch_id/, "w.branch_id")} AND w.direction = 'inbound' ORDER BY w.created_at DESC LIMIT 6`,
+      [branchId]
     ),
-    query(`SELECT COUNT(*)::int AS n FROM comm_logs WHERE type = 'alert' AND created_at > now() - interval '1 day'`),
+    query(
+      `SELECT COUNT(*)::int AS n FROM comm_logs c LEFT JOIN leads l ON c.lead_id = l.id
+       WHERE c.type = 'alert' AND c.created_at > now() - interval '1 day' AND ($1::uuid IS NULL OR l.branch_id = $1)`,
+      [branchId]
+    ),
     query(
       `SELECT l.name AS lead_name, c.summary, c.created_at FROM comm_logs c
-       LEFT JOIN leads l ON c.lead_id = l.id WHERE c.type = 'alert' ORDER BY c.created_at DESC LIMIT 5`
+       LEFT JOIN leads l ON c.lead_id = l.id WHERE c.type = 'alert' AND ($1::uuid IS NULL OR l.branch_id = $1) ORDER BY c.created_at DESC LIMIT 5`,
+      [branchId]
     ),
-    query(`SELECT key, enabled FROM security_settings ORDER BY key`),
-    query(
-      `SELECT action, performed_by, created_at FROM audit_logs
+    includeAdminData
+      ? query(`SELECT key, enabled FROM security_settings ORDER BY key`)
+      : Promise.resolve({ rows: [] }),
+    includeAdminData
+      ? query(
+          `SELECT action, performed_by, created_at FROM audit_logs
         WHERE lower(performed_by) NOT IN (SELECT lower(email) FROM allowed_emails WHERE role = 'developer')
         ORDER BY created_at DESC LIMIT 5`
-    ),
-    query(`SELECT COUNT(*)::int AS n FROM outbound_queue WHERE status = 'pending'`),
-    query(`SELECT filename, row_count, status, created_at FROM uploaded_files ORDER BY created_at DESC LIMIT 3`),
-    query(`SELECT email, role FROM allowed_emails WHERE role != 'developer' ORDER BY role, email`),
+        )
+      : Promise.resolve({ rows: [] }),
+    query(`SELECT COUNT(*)::int AS n FROM outbound_queue WHERE ${bf.sql} AND status = 'pending'`, [branchId]),
+    query(`SELECT filename, row_count, status, created_at FROM uploaded_files WHERE ${bf.sql} ORDER BY created_at DESC LIMIT 3`, [branchId]),
+    includeAdminData
+      ? query(`SELECT email, role FROM allowed_emails WHERE role != 'developer' ORDER BY role, email`)
+      : Promise.resolve({ rows: [] }),
     query(`SELECT language, content FROM ai_scripts WHERE language = 'base' LIMIT 1`).catch(() => ({ rows: [] })),
   ])
 
@@ -203,15 +235,19 @@ async function getStatsSnapshot(): Promise<string> {
     ].join("\n")
   )
 
-  const securitySection = section(
-    "SECURITY SETTINGS",
-    securitySettings.rows.map((r: { key: string; enabled: boolean }) => `${r.key}=${r.enabled ? "ON" : "OFF"}`).join(", ") || "none configured"
-  )
+  const securitySection = includeAdminData
+    ? section(
+        "SECURITY SETTINGS",
+        securitySettings.rows.map((r: { key: string; enabled: boolean }) => `${r.key}=${r.enabled ? "ON" : "OFF"}`).join(", ") || "none configured"
+      )
+    : section("SECURITY SETTINGS", "restricted — visible to administrators only")
 
-  const auditSection = section(
-    "AUDIT LOG (most recent 5)",
-    recentAuditLog.rows.map((r: { action: string; performed_by: string; created_at: string }) => `${r.action} by ${r.performed_by || "system"} (${fmtDate(r.created_at)})`).join("; ") || "no entries yet"
-  )
+  const auditSection = includeAdminData
+    ? section(
+        "AUDIT LOG (most recent 5)",
+        recentAuditLog.rows.map((r: { action: string; performed_by: string; created_at: string }) => `${r.action} by ${r.performed_by || "system"} (${fmtDate(r.created_at)})`).join("; ") || "no entries yet"
+      )
+    : section("AUDIT LOG (most recent 5)", "restricted — visible to administrators only")
 
   const opsSection = section(
     "UPLOADS & OUTBOUND CAMPAIGNS",
@@ -221,10 +257,12 @@ async function getStatsSnapshot(): Promise<string> {
     ].join("\n")
   )
 
-  const teamSection = section(
-    "TEAM ROSTER",
-    teamRoster.rows.map((r: { email: string; role: string }) => `${r.email} (${r.role})`).join(", ") || "no teammates added yet (only the admin email)"
-  )
+  const teamSection = includeAdminData
+    ? section(
+        "TEAM ROSTER",
+        teamRoster.rows.map((r: { email: string; role: string }) => `${r.email} (${r.role})`).join(", ") || "no teammates added yet (only the admin email)"
+      )
+    : section("TEAM ROSTER", "restricted — visible to administrators only")
 
   const snapshot = [
     "LIVE DATA SNAPSHOT (as of right now):",
@@ -239,11 +277,16 @@ async function getStatsSnapshot(): Promise<string> {
     opsSection,
     teamSection,
   ].join("\n\n")
-  _snapshotCache = { text: snapshot, at: Date.now() }
+  _snapshotCacheMap.set(cacheKey, { text: snapshot, at: Date.now() })
+  if (_snapshotCacheMap.size > 8) {
+    // Keep the map bounded — drop the oldest entry.
+    const oldest = _snapshotCacheMap.keys().next().value
+    if (oldest) _snapshotCacheMap.delete(oldest)
+  }
   return snapshot
 }
 
-async function searchDatabase(userMessage: string): Promise<string> {
+async function searchDatabase(userMessage: string, branchId: string | null): Promise<string> {
   try {
     const cleanMsg = userMessage.trim()
     const digitsOnly = cleanMsg.replace(/\D/g, "")
@@ -257,17 +300,20 @@ async function searchDatabase(userMessage: string): Promise<string> {
           !["the", "and", "for", "with", "what", "who", "show", "tell", "find", "about", "details", "check", "status", "give", "list", "any", "loan", "lead"].includes(w)
       )
 
-    // Primary: full-text search
+    // Primary: full-text search — SECURITY (2026-10-05): every search is now
+    // pinned to the caller's branch scope (null = whole company for
+    // admin/developer). Previously a branch_manager could full-text-search
+    // ANOTHER branch's customers by name/phone/address.
     const [leadHits, loanHits] = await Promise.all([
       query(
         `SELECT name, phone, status, product_interest, address, ts_rank(search_vector, websearch_to_tsquery('english', $1)) AS rank
-         FROM leads WHERE search_vector @@ websearch_to_tsquery('english', $1) ORDER BY rank DESC LIMIT 8`,
-        [cleanMsg]
+         FROM leads WHERE search_vector @@ websearch_to_tsquery('english', $1) AND ($2::uuid IS NULL OR branch_id = $2) ORDER BY rank DESC LIMIT 8`,
+        [cleanMsg, branchId]
       ).catch(() => ({ rows: [] })),
       query(
         `SELECT customer_name, loan_type, loan_amount, status, city, ts_rank(search_vector, websearch_to_tsquery('english', $1)) AS rank
-         FROM loan_applications WHERE search_vector @@ websearch_to_tsquery('english', $1) ORDER BY rank DESC LIMIT 8`,
-        [cleanMsg]
+         FROM loan_applications WHERE search_vector @@ websearch_to_tsquery('english', $1) AND ($2::uuid IS NULL OR branch_id = $2) ORDER BY rank DESC LIMIT 8`,
+        [cleanMsg, branchId]
       ).catch(() => ({ rows: [] })),
     ])
 
@@ -291,11 +337,11 @@ async function searchDatabase(userMessage: string): Promise<string> {
                 query(
                   `SELECT name, phone, status, product_interest, address, word_similarity($1, COALESCE(name, '')) AS sm
                    FROM leads
-                   WHERE word_similarity($1, COALESCE(name, '')) > 0.28
+                   WHERE ($2::uuid IS NULL OR branch_id = $2) AND (word_similarity($1, COALESCE(name, '')) > 0.28
                       OR word_similarity($1, COALESCE(address, '')) > 0.35
-                      OR word_similarity($1, COALESCE(product_interest, '')) > 0.35
+                      OR word_similarity($1, COALESCE(product_interest, '')) > 0.35)
                    ORDER BY sm DESC LIMIT 5`,
-                  [kw]
+                  [kw, branchId]
                 ).catch(() => ({ rows: [] }))
               )
             )
@@ -306,19 +352,19 @@ async function searchDatabase(userMessage: string): Promise<string> {
                 query(
                   `SELECT customer_name, loan_type, loan_amount, status, city, word_similarity($1, COALESCE(customer_name, '')) AS sm
                    FROM loan_applications
-                   WHERE word_similarity($1, COALESCE(customer_name, '')) > 0.28
+                   WHERE ($2::uuid IS NULL OR branch_id = $2) AND (word_similarity($1, COALESCE(customer_name, '')) > 0.28
                       OR word_similarity($1, COALESCE(city, '')) > 0.35
-                      OR word_similarity($1, COALESCE(loan_type, '')) > 0.35
+                      OR word_similarity($1, COALESCE(loan_type, '')) > 0.35)
                    ORDER BY sm DESC LIMIT 5`,
-                  [kw]
+                  [kw, branchId]
                 ).catch(() => ({ rows: [] }))
               )
             )
           : Promise.resolve([]),
         digitsOnly.length >= 5
           ? query(
-              `SELECT name, phone, status, product_interest, address FROM leads WHERE phone ILIKE ('%' || $1 || '%') LIMIT 5`,
-              [digitsOnly]
+              `SELECT name, phone, status, product_interest, address FROM leads WHERE phone ILIKE ('%' || $1 || '%') AND ($2::uuid IS NULL OR branch_id = $2) LIMIT 5`,
+              [digitsOnly, branchId]
             ).catch(() => ({ rows: [] }))
           : Promise.resolve({ rows: [] }),
       ])
@@ -406,7 +452,10 @@ function buildAssistantMathGrounding(message: string): string | null {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getSessionFromRequest(req)
+    // SECURITY (2026-10-05): getLiveSession (not the signature-only check) —
+    // revoked/demoted users must lose the assistant instantly, and the live
+    // role drives branch scoping + PII redaction below.
+    const session = await getLiveSession(req)
     if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
     // Per-user rate limit: one voice turn = one hit here; 30/min leaves a
@@ -451,7 +500,9 @@ export async function POST(req: NextRequest) {
       if (owns.rowCount) ownedChatId = chatId
     }
 
-    const [snapshot, searchResults] = await Promise.all([getStatsSnapshot(), searchDatabase(message)])
+    const branchId = sessionBranchId(session)
+    const includeAdminData = session.role === "admin" || session.role === "developer"
+    const [snapshot, searchResults] = await Promise.all([getStatsSnapshot(branchId, includeAdminData), searchDatabase(message, branchId)])
     const mathGrounding = buildAssistantMathGrounding(message)
     // ACCURACY_RULES sits between the persona and the data so the grounding
     // contract is read BEFORE any figure the model might copy.

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getSessionFromRequest } from "@/lib/auth"
+import { getLiveSession } from "@/lib/auth"
 import { checkWhatsAppHealth, liveEnvWhatsAppCreds } from "@/lib/whatsapp"
 import { withRoute } from "@/lib/api-route"
 
@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic"
 export const GET = withRoute("whatsapp/status", async (req: NextRequest) => {
   // FIX (2026-09-20): middleware-only protection → also verify the session
   // here (health message can carry config error details).
-  const session = await getSessionFromRequest(req)
+  const session = await getLiveSession(req)
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   // Live read (same creds the sender uses) — a boot-time process.env check

@@ -5,6 +5,7 @@ import { makeCall } from "@/lib/exotel"
 import { requireModuleOrRole } from "@/lib/auth"
 import { sessionBranchId, checkQuota, recordUsage } from "@/lib/branches"
 import { checkCallCompliance } from "@/lib/compliance"
+import { assertNoActiveDial } from "@/lib/outbound-dial"
 import { sanitizeText } from "@/lib/api-route"
 import { normalizePhone, phoneLast10, PHONE_MATCH_SQL } from "@/lib/phone"
 
@@ -135,7 +136,7 @@ export async function POST(req: NextRequest) {
         // duplicate leads for the same person — the queue PROCESSOR already
         // matched on last-10 digits, so the queue path and its processor
         // disagreed. Same rule everywhere now.
-        const existing = await query(`SELECT id FROM leads WHERE ${PHONE_MATCH_SQL} LIMIT 1`, [phoneLast10(contact.phone)])
+        const existing = await query(`SELECT id FROM leads WHERE ${PHONE_MATCH_SQL} AND ($2::uuid IS NULL OR branch_id = $2) LIMIT 1`, [phoneLast10(contact.phone), branchId])
         let leadId = existing.rows[0]?.id
 
         if (!leadId) {
@@ -183,10 +184,20 @@ export async function POST(req: NextRequest) {
   if (!quota.ok) {
     return NextResponse.json({ error: quota.reason }, { status: 403 })
   }
+  // Double-dial guard (2026-10-05) — see lib/outbound-dial.ts. Batch mode
+  // skips this: the queue claim machinery already serializes campaign dials.
+  try {
+    await assertNoActiveDial(phone)
+  } catch (e) {
+    if (e instanceof Error && "status" in e) {
+      return NextResponse.json({ error: e.message }, { status: (e as { status: number }).status })
+    }
+    throw e
+  }
 
   try {
     // Dedupe — last-10 digits, same as batch mode + the queue processor.
-    const existing = await query(`SELECT id FROM leads WHERE ${PHONE_MATCH_SQL} LIMIT 1`, [phoneLast10(phone)])
+    const existing = await query(`SELECT id FROM leads WHERE ${PHONE_MATCH_SQL} AND ($2::uuid IS NULL OR branch_id = $2) LIMIT 1`, [phoneLast10(phone), branchId])
     let leadId = existing.rows[0]?.id
 
     if (!leadId) {

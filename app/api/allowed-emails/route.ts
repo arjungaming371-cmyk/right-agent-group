@@ -345,8 +345,14 @@ export async function DELETE(req: NextRequest) {
   }
 
   const targetRole = targetUser.rows[0].role
-  if (targetRole === "developer" || targetRole === "admin") {
-    return NextResponse.json({ error: "This account cannot be removed." }, { status: 403 })
+  // SECURITY (2026-10-05): resolve the target's BASE role (custom roles map
+  // to one) before the privilege check — a raw string check let a custom
+  // role wrapping admin/developer slip past — and block branch_manager
+  // targets too, so a BM can no longer delete a fellow BM of the same
+  // branch (POST/PATCH already refuse to create/edit one).
+  const targetBaseRole = await getBaseRole(targetRole)
+  if (targetBaseRole === "developer" || targetBaseRole === "admin" || targetBaseRole === "branch_manager") {
+    return NextResponse.json({ error: "This account cannot be removed here." }, { status: 403 })
   }
 
   const isBM = session.role === "branch_manager"

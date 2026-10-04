@@ -182,14 +182,26 @@ const VIEW_TITLES: Record<ViewKey, { title: string; sub: string }> = {
   "dev-logs": { title: "Activity Logs",   sub: "Your activity, login history, and system events" },
 }
 
-function StatusPill({ icon: Icon, label }: { icon: LucideIcon; label: string }) {
+// FIX (2026-10-05): this pill used to paint the status dot green
+// UNCONDITIONALLY — while the sidebar's own status card reported the real
+// /api/system/status verdict — so the top bar claimed "healthy" during an
+// outage. It now mirrors the same systemOk state, stays neutral while
+// checking, and the label is announced via role="status".
+function StatusPill({ icon: Icon, label, ok }: { icon: LucideIcon; label: string; ok: boolean | null }) {
   return (
-    <div className="hidden lg:flex items-center gap-2 rounded-full border border-[var(--overlay-line)] bg-[var(--overlay-soft)] px-3.5 py-[7px]">
+    <div
+      className="hidden lg:flex items-center gap-2 rounded-full border border-[var(--overlay-line)] bg-[var(--overlay-soft)] px-3.5 py-[7px]"
+      role="status"
+      aria-label={`${label}: ${ok === null ? "status unknown" : ok ? "operational" : "degraded"}`}
+    >
       <Icon size={13} strokeWidth={2} className="text-[var(--text-secondary)]" />
       <span className="text-[12.5px] font-medium text-[var(--text-secondary)]">{label}</span>
       <span
-        className="ml-0.5 h-[6px] w-[6px] rounded-full bg-[var(--accent-green)]"
-        style={{ animation: "pulse-dot 2.2s infinite" }}
+        className="ml-0.5 h-[6px] w-[6px] rounded-full"
+        style={{
+          background: ok === null ? "var(--text-muted)" : ok ? "var(--accent-green)" : "var(--accent-yellow)",
+          animation: ok ? "pulse-dot 2.2s infinite" : "none",
+        }}
       />
     </div>
   )
@@ -204,8 +216,6 @@ export default function DashboardShell() {
   const [roleTitle, setRoleTitle] = useState("")
   const [userAllowedModules, setUserAllowedModules] = useState<string[] | null>(null)
   const [sessionBranchId, setSessionBranchId] = useState<string | null>(null)
-  const [allBranches, setAllBranches] = useState<{ id: string; name: string; code: string }[]>([])
-  const [canSwitch, setCanSwitch] = useState(false)
   const [showProfile, setShowProfile] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   // Search text seeded into a view when jumping there from the command palette.
@@ -213,6 +223,17 @@ export default function DashboardShell() {
   // Sidebar is a slide-in drawer below the md breakpoint — closed by default.
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [voiceAssistantOpen, setVoiceAssistantOpen] = useState(false)
+
+  // A11y (2026-10-05): the mobile nav drawer closes on Escape (matching the
+  // marketing nav) instead of only on backdrop tap.
+  useEffect(() => {
+    if (!mobileNavOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMobileNavOpen(false)
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [mobileNavOpen])
   // Heavy overlays mount on first open — their chunks are only fetched when
   // actually needed (VoiceAssistant alone is a ~2k-line component).
   const [voiceAssistantEverOpened, setVoiceAssistantEverOpened] = useState(false)
@@ -309,13 +330,10 @@ export default function DashboardShell() {
       if (d.roleTitle) setRoleTitle(d.roleTitle)
       if (Array.isArray(d.allowedModules)) setUserAllowedModules(d.allowedModules)
       setSessionBranchId(d.branchId ?? null)
-      setCanSwitch(!!d.canSwitchBranch)
-      // Branch switcher options for the parent account.
-      if (d.canSwitchBranch || d.branchId) {
-        fetch("/api/branches").then(r => r.json()).then(list => {
-          if (Array.isArray(list)) setAllBranches(list.map((b: any) => ({ id: b.id, name: b.name, code: b.code })))
-        }).catch(() => {})
-      }
+      // (2026-10-05) The branch-switcher UI was removed on 2026-10-03; the
+      // /api/branches fetch + canSwitch state it fed were still running on
+      // every session — dead weight, now deleted. Branch switching happens
+      // via the session's signed branch scope (see /api/auth/branch).
     }).catch(() => {})
     // AI kill-switch banner — every user sees it, so nobody wonders why
     // campaigns are not dialing. Re-checked on the same 60s cycle as the
@@ -355,17 +373,6 @@ export default function DashboardShell() {
       reason: aiPauseState.reason,
     }
   })()
-
-  async function switchBranch(id: string | null) {
-    await fetch("/api/auth/branch", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ branchId: id }),
-    })
-    // The new scope is signed into the session cookie — reload so every
-    // view refetches with the new branch filter.
-    window.location.reload()
-  }
 
   // Matches the 15s poll used by leads-view/loan-apps-view so the sidebar
   // badges don't lag a full extra cycle behind the visible lists.
@@ -643,8 +650,8 @@ export default function DashboardShell() {
             <div className="truncate text-[11px] text-[var(--text-muted)] md:text-[12px]">{sub}</div>
           </div>
 
-          <StatusPill icon={Mic} label="Voice Bot" />
-          <StatusPill icon={MessageCircle} label="WhatsApp" />
+          <StatusPill icon={Mic} label="Voice Bot" ok={systemOk} />
+          <StatusPill icon={MessageCircle} label="WhatsApp" ok={systemOk} />
 
           {/* Personal Voice Assistant trigger button */}
           <button

@@ -60,7 +60,10 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
           return (
             <div
               key={t.id}
-              role="status"
+              // A11y (2026-10-05): errors use role="alert" (assertive live
+              // region) so screen readers announce failures immediately;
+              // info/success stay polite role="status".
+              role={t.kind === "error" ? "alert" : "status"}
               style={{
                 display: "flex", alignItems: "center", gap: 10,
                 maxWidth: 480, padding: "11px 14px 11px 12px",

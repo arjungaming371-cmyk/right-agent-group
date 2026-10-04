@@ -6,6 +6,7 @@ import { BadgeCheck, Download, PenLine, Check, X, History, Plus, Settings2, File
 import { formatCurrency, timeAgo, formatDateTime } from "@/lib/utils"
 import { usePolling } from "@/lib/use-poll"
 import { SkeletonList } from "../ui/skeleton"
+import { ClickableRow, useEscapeDismiss } from "../ui/interactive"
 import { useToast } from "../ui/toast"
 import { calculateEMI, totalInterest, formatINR, BEST_RATES, detectLoanType } from "@/lib/finance"
 import LoanFormCustomizerModal from "./loan-form-customizer-modal"
@@ -93,6 +94,8 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
 
   // Modals state
   const [showAddModal, setShowAddModal] = useState(false)
+  // A11y (2026-10-05): the add-application modal closes on Escape.
+  useEscapeDismiss(showAddModal, () => setShowAddModal(false))
   const [showCustomizer, setShowCustomizer] = useState(false)
   const [adding, setAdding] = useState(false)
   const [newApp, setNewApp] = useState({
@@ -382,9 +385,10 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
             {!loading && loadError && <div style={{ padding: 30, textAlign: "center", color: "var(--accent-red)", fontSize: 13 }}>{loadError}</div>}
             {!loading && !loadError && filtered.length === 0 && <div style={{ padding: 30, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>No applications found.</div>}
             {filtered.map((app) => (
-              <div
+              <ClickableRow
                 key={app.id}
-                onClick={() => setSelectedId(app.id)}
+                onActivate={() => setSelectedId(app.id)}
+                label={`Open application for ${app.customer_name}`}
                 style={{
                   padding: "12px 16px", borderBottom: "1px solid var(--border-light)", cursor: "pointer",
                   background: selectedId === app.id ? "var(--overlay-soft)" : "transparent",
@@ -409,7 +413,7 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
                   <span>{app.city || "—"}</span>
                   <span>{timeAgo(app.submitted_at || app.created_at)}</span>
                 </div>
-              </div>
+              </ClickableRow>
             ))}
             {!loading && filtered.length > 0 && (
               <div style={{ padding: "10px 16px", fontSize: 11, color: "var(--text-muted)", textAlign: "center" }}>
@@ -532,7 +536,7 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
                 </span>
                 <div style={{ fontSize: 16, fontWeight: 700 }}>Add Loan Application +</div>
               </div>
-              <button onClick={() => setShowAddModal(false)} style={{ background: "transparent", border: "none", color: "var(--text-muted)", cursor: "pointer" }}>
+              <button onClick={() => setShowAddModal(false)} aria-label="Close" style={{ background: "transparent", border: "none", color: "var(--text-muted)", cursor: "pointer" }}>
                 <X size={18} />
               </button>
             </div>

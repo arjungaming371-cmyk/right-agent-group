@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireModuleOrRole } from "@/lib/auth"
+import { sessionBranchId } from "@/lib/branches"
 import { branchWhatsAppCtx, liveEnvWhatsAppCreds } from "@/lib/whatsapp"
 
 export const dynamic = "force-dynamic"
@@ -20,7 +21,12 @@ export async function GET(req: NextRequest) {
   const session = await requireModuleOrRole(req, "whatsapp", ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
-  const branchId = req.nextUrl.searchParams.get("branchId") || null
+  // SECURITY (2026-10-05): a branch-scoped session used to probe ANY branch's
+  // WABA number (display phone, verified_name, quality_rating, Meta errors)
+  // by passing its UUID. Clamp to the session's branch unless admin/developer.
+  const requestedBranchId = req.nextUrl.searchParams.get("branchId") || null
+  const isPrivileged = session.role === "admin" || session.role === "developer"
+  const branchId = isPrivileged ? requestedBranchId : sessionBranchId(session)
   const ctx = await branchWhatsAppCtx(branchId || undefined)
 
   // Same live read the sender uses — diagnosing with boot-time env could

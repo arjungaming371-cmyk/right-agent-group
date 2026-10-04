@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
-import { getSessionFromRequest } from "@/lib/auth"
+import { getLiveSession } from "@/lib/auth"
 import { withParams } from "@/lib/api-route"
 
 export const dynamic = "force-dynamic"
@@ -14,7 +14,7 @@ export const GET = withParams("assistant/chats", async (
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) => {
-  const session = await getSessionFromRequest(req)
+  const session = await getLiveSession(req)
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const { id } = await params
@@ -41,7 +41,7 @@ export const DELETE = withParams("assistant/chats", async (
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) => {
-  const session = await getSessionFromRequest(req)
+  const session = await getLiveSession(req)
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const { id } = await params

@@ -30,7 +30,7 @@ import { db } from "@/lib/db"
 import { makeCall } from "@/lib/exotel"
 import { branchWhatsAppCtx, placeWhatsAppCall } from "@/lib/whatsapp"
 import { bridgeToVoicebot } from "@/lib/voicebot-bridge"
-import { normalizePhone } from "@/lib/phone"
+import { normalizePhone, phoneLast10 } from "@/lib/phone"
 
 export type RequestedChannel = "phone" | "whatsapp" | "auto"
 export type ResolvedChannel = "phone" | "whatsapp"
@@ -53,6 +53,59 @@ export function toWaId(phone: string): string {
   const digits = String(phone || "").replace(/\D/g, "")
   if (!digits) return ""
   return digits.length === 10 ? `91${digits}` : digits
+}
+
+// PRE-DIAL GUARD (2026-10-05): the outbound QUEUE claims rows atomically
+// (FOR UPDATE SKIP LOCKED + a unique partial index on active phones), but
+// the three MANUAL dial paths (single-dial route, the legacy /api/calls
+// loop, the one-shot /api/outbound immediate mode) used to bypass the queue
+// entirely — an agent clicking "Call" during a live campaign produced TWO
+// simultaneous calls to the same customer, and two rapid clicks produced
+// two calls to anyone. Manual dials now run this shared guard first.
+//
+// Rejects when any of these is true for the same last-10 phone digits:
+//   1. an active outbound_queue row (pending | dialing) — the campaign
+//      machinery already owns this number right now;
+//   2. an outbound voice_call still in flight (initiated | ringing |
+//      in-progress);
+//   3. an outbound voice_call created in the last 60s — covers the placement
+//      window before the status webhook lands (redial after a genuinely
+//      finished call stays possible immediately).
+export async function assertNoActiveDial(phone: string): Promise<void> {
+  const { query } = await import("@/lib/db")
+  const last10 = phoneLast10(normalizePhone(phone))
+  if (!last10) return
+  const [queueRow, inFlight, justPlaced] = await Promise.all([
+    query(
+      `SELECT id FROM outbound_queue
+        WHERE right(regexp_replace(phone, '\\D', '', 'g'), 10) = $1
+          AND status IN ('pending', 'dialing')
+        LIMIT 1`,
+      [last10]
+    ),
+    query(
+      `SELECT id FROM voice_calls
+        WHERE direction = 'outbound'
+          AND right(regexp_replace(phone, '\\D', '', 'g'), 10) = $1
+          AND status IN ('initiated', 'ringing', 'in-progress')
+        LIMIT 1`,
+      [last10]
+    ),
+    query(
+      `SELECT id FROM voice_calls
+        WHERE direction = 'outbound'
+          AND right(regexp_replace(phone, '\\D', '', 'g'), 10) = $1
+          AND created_at > now() - interval '60 seconds'
+        LIMIT 1`,
+      [last10]
+    ),
+  ])
+  if (queueRow.rows[0]) {
+    throw new DialError("This number already has a campaign call queued or in progress.", 409)
+  }
+  if (inFlight.rows[0] || justPlaced.rows[0]) {
+    throw new DialError("A call to this number is already being placed or was just placed.", 409)
+  }
 }
 
 /** "auto" resolution: WhatsApp callback is only safe when the lead recently

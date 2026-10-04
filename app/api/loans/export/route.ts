@@ -25,8 +25,8 @@ export const GET = withRoute("loans/export", async (req: NextRequest) => {
 
   const branchId = sessionBranchId(session)
   const res = branchId
-    ? await query(`SELECT ${COLUMNS.join(", ")} FROM loan_applications WHERE branch_id = $1 ORDER BY submitted_at DESC`, [branchId])
-    : await query(`SELECT ${COLUMNS.join(", ")} FROM loan_applications ORDER BY submitted_at DESC`)
+    ? await query(`SELECT ${COLUMNS.join(", ")} FROM loan_applications WHERE branch_id = $1 ORDER BY submitted_at DESC LIMIT 50000`, [branchId])
+    : await query(`SELECT ${COLUMNS.join(", ")} FROM loan_applications ORDER BY submitted_at DESC LIMIT 50000`)
 
   const csv = toCsv(res.rows, COLUMNS)
   const filename = `loan-applications-${new Date().toISOString().slice(0, 10)}.csv`

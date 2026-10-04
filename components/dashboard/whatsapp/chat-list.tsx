@@ -12,6 +12,7 @@ import {
 import { WA, WA_FONT, fmtListTime, mediaPreview, type Lead } from "./palette"
 import { Avatar, IconBtn, Ticks } from "./bits"
 import VoiceDictation from "../../ui/voice-dictation"
+import { ClickableRow } from "../../ui/interactive"
 import { smartFilter } from "@/lib/smart-search"
 
 export type ListTab = "all" | "unread" | "favourites" | "groups"
@@ -19,7 +20,7 @@ export type ListTab = "all" | "unread" | "favourites" | "groups"
 export default function ChatList({
   leads, selected, ready, canEdit, tab, onTab, archivedOpen, onArchivedOpen,
   onOpenArchived, onSelect, onNewChat, onPin, onMute, onArchive, onRefresh,
-  onDiagnose, diagnosing, notifOn, onToggleNotifs, soundOn, onToggleSound,
+  onDiagnose, diagnosing, notifOn, onToggleNotifs, soundOn, onToggleSound, loadError,
 }: {
   leads: Lead[]
   selected: Lead | null
@@ -42,6 +43,7 @@ export default function ChatList({
   onToggleNotifs?: () => void
   soundOn?: boolean
   onToggleSound?: () => void
+  loadError?: string | null
 }) {
   const [search, setSearch] = useState("")
   const [menuOpen, setMenuOpen] = useState(false)
@@ -237,7 +239,18 @@ export default function ChatList({
 
       {/* rows */}
       <div ref={listRef} style={{ flex: 1, overflowY: "auto", paddingBottom: 76 }}>
-        {filtered.length === 0 && (
+        {loadError && filtered.length === 0 && (
+          <div style={{ padding: 28, textAlign: "center", fontSize: 13.5 }}>
+            <div style={{ color: "var(--accent-red)", fontWeight: 500, marginBottom: 10 }}>{loadError}</div>
+            <button
+              onClick={onRefresh}
+              style={{ background: "transparent", border: `1px solid ${WA.teal}`, color: WA.tealBright, borderRadius: 8, padding: "6px 16px", fontSize: 13, cursor: "pointer" }}
+            >
+              Retry
+            </button>
+          </div>
+        )}
+        {!loadError && filtered.length === 0 && (
           <div style={{ padding: 28, textAlign: "center", color: WA.textSecondary, fontSize: 13.5 }}>
             {tab === "groups" ? (
               <>
@@ -279,8 +292,9 @@ function Row({
   const lastIsOut = lead.last_direction === "outbound"
 
   return (
-    <div
-      onClick={() => onSelect(lead)}
+    <ClickableRow
+      onActivate={() => onSelect(lead)}
+      label={`Open chat with ${lead.name}`}
       style={{
         padding: "10px 12px 10px 16px", cursor: "pointer", position: "relative",
         background: isActive ? WA.selected : "transparent",
@@ -343,7 +357,7 @@ function Row({
           <MenuItem icon={<Archive size={15} />} label={unarchive ? "Unarchive chat" : "Archive chat"} onClick={() => { setRowMenu(null); onArchive(lead) }} />
         </div>
       )}
-    </div>
+    </ClickableRow>
   )
 }
 

@@ -189,11 +189,12 @@ export default function HomePage() {
             AI loan calling &amp; lead management
           </span>
           <h1>
-            Turn Every Loan Lead Into a <span className="rg-grad">Conversation.</span>
+            AI Employees That Turn Leads Into <span className="rg-grad">Loan Applications.</span>
           </h1>
           <p className="rg-sub">
-            AI employees automatically call, qualify, follow up and manage loan leads across
-            Phone, WhatsApp and Instagram — from one powerful operations console.
+            Turn every loan lead into a conversation. AI employees automatically call, qualify,
+            follow up and manage loan leads across Phone, WhatsApp and Instagram — from one
+            powerful operations console.
           </p>
           <div className="rg-hero-cta">
             <Link href="/demo" className="rg-btn rg-btn-primary">

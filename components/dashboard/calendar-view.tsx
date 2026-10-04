@@ -35,6 +35,7 @@ export default function CalendarView({ role }: { role: Role }) {
   const [callbacks, setCallbacks] = useState<Callback[]>([])
   const [leads, setLeads] = useState<Lead[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [selected, setSelected] = useState<Callback | null>(null)
   const [calling, setCalling] = useState(false)
 
@@ -56,13 +57,26 @@ export default function CalendarView({ role }: { role: Role }) {
     // Full UTC instants of the LOCAL month bounds make the window exact.
     const from = new Date(monthCursor.getFullYear(), monthCursor.getMonth(), 1).toISOString()
     const to = new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1).toISOString()
-    const [cr, lr] = await Promise.all([
-      fetch(`/api/leads/callbacks?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
-      fetch("/api/leads"),
-    ])
-    if (cr.ok) setCallbacks(await cr.json())
-    if (lr.ok) setLeads(await lr.json())
-    setLoading(false)
+    // FIX (2026-10-05): load() had NO error handling — a rejected fetch left
+    // the skeleton up forever with zero feedback. Now failures surface a
+    // retry banner instead of an eternal spinner.
+    try {
+      const [cr, lr] = await Promise.all([
+        fetch(`/api/leads/callbacks?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
+        fetch("/api/leads"),
+      ])
+      if (cr.ok) setCallbacks(await cr.json())
+      if (lr.ok) setLeads(await lr.json())
+      if (!cr.ok || !lr.ok) {
+        setLoadError("Couldn't load callbacks. Check your connection and retry.")
+      } else {
+        setLoadError(null)
+      }
+    } catch {
+      setLoadError("Couldn't load callbacks. Check your connection and retry.")
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => {
@@ -268,7 +282,13 @@ export default function CalendarView({ role }: { role: Role }) {
             <SkeletonList rows={4} />
           </div>
         )}
-        {!loading && upcomingCallbacks.length === 0 && (
+        {!loading && loadError && upcomingCallbacks.length === 0 && (
+          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: 28, textAlign: "center" }}>
+            <div style={{ color: "var(--accent-red)", fontSize: 13, fontWeight: 600, marginBottom: 10 }}>{loadError}</div>
+            <button className="btn-ghost" style={{ height: 32, padding: "0 14px" }} onClick={load}>Retry</button>
+          </div>
+        )}
+        {!loading && !loadError && upcomingCallbacks.length === 0 && (
           <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: 28, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
             No upcoming callbacks this month.
           </div>

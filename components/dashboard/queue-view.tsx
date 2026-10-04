@@ -130,6 +130,7 @@ export default function QueueView({ role }: { role: Role }) {
   const [settings, setSettings] = useState<{ concurrency: number; autoRetry: boolean; retryDelayMinutes: number; maxRetries: number } | null>(null)
   const [tab, setTab] = useState<TabId>("pending")
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [acting, setActing] = useState(false)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   // Duplicate handling: the queue keeps one row per campaign add / retry /
@@ -202,23 +203,29 @@ export default function QueueView({ role }: { role: Role }) {
         fetch("/api/outbound/process"),
         fetch(`/api/outbound?status=${tab}&limit=200`),
       ])
-      if (runRes.ok) {
+      // FIX (2026-10-05): HTTP failures used to fall through silently — the
+      // UI then showed the "Nothing here yet" empty state while the API was
+      // down, lying to the operator. Distinguish failure from empty.
+      if (!runRes.ok || !listRes.ok) {
+        if (!silent) setLoadError("Couldn't load the call queue. Check your connection and retry.")
+      } else {
         const d = await runRes.json()
         setRun(d.run || null)
         setCounts(d.queue || {})
         setOutcomes(d.outcomes || {})
-      }
-      if (listRes.ok) {
-        const d = await listRes.json()
+        const ld = await listRes.json()
         // The listing route returns a BARE ARRAY when no status filter is set
         // (the Upload console consumes it that way) and an { items, total }
         // envelope for filtered calls — the "All" tab used to read .items off
         // the array and render an empty queue forever.
-        const rows = Array.isArray(d) ? d : d.items || []
+        const rows = Array.isArray(ld) ? ld : ld.items || []
         setItems(rows)
-        setTotal(Array.isArray(d) ? d.length : d.total ?? rows.length)
+        setTotal(Array.isArray(ld) ? ld.length : ld.total ?? rows.length)
+        setLoadError(null)
       }
-    } catch { /* transient — next poll catches up */ }
+    } catch {
+      if (!silent) setLoadError("Couldn't load the call queue. Check your connection and retry.")
+    }
     if (!silent) setLoading(false)
   }, [tab])
 
@@ -436,7 +443,7 @@ export default function QueueView({ role }: { role: Role }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
       {/* ── Live campaign radar ─────────────────────────────────────── */}
-      <div style={{ display: "grid", gridTemplateColumns: "1.6fr 1fr", gap: 16 }}>
+      <div className="rg-cols-campaign">
         <div className="card" style={{ padding: "20px 24px" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
             <div style={{ fontWeight: 700, fontSize: 15, display: "flex", alignItems: "center", gap: 8 }}>
@@ -659,7 +666,15 @@ export default function QueueView({ role }: { role: Role }) {
               {loading && (
                 <tr><td colSpan={8} style={{ padding: "14px 16px", color: "var(--text-muted)", fontSize: 12 }}>Loading queue…</td></tr>
               )}
-              {!loading && visibleRows.length === 0 && (
+              {!loading && loadError && visibleRows.length === 0 && (
+                <tr><td colSpan={8} style={{ padding: 28, textAlign: "center" }}>
+                  <div style={{ color: "var(--accent-red)", fontSize: 13, fontWeight: 600, marginBottom: 8 }}>{loadError}</div>
+                  <button className="btn-ghost" style={{ height: 32, padding: "0 14px" }} onClick={() => load()}>
+                    Retry
+                  </button>
+                </td></tr>
+              )}
+              {!loading && !loadError && visibleRows.length === 0 && (
                 <tr><td colSpan={8} style={{ padding: 40, textAlign: "center", color: "var(--text-muted)" }}>
                   Nothing here yet — select leads in the Leads view and click "Add to Call Queue", or upload a CSV in Upload & Data.
                 </td></tr>
@@ -757,10 +772,10 @@ export default function QueueView({ role }: { role: Role }) {
                       <div style={{ display: "flex", gap: 6 }}>
                         {canOperate && isPending && (
                           <>
-                            <button onClick={() => dialNow(item)} disabled={acting} title="Dial now" style={{ background: "rgba(139,124,255,0.12)", border: "1px solid rgba(139,124,255,0.28)", color: "var(--accent-violet)", borderRadius: 8, width: 30, height: 30, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                            <button onClick={() => dialNow(item)} disabled={acting} title="Dial now" aria-label={`Dial ${item.name || item.phone} now`} style={{ background: "rgba(139,124,255,0.12)", border: "1px solid rgba(139,124,255,0.28)", color: "var(--accent-violet)", borderRadius: 8, width: 30, height: 30, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
                               <PhoneCall size={13} strokeWidth={2} />
                             </button>
-                            <button onClick={() => cancelOne(item)} disabled={acting} title="Cancel" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)", color: "var(--accent-red)", borderRadius: 8, width: 30, height: 30, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                            <button onClick={() => cancelOne(item)} disabled={acting} title="Cancel" aria-label={`Cancel call to ${item.name || item.phone}`} style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)", color: "var(--accent-red)", borderRadius: 8, width: 30, height: 30, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
                               <XCircle size={13} strokeWidth={2} />
                             </button>
                           </>

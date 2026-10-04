@@ -30,6 +30,11 @@ export function rateLimit(key: string, limit = 20, windowMs = 60_000): boolean {
   const now = Date.now()
   let b = buckets.get(key)
   if (!b) {
+    // HARD CAP (2026-10-05): a flood with unique keys (per-IP buckets) within
+    // one sweep window used to push the Map past MAX_BUCKETS unbounded, and
+    // every subsequent call paid a full sweep. Past the cap, brand-new keys
+    // are rejected — legitimate repeats already have a bucket.
+    if (buckets.size >= MAX_BUCKETS) return false
     b = { timestamps: [] }
     buckets.set(key, b)
   }

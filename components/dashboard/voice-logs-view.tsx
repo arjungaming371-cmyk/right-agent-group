@@ -11,6 +11,7 @@ import { formatDuration, timeAgo, formatDateTime } from "@/lib/utils"
 import { usePolling } from "@/lib/use-poll"
 import { useToast } from "../ui/toast"
 import { SkeletonList } from "../ui/skeleton"
+import { ClickableRow, useEscapeDismiss } from "../ui/interactive"
 import VoiceDictation from "../ui/voice-dictation"
 import { smartFilter } from "@/lib/smart-search"
 
@@ -50,7 +51,10 @@ export default function VoiceLogsView({ role }: { role: Role }) {
   const [calls, setCalls]   = useState<Call[]>([])
   const [leads, setLeads]   = useState<Lead[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [selected, setSelected] = useState<Call | null>(null)
+  // A11y (2026-10-05): the call detail modal now closes on Escape.
+  useEscapeDismiss(!!selected, () => { setSelected(null) })
   const [search, setSearch] = useState("")
 
   const filteredCalls = useMemo(() => {
@@ -248,6 +252,9 @@ export default function VoiceLogsView({ role }: { role: Role }) {
     // screen — without this, every 15s poll replaced the whole list with
     // skeletons all day. First load and user-triggered refreshes still show it.
     if (!silent || calls.length === 0) setLoading(true)
+    // FIX (2026-10-05): try/finally with NO catch — a network failure was an
+    // unhandled rejection, and an HTTP 401/500 silently kept stale data with
+    // no error UI. Failures now surface a retry banner.
     try {
       const [cr, lr] = await Promise.all([fetch("/api/calls"), fetch("/api/leads")])
       // Array.isArray guards: an error-object body (e.g. {error:'unauthorized'})
@@ -261,6 +268,13 @@ export default function VoiceLogsView({ role }: { role: Role }) {
         const data: unknown = await lr.json()
         setLeads(Array.isArray(data) ? (data as Lead[]) : [])
       }
+      if (!cr.ok || !lr.ok) {
+        if (!silent) setLoadError("Couldn't load call logs. Check your connection and retry.")
+      } else {
+        setLoadError(null)
+      }
+    } catch {
+      if (!silent) setLoadError("Couldn't load call logs. Check your connection and retry.")
     } finally {
       setLoading(false)
     }
@@ -424,7 +438,13 @@ export default function VoiceLogsView({ role }: { role: Role }) {
         </div>
 
         {loading && <SkeletonList rows={4} />}
-        {!loading && calls.length === 0 && <div style={{ padding: 40, textAlign: "center", color: "var(--text-muted)" }}>No calls yet.</div>}
+        {!loading && loadError && calls.length === 0 && (
+          <div style={{ padding: 28, textAlign: "center" }}>
+            <div style={{ color: "var(--accent-red)", fontSize: 13, fontWeight: 600, marginBottom: 10 }}>{loadError}</div>
+            <button className="btn-ghost" style={{ height: 32, padding: "0 14px" }} onClick={() => load()}>Retry</button>
+          </div>
+        )}
+        {!loading && !loadError && calls.length === 0 && <div style={{ padding: 40, textAlign: "center", color: "var(--text-muted)" }}>No calls yet.</div>}
         {!loading && calls.length > 0 && filteredCalls.length === 0 && (
           <div style={{ padding: 36, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
             No calls found matching "{search}".
@@ -440,9 +460,10 @@ export default function VoiceLogsView({ role }: { role: Role }) {
           const ost     = OUTCOME_STYLE[call.outcome] ?? OUTCOME_STYLE.pending
           const hasRec  = !!call.recording_url
           return (
-            <div
+            <ClickableRow
               key={call.id}
-              onClick={() => setSelected(call)}
+              onActivate={() => setSelected(call)}
+              label={`Open call with ${name}`}
               style={{ display: "flex", alignItems: "center", gap: 16, padding: "16px 24px", borderBottom: "1px solid var(--border-light)", cursor: "pointer" }}
             >
               <div style={{
@@ -476,6 +497,7 @@ export default function VoiceLogsView({ role }: { role: Role }) {
                     Reflects real play/pause state via playingId/isPlaying. */}
                 <button
                   onClick={e => { e.stopPropagation(); if (hasRec) togglePlay(call) }}
+                  aria-label={hasRec ? (playingId === call.id && isPlaying ? "Pause recording" : "Play recording") : "No recording available"}
                   title={hasRec ? (playingId === call.id && isPlaying ? "Pause recording" : "Play recording") : "No recording available"}
                   style={{
                     background: hasRec ? "rgba(34,197,94,0.15)" : "transparent",
@@ -491,7 +513,7 @@ export default function VoiceLogsView({ role }: { role: Role }) {
                     : <Play size={13} strokeWidth={2} fill={hasRec ? "currentColor" : "none"} />}
                 </button>
               </div>
-            </div>
+            </ClickableRow>
           )
         })}
       </div>
@@ -519,7 +541,7 @@ export default function VoiceLogsView({ role }: { role: Role }) {
           onClick={() => { stopAudio(); setSelected(null) }}
         >
           <div
-            style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, padding: 28, width: 620, maxHeight: "85vh", overflowY: "auto" }}
+            style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, padding: 28, width: "min(620px, calc(100vw - 32px))", maxHeight: "85vh", overflowY: "auto" }}
             onClick={e => e.stopPropagation()}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>

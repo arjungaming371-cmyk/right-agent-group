@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
-import { getSessionFromRequest } from "@/lib/auth"
+import { getLiveSession } from "@/lib/auth"
 import { isValidNotificationId, pruneNotifications } from "@/lib/notifications"
 
 export const dynamic = "force-dynamic"
@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic"
 // data, they're a heads-up. Middleware already blocks unauthenticated calls;
 // re-checked here per this app's pattern for every route.
 export async function GET(req: NextRequest) {
-  const session = await getSessionFromRequest(req)
+  const session = await getLiveSession(req)
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   // RETENTION: nothing ever deleted old rows (the table grew unbounded).
@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
 
 // Mark one notification (by id) or all notifications as read.
 export async function PATCH(req: NextRequest) {
-  const session = await getSessionFromRequest(req)
+  const session = await getLiveSession(req)
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const body = await req.json().catch(() => ({}))

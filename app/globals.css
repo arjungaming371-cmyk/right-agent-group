@@ -616,6 +616,29 @@ input[type="range"].audio-range-slider::-moz-range-track {
 
 
 /* ---------------------------------------------------------------------------
+ * Responsive two-column grids (2026-10-05 mobile pass): inline
+ * gridTemplateColumns used to force side-by-side layouts on phones. These
+ * classes collapse to a single column below the breakpoint and restore the
+ * desktop columns above it.
+ * ------------------------------------------------------------------------- */
+.rg-cols-campaign {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+@media (min-width: 1100px) {
+  .rg-cols-campaign { grid-template-columns: 1.6fr 1fr; }
+}
+.rg-cols-upload {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+@media (min-width: 900px) {
+  .rg-cols-upload { grid-template-columns: 1fr 1fr; }
+}
+
+/* ---------------------------------------------------------------------------
  * Motion & interaction polish (frontend smoothness pass)
  * ------------------------------------------------------------------------- */
 

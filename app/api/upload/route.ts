@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { db, query } from "@/lib/db"
 import { requireModuleOrRole } from "@/lib/auth"
 import { sessionBranchId } from "@/lib/branches"
-import { normalizePhone, phoneLast10, PHONE_MATCH_SQL } from "@/lib/phone"
+import { normalizePhone, phoneLast10 } from "@/lib/phone"
 import { apiError } from "@/lib/api-error"
 import { splitCsvLine } from "@/lib/csv"
 import { parseCsvToEntries, extractPdfText, chunkText } from "@/lib/kb-ingest"
@@ -95,6 +95,16 @@ export async function POST(req: NextRequest) {
     const parsedContacts: any[] = []
     let created = 0
 
+    // PERF (2026-10-05): the ingest used to run a dedupe SELECT + INSERT per
+    // row — a 2 000-row CSV fired up to 4 000 sequential queries and held the
+    // request (and pool connections) for minutes. Now: parse everything
+    // first, ONE query fetches every existing lead for the batch, ONE
+    // multi-row INSERT creates all the missing leads, then the loop only
+    // stitches ids. Same dedupe semantics as before (phone_key is globally
+    // unique — uq_leads_phone_key — so a phone owned by ANOTHER branch still
+    // cannot be adopted or duplicated; such rows are skipped exactly like
+    // they were via the unique-violation catch).
+    const staged: { name: string; phone: string; last10: string; language: string; product_interest: string; notes: string }[] = []
     for (const row of rows) {
       const cols = splitCsvLine(row)
       const obj: Record<string, string> = {}
@@ -110,32 +120,78 @@ export async function POST(req: NextRequest) {
       // public application route — junk like "+12345" must never become a
       // dedupe identity.
       if (!phone || !/^\+91\d{10}$/.test(phone)) continue
+      // In-file dedupe: the same phone twice in one CSV is ONE lead (the
+      // global unique index would reject the batch insert otherwise). The
+      // old per-row loop silently reused the first row's lead id for
+      // duplicates and double-counted `created`.
+      if (staged.some((s) => s.last10 === phoneLast10(phone))) continue
+      staged.push({ name, phone, last10: phoneLast10(phone), language: lang, product_interest: product, notes })
+    }
 
+    // One round-trip: which of these phones already exist as leads (any
+    // branch — the global unique index is the authority).
+    const existingByLast10 = new Map<string, { id: string; branch_id: string | null }>()
+    if (staged.length > 0) {
       try {
-        // Branch-scoped dedupe on last-10 digits: re-uploading a CSV (or a
-        // contact that already called in) must not create a second lead row
-        // within the branch — and a branch-bound upload must not adopt a
-        // lead owned by ANOTHER branch.
-        const existing = await query(
-          branchId
-            ? `SELECT id FROM leads WHERE ${PHONE_MATCH_SQL} AND branch_id = $2 LIMIT 1`
-            : `SELECT id FROM leads WHERE ${PHONE_MATCH_SQL} LIMIT 1`,
-          branchId ? [phoneLast10(phone), branchId] : [phoneLast10(phone)]
+        const all = await query(
+          `SELECT id, branch_id, right(regexp_replace(phone, '\\D', '', 'g'), 10) AS p10
+             FROM leads WHERE right(regexp_replace(phone, '\\D', '', 'g'), 10) = ANY($1)`,
+          [staged.map((s) => s.last10)]
         )
-        let lead = existing.rows[0] || null
-        if (!lead) {
-          const newLead = await db.from("leads").insert({
-            name, phone, language: lang, product_interest: product,
-            notes, source: "CSV Upload", status: "new", branch_id: branchId
-          }).select().single()
-          lead = newLead.data
+        for (const r of all.rows) {
+          if (r.p10 && !existingByLast10.has(r.p10)) existingByLast10.set(r.p10, { id: r.id, branch_id: r.branch_id ?? null })
         }
-
-        parsedContacts.push({ name, phone, language: lang, product_interest: product, notes, leadId: lead?.id })
-        created++
       } catch (e) {
-        console.error(`Failed to process CSV row for ${phone.slice(0, 3)}****${phone.slice(-3)}:`, (e as Error).message)
+        console.error("CSV batch dedupe lookup failed:", (e as Error).message)
       }
+    }
+
+    // Create the missing leads in ONE multi-row insert (InsertBuilder emits
+    // a single INSERT ... VALUES (...), (...) RETURNING *).
+    const toInsert = staged.filter((s) => !existingByLast10.has(s.last10))
+    if (toInsert.length > 0) {
+      try {
+        const inserted = await db.from("leads").insert(
+          toInsert.map((s) => ({
+            name: s.name, phone: s.phone, language: s.language,
+            product_interest: s.product_interest, notes: s.notes,
+            source: "CSV Upload", status: "new", branch_id: branchId,
+          }))
+        )
+        if (!inserted.error && Array.isArray(inserted.data)) {
+          for (const row of inserted.data as any[]) {
+            const p10 = phoneLast10(String(row.phone || ""))
+            if (p10) existingByLast10.set(p10, { id: row.id, branch_id: row.branch_id ?? null })
+          }
+        }
+      } catch (e) {
+        // Race fallback (a concurrent upload created one of these phones
+        // between our lookup and insert): retry row-by-row, skipping losers.
+        console.error("CSV batch insert failed, falling back to per-row:", (e as Error).message)
+        for (const s of toInsert) {
+          if (existingByLast10.has(s.last10)) continue
+          try {
+            const { data: newLead } = await db.from("leads").insert({
+              name: s.name, phone: s.phone, language: s.language,
+              product_interest: s.product_interest, notes: s.notes,
+              source: "CSV Upload", status: "new", branch_id: branchId,
+            }).select().single()
+            if (newLead?.id) existingByLast10.set(s.last10, { id: newLead.id, branch_id: newLead.branch_id ?? null })
+          } catch (e2) {
+            console.error(`Failed to process CSV row for ${s.phone.slice(0, 3)}****${s.phone.slice(-3)}:`, (e2 as Error).message)
+          }
+        }
+      }
+    }
+
+    for (const s of staged) {
+      // Branch-bound uploads must not adopt a lead owned by ANOTHER branch
+      // (same rule the per-row version enforced via the scoped query).
+      const found = existingByLast10.get(s.last10)
+      if (!found) continue
+      if (branchId && found.branch_id && found.branch_id !== branchId) continue
+      parsedContacts.push({ name: s.name, phone: s.phone, language: s.language, product_interest: s.product_interest, notes: s.notes, leadId: found.id })
+      created++
     }
 
     if (uploadRecord) {

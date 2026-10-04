@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
-import { getSessionFromRequest } from "@/lib/auth"
+import { getLiveSession } from "@/lib/auth"
 import { withRoute } from "@/lib/api-route"
 
 export const dynamic = "force-dynamic"
@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic"
 // (session.email), so nobody sees a colleague's chat history.
 
 export const GET = withRoute("assistant/chats", async (req: NextRequest) => {
-  const session = await getSessionFromRequest(req)
+  const session = await getLiveSession(req)
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const res = await query(
@@ -20,7 +20,7 @@ export const GET = withRoute("assistant/chats", async (req: NextRequest) => {
 })
 
 export const POST = withRoute("assistant/chats", async (req: NextRequest) => {
-  const session = await getSessionFromRequest(req)
+  const session = await getLiveSession(req)
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const body: unknown = await req.json().catch(() => null)

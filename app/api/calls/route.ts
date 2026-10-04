@@ -5,6 +5,7 @@ import { makeCall } from "@/lib/exotel"
 import { requireModuleOrRole } from "@/lib/auth"
 import { sessionBranchId, checkQuota, recordUsage } from "@/lib/branches"
 import { checkCallCompliance } from "@/lib/compliance"
+import { assertNoActiveDial } from "@/lib/outbound-dial"
 import { readJson, sanitizePhone, sanitizeText } from "@/lib/api-route"
 
 // Shape shared by both sources of the WhatsApp tab: voice_calls rows and the
@@ -119,16 +120,36 @@ export async function POST(req: NextRequest) {
   const phone = sanitizePhone(body?.phone)
   if (!phone) return NextResponse.json({ error: "phone required" }, { status: 400 })
   const leadId = typeof body?.leadId === "string" && body.leadId.length <= 64 ? body.leadId : null
+  const branchId = sessionBranchId(session)
+  // SECURITY (2026-10-05): the legacy path used to attach ANY leadId without
+  // an ownership check — an agent could point a call at another branch's lead
+  // and the downstream pipeline (status flips, scoring, comm logs) would
+  // mutate it. Same guard as /api/calls/dial: 403 when the lead belongs to a
+  // different branch.
+  if (leadId) {
+    const { data: leadRow } = await db.from("leads").select("branch_id").eq("id", leadId).single()
+    if (leadRow && branchId && leadRow.branch_id && leadRow.branch_id !== branchId) {
+      return NextResponse.json({ error: "lead belongs to another branch" }, { status: 403 })
+    }
+  }
   const language = typeof body?.language === "string" && CALL_LANGUAGES.has(body.language) ? body.language : "telugu"
   const instructions = sanitizeText(body?.instructions, 1000)
   const compliance = await checkCallCompliance({ leadId, phone })
   if (!compliance.allowed) {
     return NextResponse.json({ error: compliance.reason }, { status: 403 })
   }
+  // Double-dial guard (2026-10-05) — see lib/outbound-dial.ts.
+  try {
+    await assertNoActiveDial(phone)
+  } catch (e) {
+    if (e instanceof Error && "status" in e) {
+      return NextResponse.json({ error: e.message }, { status: (e as { status: number }).status })
+    }
+    throw e
+  }
   // Multi-branch: new calls belong to the session's active branch and draw
   // from its monthly quota. Calls made from the HQ scope (no branch) are
   // unlimited and unattributed, exactly like pre-multi-branch calls.
-  const branchId = sessionBranchId(session)
   const quota = await checkQuota(branchId, "call")
   if (!quota.ok) {
     return NextResponse.json({ error: quota.reason }, { status: 403 })
