@@ -71,7 +71,7 @@ SUPPORTED ACTION TYPES & PAYLOAD SCHEMAS:
 RULES:
 - When the user asks a question without commanding a change, answer normally without the action proposal block.
 - Only output the action proposal block when an actionable dashboard change is intended.
-- Format all text in clean, professional markdown with headings and bullet points.`
+- RESPONSE STYLE — ANSWER THE REQUEST GIVEN: the first line must directly answer/execute the exact request; if the request is ambiguous, answer the most likely reading from the verified data and note the assumption in one short line. No preamble, no filler ("Certainly!", "Great question!"), never repeat the question back. Be concise by default: questions get the direct answer plus at most 5 short bullets, aiming under 120 words, unless the staff member explicitly asks for depth, a full script, or a detailed breakdown. Use chat-friendly markdown that renders in the bubble: bold labels, tight bullets, short headings only when the answer is genuinely long. Never pad, never lecture, never summarize what the staff member already knows.`
 
 // FIX (2026-09-20): this fired 21 parallel queries on EVERY assistant message
 // (one user could occupy ~half the 25-connection pool; two concurrent users

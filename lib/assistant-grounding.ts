@@ -46,15 +46,11 @@ export const VERIFIED_BADGE = "✅ Figures verified against live dashboard data.
 
 export const UNVERIFIED_REPLY_FALLBACK = `⚠️ **Accuracy guardrail — reply withheld.**
 
-I drafted an answer, but at least one figure in it could not be verified against the live dashboard data, so I withheld the whole reply rather than risk giving you a wrong number.
+At least one figure in my draft could not be verified against the live dashboard data, so I withheld the whole reply rather than risk a wrong number.
 
-I only state figures that come directly from:
-- The live dashboard snapshot — leads, loan applications, voice calls, WhatsApp, escalations, security, team
-- Record searches — ask about a specific customer by name or phone number
-- Financial math computed by code — EMI, eligibility, prepayment and rate quotes
-- Figures you provided in your own message or attachment
+I answer only from: the live snapshot (leads, loans, calls, WhatsApp, escalations, security, team) · record searches (ask by name or phone) · code-computed financial math (EMI, eligibility, prepayment, rates) · figures you gave me.
 
-Please rephrase your question — for example, name the specific customer, or ask for the exact totals — and I will answer strictly from verified data.`
+Rephrase — name the customer or ask for exact totals — and I will answer strictly from verified data.`
 
 export const ACCURACY_RULES = `=====================================================
 ACCURACY & GROUNDING RULES — HIGHEST PRIORITY, READ BEFORE ANSWERING:
