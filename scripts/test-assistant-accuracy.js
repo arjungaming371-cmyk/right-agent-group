@@ -111,7 +111,7 @@ ok("significant count → badge", g.hasSignificantFigures("You have 342 leads in
 
 // ─────────────────── delivered-text constants ───────────────────
 console.log("── delivered-text constants are honest and number-free ──")
-ok("fallback explains the withholding", g.UNVERIFIED_REPLY_FALLBACK.includes("withheld") && g.UNVERIFIED_REPLY_FALLBACK.includes("rephrase"))
+ok("fallback explains the withholding", g.UNVERIFIED_REPLY_FALLBACK.includes("withheld") && g.UNVERIFIED_REPLY_FALLBACK.includes("Rephrase"))
 ok("fallback itself contains no digits (nothing assumed)", !/\d/.test(g.UNVERIFIED_REPLY_FALLBACK))
 ok("badge states verification", g.VERIFIED_BADGE.includes("verified") && g.VERIFIED_BADGE.includes("live dashboard data"))
 ok("badge contains no digits", !/\d/.test(g.VERIFIED_BADGE))
@@ -131,6 +131,23 @@ ok("passing replies carry the verification badge", route.includes("VERIFIED_BADG
 ok("raw model deltas are never forwarded unverified", !route.includes("(delta) => controller.enqueue"))
 ok("what is persisted is what was delivered", route.includes("ownedChatId, userContent, delivered]"))
 ok("action proposals skip the numeric gate (admin-reviewed drafts)", route.includes("hasProposal"))
+
+// ─────────────────── response style + markdown UI ───────────────────
+console.log("── response style + markdown UI ──")
+const qchat = read("components/dashboard/quick-chat.tsx")
+const md = read("components/dashboard/chat-markdown.tsx")
+ok("assistant replies render through the markdown renderer", qchat.includes("<ChatMarkdown content={cleanText} />"))
+ok("user messages stay plain text", qchat.includes('msg.role === "assistant" ? ('))
+ok("renderer never injects raw HTML (untrusted model output)", !md.includes("dangerouslySetInnerHTML={{"))
+ok("renderer parses headings", md.includes("#{1,4}"))
+ok("renderer parses code fences", md.includes("```"))
+ok("renderer emits list items", md.includes("<li"))
+ok("bold rendered as strong, not raw asterisks", md.includes("<strong"))
+ok("verification badge styled as a chip", md.includes("✅"))
+ok("prompt: first line answers the exact request", route.includes("ANSWER THE REQUEST GIVEN"))
+ok("prompt: concise default under 120 words", route.includes("under 120 words"))
+ok("prompt: no filler openers", route.includes("no filler"))
+ok("withheld notice stays short and number-free", !/\d/.test(g.UNVERIFIED_REPLY_FALLBACK) && g.UNVERIFIED_REPLY_FALLBACK.length < 700)
 
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)

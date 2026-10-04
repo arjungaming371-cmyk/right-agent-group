@@ -6,6 +6,7 @@ import {
   Lock, ChevronDown, ChevronUp, Loader2, FileText, Mic
 } from "lucide-react"
 import VoiceDictation from "../ui/voice-dictation"
+import ChatMarkdown from "./chat-markdown"
 import { useToast } from "../ui/toast"
 
 type Message = {
@@ -808,7 +809,13 @@ export default function QuickChat({ role = "agent", userEmail = "" }: { role?: U
                         <div style={{ display: "flex", gap: 4 }}>
                           {[0,1,2].map(d => <span key={d} style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--text-muted)", animation: `bounce 1s ${d*0.15}s infinite` }} />)}
                         </div>
-                      ) : cleanText}
+                      ) : msg.role === "assistant" ? (
+                        // Commander replies render as real markdown (bold,
+                        // lists, code, verification chip) — never raw symbols
+                        <ChatMarkdown content={cleanText} />
+                      ) : (
+                        cleanText
+                      )}
                     </div>
 
                     {/* Inline Admin Approval Card for this specific message */}
