@@ -123,7 +123,7 @@ Write-Host "[5/6] Starting Website..." -ForegroundColor Yellow
 Stop-Port 3000
 $webProcess = Start-Process "cmd" -ArgumentList "/c npm start" -WorkingDirectory $ProjectDir -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logsDir "website.log") -RedirectStandardError (Join-Path $logsDir "website.err.log")
 $webOk = $false
-for ($i = 0; $i -lt 15; $i++) {
+for ($i = 0; $i -lt 25; $i++) {
     Start-Sleep -Seconds 1
     try {
         $res = Invoke-WebRequest -Uri "http://localhost:3000" -TimeoutSec 2 -UseBasicParsing -ErrorAction Stop
@@ -133,7 +133,7 @@ for ($i = 0; $i -lt 15; $i++) {
 if ($webOk) {
     Write-Host "      OK Website started at http://localhost:3000" -ForegroundColor Green
 } else {
-    Write-Host "      WARN Website took longer than 15s to respond (check logs\website.err.log)" -ForegroundColor Yellow
+    Write-Host "      WARN Website took longer than 25s to respond (check logs\website.err.log)" -ForegroundColor Yellow
 }
 
 # 6. Voicebot (port 3002)
