@@ -4,6 +4,14 @@ import { chatWithSystemPromptStream } from "@/lib/llm"
 import { getSessionFromRequest } from "@/lib/auth"
 import { rateLimit } from "@/lib/rate-limit"
 import {
+  ACCURACY_RULES,
+  UNVERIFIED_REPLY_FALLBACK,
+  VERIFIED_BADGE,
+  buildAllowedCorpus,
+  checkReplyGrounded,
+  hasSignificantFigures,
+} from "@/lib/assistant-grounding"
+import {
   buildEligibilityInstruction,
   buildEmiInstruction,
   buildPrepaymentInstruction,
@@ -445,7 +453,21 @@ export async function POST(req: NextRequest) {
 
     const [snapshot, searchResults] = await Promise.all([getStatsSnapshot(), searchDatabase(message)])
     const mathGrounding = buildAssistantMathGrounding(message)
-    const fullContext = [SYSTEM_PROMPT, snapshot, searchResults, mathGrounding].filter(Boolean).join("\n\n")
+    // ACCURACY_RULES sits between the persona and the data so the grounding
+    // contract is read BEFORE any figure the model might copy.
+    const fullContext = [SYSTEM_PROMPT, ACCURACY_RULES, snapshot, searchResults, mathGrounding].filter(Boolean).join("\n\n")
+
+    // Verified corpus for the accuracy guardrail: every source a reply may
+    // legitimately quote numbers from. Prior turns are included — assistant
+    // turns were already verified when they were delivered, and user turns
+    // are the operator's own words (echoing those is not fabrication).
+    const groundCorpus = buildAllowedCorpus([
+      snapshot,
+      searchResults,
+      mathGrounding,
+      userContent,
+      ...history.map((m) => m.content),
+    ])
     // lib/llm expects the "model" role for assistant turns.
     const messages = [
       ...history.map((m) => ({ role: m.role === "assistant" ? ("model" as const) : ("user" as const), content: m.content })),
@@ -456,17 +478,57 @@ export async function POST(req: NextRequest) {
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
         try {
-          const fullReply = await chatWithSystemPromptStream(
+          // ACCURACY GATE (2026-10-04): the draft is generated in full BEFORE
+          // any byte reaches the client — raw model deltas are never forwar-
+          // ded. A reply whose figures cannot be traced to the verified
+          // corpus is withheld entirely and replaced with the honest fallback,
+          // so an assumed or invented number can never reach the screen.
+          // Replies carrying an action:proposal skip the numeric gate: that
+          // content is a creative draft gated by the admin Approve & Execute
+          // review, not a factual claim.
+          const rawReply = await chatWithSystemPromptStream(
             messages,
             fullContext,
-            (delta) => controller.enqueue(encoder.encode(delta)),
+            () => {},
             { numCtx: 8192, numPredict: 600, timeoutMs: 90000, historyTurns: 12 }
           )
+
+          const hasProposal = /```(?:action:proposal|json:action|action)/.test(rawReply)
+          let delivered = rawReply
+          if (!hasProposal) {
+            const verdict = checkReplyGrounded(rawReply, groundCorpus)
+            if (!verdict.grounded) {
+              console.warn(
+                "assistant accuracy guardrail withheld a reply — unverified figures:",
+                verdict.unverified.join(", "),
+                "| excerpt:",
+                rawReply.slice(0, 160)
+              )
+              delivered = UNVERIFIED_REPLY_FALLBACK
+            } else if (hasSignificantFigures(rawReply)) {
+              delivered = `${VERIFIED_BADGE}\n\n${rawReply}`
+            }
+          }
+
+          // Deliver the validated reply in small slices (surrogate-pair safe
+          // so an emoji is never split across chunk boundaries) to keep the
+          // usual streaming render feel.
+          const CHUNK = 120
+          for (let i = 0; i < delivered.length; ) {
+            let end = Math.min(i + CHUNK, delivered.length)
+            if (end < delivered.length) {
+              const tail = delivered.charCodeAt(end - 1)
+              if (tail >= 0xd800 && tail <= 0xdbff) end -= 1
+            }
+            if (end <= i) end = i + 1
+            controller.enqueue(encoder.encode(delivered.slice(i, end)))
+            i = end
+          }
 
           if (ownedChatId) {
             await query(
               `INSERT INTO assistant_messages (chat_id, role, content) VALUES ($1, 'user', $2), ($1, 'assistant', $3)`,
-              [ownedChatId, userContent, fullReply]
+              [ownedChatId, userContent, delivered]
             )
             await query(
               `UPDATE assistant_chats SET updated_at = now(), title = CASE WHEN title = 'New chat' THEN $2 ELSE title END WHERE id = $1`,
