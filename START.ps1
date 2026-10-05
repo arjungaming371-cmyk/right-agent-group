@@ -121,6 +121,7 @@ Write-Host "[4/6] Voice pipeline: cloud (STT: Sarvam Saaras | TTS: $ttsCallProvi
 # 5. Website (port 3000)
 Write-Host "[5/6] Starting Website..." -ForegroundColor Yellow
 Stop-Port 3000
+Stop-Port 3005
 $webProcess = Start-Process "cmd" -ArgumentList "/c npm start" -WorkingDirectory $ProjectDir -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logsDir "website.log") -RedirectStandardError (Join-Path $logsDir "website.err.log")
 $webOk = $false
 for ($i = 0; $i -lt 25; $i++) {

@@ -65,7 +65,9 @@ Start-Sleep -Seconds 1
 
 # --- 2. Start the local proxy (3005 -> 3000 website / 3002 voicebot by
 #        path), then tunnel THAT instead of port 3000 directly ---
-Start-Process "node" -ArgumentList "`"$(Join-Path $ProjectDir 'scripts\local-proxy.js')`" 3005" -WorkingDirectory $ProjectDir -WindowStyle Hidden | Out-Null
+$logsDir = Join-Path $ProjectDir "logs"
+New-Item -ItemType Directory -Force -Path $logsDir | Out-Null
+Start-Process "node" -ArgumentList "`"$(Join-Path $ProjectDir 'scripts\local-proxy.js')`" 3005" -WorkingDirectory $ProjectDir -WindowStyle Hidden -RedirectStandardOutput (Join-Path $logsDir "proxy.log") -RedirectStandardError (Join-Path $logsDir "proxy.err.log") | Out-Null
 $ngrokPath = "ngrok"
 $cmd = Get-Command "ngrok" -ErrorAction SilentlyContinue
 if ($cmd) {
@@ -74,7 +76,7 @@ if ($cmd) {
     $fallbackNgrok = "$env:LOCALAPPDATA\Microsoft\WindowsApps\ngrok.exe"
     if (Test-Path $fallbackNgrok) { $ngrokPath = $fallbackNgrok }
 }
-Start-Process $ngrokPath -ArgumentList "http 3005 --domain=$domain" -WindowStyle Hidden | Out-Null
+Start-Process $ngrokPath -ArgumentList "http 127.0.0.1:3005 --domain=$domain" -WindowStyle Hidden | Out-Null
 
 # --- 3. Wait (max 30s) for ngrok's local API to report the tunnel live ---
 $url = $null

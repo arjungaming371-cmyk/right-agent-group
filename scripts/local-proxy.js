@@ -20,6 +20,10 @@ function targetPort(url) {
   return url && url.startsWith("/voicebot") ? VOICEBOT_PORT : WEB_PORT
 }
 
+process.on("uncaughtException", (err) => {
+  console.error("local-proxy uncaughtException:", err.message)
+})
+
 const server = http.createServer((req, res) => {
   const port = targetPort(req.url)
   const proxyReq = http.request(
@@ -29,7 +33,13 @@ const server = http.createServer((req, res) => {
       proxyRes.pipe(res)
     }
   )
-  proxyReq.on("error", () => { if (!res.headersSent) res.writeHead(502); res.end("proxy error") })
+  proxyReq.on("error", (err) => {
+    if (!res.headersSent) {
+      res.writeHead(502, { "Content-Type": "text/plain" })
+      res.end("proxy error: " + err.message)
+    }
+  })
+  req.on("error", () => proxyReq.destroy())
   req.pipe(proxyReq)
 })
 
@@ -52,6 +62,6 @@ server.on("upgrade", (req, clientSocket, head) => {
   clientSocket.on("error", () => proxySocket.destroy())
 })
 
-server.listen(PORT, () => {
+server.listen(PORT, "0.0.0.0", () => {
   console.log(`local-proxy: :${PORT} -> /voicebot* to :${VOICEBOT_PORT}, else :${WEB_PORT}`)
 })
