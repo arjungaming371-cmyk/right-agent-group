@@ -2,7 +2,8 @@ import SiteShell from "@/components/site/site-shell"
 
 // Privacy policy — plain language, no invented registration numbers, no
 // certification claims. Every value that must be filled in before publishing
-// is wrapped in a clearly-marked [placeholder].
+// is written in plain language so customers can understand the platform's
+// data handling before they book a demo or connect an account.
 export default function PrivacyPage() {
   return (
     <SiteShell>
@@ -78,14 +79,15 @@ export default function PrivacyPage() {
 
           <h2>Contact</h2>
           <p>
-            <span className="rg-ph">[Company Legal Name — update before publishing]</span> ·{" "}
-            <span className="rg-ph">[privacy@yourdomain.com — update before publishing]</span>
+            Right Agent Group · Submit a request through the{" "}
+            <a href="/demo">Book a Demo</a> page and include the account email associated with
+            your request.
           </p>
 
           <p className="rg-legal-notice">
-            This page is a plain-language summary, not legal advice. Have your counsel review it
-            before publishing, and fill in every{" "}
-            <span className="rg-ph">[placeholder]</span> above.
+            This page is a plain-language summary of the platform's data practices. If your
+            organization has additional contractual or regulatory requirements, your signed
+            agreement and applicable law govern.
           </p>
         </div>
       </section>

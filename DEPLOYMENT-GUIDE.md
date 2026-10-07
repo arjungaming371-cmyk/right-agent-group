@@ -16,14 +16,14 @@ Everything below is copy-paste. Lines starting with `#` are comments — don't t
 
 ```bash
 sudo apt update && sudo apt upgrade -y
-sudo apt install -y curl git unzip nginx ffmpeg python3 python3-venv python3-pip postgresql postgresql-contrib
+sudo apt install -y curl git unzip nginx ffmpeg python3 build-essential postgresql postgresql-contrib
 ```
 
-Install Node.js 20:
+Install Node.js 22 LTS:
 ```bash
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt install -y nodejs
-node -v    # should print v20.x
+node -v    # should print v22.x
 ```
 
 Install pm2 (keeps all services running forever + on reboot):
@@ -78,21 +78,18 @@ curl -H "Cookie: rag_session=..." https://your-domain.com/api/system/status
 
 ## STEP 4 — The project
 
-Copy `right-agent-group_v14.zip` to the server (e.g. with `scp` or any file transfer), then:
+Copy the release archive to the server (e.g. with `scp` or any file transfer), then:
 
 ```bash
 cd ~
-unzip right-agent-group_v14.zip
+unzip right-agent-group-release.zip
 cd right-agent-group
-npm install
+npm ci
 ```
 
 Create the database tables:
 ```bash
-PGPASSWORD='YOUR_PG_PASSWORD' psql -U postgres -h localhost -d right_agent_group -f local-setup.sql
-PGPASSWORD='YOUR_PG_PASSWORD' psql -U postgres -h localhost -d right_agent_group -f local-setup-v2.sql 2>/dev/null || true
-PGPASSWORD='YOUR_PG_PASSWORD' psql -U postgres -h localhost -d right_agent_group -f 002_phase1.sql 2>/dev/null || true
-PGPASSWORD='YOUR_PG_PASSWORD' psql -U postgres -h localhost -d right_agent_group -f 003_auth_whatsapp.sql
+npm run db:setup
 ```
 
 ---
@@ -145,13 +142,11 @@ EXOTEL_SUBDOMAIN=api.exotel.com
 EXOTEL_CALLER_ID=            # the ExoPhone number
 EXOTEL_FLOW_APP_ID=          # filled in STEP 9
 
-# --- Internal services ---
-WHATSAPP_SERVICE_URL=http://127.0.0.1:3001
-WHATSAPP_SERVICE_PORT=3001
+# --- Internal service auth ---
 WHATSAPP_SERVICE_KEY=RUN_openssl_rand_-hex_32
-STT_SERVICE_URL=http://127.0.0.1:3003
-TTS_SERVICE_URL=http://127.0.0.1:3004
 VOICEBOT_PORT=3002
+APP_INTERNAL_URL=http://127.0.0.1:3000
+TTS_CALL_PROVIDER=sarvam
 ```
 
 Save (Ctrl+O, Enter, Ctrl+X).
@@ -180,9 +175,9 @@ enter the knowledge base.
 
 ## STEP 8 — Start the helper services
 
-> **Cloud voice shortcut (AWS / no GPU):** before this step, set
-> `STT_PROVIDER=sarvam` and `TTS_CALL_PROVIDER=sarvam` (or `cartesia`) in
-> `.env` — then **skip the STT and TTS services below entirely**. The
+> **Cloud voice setup (AWS / no GPU):** set
+> `TTS_CALL_PROVIDER=sarvam` (or `cartesia`) and the matching provider keys in
+> `.env` — then **skip any local STT and TTS services**. The
 > voicebot transcribes and synthesizes through the cloud APIs; no Python,
 > no venvs, no ~3GB model, no GPU. Full comparison, costs and knobs:
 > **CLOUD-VOICE-GUIDE.md**. The local-services path below remains the free
@@ -196,7 +191,7 @@ scan anymore. Follow **SETUP-GUIDE-CLOUD-API.md** to get the 4 Meta values into 
 **Voicebot** (the live call engine):
 ```bash
 cd ~/right-agent-group/server
-npm install
+npm ci
 pm2 start voicebot-server.js --name voicebot
 ```
 

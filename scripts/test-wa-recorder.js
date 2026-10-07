@@ -148,17 +148,23 @@ function ok(name, cond, extra) {
 
   // ---------- 7. Stale sweep ----------
   {
-    const oldFile = path.join(SCRATCH, "wacall-test-old.wav")
-    const newFile = path.join(SCRATCH, "wacall-test-new.wav")
+    const tmp = path.join(SCRATCH, "tmp")
+    fs.mkdirSync(tmp, { recursive: true })
+    const oldTemp = path.join(tmp, "wacall-test-old.in.pcm")
+    const newTemp = path.join(tmp, "wacall-test-new.out.pcm")
+    const completed = path.join(SCRATCH, "wacall-test-old.wav")
     const junk = path.join(SCRATCH, "unrelated.txt")
-    fs.writeFileSync(oldFile, "x"); fs.writeFileSync(newFile, "x"); fs.writeFileSync(junk, "x")
+    fs.writeFileSync(oldTemp, "x"); fs.writeFileSync(newTemp, "x")
+    fs.writeFileSync(completed, "x"); fs.writeFileSync(junk, "x")
     const old = new Date(Date.now() - 48 * 3600 * 1000)
-    fs.utimesSync(oldFile, old, old)
+    fs.utimesSync(oldTemp, old, old)
     const removed = cleanupStale()
-    ok("sweep: removed the 48h-old recording", removed >= 1 && !fs.existsSync(oldFile))
-    ok("sweep: kept the fresh recording", fs.existsSync(newFile))
+    ok("sweep: removed the 48h-old temp PCM", removed >= 1 && !fs.existsSync(oldTemp))
+    ok("sweep: kept the fresh temp PCM", fs.existsSync(newTemp))
+    ok("sweep: kept the completed recording", fs.existsSync(completed))
     ok("sweep: never touches foreign files", fs.existsSync(junk))
-    fs.unlinkSync(newFile); fs.unlinkSync(junk)
+    fs.rmSync(tmp, { recursive: true, force: true })
+    fs.unlinkSync(completed); fs.unlinkSync(junk)
   }
 
   // ---------- 8. Kill switch (child process: env is read at require time) ----------

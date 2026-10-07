@@ -136,7 +136,7 @@ ok("scope param parsed (crm default / social / all)", leadsRoute.includes('"soci
 ok("probe-once for the column (pre-migration safe)", leadsRoute.includes("hasSocialProspectColumn"))
 ok("lane filter on the FLAG, not phone IS NOT NULL", leadsRoute.includes("leads.is_social_prospect = $"))
 ok("count branch honors the same scope", /searchParams\.get\("count"\)[\s\S]*is_social_prospect = \$2/.test(leadsRoute))
-ok("PATCH cannot mass-assign the lane flags", /delete updates\.is_social_prospect[\s\S]*delete updates\.promoted_to_crm_at[\s\S]*delete updates\.ig_phone_extracted/.test(leadsRoute))
+ ok("PATCH cannot mass-assign the lane flags", /delete (?:updates|cleanUpdates)\.is_social_prospect[\s\S]*delete (?:updates|cleanUpdates)\.promoted_to_crm_at[\s\S]*delete (?:updates|cleanUpdates)\.ig_phone_extracted/.test(leadsRoute))
 
 console.log("\n— prospect list + promote endpoints —")
 const conv = read("app/api/instagram/conversations/route.ts")

@@ -1,7 +1,7 @@
 import SiteShell from "@/components/site/site-shell"
 
-// Terms — deliberately plain language. Legal placeholders are clearly
-// marked and must be reviewed by counsel before publishing.
+// Terms — deliberately plain language for the public product site. A signed
+// customer agreement may add terms specific to that deployment.
 export default function TermsPage() {
   return (
     <SiteShell>
@@ -66,9 +66,9 @@ export default function TermsPage() {
 
           <h2>Liability</h2>
           <p>
-            <span className="rg-ph">
-              [Liability cap and governing-law clause — insert after legal review]
-            </span>
+            Any limitation of liability is governed by the agreement applicable to your
+            subscription and by mandatory applicable law. Nothing in these terms limits a right
+            or remedy that cannot lawfully be limited.
           </p>
 
           <h2>Changes to these terms</h2>
@@ -80,13 +80,12 @@ export default function TermsPage() {
 
           <h2>Contact</h2>
           <p>
-            <span className="rg-ph">[Company Legal Name — update before publishing]</span> ·{" "}
-            <span className="rg-ph">[support@yourdomain.com]</span>
+            Right Agent Group · Contact our team through the <a href="/demo">Book a Demo</a> page.
           </p>
 
           <p className="rg-legal-notice">
-            Every <span className="rg-ph">[placeholder]</span> on this page must be filled in and
-            reviewed by qualified counsel before this document is published.
+            These public terms are a plain-language overview. If your signed customer agreement
+            contains additional terms, that agreement controls for your subscription.
           </p>
         </div>
       </section>

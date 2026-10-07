@@ -30,24 +30,35 @@ export async function GET(req: NextRequest) {
   const EXO_TOKEN = process.env.EXOTEL_API_TOKEN || ""
 
   try {
-    const res = await fetch(url, {
-      headers: {
-        Authorization: `Basic ${Buffer.from(`${EXO_KEY}:${EXO_TOKEN}`).toString("base64")}`,
-      },
-      // FIX (2026-09-20): an exotel.com 302 used to be followed blindly — a
-      // recording URL that redirected to an internal address would be fetched
-      // and proxied back (SSRF via redirect). Fail on redirects instead.
-      redirect: "error",
-      signal: AbortSignal.timeout(30_000),
-    })
+    let audioBuffer: Buffer
+    let contentType = "audio/mpeg"
 
-    if (!res.ok) {
-      return NextResponse.json({ error: `Exotel returned ${res.status}` }, { status: 502 })
+    try {
+      const res = await fetch(url, {
+        headers: {
+          Authorization: `Basic ${Buffer.from(`${EXO_KEY}:${EXO_TOKEN}`).toString("base64")}`,
+        },
+        redirect: "error",
+        signal: AbortSignal.timeout(10_000),
+      })
+
+      if (res.ok) {
+        audioBuffer = Buffer.from(await res.arrayBuffer())
+        contentType = res.headers.get("Content-Type") || "audio/mpeg"
+      } else {
+        return NextResponse.json(
+          { error: `Recording unavailable: provider returned ${res.status}` },
+          { status: res.status === 404 ? 404 : 502 }
+        )
+      }
+    } catch {
+      return NextResponse.json(
+        { error: "Failed to fetch recording from provider" },
+        { status: 502 }
+      )
     }
 
-    const audioBuffer = Buffer.from(await res.arrayBuffer())
     const totalSize = audioBuffer.length
-    const contentType = res.headers.get("Content-Type") || "audio/mpeg"
     // Call Recording Encryption toggle: recordings live encrypted at the
     // provider and are only ever streamed through this authenticated proxy
     // over TLS — when the toggle is ON we additionally forbid any caching,

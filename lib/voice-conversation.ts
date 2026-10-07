@@ -213,22 +213,32 @@ export async function startCall(
   }
 
   const hasName = name && !PLACEHOLDER_NAME_RE.test(name)
+  let greeting = ""
 
   if (direction === "inbound") {
-    return greetingFor(language, "inbound", hasName ? name! : undefined)
-  }
-  // Business-initiated WHATSAPP call: first contact on this channel is a
-  // callback ("you reached out earlier"), not a cold pitch.
-  if (callSid.startsWith("wacall-")) {
+    greeting = greetingFor(language, "inbound", hasName ? name! : undefined)
+  } else if (callSid.startsWith("wacall-")) {
     if (isRepeatCall) {
-      return greetingFor(language, "returning", hasName ? name! : undefined)
+      greeting = greetingFor(language, "returning", hasName ? name! : undefined)
+    } else {
+      greeting = greetingFor(language, "whatsappCallback", hasName ? name! : undefined)
     }
-    return greetingFor(language, "whatsappCallback", hasName ? name! : undefined)
+  } else if (isRepeatCall) {
+    greeting = greetingFor(language, "returning", hasName ? name! : undefined)
+  } else {
+    greeting = greetingFor(language, "cold", hasName ? name! : undefined)
   }
-  if (isRepeatCall) {
-    return greetingFor(language, "returning", hasName ? name! : undefined)
+
+  if (callSid && greeting) {
+    query(
+      `UPDATE voice_calls
+       SET transcript = jsonb_build_array(jsonb_build_object('role', 'ai', 'text', $2::text))
+       WHERE twilio_call_sid = $1 AND (transcript IS NULL OR transcript = '[]'::jsonb)`,
+      [callSid, greeting]
+    ).catch((e) => console.error("error persisting initial greeting to transcript:", e))
   }
-  return greetingFor(language, "cold", hasName ? name! : undefined)
+
+  return greeting
 }
 
 export function parseTranscriptHistory(rawTranscript: unknown): { role: "user" | "model"; content: string }[] {
@@ -510,6 +520,14 @@ async function buildTurnInstructions(
   * Listen attentively to the customer's full words before deciding your reply.
   * First, address and answer EXACTLY what the customer just asked. Never ignore their question or jump to an unrelated script question.
   * If the caller's speech was cut off or unclear, politely ask them once to repeat ("Sorry sir, నాకు సరిగా వినిపించలేదు, మళ్ళీ చెప్పగలరా?"), rather than assuming.
+  * CRITICAL — CALL OPENING ACKNOWLEDGEMENT ("TIME UNDI" / "CHEPPANDI"):
+    When the customer responds to your greeting with "time undi cheppandi", "aa time undi", "time undi", "cheppandi", "haa cheppandi", or "avunu cheppandi", they are saying: "Yes, I have time, please go ahead and speak / tell me why you called."
+    THEY ARE NOT ASKING FOR OFFICE TIMINGS, APPOINTMENT SLOTS, OR CLOCK TIME! NEVER reply with office hours (e.g. "మా office timings 9 AM to 6 PM").
+    Instead, warmly acknowledge and briefly state ONE clear purpose of your call (e.g. "Sure sir, మీ loan requirement గురించి discuss చేద్దామని call చేశాను, మీకు ఎన్ని lakh loan కావాలి sir?").
+  * ONE POINT AT A TIME (STRICT CONVERSATIONAL PACING — NEVER DUMP FACTS):
+    - Maximum 1 to 2 short sentences ONLY (under 25 words).
+    - NEVER dump past loans, education loan, home loan, appointment times, branch addresses, AND interest rates in one single monologue.
+    - Speak like a real human: say ONE thing, ask ONE simple question, then stop and listen.
 - STRICT SCRIPT & KNOWLEDGE BASE GROUNDING (ZERO INVENTIONS / NEVER HALLUCINATE):
   * Stick STRICTLY to the Company Script and the provided KNOWLEDGE BASE facts below.
   * NEVER invent, guess, assume, or fabricate any detail, address, landmark, bank name, interest rate, policy, or requirement that is NOT explicitly stated in the Knowledge Base or Script.

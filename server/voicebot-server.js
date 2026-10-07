@@ -717,7 +717,31 @@ class CallSession {
     this.startComfortNoise()
     const t0 = Date.now()
     try {
-      const r = await callTurnApi({ event: "start", callSid: this.callSid || "unknown", from, to })
+      const apiPromise = callTurnApi({ event: "start", callSid: this.callSid || "unknown", from, to })
+
+      // Ear-pickup delay: give listener 2 seconds from answer to place phone to ear
+      const greetingDelay = parseInt(process.env.CALL_GREETING_DELAY_MS || "2000")
+      const elapsed = Date.now() - t0
+      const remainingDelay = Math.max(0, greetingDelay - elapsed)
+      if (remainingDelay > 0) {
+        console.log(`⏳ call ${this.callSid}: holding greeting for ${remainingDelay}ms (target ${greetingDelay}ms from answer)`)
+        await new Promise((resolve) => {
+          const timer = setTimeout(resolve, remainingDelay)
+          this._greetingWakeup = () => {
+            clearTimeout(timer)
+            resolve()
+          }
+        })
+      }
+      if (this.closed) return
+
+      // If caller spoke early during the pickup window, let utterance handler take over
+      if (this.processing || this.speaking) {
+        console.log(`🎙 call ${this.callSid}: caller spoke first during pickup window, skipping auto-greeting`)
+        return
+      }
+
+      const r = await apiPromise
       console.log(`⏱ start API (answer → greeting text): ${Date.now() - t0}ms`)
       this.language = r.language || "english"
       // The branch's AI-Employee voice for this call (null = default).
@@ -811,6 +835,10 @@ class CallSession {
     if (energy > this.callMaxEnergy) this.callMaxEnergy = energy
 
     if (energy > ENERGY_THRESHOLD) {
+      if (this._greetingWakeup) {
+        this._greetingWakeup()
+        this._greetingWakeup = null
+      }
       this.speaking = true
       this.speechMs += ms
       this.silenceMs = 0

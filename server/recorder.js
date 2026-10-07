@@ -18,8 +18,9 @@
 //     blocking for other live calls), writes a proper WAV header, then
 //     transcodes to MP3 via ffmpeg (already a hard TTS dependency) to cut
 //     disk use ~10x — with an automatic fallback to keeping the WAV.
-//   • Orphan sweep: temp/final files older than 24 h are removed on boot, so
-//     a crash mid-call can never leak disk forever.
+//   • Orphan sweep: temporary PCM files older than 24 h are removed on boot.
+//     Completed recordings remain available to the dashboard until retention
+//     policy or an operator removes them.
 //
 // Same-box contract: the Next.js app serves these files from the SAME
 // directory (RECORDINGS_DIR, default <repo>/recordings) — both processes run
@@ -104,7 +105,7 @@ function transcodeToMp3(wavPath, mp3Path) {
     const ff = spawn("ffmpeg", [
       "-hide_banner", "-loglevel", "error", "-y",
       "-i", wavPath,
-      "-codec:a", "libmp3lame", "-b:a", "64k", "-ac", "1", "-ar", String(REC_RATE),
+      "-codec:a", "libmp3lame", "-b:a", "128k", "-ac", "1", "-ar", String(REC_RATE),
       mp3Path,
     ])
     ff.stderr?.on("data", (c) => { stderr = (stderr + String(c)).slice(-400) })
@@ -316,30 +317,32 @@ function createFor(callSid) {
 
 /**
  * Boot-time orphan sweep: a crash mid-call (or a lost finalize) leaves temp
- * PCM / finished files behind. Anything older than 24 h matching our strict
- * wacall-* naming goes away. Never throws.
+ * PCM files behind. Anything older than 24 h matching our strict temp-file
+ * naming goes away. Completed recordings are intentionally retained. Never
+ * throws.
  */
 function cleanupStale(maxAgeMs = 24 * 60 * 60 * 1000) {
   if (!REC_ENABLED) return 0
   let removed = 0
   try {
     const now = Date.now()
-    for (const dir of [recordingsDir(), tmpDir()]) {
-      let entries = []
-      try { entries = fs.readdirSync(dir) } catch { continue }
-      for (const f of entries) {
-        if (!/^wacall-[\w.-]+$/.test(f)) continue
-        const full = path.join(dir, f)
-        try {
-          const st = fs.statSync(full)
-          if (st.isFile() && now - st.mtimeMs > maxAgeMs) {
-            fs.unlinkSync(full)
-            removed++
-          }
-        } catch { /* raced delete — fine */ }
-      }
+    // Only sweep temporary PCM fragments from interrupted/aborted calls in tmpDir().
+    // Never delete completed recordings (.mp3/.wav) from recordingsDir()!
+    const dir = tmpDir()
+    let entries = []
+    try { entries = fs.readdirSync(dir) } catch { return 0 }
+    for (const f of entries) {
+      if (!/^wacall-[\w.-]+\.(in|out)\.pcm$/.test(f)) continue
+      const full = path.join(dir, f)
+      try {
+        const st = fs.statSync(full)
+        if (st.isFile() && now - st.mtimeMs > maxAgeMs) {
+          fs.unlinkSync(full)
+          removed++
+        }
+      } catch { /* raced delete — fine */ }
     }
-    if (removed) console.log(`🧹 recordings: swept ${removed} stale file(s) older than 24h`)
+    if (removed) console.log(`🧹 recordings: swept ${removed} stale temp file(s) older than 24h`)
   } catch (e) {
     console.error(`🧹 recordings cleanup error: ${e.message}`)
   }

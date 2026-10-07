@@ -60,7 +60,7 @@ export async function GET(req: NextRequest) {
   let size = 0
   try {
     const st = await fs.promises.stat(filePath)
-    if (!st.isFile()) throw new Error("not a file")
+    if (!st.isFile()) return NextResponse.json({ error: "recording not found" }, { status: 404 })
     size = st.size
   } catch {
     return NextResponse.json({ error: "recording not found" }, { status: 404 })

@@ -1,4 +1,4 @@
-# Right Agent Group — Operations Console (FINAL_10.1, Cloud API)
+# Right Agent Group — Operations Console (FINAL_10.2, Cloud API)
 
 > **AI Employees That Turn Leads Into Loan Applications.**
 > Automate calling, qualification, follow-ups and customer conversations across Phone, WhatsApp and Instagram — from one powerful platform.
@@ -13,7 +13,7 @@ See **DEPLOYMENT-GUIDE.md** (full deployment), **CLOUD-VOICE-GUIDE.md** (the 100
 1. Install: Node 22 LTS, PostgreSQL 17, ffmpeg — **no Python, no GPU**
 2. Get API keys: a **Sarvam key** at dashboard.sarvam.ai (REQUIRED — powers STT + default TTS), and a Groq key at console.groq.com (Priya's brain; or use `LLM_PROVIDER=sarvam` with the same Sarvam key)
 3. Copy `.env.example` → `.env` and fill every ❌ value (`SARVAM_API_KEY`, `GROQ_API_KEY` per `LLM_PROVIDER`, and Google login keys are REQUIRED; `WHATSAPP_APP_SECRET` is REQUIRED — the webhook is publicly abusable without it)
-4. `npm install && npm run db:setup`   ← creates the database + all tables automatically (including the multi-branch schema)
+4. `npm ci && npm run db:setup`   ← creates the database + all tables automatically (including the multi-branch schema)
 5. `TTS_CALL_PROVIDER=sarvam` (default) or `cartesia` — both flow through the same ffmpeg telephony loudness chain; see CLOUD-VOICE-GUIDE.md
 6. Set up a **named Cloudflare tunnel** (see `cloudflared-config.example.yml`) — a quick tunnel breaks Google login, the Meta webhook, Exotel callbacks, and never exposes the voicebot WebSocket on port 3002
 7. `npm run build`

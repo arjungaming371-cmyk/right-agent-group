@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
-import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth"
+// Keep middleware Edge-compatible. The full auth module contains Node/DB
+// helpers for API routes, so importing it here would bundle `pg` into Edge.
+import { SESSION_COOKIE, verifySessionToken } from "@/lib/session-token"
 
 // Paths that MUST stay public:
 // - / (homepage)                 → the public marketing landing (staff use

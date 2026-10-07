@@ -100,9 +100,12 @@ export default function SecurityPage() {
           <p className="rg-legal-notice" style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
             <AlertTriangle size={16} strokeWidth={2} style={{ flexShrink: 0, marginTop: 2 }} />
             <span>
-              Report a security concern:{" "}
-              <span className="rg-ph">[security@yourdomain.com — update before publishing]</span>. We
-              take reports seriously and will respond promptly.
+              Report a security concern through the{" "}
+              <Link href="/demo" className="rg-grad" style={{ textDecoration: "none" }}>
+                Book a Demo
+              </Link>{" "}
+              page and mark the request as security-sensitive. We take reports seriously and will
+              respond promptly.
             </span>
           </p>
         </div>

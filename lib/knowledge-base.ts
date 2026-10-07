@@ -42,7 +42,7 @@ function clip(s: string, n: number): string {
 // the obvious non-questions: greetings, acknowledgements, digit strings
 // (numbers/addresses being read out), and very short turns.
 const SKIP_PATTERNS =
-  /^(hi|hello|hey|yes|yeah|no|nope|ok|okay|sure|thanks|thank you|bye|goodbye|namaste|haan|theek hai|sare|avunu|em levu|emi ledu|chalu|time undi|time undi cheppandi|aa time undi)\.?$/i
+  /^(hi|hello|hey|yes|yeah|no|nope|ok|okay|sure|thanks|thank you|bye|goodbye|namaste|haan|theek hai|sare|avunu|em levu|emi ledu|chalu|time undi|time undi cheppandi|aa time undi|aa time undi cheppandi|haa time undi|haa time undi cheppandi|cheppandi|haa cheppandi|avunu cheppandi|sare cheppandi)\.?$/i
 
 function looksLikeQuestion(q: string): boolean {
   const t = q.trim()

@@ -543,6 +543,8 @@ function waTtsCacheKey(text, language, voice) {
   return `${v}\u0000${language}\u0000${text}`
 }
 
+let _cartesiaQuotaExceeded = false
+
 async function synthesizePcm48k(text, language, voice) {
   const activeLang = language || "english"
   const cacheable = text.length <= WA_TTS_CACHE_MAX_CHARS
@@ -558,13 +560,19 @@ async function synthesizePcm48k(text, language, voice) {
   let override = voice || null
   let audio
   let providerUsed = WA_TTS_PROVIDER
-  if (WA_TTS_PROVIDER === "cartesia" && process.env.CARTESIA_API_KEY) {
+
+  if (WA_TTS_PROVIDER === "cartesia" && process.env.CARTESIA_API_KEY && !_cartesiaQuotaExceeded) {
     const speaker = override?.provider === "cartesia" ? override.speaker : (process.env.CARTESIA_VOICE_ID || undefined)
     try {
       audio = await voiceProviders.cartesiaTts(text, activeLang, speaker)
       providerUsed = "cartesia"
     } catch (cartesiaErr) {
-      console.warn(`[WA] Cartesia TTS failed (${cartesiaErr.message}), falling back to Sarvam TTS`)
+      if (/quota_exceeded|402|credit limit/i.test(cartesiaErr.message)) {
+        _cartesiaQuotaExceeded = true
+        console.warn(`[WA] Cartesia quota exceeded — switched to Sarvam TTS for this session`)
+      } else {
+        console.warn(`[WA] Cartesia TTS failed (${cartesiaErr.message}), falling back to Sarvam TTS`)
+      }
       const sarvamSpeaker = override?.provider === "sarvam" ? override.speaker : undefined
       audio = await voiceProviders.sarvamTts(text, activeLang, sarvamSpeaker)
       providerUsed = "sarvam (fallback)"
@@ -928,6 +936,10 @@ class WhatsAppCallSession {
     if (energy > this.callMaxEnergy) this.callMaxEnergy = energy
 
     if (energy > ENERGY_THRESHOLD) {
+      if (this._greetingWakeup) {
+        this._greetingWakeup()
+        this._greetingWakeup = null
+      }
       this.speaking = true
       this.speechMs += ms
       this.silenceMs = 0
@@ -1139,7 +1151,7 @@ class WhatsAppCallSession {
     this.started = true
     const t0 = Date.now()
     try {
-      const r = await callTurnApi({
+      const apiPromise = callTurnApi({
         event: "start",
         callSid: this.callSid,
         from: this.from,
@@ -1147,6 +1159,34 @@ class WhatsAppCallSession {
         branchId: this.branchId || undefined,
         source: "whatsapp_call",
       })
+
+      // Wait for WebRTC media connection to establish
+      await this.waitForConnected(3500)
+      if (this.closed) return
+
+      // Ear-pickup delay: give listener 2 seconds from connect to place phone to ear
+      const greetingDelay = parseInt(process.env.CALL_GREETING_DELAY_MS || "2000")
+      const elapsedSinceConnect = this.connectedAt ? Date.now() - this.connectedAt : 0
+      const remainingDelay = Math.max(0, greetingDelay - elapsedSinceConnect)
+      if (remainingDelay > 0) {
+        console.log(`⏳ WhatsApp call ${this.callSid}: holding greeting for ${remainingDelay}ms (target ${greetingDelay}ms from connect)`)
+        await new Promise((resolve) => {
+          const timer = setTimeout(resolve, remainingDelay)
+          this._greetingWakeup = () => {
+            clearTimeout(timer)
+            resolve()
+          }
+        })
+      }
+      if (this.closed) return
+
+      // If caller spoke early during the pickup window, let utterance handler take over
+      if (this.processing || this.speaking) {
+        console.log(`🎙 WhatsApp call ${this.callSid}: caller spoke first during pickup window, skipping auto-greeting`)
+        return
+      }
+
+      const r = await apiPromise
       console.log(`⏱ wa start API: ${Date.now() - t0}ms  lead=${r.leadId || "?"}  branch=${r.branchId || "hq"}`)
       this.language = r.language || "english"
       this.voice = r.voice && r.voice.speaker ? r.voice : null

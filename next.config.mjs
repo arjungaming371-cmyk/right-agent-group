@@ -1,7 +1,11 @@
+import path from "path"
+import { fileURLToPath } from "url"
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
 /** @type {import("next").NextConfig} */
 const nextConfig = {
-  // (twilio was removed here — the project migrated to the self-hosted Exotel
-  // voicebot and this package is no longer a dependency anywhere.)
+  outputFileTracingRoot: __dirname,
   serverExternalPackages: ["ws"],
   experimental: {
     // "*" accepted a server action request claiming to come from any
