@@ -41,8 +41,8 @@ function assert(condition: boolean, msg: string) {
   if (!condition) throw new Error(msg)
 }
 
-const BRANCH_A_ID = "0fdbcbe6-4bf6-4ac0-80f2-dc87d77deada"
-const BRANCH_B_ID = "fcc5632f-6fe5-4fa8-9fb3-e8746dce1d26"
+let BRANCH_A_ID = ""
+let BRANCH_B_ID = ""
 
 // Track all created synthetic UUIDs for deterministic cleanup
 const createdLeadIds: string[] = []
@@ -56,18 +56,12 @@ async function runMasterAudit() {
   console.log("   RIGHT AGENT GROUP — MASTER PRODUCTION ACCEPTANCE & FEATURE AUDIT")
   console.log("================================================================================\n")
 
-  // Ensure test branches exist
-  await query(`
-    INSERT INTO branches (id, org_id, name, code, status)
-    VALUES ($1, '3575a098-e33e-49af-ae91-f97849e6bbdf', 'Audit Branch A', 'ABRA', 'active')
-    ON CONFLICT (id) DO NOTHING
-  `, [BRANCH_A_ID])
-
-  await query(`
-    INSERT INTO branches (id, org_id, name, code, status)
-    VALUES ($1, '3575a098-e33e-49af-ae91-f97849e6bbdf', 'Audit Branch B', 'ABRB', 'active')
-    ON CONFLICT (id) DO NOTHING
-  `, [BRANCH_B_ID])
+  const branchRows = await query("SELECT id FROM branches ORDER BY created_at LIMIT 2")
+  BRANCH_A_ID = branchRows.rows[0]?.id
+  BRANCH_B_ID = branchRows.rows[1]?.id
+  if (!BRANCH_A_ID || !BRANCH_B_ID) {
+    console.error('Need at least 2 branches in the database'); process.exit(1)
+  }
 
   // =========================================================================
   // 1. ENVIRONMENT & DATABASE SCHEMA INTEGRITY (Phases 2 & 6)

@@ -16,21 +16,25 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!isValidUUID(id)) return NextResponse.json({ error: "invalid lead id" }, { status: 400 })
 
   const branchId = sessionBranchId(session)
-  const current = await query(`SELECT pinned, branch_id FROM leads WHERE id = $1`, [id])
-  if (current.rows.length === 0) return NextResponse.json({ error: "lead not found" }, { status: 404 })
-  if (branchId && current.rows[0].branch_id !== branchId) {
-    return NextResponse.json({ error: "lead not found in your branch" }, { status: 404 })
-  }
-
   const body = await req.json().catch(() => ({}) as any)
-  const nextPinned = typeof body?.pinned === "boolean" ? body.pinned : !current.rows[0].pinned
+  const explicit = typeof body?.pinned === "boolean" ? body.pinned : null
 
-  const updated = await query(
-    `UPDATE leads SET pinned = $1, pinned_at = CASE WHEN $1 THEN now() ELSE NULL END WHERE id = $2
-     RETURNING id, pinned, pinned_at`,
-    [nextPinned, id]
-  )
+  const sql = branchId
+    ? `UPDATE leads
+       SET pinned = CASE WHEN $3::boolean IS NOT NULL THEN $3::boolean ELSE NOT pinned END,
+           pinned_at = CASE WHEN (CASE WHEN $3::boolean IS NOT NULL THEN $3::boolean ELSE NOT pinned END) THEN now() ELSE NULL END
+       WHERE id = $1 AND branch_id = $2
+       RETURNING id, pinned, pinned_at`
+    : `UPDATE leads
+       SET pinned = CASE WHEN $2::boolean IS NOT NULL THEN $2::boolean ELSE NOT pinned END,
+           pinned_at = CASE WHEN (CASE WHEN $2::boolean IS NOT NULL THEN $2::boolean ELSE NOT pinned END) THEN now() ELSE NULL END
+       WHERE id = $1
+       RETURNING id, pinned, pinned_at`
 
+  const updated = await query(sql, branchId ? [id, branchId, explicit] : [id, explicit])
+  if (updated.rows.length === 0) return NextResponse.json({ error: "lead not found" }, { status: 404 })
+
+  const nextPinned = updated.rows[0].pinned
   logAudit(nextPinned ? "lead pinned" : "lead unpinned", session.email, { leadId: id })
 
   return NextResponse.json(updated.rows[0])

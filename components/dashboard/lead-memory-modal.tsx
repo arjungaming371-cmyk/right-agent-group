@@ -280,7 +280,7 @@ export default function LeadMemoryModal({ leadId, canEdit, onClose }: { leadId: 
                     {data.memory.sentiment_history.length === 0 && <span style={{ fontSize: 12, color: "var(--text-muted)" }}>No history yet</span>}
                     {data.memory.sentiment_history.slice(-12).map((s, i) => (
                       <div
-                        key={i}
+                        key={`${s.sentiment}-${s.at}-${i}`}
                         title={`${s.sentiment} — ${new Date(s.at).toLocaleString()}`}
                         style={{ width: 10, height: 10, borderRadius: "50%", background: SENTIMENT_COLOR[s.sentiment] || "var(--text-muted)", flexShrink: 0 }}
                       />
@@ -344,7 +344,7 @@ export default function LeadMemoryModal({ leadId, canEdit, onClose }: { leadId: 
                     const Icon = CHANNEL_ICON[t.channel] || StickyNote
                     const DirIcon = t.direction === "in" ? ArrowDownLeft : ArrowUpRight
                     return (
-                      <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 9, fontSize: 12.5 }}>
+                      <div key={(t as any).id || `${t.channel}-${t.occurred_at}-${i}`} style={{ display: "flex", alignItems: "flex-start", gap: 9, fontSize: 12.5 }}>
                         <div style={{ width: 24, height: 24, borderRadius: 7, background: "rgba(139,124,255,0.1)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 1 }}>
                           <Icon size={12} style={{ color: "var(--accent-violet)" }} />
                         </div>

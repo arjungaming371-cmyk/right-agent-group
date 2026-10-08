@@ -10,7 +10,7 @@ import Link from "next/link"
 import { Info, SendHorizontal } from "lucide-react"
 
 type ChatRole = "user" | "assistant"
-type Msg = { role: ChatRole; content: string }
+type Msg = { id?: string; role: ChatRole; content: string }
 
 const LANGUAGES = [
   { value: "english", label: "English" },
@@ -129,7 +129,7 @@ export default function DemoChat() {
           )}
 
           {messages.map((m, i) => (
-            <div key={i} className={`dmc-msg ${m.role === "user" ? "dmc-user" : "dmc-ai"}`}>
+            <div key={m.id || (m.id = `${m.role}-${i}-${m.content.slice(0, 10)}`)} className={`dmc-msg ${m.role === "user" ? "dmc-user" : "dmc-ai"}`}>
               {m.role === "assistant" && (
                 <span className="dmc-avatar" aria-hidden="true">
                   P

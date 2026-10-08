@@ -890,6 +890,8 @@ class WhatsAppCallSession {
       // Same slice at 16 kHz for the recorder, index-aligned with outQueue so
       // the pacer can pop both together and record what it ACTUALLY plays.
       if (this.recorder) this.outPcmQueue.push(downsampleToStt(chunk))
+      if (this.outPcmQueue.length > 50) this.outPcmQueue.splice(0, this.outPcmQueue.length - 50)
+      if (this.outQueue.length > 50) this.outQueue.splice(0, this.outQueue.length - 50)
     }
   }
 
@@ -1062,8 +1064,8 @@ class WhatsAppCallSession {
     const epoch = turnEpoch === undefined ? this.speechEpoch : turnEpoch
     if (epoch !== this.speechEpoch) return
     const lang = sentenceLang || this.language || "english"
-    const synth = this.synth(clean, epoch, lang)
-    this.synthChain = synth
+    this.synthChain = (this.synthChain || Promise.resolve()).catch(() => {}).then(() => this.synth(clean, epoch, lang))
+    const synth = this.synthChain
     this.sendChain = this.sendChain.catch(() => {}).then(async () => {
       const frames = await synth
       if (frames && frames.length > 0 && !this.closed && epoch === this.speechEpoch) {

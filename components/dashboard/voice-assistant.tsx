@@ -1441,7 +1441,7 @@ export default function VoiceAssistant({
               <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
                 {[14, 32, 48, 32, 14].map((h, i) => (
                   <div
-                    key={i}
+                    key={`bar-l-${h}-${i}`}
                     style={{
                       width: 5,
                       height: h,
@@ -1456,7 +1456,7 @@ export default function VoiceAssistant({
               <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
                 {[18, 42, 26, 46, 20].map((h, i) => (
                   <div
-                    key={i}
+                    key={`bar-s-${h}-${i}`}
                     style={{
                       width: 5,
                       height: h,

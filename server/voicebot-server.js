@@ -1226,6 +1226,14 @@ if (!WS_KEY && process.env.VOICEBOT_ALLOW_UNAUTH !== "1") {
 }
 
 wss.on("connection", (ws, req) => {
+  const ip = req.socket?.remoteAddress || "unknown"
+  const count = [...wss.clients].filter(c => c._remoteIp === ip).length
+  if (count >= 5) {
+    ws.close(1008, "too many connections from this IP")
+    return
+  }
+  ws._remoteIp = ip
+
   if (WS_KEY) {
     let provided = ""
     try { provided = new URL(req.url, "http://localhost").searchParams.get("key") || "" } catch {}
@@ -1426,6 +1434,22 @@ const httpServer = http.createServer((req, res) => {
     }
   })
 })
+function gracefulShutdown(signal) {
+  console.log(`[voicebot] ${signal} received, shutting down...`)
+  for (const ws of wss.clients) {
+    try { ws.close(1001, "server shutting down") } catch {}
+  }
+  wss.close(() => {
+    httpServer.close(() => {
+      console.log("[voicebot] all connections closed")
+      process.exit(0)
+    })
+  })
+  setTimeout(() => process.exit(1), 5000).unref()
+}
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"))
+process.on("SIGINT", () => gracefulShutdown("SIGINT"))
+
 httpServer.listen(WA_HTTP_PORT, "127.0.0.1", () => {
   console.log(`WhatsApp calling bridge on http://127.0.0.1:${WA_HTTP_PORT} — ${waCalls.describeConfig()}`)
 })

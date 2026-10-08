@@ -145,7 +145,7 @@ export default function CommLogView() {
                   {expanded===call.id && transcript.length>0 && (
                     <div style={{ background:"var(--bg-secondary)",borderRadius:8,padding:14,marginTop:8 }}>
                       {transcript.map((t:any,i:number)=>(
-                        <div key={i} style={{ display:"flex",gap:8,marginBottom:8 }}>
+                        <div key={t.id || `${t.role || "turn"}-${i}-${String(t.text || "").slice(0, 10)}`} style={{ display:"flex",gap:8,marginBottom:8 }}>
                           <span style={{ flexShrink:0,width:22,height:22,borderRadius:6,display:"inline-flex",alignItems:"center",justifyContent:"center",background:t.role==="ai"?"rgba(139,124,255,0.13)":"var(--overlay-hover)",color:t.role==="ai"?"var(--accent-violet)":"var(--text-muted)" }}>
                             {t.role==="ai"?<Bot size={12} strokeWidth={1.9}/>:<User size={12} strokeWidth={1.9}/>}
                           </span>

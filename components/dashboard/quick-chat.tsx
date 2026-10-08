@@ -10,6 +10,7 @@ import ChatMarkdown from "./chat-markdown"
 import { useToast } from "../ui/toast"
 
 type Message = {
+  id?: string
   role: "user" | "assistant"
   content: string
   attachmentName?: string
@@ -775,7 +776,7 @@ export default function QuickChat({ role = "agent", userEmail = "" }: { role?: U
                 const actionState = actionStates[i]
 
                 return (
-                  <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: msg.role === "user" ? "flex-end" : "flex-start", gap: 4 }}>
+                  <div key={msg.id || (msg.id = `qc-${i}-${msg.role}`)} style={{ display: "flex", flexDirection: "column", alignItems: msg.role === "user" ? "flex-end" : "flex-start", gap: 4 }}>
                     <div style={{
                       maxWidth: expanded ? "82%" : "90%",
                       padding: isPendingStream ? "10px 14px" : "10px 14px",

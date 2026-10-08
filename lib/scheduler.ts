@@ -173,8 +173,8 @@ async function runInstagramCommentScan() {
       // Record updated count for this post
       lastCommentCounts.set(m.id, currentCount)
     }
-  } catch (e: any) {
-    // Fail-safe — never crash scheduler
+  } catch (e) {
+    console.error("[scheduler] instagram comment scan failed:", e instanceof Error ? e.message : e)
   } finally {
     igCommentScanRunning = false
   }

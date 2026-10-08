@@ -726,7 +726,7 @@ export default function CalendarView({ role }: { role: Role }) {
                   const dayEvents = eventsByDay[key] || []
                   return (
                     <div
-                      key={i}
+                      key={key}
                       style={{
                         minHeight: 112,
                         padding: "8px 6px",
@@ -1292,7 +1292,7 @@ export default function CalendarView({ role }: { role: Role }) {
                         </div>
                         {allFound.map((ev, i) => (
                           <div
-                            key={i}
+                            key={(ev as any).id || `${ev.event_type}-${ev.start_time}-${i}`}
                             style={{
                               fontSize: 12,
                               padding: "4px 8px",

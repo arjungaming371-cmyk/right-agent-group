@@ -15,7 +15,7 @@ import { ClickableRow, useEscapeDismiss } from "../ui/interactive"
 import VoiceDictation from "../ui/voice-dictation"
 import { smartFilter } from "@/lib/smart-search"
 
-type TranscriptTurn = { text?: unknown; content?: unknown; role?: unknown }
+type TranscriptTurn = { id?: string; text?: unknown; content?: unknown; role?: unknown }
 type Call = {
   id: string; phone: string; direction: string; duration: number
   status: string; sentiment: string; outcome: string; transcript: TranscriptTurn[]
@@ -867,7 +867,7 @@ export default function VoiceLogsView({ role }: { role: Role }) {
                 <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 12, fontWeight: 600, letterSpacing: "0.05em" }}>TRANSCRIPT</div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {selected.transcript.map((t: TranscriptTurn, i: number) => (
-                    <div key={i} style={{ display: "flex", gap: 12, padding: "8px 12px", borderRadius: 8, background: t.role === "ai" ? "rgba(59,130,246,0.08)" : "var(--overlay-soft)" }}>
+                    <div key={t.id || `${String(t.role || "turn")}-${i}-${String(t.text || "").slice(0, 10)}`} style={{ display: "flex", gap: 12, padding: "8px 12px", borderRadius: 8, background: t.role === "ai" ? "rgba(59,130,246,0.08)" : "var(--overlay-soft)" }}>
                       <span style={{ fontSize: 12, fontWeight: 700, color: t.role === "ai" ? "var(--accent-blue)" : "var(--text-muted)", minWidth: 80, flexShrink: 0, textTransform: "uppercase" }}>
                         {t.role === "ai" ? "Priya" : "Customer"}
                       </span>

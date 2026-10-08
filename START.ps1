@@ -8,9 +8,11 @@ param(
 $ProjectDir = if ($PSScriptRoot) { $PSScriptRoot } elseif ($MyInvocation.MyCommand.Path) { Split-Path -Parent $MyInvocation.MyCommand.Path } else { (Get-Location).Path }
 Set-Location $ProjectDir
 $ffmpegCmd = Get-Command ffmpeg -ErrorAction SilentlyContinue
-$FFmpegBin = if ($ffmpegCmd) { Split-Path -Parent $ffmpegCmd.Source } else { "C:\Users\Lenovo\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-8.1.2-full_build\bin" }
+$FFmpegBin = if ($ffmpegCmd) { Split-Path -Parent $ffmpegCmd.Source }
+             else { Write-Warning "ffmpeg not found — install via: winget install Gyan.FFmpeg"; "" }
 $ngrokCmd = Get-Command ngrok -ErrorAction SilentlyContinue
-$ngrokBin = if ($ngrokCmd) { Split-Path -Parent $ngrokCmd.Source } else { "C:\Users\Lenovo\AppData\Local\Microsoft\WindowsApps" }
+$ngrokBin  = if ($ngrokCmd)  { Split-Path -Parent $ngrokCmd.Source }
+             else { Write-Warning "ngrok not found — install via: winget install ngrok"; "" }
 $env:PATH = "$ProjectDir;$FFmpegBin;$ngrokBin;" + $env:PATH
 
 Write-Host ""

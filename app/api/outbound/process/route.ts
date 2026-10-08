@@ -44,7 +44,7 @@ async function claimPendingRows(branchId: string | null, limit: number): Promise
     `UPDATE outbound_queue SET status = 'dialing', claimed_at = now()
      WHERE id IN (
        SELECT id FROM outbound_queue
-       WHERE (status = 'pending' OR (status = 'dialing' AND claimed_at IS NOT NULL AND claimed_at < now() - interval '10 minutes'))
+       WHERE (status = 'pending' OR (status = 'dialing' AND claimed_at IS NOT NULL AND claimed_at < now() - interval '90 seconds'))
          AND scheduled_at <= now()
          AND ($1::uuid IS NULL OR branch_id = $1)
        ORDER BY priority DESC, scheduled_at ASC

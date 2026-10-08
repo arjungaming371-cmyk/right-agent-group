@@ -28,11 +28,14 @@ CREATE INDEX IF NOT EXISTS idx_outbound_queue_claim
 -- soft-cancel the newer duplicates so the audit trail survives.
 UPDATE outbound_queue
    SET status = 'cancelled', cancelled_at = now(), cancelled_by = 'migration:dedupe'
- WHERE status = 'pending'
+ WHERE status IN ('pending', 'dialing')
    AND id NOT IN (
-     SELECT MIN(id::text)::uuid FROM outbound_queue
-      WHERE status IN ('pending', 'dialing')
-      GROUP BY right(regexp_replace(phone, '\D', '', 'g'), 10)
+     SELECT id FROM (
+       SELECT DISTINCT ON (right(regexp_replace(phone, '\D', '', 'g'), 10)) id
+         FROM outbound_queue
+        WHERE status IN ('pending', 'dialing')
+        ORDER BY right(regexp_replace(phone, '\D', '', 'g'), 10), created_at ASC
+     ) keepers
    );
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_outbound_queue_active_phone

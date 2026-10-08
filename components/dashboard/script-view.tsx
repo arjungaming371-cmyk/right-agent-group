@@ -667,7 +667,7 @@ export default function ScriptView() {
           <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: "var(--accent-blue)", display: "flex", alignItems: "center", gap: 6 }}><Lightbulb size={14} strokeWidth={2} /> How to write a good script</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 24px" }}>
             {TIPS.map((t, i) => (
-              <div key={i} style={{ fontSize: 12, color: "var(--text-secondary)", padding: "2px 0", display: "flex", gap: 7, alignItems: "baseline" }}>
+              <div key={t + i} style={{ fontSize: 12, color: "var(--text-secondary)", padding: "2px 0", display: "flex", gap: 7, alignItems: "baseline" }}>
                 <span style={{ color: i < 5 ? "var(--accent-green)" : "var(--accent-yellow)", flexShrink: 0 }}>•</span>{t}
               </div>
             ))}

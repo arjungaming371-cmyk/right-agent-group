@@ -1,7 +1,12 @@
 const { execSync } = require('child_process');
 const fs = require('fs');
+const path = require('path');
 
-const mp3 = 'recordings/wacall-wacidIRggMzY3MTNCNUU5QUIyNTMzRDBGMjQ0N0ZGMzlBNTJDNUQcGAsxNTU1MTYxMjg4NBUCABUWAA.mp3';
+const mp3 = process.argv[2]
+if (!mp3 || !fs.existsSync(mp3)) {
+  console.error('Usage: node ' + path.basename(process.argv[1]) + ' <path-to-mp3>')
+  process.exit(1)
+}
 execSync(`ffmpeg -y -i "${mp3}" -f s16le -ac 1 -ar 16000 temp_test.raw`);
 const raw = fs.readFileSync('temp_test.raw');
 fs.unlinkSync('temp_test.raw');

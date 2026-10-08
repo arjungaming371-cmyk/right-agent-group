@@ -135,8 +135,5 @@ if ($appId -and $secret -and $verify) {
     }
 }
 
-# --- 6. Persist the URL for services that read it at boot (usually a no-op
-#        since the domain is stable, but harmless if it ever changes) ---
-$envText = $envText -replace "(?m)^NEXT_PUBLIC_APP_URL=\S+", "NEXT_PUBLIC_APP_URL=$url"
-[IO.File]::WriteAllText($envFile, $envText, (New-Object Text.UTF8Encoding($false)))
-Write-Host "      OK NEXT_PUBLIC_APP_URL confirmed in .env" -ForegroundColor Green
+$env:NEXT_PUBLIC_APP_URL = $url
+Write-Host "Set NEXT_PUBLIC_APP_URL=$url for this session (not written to .env)"
