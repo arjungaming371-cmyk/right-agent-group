@@ -5,6 +5,7 @@ import { sendCallFollowUp, sendMissedCallFollowUp, branchWhatsAppCtx } from "@/l
 import { refreshLeadScore } from "@/lib/scoring"
 import { rateLimit, clientIp } from "@/lib/rate-limit"
 import { runPostCallAnalysis } from "@/lib/lead-brain"
+import { runCalendarExtractionForCall } from "@/lib/calendar-agent"
 import { verifyExotelWebhookKey } from "@/lib/exotel-webhook-auth"
 import { maybeRequeueMissed } from "@/lib/auto-retry"
 import { stampQueueCallOutcome } from "@/lib/queue-outcome"
@@ -191,6 +192,9 @@ export async function POST(req: NextRequest) {
       // Lead Brain: background structured-memory extraction. Fire-and-forget —
       // never awaited, never allowed to affect this webhook's response.
       runPostCallAnalysis(callSid)
+
+      // Calendar Agent: extract appointments, callbacks & branch visits into calendar_events
+      runCalendarExtractionForCall(callSid)
     }
 
     return new NextResponse("OK", { status: 200 })

@@ -10,7 +10,7 @@
 //    ignored were completely silent.
 //  - Builders are generic: db.from<Lead>("leads") gives typed rows at call
 //    sites. The default keeps the loose shape so existing routes compile.
-import { Pool, type QueryResultRow } from "pg"
+import { Pool, type QueryResultRow, type PoolClient } from "pg"
 import { logger } from "@/lib/logger"
 
 const log = logger.child("db")
@@ -42,6 +42,27 @@ export async function query(text: string, params?: unknown[]) {
   const client = await pool.connect()
   try {
     return await client.query(text, params)
+  } finally {
+    client.release()
+  }
+}
+
+/**
+ * Executes a callback within a managed PostgreSQL transaction (BEGIN ... COMMIT),
+ * rolling back automatically if an error is thrown.
+ */
+export async function withTransaction<T>(
+  fn: (client: PoolClient) => Promise<T>
+): Promise<T> {
+  const client = await pool.connect()
+  try {
+    await client.query("BEGIN")
+    const result = await fn(client)
+    await client.query("COMMIT")
+    return result
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {})
+    throw err
   } finally {
     client.release()
   }

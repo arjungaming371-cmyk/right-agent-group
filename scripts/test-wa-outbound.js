@@ -11,9 +11,12 @@
 //
 // Run: node scripts/test-wa-outbound.js   (no API keys / network needed)
 
+const http = require("http")
+
 process.env.WHATSAPP_SERVICE_KEY = process.env.WHATSAPP_SERVICE_KEY || "test-key"
 process.env.VOICEBOT_WA_ICE_SERVERS = "" // host candidates only — pure loopback
 process.env.RECORD_CALLS = "0"           // keep the test off the recorder/disk
+process.env.CALL_GREETING_DELAY_MS = "0"
 
 // werift / @discordjs/opus are voicebot deps installed under server/
 module.paths.push(require("path").join(__dirname, "..", "server", "node_modules"))
@@ -25,14 +28,37 @@ const {
   RtpPacket,
 } = require("werift")
 const { OpusEncoder } = require("@discordjs/opus")
-const {
-  createOutboundOffer,
-  registerOutboundCallId,
-  attachOutboundSession,
-  cancelOutboundOffer,
-  endSession,
-  activeCount,
-} = require("../server/whatsapp-calls")
+
+let mockServer
+let createOutboundOffer
+let registerOutboundCallId
+let attachOutboundSession
+let cancelOutboundOffer
+let endSession
+let activeCount
+
+async function initMocks() {
+  mockServer = http.createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "application/json" })
+    res.end(JSON.stringify({
+      text: "Hello, this is Right Agent Group.",
+      language: "english",
+      leadId: "lead-outbound-test-1",
+      branchId: "hq",
+      ok: true,
+    }))
+  })
+  await new Promise((r) => mockServer.listen(0, "127.0.0.1", r))
+  process.env.APP_INTERNAL_URL = `http://127.0.0.1:${mockServer.address().port}`
+
+  const wa = require("../server/whatsapp-calls")
+  createOutboundOffer = wa.createOutboundOffer
+  registerOutboundCallId = wa.registerOutboundCallId
+  attachOutboundSession = wa.attachOutboundSession
+  cancelOutboundOffer = wa.cancelOutboundOffer
+  endSession = wa.endSession
+  activeCount = wa.activeCount
+}
 
 const WA_RATE = 48000
 const FRAME_SAMPLES = 960 // 20 ms
@@ -295,6 +321,7 @@ async function testOutboundWiringContracts() {
 
 ;(async () => {
   try {
+    await initMocks()
     const offer = await testOfferShape()
     await testOutboundCallFlow(offer)
     await testLifecycleGuards()
@@ -302,6 +329,8 @@ async function testOutboundWiringContracts() {
   } catch (e) {
     failures.push("suite crashed")
     console.error("  FAIL suite crashed:", e.stack || e.message)
+  } finally {
+    if (mockServer) mockServer.close()
   }
   console.log(`\n${passed} passed, ${failures.length} failed${failures.length ? `: ${failures.join(", ")}` : ""}`)
   process.exit(failures.length ? 1 : 0)

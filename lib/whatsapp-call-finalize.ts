@@ -18,6 +18,7 @@ import { generateLeadSummary } from "@/lib/llm"
 import { sendCallFollowUp, sendMissedCallFollowUp, branchWhatsAppCtx } from "@/lib/whatsapp"
 import { refreshLeadScore } from "@/lib/scoring"
 import { runPostCallAnalysis } from "@/lib/lead-brain"
+import { runCalendarExtractionForCall } from "@/lib/calendar-agent"
 import { isAiPaused } from "@/lib/ai-pause"
 
 export type WhatsAppCallOutcome = "resolved" | "missed" | "rejected" | "failed"

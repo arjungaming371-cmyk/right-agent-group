@@ -180,6 +180,24 @@ async function runInstagramCommentScan() {
   }
 }
 
+// Calendar Agent: scans unprocessed voice calls periodically to detect appointments
+let calendarScanRunning = false
+async function runCalendarAgentScan() {
+  if (calendarScanRunning) return
+  calendarScanRunning = true
+  try {
+    const { scanVoiceCalls } = await import("@/lib/calendar-agent")
+    const res = await scanVoiceCalls({ limit: 15, dryRun: false })
+    if (res.scanned > 0) {
+      console.log(`[scheduler] calendar agent: scanned ${res.scanned} call(s), discovered ${res.discovered.length} event(s) (${res.confirmed} confirmed, ${res.needsReview} review)`)
+    }
+  } catch (e: any) {
+    console.error("[scheduler] calendar agent scan failed:", e?.message || e)
+  } finally {
+    calendarScanRunning = false
+  }
+}
+
 export function startScheduler() {
   // instrumentation.ts's register() can fire more than once in dev under
   // Next.js hot-reload — guard so we never register the same cron job twice.
@@ -194,11 +212,13 @@ export function startScheduler() {
   cron.schedule("*/5 * * * *", () => runLeadBrainScan())
   // Prompt Tuner, Sunday 09:00 server time — quiet day, after the week's calls have accumulated.
   cron.schedule("0 9 * * 0", () => runPromptTunerScan())
+  // Calendar Agent periodic background scan, every 15 minutes.
+  cron.schedule("*/15 * * * *", () => runCalendarAgentScan())
 
   // Automated Instagram comment poller: runs every 20s to catch new comments
   setInterval(() => {
     runInstagramCommentScan().catch(() => {})
   }, 20_000)
 
-  console.log("[scheduler] in-app cron started — daily digest 08:00, weekly digest Mon 08:00, lead brain scan every 5m, prompt tuner Sun 09:00, ig comment scan every 20s")
+  console.log("[scheduler] in-app cron started — daily digest 08:00, weekly digest Mon 08:00, lead brain scan every 5m, prompt tuner Sun 09:00, calendar agent scan every 15m, ig comment scan every 20s")
 }

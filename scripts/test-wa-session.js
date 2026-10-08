@@ -23,6 +23,7 @@ process.env.VOICEBOT_WA_TTS_PROVIDER = "cartesia"
 process.env.CARTESIA_API_KEY = "test-cartesia-key"
 process.env.CARTESIA_VOICE_ID = "test-voice-id"
 process.env.VOICEBOT_WA_STT_SAMPLE_RATE = "16000"
+process.env.CALL_GREETING_DELAY_MS = "0"
 // Fast-but-clamped fallback for the hangup tests (module clamps at 3000 ms).
 process.env.VOICEBOT_WA_HANGUP_FALLBACK_MS = "3000"
 

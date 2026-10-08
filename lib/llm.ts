@@ -621,7 +621,7 @@ async function groqChatStream(
 }
 
 /** Non-streaming completion. Used by every function that just needs the final text (or JSON) back. */
-async function runCompletion(messages: ChatMessage[], opts: CompletionOpts): Promise<string> {
+export async function runCompletion(messages: ChatMessage[], opts: CompletionOpts): Promise<string> {
   assertGroqConfigured()
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), opts.timeoutMs)
