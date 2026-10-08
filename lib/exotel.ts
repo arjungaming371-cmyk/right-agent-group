@@ -96,6 +96,9 @@ export async function makeExotelCall(
   if (!creds.callerId) throw new Error("EXOTEL_CALLER_ID not set (and the branch has no ExoPhone of its own)")
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL
+  if (!appUrl || !/^https?:\/\//.test(appUrl)) {
+    throw new Error("NEXT_PUBLIC_APP_URL is not set or invalid — Exotel StatusCallback URL cannot be constructed")
+  }
   const url = `https://${creds.subdomain}/v1/Accounts/${creds.sid}/Calls/connect.json`
 
   // NOTE: no StatusCallbackEvents parameter on purpose. Verified against the

@@ -58,8 +58,17 @@ export const POST = withRoute("loans", async (req: NextRequest) => {
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const body = (await readJson(req)) as Record<string, unknown> | null
   if (!body) return NextResponse.json({ error: "invalid body" }, { status: 400 })
-  body.branch_id = sessionBranchId(session)
-  const { data, error } = await db.from("loan_applications").insert(body).select().single()
+  const WRITABLE = new Set([
+    "lead_id", "branch_id", "product", "loan_amount", "tenure_months",
+    "monthly_income", "employment_type", "city", "state", "pan_number",
+    "aadhaar_number", "status", "notes", "form_data", "source",
+  ])
+  const payload: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(body)) {
+    if (WRITABLE.has(k)) payload[k] = v
+  }
+  payload.branch_id = sessionBranchId(session)
+  const { data, error } = await db.from("loan_applications").insert(payload).select().single()
   if (error) return apiError(error)
   logAudit("loan application created", session.email, { loanAppId: data?.id, customerName: body.customer_name })
   return NextResponse.json(data)

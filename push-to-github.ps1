@@ -96,7 +96,7 @@ git remote remove origin 2>$null
 git remote add origin "https://${Username}:${token}@github.com/${Username}/${RepoName}.git"
 
 Write-Host "⬆️ Pushing branch '$currentBranch' to GitHub..." -ForegroundColor Yellow
-git push -u origin "$currentBranch" --force
+git push -u origin "$currentBranch"
 
 # 5. Clean up remote URL so token is never saved in plaintext on disk
 git remote set-url origin "https://github.com/${Username}/${RepoName}.git"

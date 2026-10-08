@@ -95,7 +95,7 @@ git remote add origin "https://${USERNAME}:${GITHUB_TOKEN}@github.com/${USERNAME
 
 # 3. Push current branch
 echo "⬆️ Pushing branch '$CURRENT_BRANCH' to GitHub..."
-git push -u origin "$CURRENT_BRANCH" --force
+git push -u origin "$CURRENT_BRANCH"
 
 # 4. Clean up token from local git config for security
 git remote set-url origin "https://github.com/${USERNAME}/${REPO_NAME}.git"

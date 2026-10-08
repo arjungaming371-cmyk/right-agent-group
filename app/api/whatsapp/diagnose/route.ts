@@ -45,8 +45,8 @@ export async function GET(req: NextRequest) {
 
   try {
     const res = await fetch(
-      `https://graph.facebook.com/v21.0/${phoneId}?fields=display_phone_number,verified_name,quality_rating,platform_type,code_verification_status&access_token=${encodeURIComponent(token)}`,
-      { signal: AbortSignal.timeout(15000) },
+      `https://graph.facebook.com/v21.0/${phoneId}?fields=display_phone_number,verified_name,quality_rating,platform_type,code_verification_status`,
+      { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15000) },
     )
     const data: any = await res.json().catch(() => ({}))
     if (!res.ok) {

@@ -17,7 +17,7 @@ export const ALL_SYSTEM_KEYS = [
   "CARTESIA_API_KEY",
   "CARTESIA_VOICE_ID",
   "EXOTEL_SID",
-  "EXOTEL_TOKEN",
+  "EXOTEL_API_TOKEN",
   "EXOTEL_CALLER_ID",
 ] as const
 

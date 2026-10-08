@@ -142,7 +142,7 @@ async function runInstagramCommentScan() {
         if (!c.id || !c.text) continue
         const senderId = c.from?.id || ""
         const username = (c.from?.username || c.username || "").toLowerCase()
-        if (senderId === accountId || senderId === "17841437996447189" || username === "arjungaming371") continue
+        if (senderId === accountId) continue
 
         await fetch(`${appUrl}/api/instagram`, {
           method: "POST",

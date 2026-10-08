@@ -53,7 +53,7 @@ const KEY_GROUPS = [
       { name: "CARTESIA_API_KEY", label: "Cartesia TTS API Key", placeholder: "car_...", provider: "cartesia" },
       { name: "CARTESIA_VOICE_ID", label: "Cartesia Voice ID", placeholder: "79a6...", provider: "cartesia" },
       { name: "EXOTEL_SID", label: "Exotel Account SID", placeholder: "rightagent...", provider: "exotel" },
-      { name: "EXOTEL_TOKEN", label: "Exotel API Token", placeholder: "ex_...", provider: "exotel" },
+      { name: "EXOTEL_API_TOKEN", label: "Exotel API Token", placeholder: "ex_...", provider: "exotel" },
       { name: "EXOTEL_CALLER_ID", label: "Virtual Caller ID Number", placeholder: "080...", provider: "exotel" },
     ],
   },
