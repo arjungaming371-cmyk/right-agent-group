@@ -28,7 +28,16 @@ $envFile = Join-Path $ProjectDir ".env"
 if (-not (Test-Path $envFile)) { Write-Host "ERROR: .env not found" -ForegroundColor Red; exit 1 }
 $envVars = @{}
 Get-Content $envFile | ForEach-Object {
-    if ($_ -match '^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$') { $envVars[$Matches[1]] = $Matches[2] }
+    if ($_ -match '^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$') {
+        $k = $Matches[1]
+        $v = $Matches[2]
+        $cmt = $v.IndexOf(" #")
+        if ($cmt -ge 0) { $v = $v.Substring(0, $cmt).Trim() }
+        if (($v.StartsWith('"') -and $v.EndsWith('"')) -or ($v.StartsWith("'") -and $v.EndsWith("'"))) {
+            $v = $v.Substring(1, $v.Length - 2)
+        }
+        $envVars[$k] = $v
+    }
 }
 $appUrl  = if ($envVars["APP_INTERNAL_URL"]) { $envVars["APP_INTERNAL_URL"] } else { "http://127.0.0.1:3000" }
 $apiKey  = $envVars["WHATSAPP_SERVICE_KEY"]

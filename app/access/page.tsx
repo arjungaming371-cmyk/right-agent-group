@@ -5,6 +5,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
+import Image from "next/image"
 import { ArrowLeft, LogOut, Shield, UserCog, Eye, UserPlus, Users, Trash2, Building2, Pencil, Check, X, SlidersHorizontal, Plus, Layers } from "lucide-react"
 import { ToastProvider, useToast } from "@/components/ui/toast"
 import { SkeletonList } from "@/components/ui/skeleton"
@@ -315,8 +316,10 @@ function AccessPageInner() {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 28, flexWrap: "wrap", gap: 14 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
             <a href="/dashboard" style={{ display: "flex", alignItems: "center", textDecoration: "none" }} title="Back to Dashboard">
-              <img
+              <Image
                 src="/logo.png"
+                width={180}
+                height={48}
                 alt="Right Agent Group"
                 style={{ height: 42, width: "auto", objectFit: "contain", borderRadius: 8 }}
               />

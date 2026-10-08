@@ -13,8 +13,13 @@ function loadEnv() {
   const envPath = path.join(__dirname, "..", ".env")
   if (!fs.existsSync(envPath)) { console.error("❌ No .env file"); process.exit(1) }
   for (const line of fs.readFileSync(envPath, "utf8").split(/\r?\n/)) {
-    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*(?:#.*)?$/)
-    if (m && !(m[1] in process.env)) process.env[m[1]] = m[2]
+    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/)
+    if (!m || m[1] in process.env) continue
+    let v = m[2]
+    const commentIdx = v.search(/\s#/)
+    if (commentIdx !== -1) v = v.slice(0, commentIdx).trim()
+    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1)
+    process.env[m[1]] = v
   }
 }
 

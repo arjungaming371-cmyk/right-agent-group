@@ -69,6 +69,10 @@ export async function PATCH(req: NextRequest) {
       if (!avatar.startsWith("data:image/") && !/^https?:\/\//.test(avatar)) {
         return NextResponse.json({ error: "Invalid photo" }, { status: 400 })
       }
+      const AVATAR_MIME = ["data:image/png", "data:image/jpeg", "data:image/webp", "data:image/gif"]
+      if (avatar.startsWith("data:") && !AVATAR_MIME.some(m => avatar.startsWith(m))) {
+        return NextResponse.json({ error: "Unsupported image type" }, { status: 400 })
+      }
     }
     updates.avatar_url = avatar || null
   }

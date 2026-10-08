@@ -67,7 +67,7 @@ export async function GET(req: NextRequest) {
       code_verification_status: data.code_verification_status,
       error: null,
     })
-  } catch (e: any) {
-    return NextResponse.json({ ok: false, token_valid: null, error: `Meta unreachable: ${e.message}` })
+  } catch (e) {
+    return NextResponse.json({ ok: false, token_valid: null, error: `Meta unreachable: ${e instanceof Error ? e.message : String(e)}` })
   }
 }

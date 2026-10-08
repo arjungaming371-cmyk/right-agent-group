@@ -1,5 +1,6 @@
 "use client"
 import { useState, useEffect, useRef } from "react"
+import Image from "next/image"
 import dynamic from "next/dynamic"
 import {
   Users, FileText, Phone, MessageCircle, Activity, ShieldCheck, UploadCloud,
@@ -503,8 +504,10 @@ export default function DashboardShell() {
             className="flex items-center gap-2.5 min-w-0 flex-1 text-left cursor-pointer hover:opacity-90 transition-opacity"
             title="Right Agent Group — Operations Console"
           >
-            <img
+            <Image
               src="/logo.png"
+              width={180}
+              height={48}
               alt="Right Agent Group"
               className="h-10 w-auto max-w-[195px] object-contain drop-shadow-[0_2px_8px_rgba(56,189,248,0.15)]"
             />

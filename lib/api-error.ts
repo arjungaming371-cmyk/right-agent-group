@@ -4,7 +4,8 @@ import { NextResponse } from "next/server"
 // stack details, connection info) straight to the client on every 500.
 // Log the real error server-side and return a generic message instead —
 // nothing here changes behavior for callers that only check response.ok.
-export function apiError(e: any, status = 500) {
-  console.error("API error:", e?.message || e)
+export function apiError(e: unknown, status = 500) {
+  const msg = e instanceof Error ? e.message : String(e)
+  console.error("API error:", msg)
   return NextResponse.json({ error: "Something went wrong. Please try again." }, { status })
 }

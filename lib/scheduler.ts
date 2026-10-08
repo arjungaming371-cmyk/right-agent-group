@@ -31,8 +31,8 @@ async function runDigest(period: "daily" | "weekly") {
     const data = await res.json()
     if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`)
     console.log(`[scheduler] ${period} digest sent — ${data.stats?.totalCalls ?? "?"} calls, ${data.stats?.qualifiedLeads ?? "?"} qualified`)
-  } catch (e: any) {
-    console.error(`[scheduler] ${period} digest failed:`, e.message)
+  } catch (e) {
+    console.error(`[scheduler] ${period} digest failed:`, e instanceof Error ? e.message : String(e))
   }
 }
 
@@ -70,8 +70,8 @@ async function runLeadBrainScanInner() {
     const data = await res.json()
     if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`)
     if (data.scanned > 0) console.log(`[scheduler] lead brain: analyzed ${data.scanned} idle WhatsApp thread(s)`)
-  } catch (e: any) {
-    console.error("[scheduler] lead brain scan failed:", e.message)
+  } catch (e) {
+    console.error("[scheduler] lead brain scan failed:", e instanceof Error ? e.message : String(e))
   }
 }
 
@@ -90,8 +90,8 @@ async function runPromptTunerScan() {
     const data = await res.json()
     if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`)
     if (data.generated > 0) console.log(`[scheduler] prompt tuner: ${data.generated} new suggestion(s) awaiting review`)
-  } catch (e: any) {
-    console.error("[scheduler] prompt tuner scan failed:", e.message)
+  } catch (e) {
+    console.error("[scheduler] prompt tuner scan failed:", e instanceof Error ? e.message : String(e))
   }
 }
 
@@ -191,8 +191,8 @@ async function runCalendarAgentScan() {
     if (res.scanned > 0) {
       console.log(`[scheduler] calendar agent: scanned ${res.scanned} call(s), discovered ${res.discovered.length} event(s) (${res.confirmed} confirmed, ${res.needsReview} review)`)
     }
-  } catch (e: any) {
-    console.error("[scheduler] calendar agent scan failed:", e?.message || e)
+  } catch (e) {
+    console.error("[scheduler] calendar agent scan failed:", e instanceof Error ? e.message : String(e))
   } finally {
     calendarScanRunning = false
   }

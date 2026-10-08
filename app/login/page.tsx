@@ -1,5 +1,6 @@
 // Verified login page — Google Sign-In only, restricted to allowlisted emails.
 // Server component: reads ?error= and ?next= from the URL (Next 15 async searchParams).
+import Image from "next/image"
 import { Phone, MessageCircle, ShieldCheck, Sparkles } from "lucide-react"
 import OtpForm from "./otp-form"
 
@@ -47,8 +48,10 @@ export default async function LoginPage({
 
         {/* Brand */}
         <div className="relative flex items-center gap-3">
-          <img
+          <Image
             src="/logo.png"
+            width={180}
+            height={48}
             alt="Right Agent Group"
             className="h-12 w-auto object-contain drop-shadow-[0_4px_16px_rgba(56,189,248,0.2)]"
           />
@@ -109,8 +112,10 @@ export default async function LoginPage({
         <div className="w-full max-w-[400px]">
           {/* Mobile-only brand (left panel hidden) */}
           <div className="mb-10 flex items-center justify-center gap-3 lg:hidden">
-            <img
+            <Image
               src="/logo.png"
+              width={180}
+              height={48}
               alt="Right Agent Group"
               className="h-10 w-auto object-contain"
             />

@@ -349,6 +349,13 @@ const FACT_KEYS = [
 ] as const
 
 const _leadBriefCache = new Map<string, { brief: string; at: number }>()
+const LEAD_BRIEF_CACHE_MAX = 500
+function trimLeadBriefCache() {
+  if (_leadBriefCache.size > LEAD_BRIEF_CACHE_MAX) {
+    const oldest = [..._leadBriefCache.entries()].sort((a, b) => a[1].at - b[1].at).slice(0, _leadBriefCache.size - LEAD_BRIEF_CACHE_MAX)
+    for (const [k] of oldest) _leadBriefCache.delete(k)
+  }
+}
 
 export function invalidateLeadBriefCache(leadId?: string) {
   if (leadId) _leadBriefCache.delete(leadId)
@@ -534,9 +541,10 @@ export async function buildLeadBrief(leadId: string): Promise<string> {
     if (brief.length > CHAR_BUDGET) brief = brief.slice(0, CHAR_BUDGET) + "…"
     const formatted = brief ? `CROSS-CHANNEL LEAD BRIEF (internal — never read this aloud/verbatim):\n${brief}` : ""
     _leadBriefCache.set(leadId, { brief: formatted, at: Date.now() })
+    trimLeadBriefCache()
     return formatted
-  } catch (e: any) {
-    console.error("buildLeadBrief error:", e.message)
+  } catch (e) {
+    console.error("buildLeadBrief error:", e instanceof Error ? e.message : String(e))
     return ""
   }
 }
