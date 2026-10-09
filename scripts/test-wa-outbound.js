@@ -250,11 +250,11 @@ async function testOutboundWiringContracts() {
   //    inbound branch must refuse it, and the outbound branch must accept it.
   const route = read("app/api/whatsapp/route.ts")
   ok("webhook detects the outbound answer shape",
-    route.includes("(connectSdpType === \"answer\" || String(call?.direction || \"\").toUpperCase() === \"BUSINESS_INITIATED\")"))
+    route.includes("(connectSdpType === \"answer\" || callDirection === \"BUSINESS_INITIATED\")"))
   ok("inbound connect branch excludes outbound answers (!isOutboundAnswer)",
     route.includes("if (event === \"connect\" && callId && !isOutboundAnswer) {"))
   ok("outbound accept branch fires for connect-shaped answers too",
-    /if \(callId && outAnswerSdp && \(isOutboundAnswer \|\| outAnswerType === "answer" \|\| event === "accept"\)\)/.test(route))
+    /if \(callId && outAnswerSdp && \(isOutboundAnswer \|\| \(\(outAnswerType === "answer" \|\| event === "accept"\) && callDirection === "BUSINESS_INITIATED"\)\)\)/.test(route))
   ok("outbound accept bridges to /whatsapp/outbound-accept", route.includes("\"/whatsapp/outbound-accept\""))
   ok("outbound accept passes the CUSTOMER (call.to) as the session's from",
     route.includes("from: String(call?.to || \"\")"))

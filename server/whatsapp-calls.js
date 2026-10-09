@@ -1275,10 +1275,10 @@ class WhatsAppCallSession {
       await this.waitForConnected(3500)
       if (this.closed) return
 
-      // Ear-pickup delay: give listener 2 seconds from connect to place phone to ear
-      const greetingDelay = parseInt(process.env.CALL_GREETING_DELAY_MS || "2000")
-      const elapsedSinceConnect = this.connectedAt ? Date.now() - this.connectedAt : 0
-      const remainingDelay = Math.max(0, greetingDelay - elapsedSinceConnect)
+      // Ear-pickup delay: give listener brief moment from connect to place phone to ear
+      const greetingDelay = parseInt(process.env.CALL_GREETING_DELAY_MS || "800")
+      const elapsedSinceAnswer = this.connectedAt ? (Date.now() - this.connectedAt) : (Date.now() - t0)
+      const remainingDelay = Math.max(0, greetingDelay - elapsedSinceAnswer)
       if (remainingDelay > 0) {
         console.log(`⏳ WhatsApp call ${this.callSid}: holding greeting for ${remainingDelay}ms (target ${greetingDelay}ms from connect)`)
         await new Promise((resolve) => {
@@ -1590,6 +1590,7 @@ async function createOutboundOffer({ phoneNumberId, from, to, branchId }) {
     callId: null,
     createdAt: Date.now(),
   })
+  console.log(`📋 WhatsApp WebRTC Outbound Offer:\n${offerSdp.trim()}`)
   console.log(`📤 WhatsApp outbound offer held ${pendingId} (branch=${branchId || "hq"}) — awaiting Graph connect + answer`)
   return { pendingId, offerSdp }
 }
@@ -1617,6 +1618,7 @@ async function attachOutboundSession({ callId, sdp, from, to }) {
   pendingOutbound.delete(pendingId)
   outboundByCallId.delete(callId)
 
+  console.log(`📋 WhatsApp WebRTC Outbound Answer:\n${String(sdp).trim()}`)
   try {
     await pending.pc.setRemoteDescription({ type: "answer", sdp })
   } catch (e) {
