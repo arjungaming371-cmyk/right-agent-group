@@ -1436,7 +1436,18 @@ export default function CalendarView({ role }: { role: Role }) {
                     {selected.status.replace("_", " ").toUpperCase()}
                   </span>
                 </div>
-                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>{selected.title}</h3>
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  {selected.title}
+                  {/* OUTPERO-STYLE AUTO-RESCHEDULE TIMELINE: machine retry
+                      appointments carry the retry engine's signature — badge
+                      them so an operator can tell an auto-rescheduled retry
+                      from a customer-promised callback at a glance. */}
+                  {(selected as Record<string, unknown>).created_by === "retry_engine" && (
+                    <span title="Scheduled automatically by the retry engine after a missed call — reschedule or cancel here and the call queue follows" style={{ fontSize: 10, fontWeight: 700, color: "var(--accent-cyan)", background: "rgba(56,189,248,0.1)", border: "1px solid rgba(56,189,248,0.3)", borderRadius: 5, padding: "1px 7px", letterSpacing: "0.05em" }}>
+                      AUTO-RETRY
+                    </span>
+                  )}
+                </h3>
               </div>
               <button
                 onClick={() => {

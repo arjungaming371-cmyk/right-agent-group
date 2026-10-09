@@ -15,6 +15,62 @@ import { query } from "@/lib/db"
 import { getDialerSettings } from "@/lib/dialer-settings"
 import { shouldAutoRetry } from "@/lib/dialer-logic"
 
+/**
+ * OUTPERO-STYLE AUTO-RESCHEDULE TIMELINE (2026-10-09): a successful requeue
+ * also drops a callback event on the Calendar — "10:00 AM Call 1 (missed) →
+ * auto-scheduled 10:12 AM" becomes a visible, reschedulable appointment
+ * instead of living only inside the queue table.
+ *
+ * Stored as source_type 'outbound_queue' (allowed by the calendar_events
+ * CHECK constraint — no migration dance) with source_id
+ * '<queueRowId>:r<attempt>', so every retry is its own idempotent row (the
+ * uq_calendar_event_source index makes webhook double-fires a no-op) while
+ * the lead's REAL customer-promised callback stays a separate row and is
+ * never clobbered by a machine retry.
+ */
+async function logRetryToCalendar(opts: {
+  queueRowId: string
+  retryCount: number
+  scheduledAt: string
+  leadId: string | null
+  name: string | null
+  outcome: string | null | undefined
+  branchId: string | null
+}): Promise<void> {
+  try {
+    const who = opts.name || "Customer"
+    const endAt = new Date(new Date(opts.scheduledAt).getTime() + 10 * 60000).toISOString()
+    await query(
+      `INSERT INTO calendar_events
+         (lead_id, title, event_type, event_at, end_at, channel,
+          confidence, confidence_score, status, raw_quote,
+          source_type, source_id, source_at, outbound_queue_id, branch_id,
+          notes, reminder_enabled, original_event_at, created_by)
+       VALUES ($1, $2, 'callback', $3, $4, 'phone',
+               'high', 1.0, 'confirmed', $5,
+               'outbound_queue', $6, now(), $7, $8,
+               $9, false, $3, 'retry_engine')
+       ON CONFLICT (source_type, source_id, event_type, original_event_at) DO NOTHING`,
+      [
+        opts.leadId,
+        `Auto-retry scheduled: ${who}`,
+        opts.scheduledAt,
+        endAt,
+        `Previous attempt ended "${opts.outcome || "no answer"}" — auto-rescheduled by the retry engine`,
+        `${opts.queueRowId}:r${opts.retryCount}`,
+        opts.queueRowId,
+        opts.branchId,
+        `Attempt ended "${opts.outcome || "no answer"}" with zero conversation time. Auto-retry #${opts.retryCount} scheduled — the operator can reschedule or cancel from here and the queue follows.`,
+      ]
+    )
+  } catch (e) {
+    // calendar_events may not exist on a fresh DB that hasn't run the
+    // 2026-10-08 migrations — a failed calendar note must never fail the
+    // requeue itself.
+    console.error("auto-retry calendar note failed:", e instanceof Error ? e.message : e)
+  }
+}
+
 export async function maybeRequeueMissed(opts: {
   callSid: string
   outcome: string | null | undefined
@@ -29,12 +85,12 @@ export async function maybeRequeueMissed(opts: {
     // The queue row this call came from (the runner stamps call_sid when it
     // dials). Only a 'called' row (dial attempt completed) is retryable.
     const row = await query(
-      `SELECT id, retry_count FROM outbound_queue
+      `SELECT id, retry_count, lead_id, name, phone, branch_id FROM outbound_queue
         WHERE call_sid = $1 AND status = 'called'
         ORDER BY created_at DESC LIMIT 1`,
       [callSid]
     )
-    const queueRow = row.rows[0] as { id: string; retry_count: number } | undefined
+    const queueRow = row.rows[0] as { id: string; retry_count: number; lead_id: string | null; name: string | null; phone: string; branch_id: string | null } | undefined
     if (!queueRow) return { requeued: false }
 
     const retryCount = Number(queueRow.retry_count) || 0
@@ -77,6 +133,16 @@ export async function maybeRequeueMissed(opts: {
     }
     if (!win) return { requeued: false }
     console.log(`🔁 auto-requeue: queue row ${queueRow.id} → pending (retry ${win.retry_count}/${settings.maxRetries}, outcome=${outcome})`)
+    // Calendar timeline (fire-and-forget — never blocks the webhook).
+    void logRetryToCalendar({
+      queueRowId: queueRow.id,
+      retryCount: Number(win.retry_count),
+      scheduledAt: win.scheduled_at,
+      leadId: queueRow.lead_id,
+      name: queueRow.name,
+      outcome,
+      branchId: queueRow.branch_id,
+    })
     return { requeued: true, retryCount: Number(win.retry_count), scheduledAt: win.scheduled_at }
   } catch (e) {
     // A failed requeue must never fail the status webhook itself.

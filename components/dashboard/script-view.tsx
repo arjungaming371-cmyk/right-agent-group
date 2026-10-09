@@ -1,7 +1,8 @@
 "use client"
-import { useCallback, useEffect, useMemo, useState } from "react"
-import { Lightbulb, Save, RotateCcw, CalendarClock, Timer, RefreshCw, Languages, Sparkles, Check, X, Phone, MessageSquare, Instagram, Info } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Lightbulb, Save, RotateCcw, CalendarClock, Timer, RefreshCw, Languages, Sparkles, Check, X, Phone, MessageSquare, Instagram, Info, Wand2, Braces, Eye } from "lucide-react"
 import { formatDateTime } from "@/lib/utils"
+import { extractMergeFields, renderMergeFields, sampleVars } from "@/lib/script-studio"
 
 type Script = {
   language: string
@@ -32,11 +33,13 @@ const LANG_LABELS: Record<string, { label: string; short: string; desc: string }
 }
 
 // Script Manager tabs — Base + the per-channel editable scripts
-// (ai_scripts keys handled by lib/channel-scripts.ts).
-type Tab = "base" | "voice" | "whatsapp" | "instagram"
+// (ai_scripts keys handled by lib/channel-scripts.ts) + the Outpero-style
+// Campaign Studio (per-lead {merge_field} campaign briefs).
+type Tab = "base" | "voice" | "whatsapp" | "instagram" | "studio"
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode; desc: string }[] = [
   { id: "base", label: "Base Script", icon: <Languages size={14} strokeWidth={2} />, desc: "Priya's core persona, rules & qualification flow (all channels)" },
+  { id: "studio", label: "Campaign Studio", icon: <Wand2 size={14} strokeWidth={2} />, desc: "Outpero-style per-lead campaign scripts — write ONE brief with {name}-style merge fields, Priya personalizes it for every call" },
   { id: "voice", label: "Voice Calls", icon: <Phone size={14} strokeWidth={2} />, desc: "Spoken openers & closings for Phone + WhatsApp calls (English, Hindi, Telugu)" },
   { id: "whatsapp", label: "WhatsApp Fallbacks", icon: <MessageSquare size={14} strokeWidth={2} />, desc: "Free-form texts sent when a Meta template isn't approved yet (24h window)" },
   { id: "instagram", label: "Instagram", icon: <Instagram size={14} strokeWidth={2} />, desc: "DM persona & public comment reply prompts" },
@@ -51,6 +54,7 @@ const VOICE_LANGS: { id: "english" | "hindi" | "telugu"; label: string }[] = [
 // ai_scripts keys edited by each tab (a tab may edit more than one row).
 const TAB_KEYS: Record<Tab, string[]> = {
   base: ["base"],
+  studio: ["campaign_template"],
   voice: ["voice_openers", "voice_closings"],
   whatsapp: ["whatsapp_fallbacks"],
   instagram: ["instagram_dm", "instagram_comment"],
@@ -152,6 +156,17 @@ export default function ScriptView() {
   // pristine copies for dirty-checking, per tab
   const [pristine, setPristine] = useState<Record<string, string>>({})
 
+  // ---- Campaign Studio state (Outpero-style per-lead campaign briefs) ----
+  const [studioTemplate, setStudioTemplate] = useState("")
+  const [studioOriginal, setStudioOriginal] = useState("")
+  const [studioFields, setStudioFields] = useState<{ canonical: { key: string; label: string }[]; custom: string[] }>({ canonical: [], custom: [] })
+  const [studioMeta, setStudioMeta] = useState<{ updated_at: string; updated_by: string } | null>(null)
+  const [studioMsg, setStudioMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null)
+  const [generatingBrief, setGeneratingBrief] = useState(false)
+  const [savingStudio, setSavingStudio] = useState(false)
+  const [gen, setGen] = useState({ product: "Home Loan", offer: "", audience: "", tone: "friendly", language: "telugu", capture: "" })
+  const studioRef = useRef<HTMLTextAreaElement>(null)
+
   const [suggestions, setSuggestions] = useState<Suggestion[]>([])
   const [ptLoading, setPtLoading]     = useState(true)
   const [generating, setGenerating]   = useState(false)
@@ -248,6 +263,113 @@ export default function ScriptView() {
   }
 
   useEffect(() => { loadSuggestions() }, [])
+
+  // ---- Campaign Studio logic ---------------------------------------------
+  async function loadStudio() {
+    try {
+      const res = await fetch("/api/script-studio")
+      const data = await res.json()
+      if (res.ok) {
+        setStudioFields({ canonical: data.canonicalFields || [], custom: data.customFields || [] })
+        setStudioMeta(data.templateMeta || null)
+        setStudioTemplate(data.template || "")
+        setStudioOriginal(data.template || "")
+      }
+    } catch { /* the tab still renders with empty template */ }
+  }
+
+  useEffect(() => {
+    if (tab === "studio" && studioOriginal === "" && studioTemplate === "") loadStudio()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab])
+
+  async function generateBrief() {
+    setGeneratingBrief(true)
+    setStudioMsg(null)
+    try {
+      const res = await fetch("/api/script-studio", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "generate",
+          product: gen.product,
+          offer: gen.offer,
+          audience: gen.audience,
+          tone: gen.tone,
+          language: gen.language,
+          capture: gen.capture.split(",").map((s) => s.trim()).filter(Boolean),
+        }),
+      })
+      const data = await res.json()
+      if (res.ok && data.script) {
+        setStudioTemplate(data.script)
+        setStudioMsg({ type: "ok", text: data.source === "ai" ? "Fresh brief generated — review, tweak the {merge_fields}, and save." : "AI was unavailable, so the built-in Outpero-style template was used — review and save." })
+      } else {
+        setStudioMsg({ type: "err", text: data.error || "Generation failed" })
+      }
+    } catch {
+      setStudioMsg({ type: "err", text: "Generation failed — check your connection" })
+    }
+    setGeneratingBrief(false)
+  }
+
+  async function saveStudio() {
+    if (!studioTemplate.trim()) return
+    setSavingStudio(true)
+    setStudioMsg(null)
+    try {
+      const res = await fetch("/api/script-studio", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "save", template: studioTemplate }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setStudioOriginal(studioTemplate)
+        setStudioMsg({ type: "ok", text: "Campaign script saved — the Upload and Call Queue consoles can now load it as the agenda, with every {merge_field} personalized per lead." })
+      } else {
+        setStudioMsg({ type: "err", text: data.error || "Save failed" })
+      }
+    } catch {
+      setStudioMsg({ type: "err", text: "Save failed. Please try again." })
+    }
+    setSavingStudio(false)
+  }
+
+  async function resetStudio() {
+    if (!confirm("Clear the saved campaign script? (Your unsaved edits stay in the editor.)")) return
+    setSavingStudio(true)
+    try {
+      const res = await fetch("/api/script?language=campaign_template", { method: "DELETE" })
+      if (res.ok) {
+        setStudioOriginal("")
+        setStudioMeta(null)
+        setStudioMsg({ type: "ok", text: "Saved campaign script cleared." })
+      } else {
+        const d = await res.json().catch(() => ({}))
+        setStudioMsg({ type: "err", text: d.error || "Reset failed" })
+      }
+    } catch {
+      setStudioMsg({ type: "err", text: "Reset failed. Please try again." })
+    }
+    setSavingStudio(false)
+  }
+
+  function insertStudioField(key: string) {
+    const token = `{${key}}`
+    const el = studioRef.current
+    if (!el) { setStudioTemplate((t) => t + token); return }
+    const start = el.selectionStart ?? studioTemplate.length
+    const end = el.selectionEnd ?? studioTemplate.length
+    const next = studioTemplate.slice(0, start) + token + studioTemplate.slice(end)
+    setStudioTemplate(next)
+    requestAnimationFrame(() => { el.focus(); el.setSelectionRange(start + token.length, start + token.length) })
+  }
+
+  // Live preview — the SAME pure renderer the dialer uses, fed a realistic
+  // Hyderabad sample lead, so what you see is what Priya will say.
+  const studioPreview = useMemo(() => renderMergeFields(studioTemplate, sampleVars()), [studioTemplate])
+  const studioUsedFields = useMemo(() => extractMergeFields(studioTemplate), [studioTemplate])
 
   async function generateNow() {
     setGenerating(true)
@@ -434,11 +556,12 @@ export default function ScriptView() {
 
   const isDirtyBase = content !== original
   const isDirtyTab = useMemo(() => {
+    if (tab === "studio") return studioTemplate !== studioOriginal
     const payload = tabPayload(tab)
     if (tab === "base") return isDirtyBase
     return payload.some((p) => p.content !== pristine[p.language])
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, content, original, voiceOpeners, voiceClosings, waFallbacks, igDm, igComment, pristine])
+  }, [tab, content, original, voiceOpeners, voiceClosings, waFallbacks, igDm, igComment, pristine, studioTemplate, studioOriginal])
 
   const currentScript = scripts.find(s => s.language === selected)
 
@@ -588,6 +711,178 @@ export default function ScriptView() {
     )
   }
 
+  // ---- Campaign Studio tab (Outpero-style per-lead campaign briefs) ----
+  function renderStudioTab() {
+    const chip = (key: string, label?: string, custom?: boolean) => (
+      <button
+        key={key}
+        onClick={() => insertStudioField(key)}
+        title={custom ? `Custom CSV column — rendered from each lead's uploaded data` : label}
+        style={{
+          fontSize: 11, padding: "3px 9px", borderRadius: 99, cursor: "pointer", fontWeight: 600,
+          background: custom ? "rgba(56,189,248,0.1)" : "rgba(139,124,255,0.1)",
+          border: custom ? "1px solid rgba(56,189,248,0.35)" : "1px solid rgba(139,124,255,0.35)",
+          color: custom ? "var(--accent-cyan)" : "var(--accent-violet)",
+          fontFamily: "monospace",
+        }}
+      >{`{${key}}`}</button>
+    )
+    return (
+      <>
+        {/* AI brief generator — the "Swara HR briefs your employee" flow */}
+        <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: 20 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+            <Sparkles size={15} strokeWidth={1.9} style={{ color: "var(--accent-violet)" }} />
+            <div style={{ fontWeight: 700, fontSize: 14 }}>Brief Priya with AI</div>
+            <div style={{ fontSize: 11, color: "var(--text-muted)" }}>— fill this in, get a complete campaign script</div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10, marginBottom: 10 }}>
+            <div>
+              <label style={{ fontSize: 11, color: "var(--text-muted)", display: "block", marginBottom: 3 }}>Product</label>
+              <select value={gen.product} onChange={(e) => setGen({ ...gen, product: e.target.value })} style={{ width: "100%" }}>
+                <option>Home Loan</option><option>Personal Loan</option><option>Business Loan</option><option>Loan Against Property</option>
+              </select>
+            </div>
+            <div>
+              <label style={{ fontSize: 11, color: "var(--text-muted)", display: "block", marginBottom: 3 }}>Language style</label>
+              <select value={gen.language} onChange={(e) => setGen({ ...gen, language: e.target.value })} style={{ width: "100%" }}>
+                <option value="telugu">Tenglish (Telugu in English letters)</option>
+                <option value="hindi">Hinglish (Hindi in English letters)</option>
+                <option value="english">English</option>
+              </select>
+            </div>
+            <div>
+              <label style={{ fontSize: 11, color: "var(--text-muted)", display: "block", marginBottom: 3 }}>Tone</label>
+              <select value={gen.tone} onChange={(e) => setGen({ ...gen, tone: e.target.value })} style={{ width: "100%" }}>
+                <option value="friendly">Friendly</option><option value="professional">Professional</option><option value="energetic">Energetic</option>
+              </select>
+            </div>
+            <div>
+              <label style={{ fontSize: 11, color: "var(--text-muted)", display: "block", marginBottom: 3 }}>Audience <span style={{ opacity: 0.7 }}>(optional)</span></label>
+              <input value={gen.audience} onChange={(e) => setGen({ ...gen, audience: e.target.value })} placeholder="e.g. customers who missed last month's EMI" style={{ width: "100%" }} />
+            </div>
+          </div>
+          <div style={{ marginBottom: 10 }}>
+            <label style={{ fontSize: 11, color: "var(--text-muted)", display: "block", marginBottom: 3 }}>The offer / angle</label>
+            <input value={gen.offer} onChange={(e) => setGen({ ...gen, offer: e.target.value })} placeholder="e.g. balance transfer at a lower EMI with free eligibility check" style={{ width: "100%" }} />
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ fontSize: 11, color: "var(--text-muted)", display: "block", marginBottom: 3 }}>Details to capture (comma separated)</label>
+            <input value={gen.capture} onChange={(e) => setGen({ ...gen, capture: e.target.value })} placeholder="Full name, Area, Loan amount, Monthly income, WhatsApp number" style={{ width: "100%" }} />
+          </div>
+          <button onClick={generateBrief} disabled={generatingBrief} className="btn-primary" style={{ height: 36, padding: "0 18px", fontSize: 13 }}>
+            <Wand2 size={13} strokeWidth={2} /> {generatingBrief ? "Writing the brief…" : "Generate Campaign Script"}
+          </button>
+        </div>
+
+        {/* Editor + merge-field palette */}
+        <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
+          <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", background: "var(--bg-secondary)", flexWrap: "wrap", gap: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ width: 32, height: 32, borderRadius: 9, background: "rgba(139,124,255,0.13)", border: "1px solid rgba(139,124,255,0.3)", display: "inline-flex", alignItems: "center", justifyContent: "center", color: "var(--accent-violet)" }}>
+                <Braces size={15} strokeWidth={1.9} />
+              </span>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 15 }}>Campaign Script</div>
+                <div style={{ fontSize: 11, color: "var(--text-muted)" }}>One brief, personalized per lead — used as Priya's agenda when a campaign runs</div>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              {studioTemplate !== studioOriginal && (
+                <span style={{ fontSize: 12, color: "var(--accent-yellow)", fontWeight: 600 }}>● Unsaved changes</span>
+              )}
+              <button onClick={resetStudio} disabled={savingStudio} className="btn-ghost" style={{ height: 34 }}>
+                <RotateCcw size={13} strokeWidth={1.9} /> Clear Saved
+              </button>
+              <button onClick={saveStudio} disabled={savingStudio || studioTemplate === studioOriginal || !studioTemplate.trim()} className={studioTemplate !== studioOriginal ? "btn-primary" : "btn-ghost"} style={{ height: 34, padding: "0 18px" }}>
+                <Save size={13.5} strokeWidth={2} /> {savingStudio ? "Saving…" : "Save Script"}
+              </button>
+            </div>
+          </div>
+
+          {studioMsg && (
+            <div style={{
+              margin: "12px 20px 0", padding: "10px 16px", borderRadius: 8,
+              background: studioMsg.type === "ok" ? "rgba(34,197,94,0.1)" : "rgba(239,68,68,0.1)",
+              border: `1px solid ${studioMsg.type === "ok" ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)"}`,
+              color: studioMsg.type === "ok" ? "var(--accent-green)" : "var(--accent-red)",
+              fontSize: 13, fontWeight: 500,
+            }}>
+              {studioMsg.text}
+            </div>
+          )}
+
+          <div style={{ padding: 20, display: "grid", gridTemplateColumns: "minmax(0, 1.4fr) minmax(0, 1fr)", gap: 16 }}>
+            {/* Left: editor + field palette */}
+            <div>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, display: "flex", alignItems: "center", gap: 5 }}>
+                <Braces size={11} strokeWidth={2} /> Click a field to insert it — replaced with each lead's own data when Priya dials:
+              </div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+                {studioFields.canonical.map((f) => chip(f.key, f.label))}
+                {studioFields.custom.map((k) => chip(k, undefined, true))}
+              </div>
+              <textarea
+                ref={studioRef}
+                value={studioTemplate}
+                onChange={(e) => setStudioTemplate(e.target.value)}
+                spellCheck={false}
+                placeholder={"Click Generate above for a complete brief, or start from e.g.:\nNamaskaram {name} garu! Right Agent Group nunchi Priya matladutunnanu — mee {product_interest} gurinchi matladudham?"}
+                style={{
+                  width: "100%", height: 420, background: "var(--bg-card)", border: "1px solid var(--border)",
+                  borderRadius: 10, color: "var(--text-primary)", padding: 14, fontSize: 12.5,
+                  fontFamily: "monospace", lineHeight: 1.7, resize: "vertical",
+                }}
+              />
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 8 }}>
+                {studioUsedFields.length > 0
+                  ? <>Uses: {studioUsedFields.map((f) => `{${f}}`).join(" ")} — unknown fields (typos) stay visible in the preview below.</>
+                  : "No merge fields yet — without {fields} every call hears the same script."}
+                {studioMeta && <> · Last saved {timeAgo(studioMeta.updated_at)} by {studioMeta.updated_by}</>}
+              </div>
+            </div>
+
+            {/* Right: live preview with a sample lead */}
+            <div style={{ border: "1px solid var(--border)", borderRadius: 10, background: "var(--bg-secondary)", padding: 16, overflow: "auto", maxHeight: 520 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8, display: "flex", alignItems: "center", gap: 5 }}>
+                <Eye size={12} strokeWidth={2} /> Live preview — sample lead
+              </div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+                {Object.entries(sampleVars()).filter(([k, v]) => v && (k === "name" || k === "product_interest" || k === "loan_amount" || k === "city" || k === "budget" || k === "campaign")).map(([k, v]) => (
+                  <span key={k} style={{ fontSize: 10, padding: "2px 7px", borderRadius: 5, background: "var(--bg-card)", border: "1px solid var(--border)", color: "var(--text-secondary)" }}>
+                    {`{${k}}`} → {String(v).slice(0, 24)}
+                  </span>
+                ))}
+              </div>
+              <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 12.5, lineHeight: 1.65, fontFamily: "inherit", color: "var(--text-primary)", margin: 0 }}>
+                {studioTemplate ? studioPreview.text : "The rendered script appears here as you type — exactly what Priya receives for this lead."}
+              </pre>
+              {(studioPreview.missing.length > 0 || studioPreview.unknown.length > 0) && (
+                <div style={{ marginTop: 12, fontSize: 11, borderTop: "1px solid var(--border)", paddingTop: 8, color: "var(--text-muted)" }}>
+                  {studioPreview.unknown.length > 0 && (
+                    <div style={{ color: "var(--accent-yellow)" }}>
+                      Unknown fields (check the spelling or upload a CSV with these columns): {studioPreview.unknown.map((f) => `{${f}}`).join(", ")}
+                    </div>
+                  )}
+                  {studioPreview.missing.length > 0 && (
+                    <div style={{ marginTop: 4 }}>
+                      Empty on the sample lead (fine — other leads may have them): {studioPreview.missing.map((f) => `{${f}}`).join(", ")}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div style={{ padding: "12px 20px", borderTop: "1px solid var(--border)", display: "flex", gap: 24, fontSize: 12, color: "var(--text-muted)" }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><Info size={12.5} strokeWidth={1.8} /> Used by the Upload & Call Queue consoles ("Use saved campaign script")</span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><Timer size={12.5} strokeWidth={1.8} /> Rendered per lead at dial time — leftover fields are never spoken</span>
+          </div>
+        </div>
+      </>
+    )
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
 
@@ -618,6 +913,9 @@ export default function ScriptView() {
       <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: -10 }}>
         {TABS.find((t) => t.id === tab)?.desc}
       </div>
+
+      {/* Campaign Studio (Outpero-style per-lead campaign briefs) */}
+      {tab === "studio" && renderStudioTab()}
 
       {/* Header cards (base tab only) */}
       {tab === "base" && (
@@ -842,7 +1140,7 @@ export default function ScriptView() {
       )}
 
       {/* Channel-tab editor (voice / whatsapp / instagram) */}
-      {tab !== "base" && (
+      {tab !== "base" && tab !== "studio" && (
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
         <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", background: "var(--bg-secondary)", flexWrap: "wrap", gap: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -909,6 +1207,7 @@ export default function ScriptView() {
   )
 
   function isDirtyTabFor(t: Tab): boolean {
+    if (t === "studio") return studioTemplate !== studioOriginal
     if (t === "base") return content !== original
     const payload = tabPayload(t)
     return payload.some((p) => p.content !== pristine[p.language])

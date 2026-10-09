@@ -283,3 +283,57 @@ spoken naturally, one Romanized keyword no longer flips the whole reply to the
 wrong voice (sticky locale, ≥2 keyword rule), auto-retry re-schedules against
 the REAL compliance window (not hardcoded 8:00), and the LLM-failure line no
 longer re-asks for the name mid-call.
+
+## 9. The Outpero ops layer (2026-10-09): upload, calendar, queue, scripts, assistant
+
+Section 8 made the CALL as good as Outpero's. This section converts the
+OPERATOR EXPERIENCE — "hand a whole list over", the script editor, the
+auto-reschedule timeline and the HR-style assistant — into Right Agent
+Group's stack.
+
+**Lead upload — the sheet is the script.** Every CSV column that is not a
+native column (city, budget, plan, campaign, referred_by, …) is captured
+into `leads.custom_fields` / `outbound_queue.custom_fields` JSONB (migration
+`2026-10-09_lead_custom_fields`). The Upload console adds a paste-a-list box
+(`Name, 98765 43210` per line, bare numbers fine) and a CSV template
+download; the review modal shows each lead's sheet data as chips and reports
+duplicates/invalid counts. The Upload console is still parse-only — dialing
+starts from the Confirm + Start Calling, exactly as before.
+
+**Script Studio (Scripts → Campaign Studio).** The Outpero Script Editor,
+Priya-fied: write ONE campaign brief with `{name}`-style merge fields
+(canonical lead columns + every custom CSV column ever uploaded), see a live
+preview against a sample Hyderabad lead (typos stay visible; the dialer
+strips leftover braces so nothing is ever read aloud), and either write it
+yourself or generate a complete structured brief (OPENING → DISCOVERY →
+PITCH → CAPTURE → READBACK → CLOSE → HARD RULES) with AI in Tenglish /
+Hinglish / English. Saved as the `campaign_template` ai_scripts row; the
+Upload and Call Queue consoles load it with one click as the campaign
+agenda. Implementation: `lib/script-studio.ts` (pure), `/api/script-studio`.
+
+**Dial-time personalization.** `renderInstructionsForLead()` is the single
+choke point: when the campaign runner or speed-to-lead dials, `{merge_fields}`
+resolve against the lead row + its sheet data, and any lead with custom data
+gets a `LEAD DATA ON FILE (use it, never re-ask)` fact sheet appended even to
+a plain agenda — the "Hi Ramesh, about your Home Loan in Kukatpally" opener
+Outpero demos, inside Priya's persona and safety rules.
+
+**Calendar — the auto-reschedule timeline.** A missed/voicemail call that the
+retry engine re-queues now also writes a callback event on the Calendar
+("Auto-retry scheduled: <name>", `created_by='retry_engine'`, idempotent per
+retry attempt) — "10:00 AM Call 1 (busy) → auto-scheduled 10:12 AM" is a
+visible, reschedulable appointment; rescheduling/cancelling it drives the
+queue row through the existing bidirectional sync. Customer-promised
+callbacks are separate rows and are never clobbered.
+
+**Call queue — hot leads.** "Boost to Front" (selection toolbar) bumps
+pending rows to priority 100 — the atomic claim dials them ahead of the
+entire backlog on the next campaign tick.
+
+**Assistant — Brief Priya.** The Ops Commander gained the Swara-HR flow:
+"write a campaign script for our balance-transfer push" produces a complete
+`{merge_field}` brief and proposes `update_campaign_template` (admin
+approves → saved into the Studio); "call Ramesh now" proposes
+`queue_lead_call` (compliance-gated queueing, `priority: urgent` = front of
+the queue); "schedule a callback tomorrow 6pm" proposes `update_lead` with
+`callback_at`. Everything else stays proposal + Approve & Execute.

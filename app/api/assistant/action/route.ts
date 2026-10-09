@@ -3,6 +3,8 @@ import { db, query } from "@/lib/db"
 import { requireRole } from "@/lib/auth"
 import { logAudit } from "@/lib/audit"
 import { normalizePhone } from "@/lib/phone"
+import { checkCallCompliance } from "@/lib/compliance"
+import { sanitizeCustomFields } from "@/lib/script-studio"
 
 export const dynamic = "force-dynamic"
 
@@ -12,8 +14,9 @@ export const dynamic = "force-dynamic"
 // hallucinated or malicious payload can't write arbitrary status strings,
 // script languages or security keys into the DB.
 const ACTION_TYPES = new Set([
-  "update_script", "add_kb_entry", "update_kb_entry", "delete_kb_entry",
+  "update_script", "update_campaign_template", "add_kb_entry", "update_kb_entry", "delete_kb_entry",
   "add_lead", "update_lead", "update_loan", "add_dnd", "remove_dnd", "toggle_security",
+  "queue_lead_call",
 ])
 const SCRIPT_LANGUAGES = new Set(["base", "english", "hindi", "telugu"])
 const LEAD_STATUSES = new Set(["new", "contacted", "qualified", "callback", "lost"])
@@ -155,6 +158,101 @@ export async function POST(req: NextRequest) {
         })
       }
 
+      case "update_campaign_template": {
+        // The assistant's Brief-Priya flow (Outpero's "Swara HR sets the
+        // script"): a full campaign brief with {merge_field} placeholders,
+        // stored under the Script Studio's ai_scripts key. Same validation
+        // as /api/script-studio save.
+        const content = str(p.content, 20000)
+        if (!content) return NextResponse.json({ error: "Campaign template content cannot be empty" }, { status: 400 })
+        if (content.length > 40000) return NextResponse.json({ error: "Campaign template too long (max 40,000 characters)" }, { status: 400 })
+
+        await query(
+          `INSERT INTO ai_scripts (language, content, updated_at, updated_by)
+           VALUES ('campaign_template', $1, now(), $2)
+           ON CONFLICT (language) DO UPDATE
+             SET content = EXCLUDED.content, updated_at = now(), updated_by = EXCLUDED.updated_by`,
+          [content.trim(), session.email]
+        )
+        logAudit("campaign template updated via ops assistant", session.email, { length: content.length })
+        return NextResponse.json({
+          success: true,
+          message: "Priya's campaign brief saved — the Upload and Call Queue consoles now offer it as the campaign agenda, and every {merge_field} is personalized per lead at dial time.",
+          details: { key: "campaign_template", contentLength: content.length },
+        })
+      }
+
+      case "queue_lead_call": {
+        // "Call this lead now / put them at the front of the queue" — the
+        // assistant queues the number for the dialer (never dials directly:
+        // the campaign runner owns dialing, compliance stays in one place).
+        const phone = str(p.phone, 20)
+        if (!phone) return NextResponse.json({ error: "Lead phone number is required" }, { status: 400 })
+        const normalized = normalizePhone(phone)
+        if (!normalized) return NextResponse.json({ error: "Phone number could not be parsed — use digits with country code" }, { status: 400 })
+
+        // The same regulatory gate queue-time uses: DNC/DND refuse, outside
+        // the calling window is FINE (queueing for later is the point).
+        const compliance = await checkCallCompliance({ phone: normalized })
+        if (!compliance.allowed && (compliance.code === "do_not_call" || compliance.code === "dnd_suppressed")) {
+          return NextResponse.json({ error: `Compliance blocks this number: ${compliance.reason || compliance.code}` }, { status: 403 })
+        }
+
+        const name = str(p.name, 120)
+        const language = ["telugu", "hindi", "english"].includes(String(p.language)) ? String(p.language) : "telugu"
+        const talkingPoints = str(p.talking_points, 1000) || null
+        const urgent = p.priority === "urgent" || p.priority === true
+        let scheduledAt = new Date().toISOString()
+        if (typeof p.scheduled_at === "string") {
+          const d = new Date(p.scheduled_at)
+          if (!isNaN(d.getTime())) scheduledAt = d.toISOString()
+        }
+
+        // Find-or-create the lead (last-10 match, same as every queue path).
+        const last10 = normalized.replace(/\D/g, "").slice(-10)
+        const existing = await query(
+          `SELECT id FROM leads WHERE right(regexp_replace(phone, '\\D', '', 'g'), 10) = $1 LIMIT 1`,
+          [last10]
+        )
+        let leadId: string | undefined = existing.rows[0]?.id
+        if (!leadId) {
+          const { data: lead, error } = await db.from("leads").insert({
+            name: name || "Unknown", phone: normalized, language,
+            product_interest: str(p.product_interest, 120) || null,
+            notes: "Created via Ops Assistant", source: "Ops Assistant",
+            status: "new", score: 50,
+          }).select().single()
+          if (error) throw new Error(error.message)
+          leadId = lead?.id
+        }
+
+        try {
+          await db.from("outbound_queue").insert({
+            lead_id: leadId || null,
+            name: name || null, phone: normalized, language,
+            talking_points: talkingPoints,
+            custom_fields: sanitizeCustomFields(p.custom_fields),
+            status: "pending",
+            channel: "auto",
+            priority: urgent ? 100 : 0,
+            scheduled_at: scheduledAt,
+          })
+        } catch (e: unknown) {
+          if ((e as { code?: string })?.code === "23505") {
+            return NextResponse.json({ success: true, message: "That number is already pending in the call queue — no duplicate was created." })
+          }
+          throw e
+        }
+        logAudit("lead queued via ops assistant", session.email, { phone: normalized, urgent })
+        return NextResponse.json({
+          success: true,
+          message: urgent
+            ? "Lead queued at the FRONT of the call queue — Priya dials them on the next campaign tick."
+            : "Lead queued — Priya dials them when the campaign runs (or outside the calling window, at the next window open).",
+          details: { phone: normalized, leadId, urgent },
+        })
+      }
+
       case "add_lead": {
         const name = str(p.name, 120)
         const phone = str(p.phone, 20)
@@ -172,6 +270,10 @@ export async function POST(req: NextRequest) {
         const loanAmountRaw = typeof p.loan_amount === "string" || typeof p.loan_amount === "number" ? Number(p.loan_amount) : null
         const loanAmount = loanAmountRaw !== null && Number.isFinite(loanAmountRaw) && loanAmountRaw > 0 ? loanAmountRaw : null
         const productInterest = typeof p.product_interest === "string" && PRODUCT_INTERESTS.has(p.product_interest) ? p.product_interest : "personal"
+        // NOTE: leads has no `city` column (city lives on loan_applications)
+        // — the old insert crashed with "column city does not exist" whenever
+        // the model filled it in. Non-column fields fold into notes instead.
+        const cityNote = city ? `City: ${city}` : ""
         const { data, error } = await db
           .from("leads")
           .insert({
@@ -179,9 +281,8 @@ export async function POST(req: NextRequest) {
             phone: normalized,
             product_interest: productInterest,
             loan_amount: loanAmount,
-            city: city || null,
             address: address || null,
-            notes: notes || "Created via Ops Assistant",
+            notes: [notes || "Created via Ops Assistant", cityNote].filter(Boolean).join(" — "),
             status: "new",
             score: 50,
           })
@@ -260,6 +361,20 @@ export async function POST(req: NextRequest) {
         if (typeof p.notes === "string") updates.notes = p.notes.slice(0, 2000)
         if (typeof p.product_interest === "string" && PRODUCT_INTERESTS.has(p.product_interest)) updates.product_interest = p.product_interest
         if (typeof p.interested === "string") updates.interested = p.interested.slice(0, 40)
+        // "Schedule a callback for tomorrow 6pm" — callback_at feeds the
+        // Calendar + speech-scheduler; an explicit null clears it.
+        if ("callback_at" in p) {
+          if (p.callback_at === null) {
+            updates.callback_at = null
+          } else if (typeof p.callback_at === "string") {
+            const d = new Date(p.callback_at)
+            if (isNaN(d.getTime())) {
+              return NextResponse.json({ error: "callback_at is not a valid date" }, { status: 400 })
+            }
+            updates.callback_at = d.toISOString()
+          }
+        }
+        if (typeof p.callback_note === "string") updates.callback_note = p.callback_note.slice(0, 300)
 
         let result
         if (id) {

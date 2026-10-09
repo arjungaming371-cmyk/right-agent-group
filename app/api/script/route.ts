@@ -34,9 +34,11 @@ const DEFAULTS: Record<string, string> = DEFAULT_SCRIPTS
 
 // Editable keys: the main conversation script ('base' + legacy languages)
 // PLUS the per-channel scripts (openers/closings/fallbacks/Instagram) that
-// live in lib/channel-scripts.ts.
+// live in lib/channel-scripts.ts, PLUS the Script Studio's per-campaign
+// agenda template ('campaign_template' — {merge_field} placeholders rendered
+// per lead at dial time; see lib/script-studio.ts).
 const LEGACY_KEYS = ["base", "english", "hindi", "telugu"]
-const EDITABLE_KEYS = [...LEGACY_KEYS, ...CHANNEL_SCRIPT_KEYS]
+const EDITABLE_KEYS = [...LEGACY_KEYS, ...CHANNEL_SCRIPT_KEYS, "campaign_template"]
 // Channel keys stored as JSON objects (validated on save; per-field fallback
 // to code defaults happens at load time in lib/channel-scripts.ts).
 const JSON_KEYS: string[] = [
@@ -76,7 +78,7 @@ export async function GET(req: NextRequest) {
     const result = await query(
       `SELECT language, content, updated_at, updated_by FROM ai_scripts
        WHERE language = ANY($1)`,
-      [["base", ...CHANNEL_SCRIPT_KEYS]]
+      [["base", "campaign_template", ...CHANNEL_SCRIPT_KEYS]]
     )
     return NextResponse.json({
       scripts: result.rows,
@@ -140,6 +142,14 @@ export async function DELETE(req: NextRequest) {
     const language = new URL(req.url).searchParams.get("language")
     if (!language || !EDITABLE_KEYS.includes(language)) {
       return NextResponse.json({ error: "invalid language" }, { status: 400 })
+    }
+    if (language === "campaign_template") {
+      // Studio template: no code default exists (it is per-campaign) — reset
+      // simply removes the row, the Studio then falls back to the generated
+      // default brief.
+      await query(`DELETE FROM ai_scripts WHERE language = $1`, [language])
+      logAudit("campaign template reset to default", session.email, { language })
+      return NextResponse.json({ ok: true, message: "Campaign template cleared" })
     }
     if (LEGACY_KEYS.includes(language)) {
       // Reset to default instead of hard delete — 'base' resets to the pure

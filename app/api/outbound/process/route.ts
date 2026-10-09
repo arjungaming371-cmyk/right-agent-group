@@ -11,6 +11,7 @@ import { isAiPaused, aiPauseMessage } from "@/lib/ai-pause"
 import { getDialerSettings } from "@/lib/dialer-settings"
 import { nextWindowStartMs } from "@/lib/dialer-logic"
 import { sanitizeText } from "@/lib/api-route"
+import { renderInstructionsForLead, type Leadish } from "@/lib/script-studio"
 
 // Shape of an outbound_queue row actually used by the dialer —
 // replaces the previous untyped `item: any` without forcing `unknown`
@@ -21,6 +22,8 @@ type QueueRow = BulkQueueRow & {
   retry_count?: number | null
   // "What should Priya talk about?" (migration 2026-10-01_queue_talking_points)
   talking_points?: string | null
+  // Outpero-style per-lead sheet data (migration 2026-10-09_lead_custom_fields)
+  custom_fields?: unknown
 }
 
 /**
@@ -51,7 +54,7 @@ async function claimPendingRows(branchId: string | null, limit: number): Promise
        LIMIT $2
        FOR UPDATE SKIP LOCKED
      )
-     RETURNING id, lead_id, phone, name, language, product_interest, notes, branch_id, channel, retry_count, talking_points`,
+     RETURNING id, lead_id, phone, name, language, product_interest, notes, branch_id, channel, retry_count, talking_points, custom_fields`,
     [branchId, limit]
   ).catch(async (e) => {
     if (!((e as { code?: unknown })?.code === "42703")) throw e // claimed_at column not added yet → claim without reaper support
@@ -64,7 +67,7 @@ async function claimPendingRows(branchId: string | null, limit: number): Promise
          LIMIT $2
          FOR UPDATE SKIP LOCKED
        )
-       RETURNING id, lead_id, phone, name, language, product_interest, notes, branch_id, channel, retry_count, talking_points`,
+       RETURNING id, lead_id, phone, name, language, product_interest, notes, branch_id, channel, retry_count, talking_points, custom_fields`,
       [branchId, limit]
     )
   })
@@ -133,6 +136,30 @@ async function dialQueueRow(item: QueueRow, branchId: string | null): Promise<Di
     // Exotel-only. lib/outbound-dial writes the voice_calls row BEFORE the
     // phone rings and throws DialError with Meta's raw rejection text.
     const requested = item.channel === "whatsapp_voice" ? "whatsapp" : item.channel === "auto" ? "auto" : "phone"
+
+    // OUTPERO-STYLE PER-LEAD SCRIPT (2026-10-09): the agenda is personalized
+    // per call — {merge_fields} rendered from the lead row + the CSV's own
+    // columns, and the sheet's custom data is appended as a "LEAD DATA ON
+    // FILE" brief even when the agenda has no placeholders. One SELECT for
+    // the freshest lead facts; without a lead the queue row's own columns
+    // stand in (find-or-create above guarantees this is rare).
+    let leadRow: Leadish | null = null
+    if (leadId) {
+      const leadRes = await query(
+        `SELECT name, phone, language, product_interest, loan_amount, address, notes, status, source, callback_note
+           FROM leads WHERE id = $1 LIMIT 1`,
+        [leadId]
+      ).catch(() => ({ rows: [] as Leadish[] }))
+      leadRow = (leadRes.rows[0] as Leadish | undefined) ?? null
+    }
+    if (!leadRow) {
+      leadRow = {
+        name: item.name, phone: item.phone, language: item.language,
+        product_interest: item.product_interest, notes: item.notes,
+      }
+    }
+    const instructions = renderInstructionsForLead(item.talking_points ?? null, leadRow, item.custom_fields)
+
     const placed = await placeOutboundCall({
       phone,
       leadId,
@@ -142,10 +169,8 @@ async function dialQueueRow(item: QueueRow, branchId: string | null): Promise<Di
       // "What should Priya talk about?" — the row's agenda (stamped at
       // queueing time or at campaign start) rides into placeOutboundCall,
       // which persists it on the voice_calls row where /api/calls/turn reads
-      // it EVERY TURN. The bulk path used to drop this — bulk-dialed leads
-      // got the generic script even when the operator launched the campaign
-      // with a specific offer to push.
-      instructions: item.talking_points ?? null,
+      // it EVERY TURN — now with {merge_fields} resolved per lead.
+      instructions,
     })
     const callBranch = item.branch_id || branchId
     if (callBranch) recordUsage(callBranch, "call")

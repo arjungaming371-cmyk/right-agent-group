@@ -7,6 +7,7 @@ import { apiError } from "@/lib/api-error"
 import { splitCsvLine } from "@/lib/csv"
 import { parseCsvToEntries, extractPdfText, chunkText } from "@/lib/kb-ingest"
 import { logAudit } from "@/lib/audit"
+import { sanitizeCustomFields } from "@/lib/script-studio"
 
 // STEP 1: Upload + PARSE ONLY — creates leads for review, queues NOTHING.
 // The dashboard opens the "Review Before Queueing" modal; only the CONFIRM
@@ -104,7 +105,19 @@ export async function POST(req: NextRequest) {
     // unique — uq_leads_phone_key — so a phone owned by ANOTHER branch still
     // cannot be adopted or duplicated; such rows are skipped exactly like
     // they were via the unique-violation catch).
-    const staged: { name: string; phone: string; last10: string; language: string; product_interest: string; notes: string }[] = []
+    //
+    // OUTPERO-STYLE CUSTOM COLUMNS (2026-10-09): every header that is NOT a
+    // known column (city, budget, plan, campaign, referred_by, …) is
+    // captured into the lead's custom_fields JSONB — the same "Lead Source /
+    // Sheet → Input → Script Editor" flow Outpero sells. lib/script-studio
+    // renders these as {merge_fields} in the campaign script at dial time.
+    const KNOWN_HEADERS = new Set([
+      "name", "full name", "customer name", "phone", "phone number", "mobile",
+      "language", "lang", "product_interest", "product", "notes", "note",
+    ])
+    const staged: { name: string; phone: string; last10: string; language: string; product_interest: string; notes: string; custom_fields: Record<string, string> | null }[] = []
+    let invalid = 0
+    let duplicatesInFile = 0
     for (const row of rows) {
       const cols = splitCsvLine(row)
       const obj: Record<string, string> = {}
@@ -116,16 +129,23 @@ export async function POST(req: NextRequest) {
       const product = (obj.product_interest || obj.product || "Home Loan").slice(0, 120)
       const notes   = (obj.notes || obj.note || "").slice(0, 2000)
 
+      // Everything the app does not model natively becomes custom data.
+      const customRaw: Record<string, string> = {}
+      headers.forEach((h, i) => {
+        if (!KNOWN_HEADERS.has(h) && (cols[i] ?? "").trim()) customRaw[h] = cols[i]
+      })
+      const customFields = sanitizeCustomFields(customRaw)
+
       // India-only app: require the full +91 10-digit form, same as the
       // public application route — junk like "+12345" must never become a
       // dedupe identity.
-      if (!phone || !/^\+91\d{10}$/.test(phone)) continue
+      if (!phone || !/^\+91\d{10}$/.test(phone)) { invalid++; continue }
       // In-file dedupe: the same phone twice in one CSV is ONE lead (the
       // global unique index would reject the batch insert otherwise). The
       // old per-row loop silently reused the first row's lead id for
       // duplicates and double-counted `created`.
-      if (staged.some((s) => s.last10 === phoneLast10(phone))) continue
-      staged.push({ name, phone, last10: phoneLast10(phone), language: lang, product_interest: product, notes })
+      if (staged.some((s) => s.last10 === phoneLast10(phone))) { duplicatesInFile++; continue }
+      staged.push({ name, phone, last10: phoneLast10(phone), language: lang, product_interest: product, notes, custom_fields: customFields })
     }
 
     // One round-trip: which of these phones already exist as leads (any
@@ -149,12 +169,14 @@ export async function POST(req: NextRequest) {
     // Create the missing leads in ONE multi-row insert (InsertBuilder emits
     // a single INSERT ... VALUES (...), (...) RETURNING *).
     const toInsert = staged.filter((s) => !existingByLast10.has(s.last10))
+    let duplicatesExisting = staged.length - toInsert.length
     if (toInsert.length > 0) {
       try {
         const inserted = await db.from("leads").insert(
           toInsert.map((s) => ({
             name: s.name, phone: s.phone, language: s.language,
             product_interest: s.product_interest, notes: s.notes,
+            custom_fields: s.custom_fields,
             source: "CSV Upload", status: "new", branch_id: branchId,
           }))
         )
@@ -174,6 +196,7 @@ export async function POST(req: NextRequest) {
             const { data: newLead } = await db.from("leads").insert({
               name: s.name, phone: s.phone, language: s.language,
               product_interest: s.product_interest, notes: s.notes,
+              custom_fields: s.custom_fields,
               source: "CSV Upload", status: "new", branch_id: branchId,
             }).select().single()
             if (newLead?.id) existingByLast10.set(s.last10, { id: newLead.id, branch_id: newLead.branch_id ?? null })
@@ -189,10 +212,11 @@ export async function POST(req: NextRequest) {
       // (same rule the per-row version enforced via the scoped query).
       const found = existingByLast10.get(s.last10)
       if (!found) continue
-      if (branchId && found.branch_id && found.branch_id !== branchId) continue
-      parsedContacts.push({ name: s.name, phone: s.phone, language: s.language, product_interest: s.product_interest, notes: s.notes, leadId: found.id })
+      if (branchId && found.branch_id && found.branch_id !== branchId) { duplicatesExisting++; continue }
+      parsedContacts.push({ name: s.name, phone: s.phone, language: s.language, product_interest: s.product_interest, notes: s.notes, custom_fields: s.custom_fields, leadId: found.id })
       created++
     }
+    const duplicates = duplicatesInFile + duplicatesExisting
 
     if (uploadRecord) {
       await db.from("uploaded_files").update({ processed: created, status: "pending_review" }).eq("id", uploadRecord.id)
@@ -209,9 +233,11 @@ export async function POST(req: NextRequest) {
       ok: true,
       rowCount,
       created,
+      duplicates,
+      invalid,
       uploadId: uploadRecord?.id,
       contacts: parsedContacts,
-      message: `${created} contacts parsed. Review and confirm to add them to the outbound queue — nothing is dialed yet.`,
+      message: `${created} contacts parsed${duplicates ? ` · ${duplicates} duplicate${duplicates === 1 ? "" : "s"} skipped` : ""}${invalid ? ` · ${invalid} invalid number${invalid === 1 ? "" : "s"}` : ""}. Review and confirm to add them to the outbound queue — nothing is dialed yet.`,
     })
   }
 

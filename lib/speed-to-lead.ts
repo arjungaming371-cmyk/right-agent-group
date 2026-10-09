@@ -28,6 +28,7 @@ import { checkCallCompliance, getCallingWindow, isWithinCallingWindow } from "@/
 import { getDialerSettings } from "@/lib/dialer-settings"
 import { nextWindowStartMs } from "@/lib/dialer-logic"
 import { assertNoActiveDial, placeOutboundCall, DialError } from "@/lib/outbound-dial"
+import { renderInstructionsForLead, type Leadish } from "@/lib/script-studio"
 
 export type SpeedToLeadLead = {
   id?: string | null
@@ -118,13 +119,33 @@ export async function speedToLeadDial(lead: SpeedToLeadLead): Promise<string> {
     }).select().single()
 
     try {
+      // OUTPERO-STYLE PER-LEAD BRIEF: fetch the full lead row so the notes
+      // agenda renders {merge_fields} from the lead + its CSV sheet columns
+      // (custom_fields) — a speed-to-lead call is exactly where "Hi {name},
+      // about your {product_interest} in {city}" hits hardest: seconds
+      // after the lead landed.
+      let leadRow: Leadish = {
+        name: lead.name || null, phone, language: lead.language || null,
+        product_interest: lead.product_interest || null, notes: lead.notes || null,
+        source: lead.source || null,
+      }
+      try {
+        const full = await query(
+          `SELECT name, phone, language, product_interest, loan_amount, address, notes, status, source, callback_note
+             FROM leads WHERE id = $1 LIMIT 1`,
+          [lead.id]
+        )
+        if (full.rows[0]) leadRow = full.rows[0] as Leadish
+      } catch { /* fall back to the payload's own fields */ }
+      const instructions = renderInstructionsForLead(lead.notes ?? null, leadRow, null)
+
       const placed = await placeOutboundCall({
         phone,
         leadId: lead.id,
         language: lead.language || "telugu",
         requested,
         branchId: lead.branch_id || null,
-        instructions: lead.notes ? String(lead.notes).slice(0, 1000) : null,
+        instructions,
       })
       if (row?.id) {
         await db.from("outbound_queue")

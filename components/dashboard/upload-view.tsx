@@ -1,10 +1,10 @@
 "use client"
 import { useEffect, useRef, useState } from "react"
-import { ClipboardList, FolderUp, FileText, FileUp, PhoneCall, Play, Plus, RotateCcw, Square } from "lucide-react"
+import { ClipboardList, ClipboardPaste, Download, FolderUp, FileText, FileUp, PhoneCall, Play, Plus, RotateCcw, Square, Wand2 } from "lucide-react"
 import { useToast } from "../ui/toast"
 
 type UploadedFile = { id: string; filename: string; type: string; row_count: number; processed: number; status: string; created_at: string }
-type Contact = { name: string; phone: string; language: string; product_interest: string; leadId: string }
+type Contact = { name: string; phone: string; language: string; product_interest: string; leadId: string; custom_fields?: Record<string, string> | null }
 
 // Live snapshot of a bulk campaign — mirrors lib/bulk-dialer.ts BulkRunSnapshot.
 type BulkRun = {
@@ -58,10 +58,17 @@ export default function UploadView({ role = "admin" }: { role?: string }) {
   // Campaign agenda — sent on "Call Entire Queue": stamped across every
   // pending row server-side before the runner claims them.
   const [bulkTalkPoints, setBulkTalkPoints] = useState("")
+  const [loadingSavedScript, setLoadingSavedScript] = useState(false)
   const [run, setRun] = useState<BulkRun | null>(null)
   const [queueCounts, setQueueCounts] = useState<Record<string, number>>({})
   const [queueRows, setQueueRows] = useState<QueueRowView[]>([])
   const [startBulk, setStartBulk] = useState(false)
+
+  // OUTPERO-STYLE PASTE-A-LIST ("hand a whole list over"): no CSV file
+  // needed — paste lines like "Ramesh, 98765 43210" (or bare numbers) and
+  // they go through the SAME queue-only batch path as the CSV confirm.
+  const [pasteText, setPasteText] = useState("")
+  const [pasting, setPasting] = useState(false)
 
   async function load() {
     const res = await fetch("/api/upload/list")
@@ -114,6 +121,9 @@ export default function UploadView({ role = "admin" }: { role?: string }) {
         load()
         if (type === "contacts" && data.contacts?.length > 0) {
           setPreview({ uploadId: data.uploadId, contacts: data.contacts })
+          if (data.duplicates || data.invalid) {
+            toast.info(data.message)
+          }
         } else {
           toast.success(`Uploaded — ${data.rowCount ?? ""} items processed`)
         }
@@ -157,6 +167,123 @@ export default function UploadView({ role = "admin" }: { role?: string }) {
   }
 
   function cancelPreview() { setPreview(null) }
+
+  // ---- Outpero-style paste-a-list ----------------------------------------
+  // Parse pasted rows client-side for instant feedback, then reuse the
+  // queue-only batch endpoint (dedupe + lead creation + talking points all
+  // behave exactly like a confirmed CSV). Accepts name, phone [, language]
+  // per line separated by comma / semicolon / tab, or a bare phone number.
+  function parsePasteList(text: string): { contacts: Contact[]; invalid: number; duplicates: number } {
+    const contacts: Contact[] = []
+    const seen = new Set<string>()
+    let invalid = 0
+    let duplicates = 0
+    for (const rawLine of text.split(/\r?\n/)) {
+      const line = rawLine.trim()
+      if (!line) continue
+      const parts = line.split(/[;,\t]/).map((p) => p.trim()).filter(Boolean)
+      if (!parts.length) continue
+      // The phone is whichever token holds ≥10 digits.
+      let phoneTok = ""
+      let name = ""
+      let language = ""
+      for (let i = 0; i < parts.length; i++) {
+        const digits = parts[i].replace(/\D/g, "")
+        if (!phoneTok && digits.length >= 10 && digits.length <= 13) {
+          phoneTok = digits
+          if (i === 0) continue // "9876543210, Ramesh" — phone came first
+        }
+        if (!name && !/^\+?[\d\s-]+$/.test(parts[i])) name = parts[i]
+        else if (!name && i > 0 && !phoneTok) name = ""
+      }
+      if (!phoneTok) {
+        // A name-only line with a 10-digit token we missed? One more try:
+        // the longest digit run in the line.
+        const m = line.replace(/\D/g, "")
+        if (m.length >= 10 && m.length <= 13) phoneTok = m
+      }
+      const last10 = phoneTok.slice(-10)
+      if (last10.length !== 10 || !/^[6-9]/.test(last10)) { invalid++; continue }
+      if (seen.has(last10)) { duplicates++; continue }
+      seen.add(last10)
+      const langTok = parts.find((p) => /^(telugu|tenglish|hindi|hinglish|english|te|hi|en)$/i.test(p))
+      if (langTok) language = langTok.toLowerCase().replace(/^tenglish$/, "telugu").replace(/^hinglish$/, "hindi").replace(/^(te|hi|en)$/, (m2) => ({ te: "telugu", hi: "hindi", en: "english" } as Record<string, string>)[m2] || "")
+      contacts.push({ name: name || "Unknown", phone: `+91${last10}`, language: language || "telugu", product_interest: "Home Loan", leadId: "" })
+    }
+    return { contacts, invalid, duplicates }
+  }
+
+  async function addPasteList() {
+    const { contacts, invalid, duplicates } = parsePasteList(pasteText)
+    if (!contacts.length) {
+      toast.error("No valid numbers found — each line needs a 10-digit Indian mobile number (e.g. \"Ramesh, 98765 43210\")")
+      return
+    }
+    setPasting(true)
+    try {
+      const res = await fetch("/api/outbound", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contacts, talking_points: bulkTalkPoints.trim() || undefined }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        const bits = [
+          `${data.queued} queued`,
+          data.skipped ? `${data.skipped} already in queue` : "",
+          duplicates ? `${duplicates} duplicate line${duplicates === 1 ? "" : "s"}` : "",
+          invalid ? `${invalid} invalid` : "",
+        ].filter(Boolean).join(" · ")
+        toast.success(`Pasted list added — ${bits}. Use Call Entire Queue to start dialing.`)
+        setPasteText("")
+        load()
+      } else {
+        toast.error(data.error || "Could not queue the pasted list")
+      }
+    } catch {
+      toast.error("Could not queue the pasted list — check your connection and try again")
+    } finally {
+      setPasting(false)
+    }
+  }
+
+  function downloadTemplate() {
+    const csv = [
+      "name,phone,language,product_interest,notes,city,budget",
+      "Ramesh Kumar,+919876543210,telugu,Home Loan,Asked about balance transfer,Kukatpally,40 lakhs",
+      "Sunita Sharma,+918812345678,hindi,Personal Loan,,Gachibowli,5 lakh",
+    ].join("\n")
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = "right-agent-group-lead-template.csv"
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  // "Use saved campaign script" — pull the Script Studio's saved brief into
+  // the agenda box so a campaign starts with the exact script that was
+  // written (with {merge_fields} rendered per lead at dial time).
+  async function useSavedScript() {
+    setLoadingSavedScript(true)
+    try {
+      const res = await fetch("/api/script-studio")
+      const data = await res.json()
+      if (res.ok && data.template) {
+        setBulkTalkPoints(String(data.template).slice(0, 1000))
+        toast.success("Saved campaign script loaded — {merge_fields} are personalized per lead when Priya dials")
+      } else if (res.ok) {
+        toast.info("No saved campaign script yet — write one in Scripts → Campaign Studio")
+      } else {
+        toast.error(data.error || "Could not load the saved script")
+      }
+    } catch {
+      toast.error("Could not load the saved script — check your connection")
+    } finally {
+      setLoadingSavedScript(false)
+    }
+  }
 
   async function addToQueue() {
     // FIX (2026-09-26): this form used to POST the single contact directly,
@@ -313,13 +440,18 @@ export default function UploadView({ role = "admin" }: { role?: string }) {
       {canWrite && (
       <div className="rg-cols-upload">
         <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: 24 }}>
-          <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}><ClipboardList size={16} strokeWidth={1.9} style={{ color: "var(--accent-violet)" }} /> Upload Contacts (CSV)</div>
-          <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16 }}>Upload a CSV with columns: name, phone, language, product_interest, notes</div>
+          <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}><ClipboardList size={16} strokeWidth={1.9} style={{ color: "var(--accent-violet)" }} /> Upload Leads (CSV)</div>
+          <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16 }}>
+            Columns: name, phone, language, product_interest, notes — plus ANY extra columns you want (city, budget, plan…). Extra columns become per-lead data Priya opens with.
+          </div>
           <div style={{ border: "2px dashed var(--border)", borderRadius: 10, padding: 28, textAlign: "center", cursor: "pointer", marginBottom: 12 }} onClick={() => csvRef.current?.click()}>
             <FolderUp size={30} strokeWidth={1.4} style={{ marginBottom: 8, color: "var(--text-muted)" }} />
             <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>Click to upload CSV</div>
             <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>Supports .csv — from Excel or Google Sheet: File → Download / Save As → CSV</div>
           </div>
+          <button onClick={downloadTemplate} className="btn-ghost" style={{ height: 30, fontSize: 12 }}>
+            <Download size={12} strokeWidth={2} /> Download CSV template
+          </button>
           <input ref={csvRef} type="file" accept=".csv,.txt" style={{ display: "none" }} onChange={(e) => uploadFile(e, "contacts")} />
         </div>
 
@@ -333,6 +465,26 @@ export default function UploadView({ role = "admin" }: { role?: string }) {
           </div>
           <input ref={docRef} type="file" accept=".txt,.csv,.pdf" style={{ display: "none" }} onChange={(e) => uploadFile(e, "script")} />
         </div>
+      </div>
+      )}
+
+      {/* Paste-a-list — Outpero's "hand a whole list over" without a file */}
+      {canWrite && (
+      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: 24 }}>
+        <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}><ClipboardPaste size={16} strokeWidth={1.9} style={{ color: "var(--accent-yellow)" }} /> Paste a Lead List</div>
+        <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 10 }}>
+          One lead per line: <code style={{ color: "var(--text-secondary)" }}>Name, 98765 43210</code> (language optional) — or just paste numbers, one per line. Instantly queued, nothing dialed until you start.
+        </div>
+        <textarea
+          value={pasteText}
+          onChange={(e) => setPasteText(e.target.value.slice(0, 20000))}
+          rows={4}
+          placeholder={"Ramesh Kumar, 9876543210, telugu\nSunita Sharma, 8812345678, hindi\n9876501234"}
+          style={{ width: "100%", fontSize: 13, lineHeight: 1.6, padding: "10px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", resize: "vertical", fontFamily: "monospace", marginBottom: 10 }}
+        />
+        <button onClick={addPasteList} disabled={pasting || !pasteText.trim()} className="btn-primary" style={{ height: 38, padding: "0 20px", fontSize: 13, opacity: pasting || !pasteText.trim() ? 0.5 : 1 }}>
+          <ClipboardPaste size={13} strokeWidth={2} /> {pasting ? "Queueing…" : "Add List to Queue"}
+        </button>
       </div>
       )}
 
@@ -360,9 +512,14 @@ export default function UploadView({ role = "admin" }: { role?: string }) {
           <>
             {/* "What should Priya talk about?" — the campaign agenda box */}
             <div style={{ marginBottom: 14 }}>
-              <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-secondary)", display: "block", marginBottom: 4 }}>
-                What should Priya talk about? <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>(optional)</span>
-              </label>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-secondary)" }}>
+                  What should Priya talk about? <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>(optional — <code>{"{merge_fields}"}</code> are filled per lead)</span>
+                </label>
+                <button onClick={useSavedScript} disabled={loadingSavedScript} className="btn-ghost" style={{ height: 26, fontSize: 11, padding: "0 10px" }}>
+                  <Wand2 size={11} strokeWidth={2} /> {loadingSavedScript ? "Loading…" : "Use saved campaign script"}
+                </button>
+              </div>
               <textarea
                 value={bulkTalkPoints}
                 onChange={(e) => setBulkTalkPoints(e.target.value.slice(0, 1000))}
@@ -372,7 +529,7 @@ export default function UploadView({ role = "admin" }: { role?: string }) {
                 style={{ width: "100%", fontSize: 13, lineHeight: 1.5, padding: "8px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", resize: "vertical" }}
               />
               <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3 }}>
-                Priya opens with this agenda on every call in this run. Leave blank to keep the talking points set when the numbers were queued ({bulkTalkPoints.length}/1000).
+                Priya opens with this agenda on every call in this run. Write <code>{'{name}'}</code>, <code>{'{city}'}</code>, <code>{'{budget}'}</code>… and each lead's own data is substituted at dial time — or save a reusable script in Scripts → Campaign Studio ({bulkTalkPoints.length}/1000).
               </div>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 12, alignItems: "end", marginBottom: 14 }}>
@@ -610,7 +767,21 @@ export default function UploadView({ role = "admin" }: { role?: string }) {
                 <tbody>
                   {preview.contacts.map((c, i) => (
                     <tr key={i} style={{ borderBottom: "1px solid var(--border-light)" }}>
-                      <td style={{ padding: "8px 14px", fontSize: 13 }}>{c.name}</td>
+                      <td style={{ padding: "8px 14px", fontSize: 13 }}>
+                        {c.name}
+                        {c.custom_fields && Object.keys(c.custom_fields).length > 0 && (
+                          <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 3 }}>
+                            {Object.entries(c.custom_fields).slice(0, 4).map(([k, v]) => (
+                              <span key={k} title={`${k}: ${v}`} style={{ fontSize: 10, padding: "1px 6px", borderRadius: 5, background: "rgba(56,189,248,0.1)", border: "1px solid rgba(56,189,248,0.3)", color: "var(--accent-cyan)" }}>
+                                {k}: {String(v).slice(0, 18)}{String(v).length > 18 ? "…" : ""}
+                              </span>
+                            ))}
+                            {Object.keys(c.custom_fields).length > 4 && (
+                              <span style={{ fontSize: 10, color: "var(--text-muted)" }}>+{Object.keys(c.custom_fields).length - 4} more</span>
+                            )}
+                          </div>
+                        )}
+                      </td>
                       <td style={{ padding: "8px 14px", fontSize: 13, fontFamily: "monospace" }}>{c.phone}</td>
                       <td style={{ padding: "8px 14px", fontSize: 13, textTransform: "capitalize" }}>{c.language}</td>
                       <td style={{ padding: "8px 14px", fontSize: 13 }}>{c.product_interest}</td>

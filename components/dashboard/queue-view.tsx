@@ -374,6 +374,32 @@ export default function QueueView({ role }: { role: Role }) {
     await requeueIds(requeueable)
   }
 
+  // OUTPERO-STYLE HOT LEADS: boost selected PENDING rows to priority 100 —
+  // the atomic claim (ORDER BY priority DESC) dials them ahead of the whole
+  // bulk backlog on the next campaign tick.
+  async function boostSelected() {
+    const pending = selectedIds.filter((id) => items.find((i) => i.id === id)?.status === "pending")
+    if (!pending.length) {
+      toast.info("Select PENDING rows to boost — they jump ahead of the campaign backlog")
+      return
+    }
+    setActing(true)
+    try {
+      const res = await fetch("/api/outbound/queue/prioritize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: pending, boost: true }),
+      })
+      const d = await res.json()
+      if (res.ok) toast.success(`${d.boosted} call${d.boosted === 1 ? "" : "s"} moved to the FRONT of the queue — dialed first on the next campaign tick`)
+      else toast.error(d.error || "Boost failed")
+    } catch {
+      toast.error("Boost failed — check your connection and try again")
+    }
+    await load(true)
+    setActing(false)
+  }
+
   // "Resume" path for a drained queue: when nothing is pending, a silently
   // disabled Start button teaches nothing — offer the one-click bulk
   // re-queue of every requeueable row already loaded. The listing fetch is
@@ -633,6 +659,9 @@ export default function QueueView({ role }: { role: Role }) {
         {selectedIds.length > 0 && canOperate && (
           <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--border)", display: "flex", gap: 10, alignItems: "center", background: "rgba(139,124,255,0.05)" }}>
             <span style={{ fontSize: 12.5, fontWeight: 700 }}>{selectedIds.length} selected</span>
+            <button onClick={boostSelected} disabled={acting} className="btn-ghost" style={{ height: 30, fontSize: 12, color: "var(--accent-yellow)" }} title="Hot leads — dialed before the rest of the backlog">
+              <Zap size={12.5} strokeWidth={2} /> Boost to Front
+            </button>
             <button onClick={cancelSelected} disabled={acting} className="btn-ghost" style={{ height: 30, fontSize: 12, color: "var(--accent-red)" }}>
               <XCircle size={12.5} strokeWidth={2} /> Cancel Selected
             </button>

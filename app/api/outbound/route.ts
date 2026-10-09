@@ -8,6 +8,7 @@ import { checkCallCompliance } from "@/lib/compliance"
 import { assertNoActiveDial } from "@/lib/outbound-dial"
 import { sanitizeText } from "@/lib/api-route"
 import { normalizePhone, phoneLast10, PHONE_MATCH_SQL } from "@/lib/phone"
+import { sanitizeCustomFields } from "@/lib/script-studio"
 
 // "What should Priya talk about?" — the operator's agenda for this campaign.
 // Same field, same cap, as /api/calls/dial's instructions. Stamped on every
@@ -156,6 +157,10 @@ export async function POST(req: NextRequest) {
           product_interest: contact.product_interest,
           notes: (contact as Record<string, unknown>).notes as string | undefined || null,
           talking_points: campaignTalkingPoints((contact as Record<string, unknown>).talking_points) ?? campaignPoints,
+          // Outpero-style per-lead sheet data (city, budget, plan, …) — the
+          // dialer renders {merge_fields} in the talking points from this at
+          // dial time (lib/script-studio.renderForDial).
+          custom_fields: sanitizeCustomFields((contact as Record<string, unknown>).custom_fields),
           lead_id: leadId || null,
           status: "pending",
           branch_id: branchId,
