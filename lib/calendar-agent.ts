@@ -253,68 +253,139 @@ export async function persistCalendarEvent(
     return { persisted: false, action: "preview" }
   }
 
-  // Atomically check, insert calendar_events and sync outbound_queue + leads in a single transaction
+  // Atomically check, insert/consolidate calendar_events and sync outbound_queue + leads in a single transaction
   return await withTransaction(async (client) => {
-    // 1. Idempotency check: does this source already have this event_type and original_event_at?
-    const existing = await client.query(
-      `SELECT id, outbound_queue_id FROM calendar_events 
-       WHERE source_type = $1 AND source_id = $2 AND event_type = $3 AND original_event_at = $4 LIMIT 1`,
-      [event.sourceType, event.sourceId, event.eventType, event.eventAt]
-    )
+    const last10 = event.leadPhone ? phoneLast10(normalizePhone(event.leadPhone)) : null
 
-    if (existing.rows.length > 0) {
-      return {
-        persisted: false,
-        eventId: existing.rows[0].id,
-        queueId: existing.rows[0].outbound_queue_id,
-        action: "skipped_duplicate" as const,
-      }
-    }
+    // 1. Single Point of Truth Per Lead Check:
+    // Does this lead already have an active calendar appointment?
+    const existingLeadRow = await client.query(
+      `SELECT id, title, event_type, event_at, end_at, location, notes, raw_quote, outbound_queue_id, branch_id, status
+       FROM calendar_events
+       WHERE (
+         ($1::uuid IS NOT NULL AND lead_id = $1)
+         OR (
+           $2::text IS NOT NULL AND lead_id IN (
+             SELECT id FROM leads WHERE right(regexp_replace(phone, '\\D', '', 'g'), 10) = $2
+           )
+         )
+       )
+       AND status != 'cancelled'
+       ORDER BY event_at DESC
+       LIMIT 1`,
+      [event.leadId || null, last10 || null]
+    )
 
     let outboundQueueId: string | null = null
 
-    // 2. Strict Purpose Separation & Synchronized Call Queue creation:
-    // Only callbacks and reminders ever link with outbound_queue. Branch visits NEVER link.
-    if (opts.autoSyncQueue !== false && event.status === "confirmed" && (event.eventType === "callback" || event.eventType === "reminder") && event.leadPhone) {
-      const last10 = phoneLast10(normalizePhone(event.leadPhone))
-      if (last10) {
-        // Check if an active queue item already exists to avoid duplicate stacking
-        const activeQueue = await client.query(
-          `SELECT id FROM outbound_queue 
-           WHERE right(regexp_replace(phone, '\\D', '', 'g'), 10) = $1 AND status IN ('pending', 'dialing')
-           LIMIT 1`,
-          [last10]
-        )
+    // Synchronize Call Queue if callback or reminder
+    if (opts.autoSyncQueue !== false && event.status === "confirmed" && (event.eventType === "callback" || event.eventType === "reminder") && last10) {
+      const activeQueue = await client.query(
+        `SELECT id FROM outbound_queue 
+         WHERE right(regexp_replace(phone, '\\D', '', 'g'), 10) = $1 AND status IN ('pending', 'dialing')
+         LIMIT 1`,
+        [last10]
+      )
 
-        if (activeQueue.rows.length > 0) {
-          outboundQueueId = activeQueue.rows[0].id
-          await client.query(
-            `UPDATE outbound_queue SET scheduled_at = $1, talking_points = COALESCE($2, talking_points) WHERE id = $3`,
-            [event.eventAt, event.notes, outboundQueueId]
-          )
-        } else {
-          // Insert new linked queue row
-          const newQueue = await client.query(
-            `INSERT INTO outbound_queue (
-              lead_id, name, phone, language, product_interest, notes, status, channel, priority, scheduled_at, talking_points, branch_id
-            ) VALUES ($1, $2, $3, 'telugu', 'Follow-up', $4, 'pending', 'whatsapp_voice', 100, $5, $6, $7)
-            RETURNING id`,
-            [
-              event.leadId,
-              event.leadName || "Lead",
-              event.leadPhone,
-              `Scheduled via Calendar Agent: ${event.title}`,
-              event.eventAt,
-              event.notes || event.title,
-              event.branchId,
-            ]
-          )
-          outboundQueueId = newQueue.rows[0]?.id || null
-        }
+      if (activeQueue.rows.length > 0) {
+        outboundQueueId = activeQueue.rows[0].id
+        await client.query(
+          `UPDATE outbound_queue SET scheduled_at = $1, talking_points = COALESCE($2, talking_points) WHERE id = $3`,
+          [event.eventAt, event.notes, outboundQueueId]
+        )
+      } else {
+        const newQueue = await client.query(
+          `INSERT INTO outbound_queue (
+            lead_id, name, phone, language, product_interest, notes, status, channel, priority, scheduled_at, talking_points, branch_id
+          ) VALUES ($1, $2, $3, 'telugu', 'Follow-up', $4, 'pending', 'whatsapp_voice', 100, $5, $6, $7)
+          RETURNING id`,
+          [
+            event.leadId,
+            event.leadName || "Lead",
+            event.leadPhone,
+            `Scheduled via Calendar Agent: ${event.title}`,
+            event.eventAt,
+            event.notes || event.title,
+            event.branchId,
+          ]
+        )
+        outboundQueueId = newQueue.rows[0]?.id || null
       }
     }
 
-    // 3. Insert into calendar_events with ON CONFLICT DO NOTHING on (source_type, source_id, event_type, original_event_at)
+    // 2. If the lead ALREADY has an active event, CONSOLIDATE into ONE POINT
+    if (existingLeadRow.rows.length > 0) {
+      const existing = existingLeadRow.rows[0]
+      const sourceLabel = event.sourceType === "voice_call" ? "Voice Call" : event.sourceType === "whatsapp_message" ? "WhatsApp" : "CRM Update"
+      const timeStr = new Date(event.sourceAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "short", timeStyle: "short" })
+      const newTimelineEntry = `• [${sourceLabel} - ${timeStr} IST]: ${event.title}${event.notes ? ` — ${event.notes}` : ""}`
+
+      let consolidatedNotes = existing.notes || ""
+      if (!consolidatedNotes.includes("--- CONSOLIDATED LEAD TIMELINE")) {
+        consolidatedNotes = [
+          consolidatedNotes,
+          "\n--- CONSOLIDATED LEAD TIMELINE (ALL INTERACTIONS AT ONE POINT) ---",
+          newTimelineEntry,
+        ].filter(Boolean).join("\n")
+      } else {
+        consolidatedNotes += `\n${newTimelineEntry}`
+      }
+
+      await client.query(
+        `UPDATE calendar_events
+         SET title = $1,
+             event_type = $2,
+             event_at = $3,
+             end_at = $4,
+             location = COALESCE($5, location),
+             channel = $6,
+             status = $7,
+             raw_quote = COALESCE($8, raw_quote),
+             notes = $9,
+             outbound_queue_id = COALESCE($10, outbound_queue_id),
+             source_type = $11,
+             source_id = $12,
+             updated_at = now()
+         WHERE id = $13`,
+        [
+          event.title,
+          event.eventType,
+          event.eventAt,
+          event.endAt,
+          event.location,
+          event.channel,
+          event.status,
+          event.rawQuote,
+          consolidatedNotes,
+          outboundQueueId,
+          event.sourceType,
+          event.sourceId,
+          existing.id,
+        ]
+      )
+
+      // Purge any stale duplicate rows for this lead
+      if (event.leadId) {
+        await client.query(`DELETE FROM calendar_events WHERE lead_id = $1 AND id != $2`, [event.leadId, existing.id])
+      }
+
+      // Sync leads.callback_at
+      if (event.leadId && event.eventType === "callback" && event.status === "confirmed") {
+        await client.query(
+          `UPDATE leads SET callback_at = $1, callback_note = COALESCE($2, callback_note) WHERE id = $3`,
+          [event.eventAt, event.title, event.leadId]
+        )
+      }
+
+      return {
+        persisted: true,
+        eventId: existing.id,
+        queueId: outboundQueueId || existing.outbound_queue_id,
+        action: "created" as const,
+      }
+    }
+
+    // 3. New Lead: Insert first active appointment
     const inserted = await client.query(
       `INSERT INTO calendar_events (
         lead_id, title, event_type, event_at, end_at, location, channel,
@@ -349,22 +420,9 @@ export async function persistCalendarEvent(
       ]
     )
 
-    if (inserted.rows.length === 0) {
-      // Unique conflict hit concurrently — query existing row
-      const conflictRow = await client.query(
-        `SELECT id, outbound_queue_id FROM calendar_events 
-         WHERE source_type = $1 AND source_id = $2 AND event_type = $3 AND original_event_at = $4 LIMIT 1`,
-        [event.sourceType, event.sourceId, event.eventType, event.eventAt]
-      )
-      return {
-        persisted: false,
-        eventId: conflictRow.rows[0]?.id,
-        queueId: conflictRow.rows[0]?.outbound_queue_id,
-        action: "skipped_duplicate" as const,
-      }
-    }
+    const eventId = inserted.rows[0]?.id
 
-    // 4. Sync to leads.callback_at if callback and leadId is present
+    // Sync to leads.callback_at if callback and leadId is present
     if (event.leadId && event.eventType === "callback" && event.status === "confirmed") {
       await client.query(
         `UPDATE leads SET callback_at = $1, callback_note = COALESCE($2, callback_note) WHERE id = $3`,
@@ -374,7 +432,7 @@ export async function persistCalendarEvent(
 
     return {
       persisted: true,
-      eventId: inserted.rows[0]?.id,
+      eventId: eventId,
       queueId: outboundQueueId || undefined,
       action: "created" as const,
     }
@@ -428,7 +486,7 @@ export async function updateCalendarEvent(
           `UPDATE outbound_queue SET status = 'cancelled', cancelled_at = now(), cancelled_by = $1 WHERE id = $2`,
           [operatorEmail || "calendar_agent", current.outbound_queue_id]
         )
-      } else if (newStatus === "confirmed" && updates.eventAt) {
+      } else if ((newStatus === "confirmed" || newStatus === "rescheduled") && updates.eventAt) {
         await client.query(
           `UPDATE outbound_queue SET scheduled_at = $1, status = 'pending' WHERE id = $2`,
           [updates.eventAt, current.outbound_queue_id]
@@ -469,7 +527,7 @@ export async function updateCalendarEvent(
     if (current.lead_id && current.event_type === "callback") {
       if (newStatus === "cancelled") {
         await client.query(`UPDATE leads SET callback_at = NULL WHERE id = $1`, [current.lead_id])
-      } else if (newEventAt && newStatus === "confirmed") {
+      } else if (newEventAt && (newStatus === "confirmed" || newStatus === "rescheduled")) {
         await client.query(`UPDATE leads SET callback_at = $1 WHERE id = $2`, [newEventAt, current.lead_id])
       }
     }
@@ -496,14 +554,17 @@ export async function scanVoiceCalls(opts: {
   const dryRun = !!opts.dryRun
 
   const callsRes = await query(
-    `SELECT v.id, v.lead_id, v.phone, v.direction, v.status, v.transcript, v.created_at, v.branch_id,
-            l.name as lead_name
-     FROM voice_calls v
-     LEFT JOIN leads l ON v.lead_id = l.id
-     WHERE v.transcript IS NOT NULL AND jsonb_array_length(CASE WHEN jsonb_typeof(v.transcript::jsonb) = 'array' THEN v.transcript::jsonb ELSE '[]'::jsonb END) >= 2
-       AND ($1::uuid IS NULL OR v.branch_id = $1)
-     ORDER BY v.created_at DESC
-     LIMIT $2`,
+    `SELECT * FROM (
+       SELECT v.id, v.lead_id, v.phone, v.direction, v.status, v.transcript, v.created_at, v.branch_id,
+              l.name as lead_name
+       FROM voice_calls v
+       LEFT JOIN leads l ON v.lead_id = l.id
+       WHERE v.transcript IS NOT NULL AND jsonb_array_length(CASE WHEN jsonb_typeof(v.transcript::jsonb) = 'array' THEN v.transcript::jsonb ELSE '[]'::jsonb END) >= 2
+         AND ($1::uuid IS NULL OR v.branch_id = $1)
+       ORDER BY v.created_at DESC
+       LIMIT $2
+     ) recent_calls
+     ORDER BY created_at ASC`,
     [opts.branchId || null, limit]
   )
 
@@ -579,6 +640,159 @@ export async function scanVoiceCalls(opts: {
     confirmed,
     needsReview,
     skippedDuplicates,
+  }
+}
+
+/**
+ * Ingests scheduled callbacks from outbound_queue into calendar_events.
+ */
+export async function syncOutboundQueueEvents(opts: {
+  branchId?: string | null
+  dryRun?: boolean
+}): Promise<{ syncedCount: number; events: DiscoveredEvent[] }> {
+  const dryRun = !!opts.dryRun
+  const queueRes = await query(
+    `SELECT q.id, q.lead_id, q.name, q.phone, q.scheduled_at, q.notes, q.talking_points, q.branch_id,
+            l.name as lead_name, l.phone as lead_phone
+     FROM outbound_queue q
+     LEFT JOIN leads l ON q.lead_id = l.id
+     WHERE q.scheduled_at IS NOT NULL
+       AND q.status IN ('pending', 'dialing')
+       AND ($1::uuid IS NULL OR q.branch_id = $1)
+     ORDER BY q.scheduled_at ASC`,
+    [opts.branchId || null]
+  )
+
+  let syncedCount = 0
+  const events: DiscoveredEvent[] = []
+
+  for (const q of queueRes.rows) {
+    const contactName = q.lead_name || q.name || "Customer"
+    const phone = q.lead_phone || q.phone || null
+    const scheduledDate = new Date(q.scheduled_at)
+    if (isNaN(scheduledDate.getTime())) continue
+
+    const ev: DiscoveredEvent = {
+      title: `Callback with ${contactName}`,
+      eventType: "callback",
+      eventAt: scheduledDate.toISOString(),
+      endAt: new Date(scheduledDate.getTime() + 15 * 60000).toISOString(),
+      location: null,
+      channel: "phone",
+      confidence: "high",
+      confidenceScore: 1.0,
+      status: "confirmed",
+      rawQuote: `Scheduled in Outbound Call Queue: ${q.talking_points || q.notes || "Follow-up"}`,
+      notes: q.talking_points || q.notes || null,
+      sourceType: "outbound_queue",
+      sourceId: String(q.id),
+      sourceAt: scheduledDate.toISOString(),
+      leadId: q.lead_id || null,
+      leadName: contactName,
+      leadPhone: phone,
+      branchId: q.branch_id || null,
+      outboundQueueId: String(q.id),
+    }
+
+    events.push(ev)
+    if (!dryRun) {
+      const res = await persistCalendarEvent(ev, { dryRun: false, autoSyncQueue: false })
+      if (res.action === "created") syncedCount++
+    } else {
+      syncedCount++
+    }
+  }
+
+  return { syncedCount, events }
+}
+
+/**
+ * Ingests callbacks set directly on CRM leads (leads.callback_at) into calendar_events.
+ */
+export async function syncCrmLeadCallbacks(opts: {
+  branchId?: string | null
+  dryRun?: boolean
+}): Promise<{ syncedCount: number; events: DiscoveredEvent[] }> {
+  const dryRun = !!opts.dryRun
+  const leadsRes = await query(
+    `SELECT l.id, l.name, l.phone, l.callback_at, l.callback_note, l.branch_id
+     FROM leads l
+     WHERE l.callback_at IS NOT NULL
+       AND ($1::uuid IS NULL OR l.branch_id = $1)
+     ORDER BY l.callback_at ASC`,
+    [opts.branchId || null]
+  )
+
+  let syncedCount = 0
+  const events: DiscoveredEvent[] = []
+
+  for (const l of leadsRes.rows) {
+    const cbDate = new Date(l.callback_at)
+    if (isNaN(cbDate.getTime())) continue
+
+    const ev: DiscoveredEvent = {
+      title: l.callback_note ? String(l.callback_note).slice(0, 100) : `Callback with ${l.name || "Customer"}`,
+      eventType: "callback",
+      eventAt: cbDate.toISOString(),
+      endAt: new Date(cbDate.getTime() + 15 * 60000).toISOString(),
+      location: null,
+      channel: "phone",
+      confidence: "high",
+      confidenceScore: 1.0,
+      status: "confirmed",
+      rawQuote: l.callback_note || "Scheduled in Leads CRM",
+      notes: l.callback_note || null,
+      sourceType: "leads_crm",
+      sourceId: String(l.id),
+      sourceAt: cbDate.toISOString(),
+      leadId: String(l.id),
+      leadName: l.name || "Customer",
+      leadPhone: l.phone || null,
+      branchId: l.branch_id || null,
+    }
+
+    events.push(ev)
+    if (!dryRun) {
+      const res = await persistCalendarEvent(ev, { dryRun: false, autoSyncQueue: true })
+      if (res.action === "created") syncedCount++
+    } else {
+      syncedCount++
+    }
+  }
+
+  return { syncedCount, events }
+}
+
+/**
+ * Omni-channel sync: collects from Voice Calls, Outbound Call Queue, and CRM Leads.
+ */
+export async function syncAllCalendarSources(opts: {
+  limit?: number
+  dryRun?: boolean
+  branchId?: string | null
+}): Promise<{
+  scanned: number
+  discovered: DiscoveredEvent[]
+  confirmed: number
+  needsReview: number
+  skippedDuplicates: number
+  queueSynced: number
+  leadsSynced: number
+}> {
+  const voiceResult = await scanVoiceCalls(opts)
+  const queueResult = await syncOutboundQueueEvents({ branchId: opts.branchId, dryRun: opts.dryRun })
+  const leadsResult = await syncCrmLeadCallbacks({ branchId: opts.branchId, dryRun: opts.dryRun })
+
+  const allDiscovered = [...voiceResult.discovered, ...queueResult.events, ...leadsResult.events]
+
+  return {
+    scanned: voiceResult.scanned,
+    discovered: allDiscovered,
+    confirmed: voiceResult.confirmed + queueResult.syncedCount + leadsResult.syncedCount,
+    needsReview: voiceResult.needsReview,
+    skippedDuplicates: voiceResult.skippedDuplicates,
+    queueSynced: queueResult.syncedCount,
+    leadsSynced: leadsResult.syncedCount,
   }
 }
 

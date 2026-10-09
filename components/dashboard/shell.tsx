@@ -134,7 +134,7 @@ const NAV_SECTIONS: NavSection[] = [
       { key: "leads",     label: "Leads",             icon: Users,     roles: ["admin", "agent", "viewer", "branch_manager"] },
       { key: "loans",     label: "Loan Applications", icon: FileText,  roles: ["admin", "agent", "viewer", "branch_manager"] },
       { key: "queue",     label: "Call Queue",        icon: PhoneCall, roles: ["admin", "agent", "viewer", "branch_manager"] },
-      { key: "calendar",  label: "Calendar",          icon: CalendarDays, roles: ["admin", "agent", "viewer", "branch_manager"] },
+      { key: "calendar",  label: "Calendar",          icon: CalendarDays, roles: ["admin", "agent", "viewer", "branch_manager", "developer"] },
     ],
   },
   {

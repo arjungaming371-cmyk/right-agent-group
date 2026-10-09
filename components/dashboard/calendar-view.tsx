@@ -23,7 +23,9 @@ import {
   ArrowRight,
   ShieldCheck,
   Check,
-  Edit2
+  Edit2,
+  History,
+  MessageSquare
 } from "lucide-react"
 import { useToast } from "../ui/toast"
 import { SkeletonList } from "../ui/skeleton"
@@ -115,6 +117,16 @@ export function formatTimeIST(dateStr: string): string {
   }
 }
 
+export function toLocalDatetimeInput(dateStrOrObj: string | Date): string {
+  try {
+    const d = typeof dateStrOrObj === "string" ? new Date(dateStrOrObj) : dateStrOrObj
+    if (isNaN(d.getTime())) return ""
+    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`
+  } catch {
+    return ""
+  }
+}
+
 const TYPE_CONFIG: Record<CalendarEventType, { label: string; icon: any; color: string; bg: string; border: string }> = {
   branch_visit: {
     label: "Branch Visit",
@@ -191,8 +203,17 @@ export default function CalendarView({ role }: { role: Role }) {
 
   async function loadData() {
     setLoading(true)
-    const from = new Date(monthCursor.getFullYear(), monthCursor.getMonth(), 1).toISOString()
-    const to = new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1).toISOString()
+    const firstOfMonth = new Date(monthCursor.getFullYear(), monthCursor.getMonth(), 1)
+    const gridStart = new Date(firstOfMonth)
+    gridStart.setDate(gridStart.getDate() - firstOfMonth.getDay() - 1)
+    gridStart.setHours(0, 0, 0, 0)
+    const lastDayOfMonth = new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 0)
+    const gridEnd = new Date(lastDayOfMonth)
+    gridEnd.setDate(gridEnd.getDate() + (6 - lastDayOfMonth.getDay()) + 1)
+    gridEnd.setHours(23, 59, 59, 999)
+
+    const from = gridStart.toISOString()
+    const to = gridEnd.toISOString()
 
     try {
       const [eventsRes, reviewRes, leadsRes] = await Promise.all([
@@ -202,15 +223,16 @@ export default function CalendarView({ role }: { role: Role }) {
       ])
 
       if (eventsRes.ok) {
-        const d = await eventsRes.json()
-        setEvents(Array.isArray(d.events) ? d.events : [])
+        const d = await eventsRes.json().catch(() => ({}))
+        setEvents(Array.isArray(d?.events) ? d.events : [])
       }
       if (reviewRes.ok) {
-        const d = await reviewRes.json()
-        setReviewEvents(Array.isArray(d.events) ? d.events : [])
+        const d = await reviewRes.json().catch(() => ({}))
+        setReviewEvents(Array.isArray(d?.events) ? d.events : [])
       }
       if (leadsRes.ok) {
-        setLeads(await leadsRes.json())
+        const d = await leadsRes.json().catch(() => [])
+        setLeads(Array.isArray(d) ? d : [])
       }
 
       if (!eventsRes.ok && !reviewRes.ok) {
@@ -424,13 +446,33 @@ export default function CalendarView({ role }: { role: Role }) {
     }
   }
 
-  // Filtered confirmed/scheduled events for the calendar grid
+  // Filtered confirmed/scheduled events for the calendar grid - Single Point of Truth Per Lead
   const visibleEvents = useMemo(() => {
-    return events.filter((e) => {
+    const leadMap = new Map<string, CalendarEvent>()
+
+    const active = events.filter((e) => {
       if (e.status === "cancelled") return false
       if (typeFilter !== "all" && e.event_type !== typeFilter) return false
       return true
     })
+
+    // Group and consolidate per lead so that each lead appears as EXACTLY ONE clean appointment card!
+    for (const e of active) {
+      const key = e.lead_id || (e.lead_phone ? e.lead_phone.replace(/\D/g, "").slice(-10) : e.id)
+      const existing = leadMap.get(key)
+      if (!existing) {
+        leadMap.set(key, e)
+      } else {
+        // Keep the one with the latest date or confirmed status
+        const existingTime = new Date(existing.event_at).getTime()
+        const currTime = new Date(e.event_at).getTime()
+        if (currTime >= existingTime && (e.status === "confirmed" || existing.status !== "confirmed")) {
+          leadMap.set(key, e)
+        }
+      }
+    }
+
+    return Array.from(leadMap.values())
   }, [events, typeFilter])
 
   // Build the visible grid: pad to full weeks, Sunday-first.
@@ -642,6 +684,7 @@ export default function CalendarView({ role }: { role: Role }) {
                 { id: "branch_visit", label: "🏢 Branch Visits" },
                 { id: "callback", label: "📞 Callbacks" },
                 { id: "document_deadline", label: "📄 Deadlines" },
+                { id: "reminder", label: "⏰ Reminders" },
               ].map((f) => {
                 const active = typeFilter === f.id
                 return (
@@ -1061,7 +1104,7 @@ export default function CalendarView({ role }: { role: Role }) {
                         onClick={() => {
                           setSelected(item)
                           setRescheduleMode(true)
-                          setRescheduleDateTime(new Date(item.event_at).toISOString().slice(0, 16))
+                          setRescheduleDateTime(toLocalDatetimeInput(item.event_at))
                         }}
                         className="btn-ghost"
                         style={{ height: 34, fontSize: 12.5 }}
@@ -1292,7 +1335,7 @@ export default function CalendarView({ role }: { role: Role }) {
                         </div>
                         {allFound.map((ev, i) => (
                           <div
-                            key={(ev as any).id || `${ev.event_type}-${ev.start_time}-${i}`}
+                            key={(ev as any).id || `${ev.eventType || 'ev'}-${ev.eventAt || ''}-${i}`}
                             style={{
                               fontSize: 12,
                               padding: "4px 8px",
@@ -1372,8 +1415,22 @@ export default function CalendarView({ role }: { role: Role }) {
                       fontWeight: 600,
                       padding: "2px 8px",
                       borderRadius: 6,
-                      background: selected.status === "confirmed" ? "rgba(16, 185, 129, 0.15)" : "rgba(245, 158, 11, 0.15)",
-                      color: selected.status === "confirmed" ? "#10b981" : "#f59e0b",
+                      background:
+                        selected.status === "confirmed"
+                          ? "rgba(16, 185, 129, 0.15)"
+                          : selected.status === "cancelled"
+                          ? "rgba(239, 68, 68, 0.15)"
+                          : selected.status === "completed"
+                          ? "rgba(59, 130, 246, 0.15)"
+                          : "rgba(245, 158, 11, 0.15)",
+                      color:
+                        selected.status === "confirmed"
+                          ? "#10b981"
+                          : selected.status === "cancelled"
+                          ? "#ef4444"
+                          : selected.status === "completed"
+                          ? "#3b82f6"
+                          : "#f59e0b",
                     }}
                   >
                     {selected.status.replace("_", " ").toUpperCase()}
@@ -1439,12 +1496,70 @@ export default function CalendarView({ role }: { role: Role }) {
                 </div>
               )}
 
-              {selected.notes && (
-                <div style={{ background: "var(--bg-secondary)", borderRadius: 8, padding: 12 }}>
-                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 3 }}>Notes</div>
-                  <div style={{ fontSize: 12.5 }}>{selected.notes}</div>
-                </div>
-              )}
+              {selected.notes && (() => {
+                const hasTimeline = selected.notes.includes("--- CONSOLIDATED LEAD TIMELINE")
+                const [primaryNotes, timelineRaw] = hasTimeline
+                  ? selected.notes.split("--- CONSOLIDATED LEAD TIMELINE (ALL INTERACTIONS AT ONE POINT) ---")
+                  : [selected.notes, ""]
+                const timelineLines = timelineRaw
+                  ? timelineRaw.split("\n").map(l => l.trim()).filter(l => l.startsWith("•"))
+                  : []
+
+                return (
+                  <>
+                    {primaryNotes.trim() && (
+                      <div style={{ background: "var(--bg-secondary)", borderRadius: 8, padding: 12 }}>
+                        <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 3 }}>Notes</div>
+                        <div style={{ fontSize: 12.5, whiteSpace: "pre-wrap" }}>{primaryNotes.trim()}</div>
+                      </div>
+                    )}
+
+                    {timelineLines.length > 0 && (
+                      <div style={{ background: "rgba(139, 92, 246, 0.05)", border: "1px solid rgba(139, 92, 246, 0.2)", borderRadius: 8, padding: 12 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8, color: "var(--accent-violet)", fontWeight: 700, fontSize: 12 }}>
+                          <History size={14} />
+                          <span>Unified Interaction Timeline ({timelineLines.length} points consolidated)</span>
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                          {timelineLines.map((line, idx) => {
+                            const isVoice = line.includes("Voice Call")
+                            const isWhatsApp = line.includes("WhatsApp")
+                            return (
+                              <div
+                                key={idx}
+                                style={{
+                                  fontSize: 11.5,
+                                  lineHeight: 1.45,
+                                  padding: "6px 8px",
+                                  borderRadius: 6,
+                                  background: "var(--bg-card)",
+                                  border: "1px solid var(--border)",
+                                  display: "flex",
+                                  alignItems: "flex-start",
+                                  gap: 6
+                                }}
+                              >
+                                <span style={{ marginTop: 2, display: "inline-flex", flexShrink: 0 }}>
+                                  {isVoice ? (
+                                    <PhoneCall size={12} color="#8b5cf6" />
+                                  ) : isWhatsApp ? (
+                                    <MessageSquare size={12} color="#10b981" />
+                                  ) : (
+                                    <Clock size={12} color="#3b82f6" />
+                                  )}
+                                </span>
+                                <span style={{ color: "var(--text-secondary)" }}>
+                                  {line.replace(/^•\s*/, "")}
+                                </span>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )
+              })()}
 
               {/* Reschedule inline form */}
               {rescheduleMode && (
@@ -1518,7 +1633,7 @@ export default function CalendarView({ role }: { role: Role }) {
                     <button
                       onClick={() => {
                         setRescheduleMode(true)
-                        setRescheduleDateTime(new Date(selected.event_at).toISOString().slice(0, 16))
+                        setRescheduleDateTime(toLocalDatetimeInput(selected.event_at))
                       }}
                       className="btn-ghost"
                       style={{ flex: 1, height: 34, fontSize: 12.5, display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}

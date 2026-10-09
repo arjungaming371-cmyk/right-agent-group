@@ -130,8 +130,8 @@ const WA_AUDIO_FILTER = (process.env.VOICEBOT_WA_AUDIO_FILTER || "1").trim() !==
 function buildWaAudioFilter() {
   const parts = []
   if (WA_AUDIO_FILTER) {
-    parts.push("highpass=f=70")
-    parts.push("acompressor=threshold=-18dB:ratio=3:attack=5:release=120:makeup=2")
+    parts.push("highpass=f=80")
+    parts.push("acompressor=threshold=-12dB:ratio=1.5:attack=10:release=100:makeup=1")
   }
   if (WA_TTS_VOLUME !== 1) parts.push(`volume=${WA_TTS_VOLUME}`)
   if (parts.length) parts.push("alimiter=limit=0.95")

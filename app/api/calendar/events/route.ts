@@ -43,6 +43,8 @@ export const GET = withRoute("calendar/events", async (req: NextRequest) => {
     sql += ` AND e.status = $${pIdx}`
     params.push(statusFilter)
     pIdx++
+  } else {
+    sql += ` AND e.status != 'cancelled'`
   }
   if (typeFilter && typeFilter !== "all") {
     sql += ` AND e.event_type = $${pIdx}`
@@ -66,17 +68,24 @@ export const POST = withRoute("calendar/events/create", async (req: NextRequest)
   if (!body.title || !body.eventAt || !body.eventType) {
     return NextResponse.json({ error: "title, eventAt, and eventType are required" }, { status: 400 })
   }
+  const parsedEventAt = new Date(body.eventAt)
+  if (isNaN(parsedEventAt.getTime())) {
+    return NextResponse.json({ error: "invalid eventAt date format" }, { status: 400 })
+  }
 
   if (branchId && body.branchId && body.branchId !== branchId) {
     return NextResponse.json({ error: "forbidden: cannot schedule events for another branch" }, { status: 403 })
   }
   const effectiveBranchId = branchId || body.branchId || null
 
+  const parsedEndAt = body.endAt ? new Date(body.endAt) : new Date(parsedEventAt.getTime() + 30 * 60000)
+  const safeEndAt = !isNaN(parsedEndAt.getTime()) ? parsedEndAt.toISOString() : new Date(parsedEventAt.getTime() + 30 * 60000).toISOString()
+
   const discovered: DiscoveredEvent = {
     title: String(body.title).slice(0, 150),
     eventType: body.eventType,
-    eventAt: new Date(body.eventAt).toISOString(),
-    endAt: body.endAt ? new Date(body.endAt).toISOString() : new Date(new Date(body.eventAt).getTime() + 30 * 60000).toISOString(),
+    eventAt: parsedEventAt.toISOString(),
+    endAt: safeEndAt,
     location: body.location || null,
     channel: body.channel || "phone",
     confidence: "high",

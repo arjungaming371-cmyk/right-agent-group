@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { requireRole } from "@/lib/auth"
 import { sessionBranchId } from "@/lib/branches"
 import { withRoute } from "@/lib/api-route"
-import { scanVoiceCalls } from "@/lib/calendar-agent"
+import { syncAllCalendarSources } from "@/lib/calendar-agent"
 
 export const dynamic = "force-dynamic"
 
@@ -22,7 +22,7 @@ export const POST = withRoute("calendar/scan", async (req: NextRequest) => {
   }
   const effectiveBranchId = branchId || body.branchId || null
 
-  const result = await scanVoiceCalls({
+  const result = await syncAllCalendarSources({
     limit,
     dryRun,
     branchId: effectiveBranchId,
