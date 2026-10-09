@@ -54,6 +54,7 @@
 
 require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") })
 
+const os = require("os")
 const crypto = require("crypto")
 const { spawn } = require("child_process")
 const {
@@ -183,6 +184,43 @@ const WA_TTS_PROVIDER = (process.env.VOICEBOT_WA_TTS_PROVIDER || process.env.TTS
 const ICE_SERVERS = (process.env.VOICEBOT_WA_ICE_SERVERS ||
   "stun:stun.l.google.com:19302")
   .split(",").map((s) => s.trim()).filter(Boolean).map((urls) => ({ urls }))
+
+/**
+ * Filter out virtual/hypervisor network adapters (e.g. WSL, Hyper-V vEthernet, Docker,
+ * VMware, VirtualBox) so werift's ICE and DTLS handshake bind directly to the machine's
+ * real internet-connected physical interface. Without this, internal virtual switches
+ * advertise inaccessible reflexive candidates that stall the DTLS handshake with Meta SFU.
+ */
+function getPhysicalInterfaceAddresses() {
+  const manual = (process.env.VOICEBOT_WA_INTERFACE_ADDRESSES || process.env.VOICEBOT_WA_INTERFACE_IP || "").trim()
+  if (manual) {
+    return manual.split(",").map((s) => s.trim()).filter(Boolean)
+  }
+  const ifaces = os.networkInterfaces()
+  const physicalIps = []
+  for (const [name, addrs] of Object.entries(ifaces)) {
+    const lower = name.toLowerCase()
+    if (
+      lower.includes("vethernet") ||
+      lower.includes("wsl") ||
+      lower.includes("hyper-v") ||
+      lower.includes("docker") ||
+      lower.includes("veth") ||
+      lower.includes("vmware") ||
+      lower.includes("virtual") ||
+      lower.includes("loopback")
+    ) {
+      continue
+    }
+    for (const a of addrs || []) {
+      const isIpv4 = a.family === "IPv4" || a.family === 4
+      if (isIpv4 && !a.internal && !a.address.startsWith("127.") && !a.address.startsWith("169.254.")) {
+        physicalIps.push(a.address)
+      }
+    }
+  }
+  return physicalIps.length > 0 ? physicalIps : undefined
+}
 
 // Fixed last-resort lines (clarify / hold / can't-reach-app) now come from
 // server/fallback-speech.js — shared with voicebot-server.js so the two
@@ -549,7 +587,11 @@ function filterSdpForWhatsApp(sdp) {
  * with its negotiated payloadType/ssrc, and the filtered answer SDP.
  */
 async function createCallAnswer(offerSdp) {
-  const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
+  const ifaceAddrs = getPhysicalInterfaceAddresses()
+  const pc = new RTCPeerConnection({
+    iceServers: ICE_SERVERS,
+    ...(ifaceAddrs ? { iceInterfaceAddresses: ifaceAddrs } : {}),
+  })
   const sendTrack = new MediaStreamTrack({ kind: "audio" })
   const sender = pc.addTrack(sendTrack)
 
@@ -1560,7 +1602,11 @@ function dropPendingOffer(pendingId, reason) {
  *  caller (Next.js dial route) MUST place it with Graph and register the
  *  returned call_id, or the sweeper reclaims the peer connection. */
 async function createOutboundOffer({ phoneNumberId, from, to, branchId }) {
-  const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
+  const ifaceAddrs = getPhysicalInterfaceAddresses()
+  const pc = new RTCPeerConnection({
+    iceServers: ICE_SERVERS,
+    ...(ifaceAddrs ? { iceInterfaceAddresses: ifaceAddrs } : {}),
+  })
   const sendTrack = new MediaStreamTrack({ kind: "audio" })
   const sender = pc.addTrack(sendTrack)
   // werift fires onTrack inside setRemoteDescription — i.e. the moment the
