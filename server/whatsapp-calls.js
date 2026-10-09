@@ -63,6 +63,32 @@ const {
   RtpPacket,
   RtpHeader,
 } = require("werift")
+
+// Ensure DTLS record coalescing (RFC 6347 §4.1.1): Werift by default sends each handshake
+// record in Flight 5 (Certificate, ClientKeyExchange, CertificateVerify, ChangeCipherSpec, Finished)
+// as separate UDP datagrams. Meta's WhatsApp SFU expects them coalesced in one packet (<= 1400 bytes).
+try {
+  const path = require("path")
+  const weriftEntry = require.resolve("werift")
+  const flightPath = path.resolve(path.dirname(weriftEntry), "../../dtls/src/flight/flight.js")
+  const flightMod = require(flightPath)
+  if (flightMod && flightMod.Flight && flightMod.Flight.prototype) {
+    const origTransmit = flightMod.Flight.prototype.transmit
+    flightMod.Flight.prototype.transmit = async function(buffers) {
+      if (Array.isArray(buffers)) {
+        this.send = (buf) => {
+          const totalLen = buf.reduce((acc, v) => acc + (v ? v.length : 0), 0)
+          if (totalLen <= 1400) return this.transport.send(Buffer.concat(buf))
+          return Promise.all(buf.map((v) => this.transport.send(v)))
+        }
+      }
+      return origTransmit.apply(this, arguments)
+    }
+  }
+} catch (e) {
+  console.warn("Could not patch werift Flight coalescing:", e.message)
+}
+
 const { OpusEncoder } = require("@discordjs/opus")
 const voiceProviders = require("./voice-providers")
 const recorder = require("./recorder")
@@ -830,6 +856,7 @@ class WhatsAppCallSession {
     })
 
     if (this.sender?.dtlsTransport) {
+      console.log(`🔐 WhatsApp call ${this.callSid} initial DTLS state: ${this.sender.dtlsTransport.state}, role: ${this.sender.dtlsTransport.role}`)
       this.sender.dtlsTransport.onStateChange.subscribe((state) => {
         console.log(`🔐 WhatsApp call ${this.callSid} DTLS state: ${state}`)
         if (state === "connected") {
@@ -840,6 +867,23 @@ class WhatsAppCallSession {
           }
         }
       })
+      const iceConn = this.sender.dtlsTransport.iceTransport?.connection
+      if (iceConn) {
+        iceConn.onData.subscribe((buf) => {
+          const isDtls = buf.length > 0 && buf[0] > 19 && buf[0] < 64
+          if (isDtls) {
+            console.log(`🔐 [DTLS-IN] packet len=${buf.length} byte0=${buf[0]}`)
+          }
+        })
+        const origSend = iceConn.send.bind(iceConn)
+        iceConn.send = async (data) => {
+          const isDtls = data.length > 0 && data[0] > 19 && data[0] < 64
+          if (isDtls) {
+            console.log(`🔐 [DTLS-OUT] packet len=${data.length} byte0=${data[0]} nominated=${!!iceConn.nominated} consentFresh=${iceConn.consentFresh}`)
+          }
+          return origSend(data)
+        }
+      }
     }
 
     // Inbound audio: the REMOTE track. werift fires onTrack during
