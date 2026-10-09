@@ -47,6 +47,10 @@ export async function maybeRequeueMissed(opts: {
     // A 23505 here means the number ALREADY has another pending/dialing row
     // (e.g. the operator re-added the lead while this webhook was in flight)
     // — the anti-stacking index doing its job, not an error.
+    // BACKOFF: base delay × retry attempt (1st retry 12 min, 2nd 24 min …)
+    // — fast enough to catch the lead the same morning, spaced enough to
+    // never feel like harassment.
+    const delayMinutes = Math.min(1440, Math.max(5, settings.retryDelayMinutes * (retryCount + 1)))
     let win: { retry_count: number; scheduled_at: string } | undefined
     try {
       const updated = await query(
@@ -61,7 +65,7 @@ export async function maybeRequeueMissed(opts: {
                 outcome = NULL, outcome_at = NULL, outcome_detail = NULL
           WHERE id = $1 AND retry_count = $3
           RETURNING retry_count, scheduled_at`,
-        [queueRow.id, String(settings.retryDelayMinutes), retryCount]
+        [queueRow.id, String(delayMinutes), retryCount]
       )
       win = updated.rows[0] as { retry_count: number; scheduled_at: string } | undefined
     } catch (e: unknown) {

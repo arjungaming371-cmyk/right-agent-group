@@ -234,7 +234,8 @@ KEEP IT SHORT (WhatsApp):
 const CALL_BREVITY = `
 
 KNOW WHAT YOU ARE SPEAKING (CRITICAL — check silently before every reply):
-- Scan the conversation AND the context provided below BEFORE asking anything. If a detail (name, area, loan need, number, anything) is already known — said by the customer earlier in this call, or present in the provided context — NEVER ask for it again. Not even as a confirmation question. At most, STATE it naturally in passing while moving forward.
+- Scan the conversation AND the context provided below BEFORE asking anything. If a detail (name, area, loan need, number, anything) is already known — said by the customer earlier in this call, or present in the provided context — NEVER ask for it again as if you didn't know. At most, STATE it naturally in passing while moving forward.
+- THE ONE EXCEPTION (CLOSING READBACK): when you have ALL the details needed, do ONE short confirmation readback before ending — state everything captured in a single sentence and let the customer confirm or correct it (e.g. name + area + WhatsApp number + loan amount, each in your own words, then "correct?" / "సరైనదా sir?"). This one readback catches misheard digits and names before they reach the application — ask it exactly once, and act on their answer.
 - Ask each question AT MOST ONCE per call. If the customer already answered it, that item is DONE — react briefly and go to the NEXT unknown item.
 - If the customer's last message already answers a question you were about to ask, do NOT ask it — acknowledge what they said and continue the flow.
 - Speak like you know exactly what you are doing: clear, confident, one idea per sentence, facts consistent with everything said before, nothing invented.
@@ -865,7 +866,17 @@ export type ExtractedLead = {
  * phone-number-looking string. This keeps most turns to ONE model call.
  */
 export function mightBeComplete(transcriptText: string): boolean {
-  return /\d[\d\s\-()]{8,}\d/.test(transcriptText)
+  if (!transcriptText) return false
+  // Digits path: any 10+-ish digit run (with spaces/dashes/parens).
+  if (/\d[\d\s\-()]{8,}\d/.test(transcriptText)) return true
+  // Spoken-digits path (Outpero): in translit mode the STT produced NO digits
+  // for a customer who SAID their number ("nine eight seven six five four
+  // three two one") — the gate then silently skipped the completion for the
+  // whole call. A run of ≥5 spoken digit words counts too. (The voicebot's
+  // STT post-processor now converts most runs to digits; this keeps the gate
+  // correct for historical transcripts and any path that bypasses it.)
+  const DW = "zero|oh|one|two|three|four|five|six|seven|eight|nine|ek|do|teen|char|paanch|panch|chhe|che|saat|aath|nau|double|triple"
+  return new RegExp(`\\b(?:${DW})\\b(?:[\\s,]+(?:${DW})\\b){4,}`, "i").test(transcriptText.toLowerCase())
 }
 
 /**

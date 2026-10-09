@@ -222,3 +222,64 @@ talking to. The real duration is read from the voice_calls row first now.
 Deployment after pulling this code: `git pull && npm install (root) &&
 pm2 restart all`. Talking points need one migration:
 `node scripts/run-migrations.js` (adds `outbound_queue.talking_points`).
+
+---
+
+## 8. Outpero-grade upgrades (2026-10)
+
+Six changes tuned the outbound stack against the Outpero benchmark (instant
+lead calls, code-switched Telugu/Hindi/English, every detail confirmed, WhatsApp
+sent before the call ends, auto-retry that actually retries):
+
+**Speed-to-lead** — a NEW lead (dashboard form, CSV, API) is dialed the moment
+it is created, while the person is still holding their phone. Fire-and-forget
+from `POST /api/leads` through `lib/speed-to-lead.ts`. Guarded by: the
+`dialer_settings.speed_to_lead` kill switch (dashboard-tunable, default ON),
+the SAME compliance gate as every other dial (DND, Lead-Brain stage, calling
+window — outside the window the lead is queued for the window open instead of
+dropped), the double-dial guard, and the dual-channel resolver (`auto` =
+WhatsApp when callable there, else the phone line). Only NEW leads trigger it;
+dedupe-updates of existing leads never auto-dial.
+
+**Retry matrix** — `lib/dialer-logic.ts` no longer treats every failure the
+same: `missed`/busy → retry, `voicemail` → retry, `rejected` (WhatsApp
+decline) → NEVER auto-retry (Meta revokes call permission after 4 consecutive
+unanswered calls — hammering declined dials burns the permission budget),
+`failed`/`resolved` → never. The base delay dropped from 120 to **12 minutes**
+with a per-attempt backoff (12 → 24 → …), so a busy lead is re-dialed the same
+morning, not the same evening.
+
+**Detail readback** — the anti-repetition prompt rules had accidentally
+FORBIDDEN confirming anything ("not even as a confirmation question"), so
+Priya never verified what she heard. The one-exception CLOSING READBACK is now
+explicitly trained into `CALL_BREVITY` (lib/llm.ts): once all details are
+gathered, Priya states everything back in one sentence and lets the customer
+correct it before the WhatsApp link goes out.
+
+**Spoken-number capture** — a customer who SAYS their phone number
+("nine eight seven six five four three two one") produced zero digits in
+translit mode, silently skipping the WhatsApp-link completion for the whole
+call. Runs of ≥5 spoken digit words (English + common translit variants,
+double/triple) now become digits in the STT post-processor
+(`voiceProviders.spokenNumbersToDigits`), and `mightBeComplete` accepts them
+too.
+
+**STT accuracy** — per-utterance language AUTO-detect is the default
+(`SARVAM_STT_AUTO=1`): a Hindi reply inside a Telugu call no longer gets
+decoded with a `te-IN` hint. The turn API ships the lead's name + branch brand
+words back on every "start" response; the voicebot canonicalizes near-miss
+spellings of those tokens per call ("soresh" → "Suresh") before the transcript
+reaches Priya or the Lead Brain.
+
+**Smart reschedule** — "రేపు చెప్తాను" / "call me at 6pm" / "कल शाम को call
+करना" now books a REAL callback (`leads.callback_at`, visible on the Calendar)
+and Priya confirms it out loud before ending the call — the promise used to
+live only in the transcript. Manual operator callbacks are never overwritten.
+Implementation: `lib/speech-scheduler.ts`, wired into both turn paths.
+
+**Also tuned**: TTS no longer says Telugu "okka minute" in English/Hindi
+replies, times ("6:30pm" → "six thirty p m"), ordinals ("2nd") and dates are
+spoken naturally, one Romanized keyword no longer flips the whole reply to the
+wrong voice (sticky locale, ≥2 keyword rule), auto-retry re-schedules against
+the REAL compliance window (not hardcoded 8:00), and the LLM-failure line no
+longer re-asks for the name mid-call.

@@ -30,6 +30,7 @@ if (!SCENARIO) {
     ["C", "sarvam STT + TTS payloads (mocked fetch)", {
       STT_PROVIDER: "sarvam", TTS_CALL_PROVIDER: "sarvam",
       SARVAM_API_KEY: "test-key-sarvam",
+      SARVAM_STT_AUTO: "0", // pin the hint path here; scenario F covers auto (the default)
     }],
     ["D", "cartesia TTS payload (mocked fetch)", {
       TTS_CALL_PROVIDER: "cartesia",
@@ -38,6 +39,9 @@ if (!SCENARIO) {
       CARTESIA_VOICE_ID: "11111111-2222-3333-4444-555555555555",
     }],
     ["E", "script guard + multipart builder", {
+      SARVAM_API_KEY: "test-key-sarvam",
+    }],
+    ["F", "STT auto-detect default + spoken digits + vocabulary", {
       SARVAM_API_KEY: "test-key-sarvam",
     }],
   ]
@@ -309,8 +313,59 @@ async function scenarioE() {
   }
 }
 
+async function scenarioF() {
+  // --- STT auto-detect is the DEFAULT (Outpero-grade trilingual): no hint field ---
+  let captured = []
+  const restore = await mockFetchOnce(
+    () => ({ ok: true, json: async () => ({ transcript: "number nine double eight six five", language_code: "te-IN" }) }),
+    captured
+  )
+  try {
+    const out = await vp.sarvamStt(fakeWav(), "telugu")
+    const req = captured[0]
+    const body = req.init.body.toString("utf8")
+    check("F1 auto-detect default: NO language hint field", !/name="language_code"/.test(body))
+    check("F2 spoken digit run → digits (double 8 handled)", out.text === "number 98865", JSON.stringify(out.text))
+  } finally { restore() }
+
+  // --- call-scoped vocabulary: exact + near-miss canonicalization ---
+  const captured2 = []
+  const restore2 = await mockFetchOnce(
+    () => ({ ok: true, json: async () => ({ transcript: "naa peru soresh reddy", language_code: "te-IN" }) }),
+    captured2
+  )
+  try {
+    vp.setCallVocabulary("wa-test-vocab", ["Suresh"])
+    const out = await vp.sarvamStt(fakeWav(), "telugu", "wa-test-vocab")
+    check("F3 vocabulary near-miss corrected (soresh → Suresh)", out.text === "naa peru Suresh reddy", JSON.stringify(out.text))
+    vp.clearCallVocabulary("wa-test-vocab")
+    const out2 = await vp.sarvamStt(fakeWav(), "telugu", "wa-test-vocab")
+    check("F4 vocabulary cleared → transcript untouched", out2.text === "naa peru soresh reddy", JSON.stringify(out2.text))
+  } finally { restore2() }
+
+  // --- isolated helpers ---
+  check("F5 spokenNumbersToDigits: 10-word run",
+    vp.spokenNumbersToDigits("nine eight seven six five four three two one zero") === "9876543210",
+    vp.spokenNumbersToDigits("nine eight seven six five four three two one zero"))
+  check("F6 spokenNumbersToDigits: amounts untouched",
+    vp.spokenNumbersToDigits("sixteen thousand five hundred rupees") === "sixteen thousand five hundred rupees")
+  check("F7 normalizeForTts: 6:30pm → six thirty p m",
+    vp.normalizeForTts("I will call you at 6:30pm").includes("six thirty p m"),
+    vp.normalizeForTts("I will call you at 6:30pm"))
+  check("F8 normalizeForTts: 1 minute stays English (okka leak removed)",
+    vp.normalizeForTts("give me 1 minute sir") === "give me one minute sir",
+    vp.normalizeForTts("give me 1 minute sir"))
+  check("F9 normalizeForTts: 2nd Feb ordinal",
+    vp.normalizeForTts("meeting on 2nd Feb").toLowerCase().includes("second feb"),
+    vp.normalizeForTts("meeting on 2nd Feb"))
+  check("F10 sticky locale: one keyword does not flip English",
+    vp.resolveTtsLocale("Let me check the EMI for you, sir", "english", { english: "en-IN", hindi: "hi-IN", telugu: "te-IN" }) === "en-IN")
+  check("F11 sticky locale: two keywords still flip",
+    vp.resolveTtsLocale("meeru cheppandi sir", "english", { english: "en-IN", hindi: "hi-IN", telugu: "te-IN" }) === "te-IN")
+}
+
 ;(async () => {
-  const scenarios = { A: scenarioA, B: scenarioB, C: scenarioC, D: scenarioD, E: scenarioE }
+  const scenarios = { A: scenarioA, B: scenarioB, C: scenarioC, D: scenarioD, E: scenarioE, F: scenarioF }
   await scenarios[SCENARIO]()
   console.log(`\n  ${pass} passed, ${fail} failed (scenario ${SCENARIO})\n`)
   process.exit(fail ? 1 : 0)

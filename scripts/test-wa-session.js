@@ -232,7 +232,7 @@ const until = async (fn, ms) => {
   ok("encoder pinned to 64 kbps (was libopus AUTO in MUSIC mode — smeared consonants)",
     enc.getBitrate() === 64000 && WA_OPUS_BITRATE === 64000, `bitrate=${enc.getBitrate()}`)
   ok("loudness chain is fullband + leveled (highpass, compressor, limiter — NO phone-line 3400 lowpass)",
-    WA_AUDIO_FILTER_CHAIN.includes("highpass=f=70")
+    WA_AUDIO_FILTER_CHAIN.includes("highpass=f=80")
     && WA_AUDIO_FILTER_CHAIN.includes("acompressor=")
     && WA_AUDIO_FILTER_CHAIN.includes("alimiter=")
     && !WA_AUDIO_FILTER_CHAIN.includes("3400"))

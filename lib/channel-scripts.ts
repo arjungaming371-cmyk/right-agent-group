@@ -167,9 +167,13 @@ export const DEFAULT_VOICE_CLOSINGS: VoiceClosings = {
     telugu: "Thank you so much sir, have a great day, bye!",
   },
   retry: {
-    english: "Sorry, I had a small technical moment. Could you please share your name so I can send your loan application link?",
-    hindi: "Sorry sir, एक छोटी technical problem हो गई थी. कृपया अपना नाम बताइए ताकि मैं आपका loan application link भेज सकूँ.",
-    telugu: "Sorry sir, చిన్న technical issue వచ్చింది. దయచేసి మీ పేరు చెప్పగలరా, loan application link పంపిస్తాను.",
+    // Neutral repeat-request, NOT a name re-ask: this line can fire MID-CALL
+    // (transient LLM failure on any turn), when the name was already given
+    // and re-asking it is both awkward and forbidden by the anti-repetition
+    // rules. Just ask them to repeat the last thing they said.
+    english: "Sorry sir, I couldn't hear that clearly — could you please say that again?",
+    hindi: "Sorry sir, मुझे ठीक से सुनाई नहीं दिया — कृपया वो दोबारा बताइए.",
+    telugu: "Sorry sir, నాకు సరిగ్గా వినిపించలేదు — దయచేసి మళ్ళీ చెప్పగలరా?",
   },
   rateLimit: {
     english: "Sorry sir, we're having a brief network issue on our end. I'll have someone call you back in a few minutes to continue — thank you for your patience!",

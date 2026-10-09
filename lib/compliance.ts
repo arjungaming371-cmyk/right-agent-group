@@ -66,6 +66,20 @@ export function invalidateComplianceCache(): void {
   _cache = null
 }
 
+/**
+ * The configured calling window (compliance_settings) in the shape
+ * nextWindowStartMs() consumes — so every auto-reschedule targets the window
+ * the dialer ACTUALLY enforces. The old auto-pause re-scheduled rows against
+ * hardcoded defaults (8:00 IST, Mon-Sat) while the gate read THIS table: a
+ * deployment with a 10:00 window got rows re-scheduled to 08:00, re-skipped
+ * as outside_window, and silently pushed to the next day — a daily
+ * throughput leak nobody could see.
+ */
+export async function getCallingWindow(): Promise<{ startHour: number; days: string[] }> {
+  const settings = await getSettings()
+  return { startHour: settings.startHour, days: [...settings.days] }
+}
+
 /** Is `at` (defaults to now) within the configured calling window, in IST? */
 export async function isWithinCallingWindow(at: Date = new Date()): Promise<boolean> {
   const settings = await getSettings()

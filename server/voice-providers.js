@@ -42,10 +42,15 @@ const SARVAM_STT_MODEL = process.env.SARVAM_STT_MODEL || "saaras:v4"
 // translit = Romanized output (Tenglish/Hinglish). transcribe = native script.
 // codemix = Indic words in native script with English words in Latin.
 const SARVAM_STT_MODE = process.env.SARVAM_STT_MODE || "translit"
-// Default: pass the call's known language as a recognition hint. SARVAM_STT_AUTO=1
-// always auto-detects instead — use it
-// if callers switch languages mid-sentence so often the hint hurts more.
-const SARVAM_STT_AUTO = (process.env.SARVAM_STT_AUTO || "0").trim() === "1"
+// Language hint policy (Outpero-grade trilingual: Telugu + Hindi + English):
+// DEFAULT ON — Saaras auto-detects the language of EVERY utterance. Forcing
+// the call's declared language as a hint decoded a Hindi reply inside a
+// Telugu call with a te-IN hint (mangled translit) and locked the call to
+// the wrong voice until the turn API self-healed it. Auto-detect also makes
+// the FIRST cross-language utterance land correctly, not just the ones after
+// the app's language resolution caught up. Set SARVAM_STT_AUTO=0 to restore
+// the hint-anchored behaviour for single-language deployments.
+const SARVAM_STT_AUTO = (process.env.SARVAM_STT_AUTO || "1").trim() === "1"
 
 const SARVAM_TTS_MODEL = process.env.SARVAM_TTS_MODEL || "bulbul:v3"
 const SARVAM_TTS_SPEAKER_TELUGU = process.env.SARVAM_TTS_SPEAKER_TELUGU || "priya"
@@ -85,25 +90,44 @@ const CARTESIA_LOCALES = { english: "en-IN", hindi: "hi-IN", telugu: "te-IN" }
 // lib/llm.ts — deliberately DROPPING the ambiguous short ones ("ela", "idi",
 // "adi", "hu", "mari", "meera", "mari") so an ordinary ENGLISH sentence can
 // never trip them and get hijacked to the Indic voice.
-const _TELUGU_RE = /[\u0C00-\u0C7F]/g // ఀ-౿
-const _DEVANAGARI_RE = /[\u0900-\u097F]/g // ऀ-ॿ
-const _ROMAN_TELUGU_RE = /\b(kavali|kavala|kavalenu|naku|naaku|maaku|meeku|meeru|neeku|gurinchi|cheppandi|cheppanu|cheppali|cheppu|chepandi|cheyandi|cheyali|endukante|avunu|ledhu|ledu|vaddhu|vaddu|undhi|undi|unna|unnaru|unnara|unnaya|istara|matladutunnanu|matladali|matladandi|matladanu|telugu|telugulo|namaskaram|garu|kaadu|kadu|kadha|telusukovadaniki|enti|ento|enta|enni|eppudu|evaru|ekkada|nenu|manaki|memu|maa|kosam|chudandi|baga|kada|chalu|ayithe|ayindi|ayipoyindi|chesanu|chesam|chesaru|chestaru|chestunna|chestunnanu|chesukondi|antundi|malli|kuda|antha|inka|konchem|mariyu)\b/i
-const _ROMAN_HINDI_RE = /\b(chahiye|chaiye|hai|hain|nahi|nahin|haan|boliye|batao|bataiye|bataye|baat|karna|karni|karein|karta|karti|mera|meri|mere|naam|kya|kyun|kaise|kaha|mujhe|humein|apna|apni|hoga|hogi|dijiye|hoon|hun|tum|aap|samjha|samjhe|theek|achha|kuch|kripya|thoda|zara|matlab|bhej|bhejna|bhejiye)\b/i
+//
+// STICKY LOCALE (Outpero-grade prosody): the roman keyword lists now need
+// TWO OR MORE hits to override the declared language — a single Romanized
+// keyword inside an otherwise English sentence ("Let me check the EMI for
+// you, sir") used to reroute the WHOLE sentence to the Telugu/Hindi voice,
+// producing audible accent flips mid-reply. Native script still wins on the
+// FIRST character. NOTE: these test regexes are intentionally NON-global —
+// a global regex + .test() advances lastIndex and flips true/false on
+// alternating calls (stateful-regex bug).
+const _TELUGU_RE = /[\u0C00-\u0C7F]/ // ఀ-౿
+const _DEVANAGARI_RE = /[\u0900-\u097F]/ // ऀ-ॿ
+const _ROMAN_TELUGU_RE = /\b(kavali|kavala|kavalenu|naku|naaku|maaku|meeku|meeru|neeku|gurinchi|cheppandi|cheppanu|cheppali|cheppu|chepandi|cheyandi|cheyali|endukante|avunu|ledhu|ledu|vaddhu|vaddu|undhi|undi|unna|unnaru|unnara|unnaya|istara|matladutunnanu|matladali|matladandi|matladanu|telugu|telugulo|namaskaram|garu|kaadu|kadu|kadha|telusukovadaniki|enti|ento|enta|enni|eppudu|evaru|ekkada|nenu|manaki|memu|maa|kosam|chudandi|baga|kada|chalu|ayithe|ayindi|ayipoyindi|chesanu|chesam|chesaru|chestaru|chestunna|chestunnanu|chesukondi|antundi|malli|kuda|antha|inka|konchem|mariyu)\b/gi
+const _ROMAN_HINDI_RE = /\b(chahiye|chaiye|hai|hain|nahi|nahin|haan|boliye|batao|bataiye|bataye|baat|karna|karni|karein|karta|karti|mera|meri|mere|naam|kya|kyun|kaise|kaha|mujhe|humein|apna|apni|hoga|hogi|dijiye|hoon|hun|tum|aap|samjha|samjhe|theek|achha|kuch|kripya|thoda|zara|matlab|bhej|bhejna|bhejiye)\b/gi
+
+function countRomanHits(re, text) {
+  // String.match with a /g regex never leaks lastIndex state across calls.
+  const hits = text.match(re)
+  return hits ? hits.length : 0
+}
 
 /**
  * Resolve the TTS locale for a reply, letting native script or Romanized Indic
  * words overrule a stale declared language (a Telugu sentence must never come out
- * of the English voice with a Western accent).
+ * of the English voice with a Western accent). Romanized evidence needs ≥2
+ * keyword hits — see the STICKY LOCALE note above.
  */
 function resolveTtsLocale(text, language, locales) {
-  const teluguChars = (text.match(_TELUGU_RE) || []).length
-  const devanagariChars = (text.match(_DEVANAGARI_RE) || []).length
+  const teluguChars = (text.match(/[\u0C00-\u0C7F]/g) || []).length
+  const devanagariChars = (text.match(/[\u0900-\u097F]/g) || []).length
   if (teluguChars || devanagariChars) {
     // Mixed scripts shouldn't happen, but the dominant script wins.
     return teluguChars >= devanagariChars ? locales.telugu : locales.hindi
   }
-  if (_ROMAN_TELUGU_RE.test(text)) return locales.telugu
-  if (_ROMAN_HINDI_RE.test(text)) return locales.hindi
+  const teluguHits = countRomanHits(_ROMAN_TELUGU_RE, text)
+  const hindiHits = countRomanHits(_ROMAN_HINDI_RE, text)
+  if (teluguHits >= 2 || hindiHits >= 2) {
+    return teluguHits >= hindiHits ? locales.telugu : locales.hindi
+  }
   return locales[language] || locales.english
 }
 
@@ -208,6 +232,20 @@ function normalizeNumbersToEnglishWords(text) {
   if (!text) return text
   let s = String(text)
 
+  // 0. TIMES before decimal handling — "6:30" must become "six thirty",
+  // never "six point three zero" (the old decimal rule mangled every time
+  // of day: "call you at 6:30pm" → "six point three zero p m").
+  s = s.replace(/\b(\d{1,2}):(\d{2})\s*([ap])\.?\s*m?\b/gi, (m, hh, mm, ap) =>
+    `${smallNumberToWords(parseInt(hh, 10))} ${smallNumberToWords(parseInt(mm, 10))} ${ap ? `${ap.toLowerCase()} m` : ""}`.trim())
+  s = s.replace(/\b(\d{1,2})\s*([ap])\.?m\b/gi, (m, hh, ap) =>
+    `${smallNumberToWords(parseInt(hh, 10))} ${ap.toLowerCase()} m`)
+  // 0b. ORDINALS before integer handling — "1st" used to read "one st".
+  const ORDINALS = { 1: "first", 2: "second", 3: "third", 4: "fourth", 5: "fifth", 6: "sixth", 7: "seventh", 8: "eighth", 9: "ninth", 10: "tenth", 11: "eleventh", 12: "twelfth", 13: "thirteenth", 14: "fourteenth", 15: "fifteenth", 16: "sixteenth", 17: "seventeenth", 18: "eighteenth", 19: "nineteenth", 20: "twentieth", 21: "twenty first", 22: "twenty second", 23: "twenty third", 24: "twenty fourth", 25: "twenty fifth", 26: "twenty sixth", 27: "twenty seventh", 28: "twenty eighth", 29: "twenty ninth", 30: "thirtieth", 31: "thirty first" }
+  s = s.replace(/\b(\d{1,2})(st|nd|rd|th)\b/gi, (m, num) => ORDINALS[parseInt(num, 10)] || m)
+  // 0c. DATES with month names — "12 Aug" / "August 12" read naturally.
+  s = s.replace(/\b(\d{1,2})\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b/gi, (m, d, mon) =>
+    `${integerToWords(parseInt(d, 10))} ${mon.toLowerCase()}`)
+
   // 1. Remove commas in numbers like 16,00,000 or 14,500
   while (/\b(\d+),(\d{2,3})\b/.test(s)) {
     s = s.replace(/\b(\d+),(\d{2,3})\b/g, "$1$2")
@@ -286,7 +324,11 @@ function normalizeForTts(text) {
   out = out.replace(/\*([^*]+)\*/g, "$1") // *single-asterisk* bold too
   out = out.replace(/\p{Extended_Pictographic}/gu, "") // emoji is never spoken
   out = out.replace(/[—–]/g, ", ") // dashes to gentle commas to prevent long dead pauses
-  out = out.replace(/\b1\s*minute\b/gi, "okka minute")
+  // REMOVED: "1 minute" → "okka minute". A hard-coded Telugu substitution in
+  // the SHARED normalizer made an English or Hindi reply say "okka minute"
+  // with the en-IN/hi-IN voice — the exact foreign-accent glitch this file
+  // exists to prevent. English "one minute" (from the number rules below)
+  // is correct in every language pair.
   out = out.replace(/&/g, " and ")
   out = out.replace(/(\.{2,}|…)/g, ".") // ellipses to single period
   out = out.replace(/!\s+/g, ", ") // soften exclamations to commas to prevent terminal pitch crashes
@@ -380,6 +422,118 @@ function fixSttLexicon(text) {
   return out
 }
 
+// ---------- Call-scoped vocabulary (Outpero-style name accuracy) ----------
+//
+// Saaras has no decode-time custom-vocabulary biasing on the batch endpoint,
+// so the caller's NAME (the single most-mangled token in every call) is
+// canonicalized post-hoc: the turn API's "start" response ships the lead's
+// name + branch brand words, the voicebot hands them here, and every
+// transcript on that call gets phonetic-ish near-miss spellings corrected
+// back to the real word ("suresh"→"Suresh", "soresh"→"Suresh",
+// "sharmaa"→"Sharma"). Scoped per callSid so two concurrent calls can
+// never pollute each other's transcripts.
+const callVocabulary = new Map() // callSid → string[]
+const VOCAB_MAX_TERMS = 32
+const VOCAP_MAX_AGE_MS = 30 * 60 * 1000
+
+function setCallVocabulary(callSid, terms) {
+  if (!callSid) return
+  const clean = (Array.isArray(terms) ? terms : [])
+    .map((t) => String(t || "").trim())
+    .filter((t) => t.length >= 3 && t.length <= 40)
+    .slice(0, VOCAB_MAX_TERMS)
+  if (clean.length) callVocabulary.set(callSid, { terms: clean, at: Date.now() })
+}
+
+function clearCallVocabulary(callSid) {
+  if (callSid) callVocabulary.delete(callSid)
+}
+
+function levenshtein(a, b, max) {
+  if (Math.abs(a.length - b.length) > max) return max + 1
+  const prev = new Array(b.length + 1)
+  const cur = new Array(b.length + 1)
+  for (let j = 0; j <= b.length; j++) prev[j] = j
+  for (let i = 1; i <= a.length; i++) {
+    cur[0] = i
+    let best = cur[0]
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost)
+      if (cur[j] < best) best = cur[j]
+    }
+    if (best > max) return max + 1 // early exit — rows can only get worse
+    for (let k = 0; k <= b.length; k++) prev[k] = cur[k]
+  }
+  return prev[b.length]
+}
+
+function applyCallVocabulary(text, callSid) {
+  if (!text || !callSid) return text
+  const entry = callVocabulary.get(callSid)
+  if (!entry || !entry.terms.length) return text
+  if (Date.now() - entry.at > VOCAP_MAX_AGE_MS) { callVocabulary.delete(callSid); return text }
+  let out = String(text)
+  for (const term of entry.terms) {
+    // 1) Exact whole-word match — canonicalize the casing/spelling.
+    const exact = new RegExp(`\\b${term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "gi")
+    if (exact.test(out)) { out = out.replace(exact, term); continue }
+    // 2) Near-miss: a single word within edit distance ≤ 2 (words ≥ 4 chars
+    //    only — short words are too risky to fuzzy-match).
+    const words = out.split(/\s+/)
+    for (let w = 0; w < words.length; w++) {
+      const bare = words[w].replace(/[^\p{L}\p{N}]/gu, "")
+      if (bare.length < 4) continue
+      const dl = levenshtein(bare.toLowerCase(), term.toLowerCase(), 2)
+      if (dl <= 2) words[w] = term
+    }
+    out = words.join(" ")
+  }
+  return out
+}
+
+// ---------- Spoken digit strings → digits (Outpero-style number capture) ----------
+//
+// In translit mode a customer who SAYS their phone number ("nine eight seven
+// six five four three two one") produced NO digits — so the WhatsApp-link
+// completion gate and the lead-form extraction both silently skipped the
+// call. Runs of ≥5 spoken digit words (plus double/triple/"oh") now become
+// the digit string. Deliberately conservative: 5+ digit words ≈ a (partial)
+// phone number or OTP, never an amount ("sixteen thousand five hundred" is
+// untouched — "thousand"/"hundred" are not digit words).
+const _DIGIT_WORD_MAP = {
+  zero: "0", oh: "0", o: "0", one: "1", two: "2", to: "2", too: "2", three: "3", four: "4",
+  five: "5", six: "6", seven: "7", eight: "8", nine: "9",
+  // common translit variants Saaras emits for Indian-accent digits
+  ek: "1", do: "2", teen: "3", char: "4", paanch: "5", panch: "5", chhe: "6", che: "6",
+  saat: "7", aath: "8", nau: "9", ninee: "9", foure: "4", shei: "6", threen: "3",
+}
+// Word-boundary AFTER every token too: without it the "o" alternative ate the
+// first letter of "one" and produced digit soup ("...320ne zero").
+const _DW_ALT = Object.keys(_DIGIT_WORD_MAP).concat(["double", "triple"]).map((w) => `${w}\\b`).join("|")
+const _SPOKEN_DIGIT_RUN = new RegExp(`\\b(?:${_DW_ALT})(?:[\\s,]+(?:${_DW_ALT})){4,}`, "gi")
+
+function spokenNumbersToDigits(text) {
+  if (!text) return text
+  return String(text).replace(_SPOKEN_DIGIT_RUN, (run) => {
+    let out = ""
+    let pendingRepeat = 0
+    for (const raw of run.split(/[\s,]+/)) {
+      const w = raw.toLowerCase()
+      if (!w) continue
+      if (w === "double") { pendingRepeat = 2; continue }
+      if (w === "triple") { pendingRepeat = 3; continue }
+      const d = _DIGIT_WORD_MAP[w]
+      if (!d) continue
+      if (pendingRepeat) { out += d.repeat(pendingRepeat); pendingRepeat = 0 }
+      else out += d
+    }
+    // ≥5 words ≈ a partial/full phone number or OTP — convert. Anything
+    // shorter stays as words ("nine eight" is usually something else).
+    return out.length >= 5 ? out : run
+  })
+}
+
 function buildMultipart(fields, fileField, fileBuffer, filename, contentType) {
   const boundary = "----rag-voice-" + Math.random().toString(16).slice(2)
   const parts = []
@@ -398,7 +552,7 @@ function buildMultipart(fields, fileField, fileBuffer, filename, contentType) {
   return { body: Buffer.concat(parts), contentType: `multipart/form-data; boundary=${boundary}` }
 }
 
-async function sarvamStt(wavBuffer, language) {
+async function sarvamStt(wavBuffer, language, callSid) {
   if (!SARVAM_API_KEY) throw new Error("SARVAM_API_KEY is not set — cannot use STT_PROVIDER=sarvam")
   const fields = { model: SARVAM_STT_MODEL, mode: SARVAM_STT_MODE }
   if (!SARVAM_STT_AUTO) {
@@ -414,7 +568,14 @@ async function sarvamStt(wavBuffer, language) {
   })
   const data = await res.json()
   console.log(`⏱ STT(sarvam ${SARVAM_STT_MODEL}/${SARVAM_STT_MODE}): ${Date.now() - t0}ms  lang=${data?.language_code || "?"}`)
-  return { text: fixSttLexicon((data?.transcript || "").trim()), lowConfidence: false }
+  // Post-hoc training chain (order matters): domain lexicon polish →
+  // call-scoped name/vocab canonicalization → spoken digit runs to digits.
+  // Kept the required fixSttLexicon((data?.transcript || "").trim()) spine —
+  // the transcript is NEVER allowed to reach the LLM unpolished.
+  return {
+    text: spokenNumbersToDigits(applyCallVocabulary(fixSttLexicon((data?.transcript || "").trim()), callSid)),
+    lowConfidence: false,
+  }
 }
 
 // ---------- Sarvam TTS (Bulbul v3) ----------
@@ -549,10 +710,10 @@ function ttsCallProviderName() {
   return TTS_CALL_PROVIDER
 }
 
-async function transcribe(wavBuffer, language) {
+async function transcribe(wavBuffer, language, callSid) {
   // Cloud-only: Saaras is the only STT. Throws on failure — the voicebot's
   // caller-facing error handling takes over (clarify/fallback phrases).
-  return sarvamStt(wavBuffer, language)
+  return sarvamStt(wavBuffer, language, callSid)
 }
 
 /**
@@ -634,7 +795,10 @@ module.exports = {
   transcribe, synthesize,
   // direct provider calls (exported for tests + reuse)
   sarvamStt, sarvamTts, sarvamCloneTts, cartesiaTts,
+  // call-scoped STT vocabulary (name accuracy)
+  setCallVocabulary, clearCallVocabulary,
   // internals used by tests
   resolveTtsLocale, hasIndicScript, normalizeForTts, buildMultipart, fetchWithRetry,
   normalizeNumbersToEnglishWords, integerToWords, digitsToWords,
+  spokenNumbersToDigits, applyCallVocabulary,
 }

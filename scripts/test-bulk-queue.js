@@ -47,12 +47,12 @@ try {
   const dl = require(path.join(TMP, "dialer-logic.js"))
 
   // ── 1. Auto-retry decision ──
-  section("shouldAutoRetry: busy/no-answer re-queue policy")
+  section("shouldAutoRetry: busy/no-answer re-queue policy (2026-10 matrix)")
   eq(dl.shouldAutoRetry("missed", 0, 0, 2), true, "missed + no talk + fresh row → retry")
-  eq(dl.shouldAutoRetry("rejected", 0, 0, 2), true, "rejected (WhatsApp decline) → retry")
+  eq(dl.shouldAutoRetry("rejected", 0, 0, 2), false, "rejected (WhatsApp decline) → NEVER (4 unanswered calls revoke Meta call permission)")
   eq(dl.shouldAutoRetry("resolved", 0, 0, 2), false, "resolved → never")
   eq(dl.shouldAutoRetry("failed", 0, 0, 2), false, "failed (bad number) → never")
-  eq(dl.shouldAutoRetry("voicemail", 0, 0, 2), false, "voicemail → never")
+  eq(dl.shouldAutoRetry("voicemail", 0, 0, 2), true, "voicemail → retry (a machine picked up; a human may call back)")
   eq(dl.shouldAutoRetry("missed", 45, 0, 2), false, "45s of conversation → human answered, never")
   eq(dl.shouldAutoRetry("missed", 1, 0, 2), false, "even 1s of talk time → never")
   eq(dl.shouldAutoRetry("missed", 0, 2, 2), false, "retry cap reached → never")
@@ -165,10 +165,12 @@ try {
   eq(dl.outcomeGroup("some_new_future_outcome"), null, "unknown outcomes stay untyped (detail column carries them)")
 
   // The auto-retry × outcome interaction contract: a stamped outcome and
-  // shouldAutoRetry must agree — exactly the no_answer/declined outcomes
-  // auto-redial, answered/dial_failed never do.
+  // shouldAutoRetry must agree with outcomeGroup — the queue only re-dials
+  // what a human failed to answer (no_answer; rejected is deliberately OUT:
+  // Meta revokes call permission after 4 unanswered calls, so declined dials
+  // never auto-retry).
   section("outcome × auto-retry: the queue only re-dials what a human failed to answer")
-  const RETRYABLE_GROUPS = new Set(["no_answer", "declined"])
+  const RETRYABLE_GROUPS = new Set(["no_answer"])
   for (const [outcome, group] of [
     ["resolved", "answered"], ["missed", "no_answer"],
     ["rejected", "declined"], ["failed", "dial_failed"],

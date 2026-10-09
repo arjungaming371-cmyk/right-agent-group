@@ -176,7 +176,7 @@ ok(vc.includes("IN-CALL FACT MEMORY"), "in-call fact block is commented/document
 ok(vc.includes("retry ONCE with Priya's last question"), "KB retry with conversation context documented")
 ok(vc.includes("kbContext = await searchKnowledgeBase(`${lastPriyaTurn.content} ${speech}`"), "KB retry searches speech + Priya's last question")
 ok(!vc.includes("ALWAYS proactively ask if they have any doubts"), "forced doubts-question-after-every-reply rule removed")
-ok(vc.includes("AT MOST ONCE per reply"), "doubt-check capped at once per reply")
+ok(vc.includes("AT MOST ONCE per call"), "doubt-check capped at once per call")
 
 section("13. lib/knowledge-base.ts — grounding mandate")
 const kb = fs.readFileSync(path.join(ROOT, "lib", "knowledge-base.ts"), "utf8")
@@ -203,7 +203,7 @@ ok(wa.includes('event: "start"') && wa.includes('event: "turn"'), "start + turn 
 ok(wa.includes('source: "whatsapp_call"'), "WhatsApp calls tagged with source=whatsapp_call (lead + analytics)")
 ok(wa.includes("callTurnApiStream"), "WhatsApp turns use the streaming path (same instant-sentence pipeline)")
 ok((wa.match(/if \(ev\.language\) this\.language = ev\.language/g) || []).length >= 2, "session language follows the brain's per-turn language (no stale TTS voice)")
-ok(wa.includes("voiceProviders.transcribe(pcmToWav16k(pcm16k), this.language)"), "STT hint per utterance (mid-call language switching works)")
+ok(wa.includes("voiceProviders.transcribe(pcmToWav16k(pcm16k), this.language, this.callSid)"), "STT per utterance + call-scoped vocabulary (language switching + name accuracy work)")
 
 section("16. WhatsApp-call context in the shared brain — grounding + tone + facts")
 ok(vc.includes('isWhatsAppCall ? "whatsapp" : "phone"'), "BOTH turn paths pass the WhatsApp channel fact to buildTurnInstructions")

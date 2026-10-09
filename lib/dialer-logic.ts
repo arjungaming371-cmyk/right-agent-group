@@ -18,8 +18,17 @@ export function normalizeChannel(raw: unknown): QueueChannel {
  * talked (duration > 0), a provider failure (bad number), or a lead who
  * already burned the retry cap never auto-requeues.
  *
- * outcome vocabulary comes from /api/calls/status + whatsapp-call-finalize:
- *   resolved | missed | failed | rejected | voicemail | ...
+ * RETRY MATRIX (Outpero-style, 2026-10):
+ *   missed   → RETRY   (covers both ring-out and busy — /api/calls/status
+ *                       collapses busy into missed)
+ *   voicemail→ RETRY   (a machine picked up; a human may call back)
+ *   rejected → NO RETRY (the lead DECLINED a WhatsApp call — Meta revokes
+ *                       call permission after 4 consecutive unanswered
+ *                       calls, so hammering declined dials burns the
+ *                       permission budget for every future attempt)
+ *   failed   → NO RETRY (dial never went out — provider problem; an operator
+ *                       re-queues manually after checking)
+ *   resolved → NO RETRY (talked — never auto-dial a happy customer again)
  */
 export function shouldAutoRetry(
   outcome: string | null | undefined,
@@ -31,7 +40,7 @@ export function shouldAutoRetry(
   if (retryCount >= maxRetries) return false
   if (Number(durationSec) > 0) return false // a human answered and talked
   const o = String(outcome || "").toLowerCase()
-  return o === "missed" || o === "rejected"
+  return o === "missed" || o === "voicemail"
 }
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000 // UTC+5:30, no DST — fixed offset is safe

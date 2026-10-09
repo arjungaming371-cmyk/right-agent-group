@@ -4,7 +4,7 @@ import { normalizePhone, phoneLast10, PHONE_MATCH_SQL } from "@/lib/phone"
 import { requireModuleOrRole, requireRole } from "@/lib/auth"
 import { sessionBranchId, checkQuota, recordUsage } from "@/lib/branches"
 import { logAudit } from "@/lib/audit"
-import { checkCallCompliance, isWithinCallingWindow } from "@/lib/compliance"
+import { checkCallCompliance, isWithinCallingWindow, getCallingWindow } from "@/lib/compliance"
 import { getBulkDialer, BulkQueueRow, DialOutcome } from "@/lib/bulk-dialer"
 import { placeOutboundCall, DialError } from "@/lib/outbound-dial"
 import { isAiPaused, aiPauseMessage } from "@/lib/ai-pause"
@@ -111,8 +111,13 @@ async function dialQueueRow(item: QueueRow, branchId: string | null): Promise<Di
         // AUTO-PAUSE (bulk plan Feature 2): the window closed mid-campaign —
         // RE-SCHEDULE for the next window open instead of terminally
         // skipping. The old behaviour permanently LOST every row it caught
-        // past 19:00; now the campaign resumes by itself at 8:00 IST.
-        const nextOpen = new Date(nextWindowStartMs(Date.now()))
+        // past 19:00; now the campaign resumes by itself when the window
+        // opens. The target is read from compliance_settings (the SAME
+        // config the gate above enforced) — rescheduling against hardcoded
+        // defaults produced rows that woke up outside the window and were
+        // re-skipped every day.
+        const window = await getCallingWindow()
+        const nextOpen = new Date(nextWindowStartMs(Date.now(), window.startHour, window.days))
         await db.from("outbound_queue")
           .update({ status: "pending", scheduled_at: nextOpen.toISOString(), claimed_at: null, outcome: null, outcome_at: null, outcome_detail: null })
           .eq("id", item.id)

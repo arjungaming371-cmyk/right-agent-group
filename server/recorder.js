@@ -82,21 +82,24 @@ function wavHeader(dataBytes) {
 
 /**
  * Mix one chunk of the two timelines sample-by-sample with clipping.
- * `n` = valid bytes in each buffer; the shorter side is treated as silence
- * past its length (caller left / Priya finished, respectively).
+ * `inLen`/`outLen` are the VALID byte counts returned by the fd reads — the
+ * shorter side is treated as silence past its length. Buffer.length alone
+ * lies here: the chunk buffers are REUSED across iterations, so when one
+ * side's read came back short (caller left / capped side), the tail of the
+ * buffer still held the PREVIOUS second's audio and was mixed in as if real.
  */
-function mixChunk(inBuf, outBuf, n) {
+function mixChunk(inBuf, outBuf, n, inLen = n, outLen = n) {
   const mixed = Buffer.alloc(n)
   for (let i = 0; i + 1 < n; i += 2) {
-    const a = i < inBuf.length ? inBuf.readInt16LE(i) : 0
-    const b = i < outBuf.length ? outBuf.readInt16LE(i) : 0
+    const a = i < inLen && i < inBuf.length ? inBuf.readInt16LE(i) : 0
+    const b = i < outLen && i < outBuf.length ? outBuf.readInt16LE(i) : 0
     const s = a + b
     mixed.writeInt16LE(s > 32767 ? 32767 : s < -32768 ? -32768 : s, i)
   }
   return mixed
 }
 
-/** WAV → MP3 (64 kbps mono, voice-optimized). Resolves false on ANY failure —
+/** WAV → MP3 (128 kbps mono, voice-optimized). Resolves false on ANY failure —
  *  the caller then keeps the WAV. ffmpeg is already required for TTS decode,
  *  so this adds no new deployment dependency. */
 function transcodeToMp3(wavPath, mp3Path) {
@@ -257,7 +260,7 @@ class CallRecorder {
         if (inRes.bytesRead === 0 && outRes.bytesRead === 0) break
         const n = Math.max(inRes.bytesRead, outRes.bytesRead)
         if (n < 2) break
-        await wavFd.write(mixChunk(inBuf, outBuf, n))
+        await wavFd.write(mixChunk(inBuf, outBuf, n, inRes.bytesRead, outRes.bytesRead))
         written += n
       }
       if (written !== totalDataBytes) {

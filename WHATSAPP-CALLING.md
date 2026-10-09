@@ -61,9 +61,13 @@ VOICEBOT_HTTP_PORT=3003             # voicebot side
 VOICEBOT_INTERNAL_URL=http://127.0.0.1:3003   # app side
 
 # Optional tuning
-VOICEBOT_WA_BARGE_IN=1                              # default on (safe: client-side AEC)
+VOICEBOT_WA_BARGE_IN=1                              # default ON (safe: client-side AEC) — set 0 to make Priya finish without interruptions
 VOICEBOT_WA_ENERGY_THRESHOLD=300                    # endpointing sensitivity
+VOICEBOT_WA_MAX_UTTERANCE_MS=20000                  # hard cap per uninterrupted answer (15s used to cut long answers; Saaras batch allows 30s)
 VOICEBOT_WA_ICE_SERVERS=stun:stun.l.google.com:19302
+VOICEBOT_WA_TTS_CACHE_MB=64                         # TTS cache budget (PCM bytes), bounded in addition to entry count
+VOICEBOT_WA_CARTESIA_QUOTA_RETRY_MS=600000          # after a Cartesia quota error, retry Cartesia after this window (no pm2 restart needed)
+WA_WEBHOOK_CALLS_RATE_LIMIT=600                     # generous per-min budget for signature-verified Meta CALL events (messages keep the 60/min cap)
 WHATSAPP_VOICE_CALLS=1                              # 0 = decline all WhatsApp calls
 ```
 

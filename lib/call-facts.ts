@@ -261,7 +261,7 @@ export function formatInCallFactsBlock(facts: InCallFacts): string {
   if (lines.length === 0) return ""
   return [
     "=== ANSWERED ALREADY IN THIS CALL (customer's own words — every item here is DONE) ===",
-    "NEVER ask for any item below again — not even as a confirmation question. Use them naturally and move to the NEXT unknown GOAL step.",
+    "NEVER ask for any item below again as if you didn't know — use them naturally and move to the NEXT unknown GOAL step. The ONLY exception is the single CLOSING READBACK allowed by the brevity rules: when all details are gathered, state them back in one sentence for a final confirm/correct.",
     ...lines,
   ].join("\n")
 }

@@ -206,17 +206,23 @@ export async function POST(req: NextRequest) {
       //     resolves direction=outbound, lead, language and branch from it.
       //     `instructions` rides on the row: the turn handler reads it from
       //     there on every turn (the WhatsApp session can't pass custom text).
+      //     UPSERT, not insert: if the customer answered instantly, the turn
+      //     "start" seeded the row first (direction=outbound seed) — a plain
+      //     insert died on the unique sid with a 500 after the call was live.
       const callSid = `wacall-${placed.callId}`
-      await db.from("voice_calls").insert({
-        lead_id: leadId,
-        twilio_call_sid: callSid,
-        direction: "outbound",
-        status: "ringing",
-        language,
-        phone,
-        branch_id: branchId || lead.branch_id || null,
-        instructions,
-      })
+      await db.from("voice_calls").upsert(
+        {
+          lead_id: leadId,
+          twilio_call_sid: callSid,
+          direction: "outbound",
+          status: "ringing",
+          language,
+          phone,
+          branch_id: branchId || lead.branch_id || null,
+          instructions,
+        },
+        { onConflict: "twilio_call_sid" }
+      )
       if (branchId) recordUsage(branchId, "call")
       await db.from("comm_logs").insert({
         lead_id: leadId,

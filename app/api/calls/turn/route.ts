@@ -52,6 +52,7 @@ type TurnBody = {
   To?: unknown
   branchId?: unknown
   source?: unknown
+  direction?: unknown
   speech?: unknown
   language?: unknown
   stream?: unknown
@@ -102,7 +103,30 @@ export async function POST(req: NextRequest) {
       // 2) Inbound call? The CALLED number (the branch's DLT ExoPhone) decides
       //    which branch serves it; then match the caller's number to a lead, or
       //    create one under that branch.
-      if (!leadId && body?.from) {
+      const bodyDirection = typeof body?.direction === "string" ? body.direction.toLowerCase() : ""
+      if (!leadId && body?.from && bodyDirection === "outbound") {
+        // RACE (outbound WhatsApp): the customer answered BEFORE the dial
+        // route's row insert landed. The old fall-through upserted the row as
+        // direction "inbound" (body.from is always present) and the dial
+        // route's insert then died on the unique sid — finalizing a real
+        // outbound conversation as an incoming call. Seed the OUTBOUND row
+        // here instead; the dial route's upsert (onConflict sid) fills
+        // lead/language/instructions moments later.
+        direction = "outbound"
+        const digits = String(body.from).replace(/\D/g, "")
+        await db.from("voice_calls").upsert(
+          {
+            twilio_call_sid: callSid,
+            lead_id: null,
+            direction: "outbound",
+            status: "in-progress",
+            language,
+            phone: digits.length === 10 ? `+91${digits}` : digits ? `+${digits}` : "",
+            branch_id: bodyBranchId,
+          },
+          { onConflict: "twilio_call_sid" }
+        )
+      } else if (!leadId && body?.from) {
         direction = "inbound"
         // Multi-branch routing: WhatsApp calls carry the branch from the
         // webhook (phone_number_id match); Exotel calls fall back to the
@@ -154,7 +178,27 @@ export async function POST(req: NextRequest) {
       // The branch's primary AI Employee's voice — the voicebot uses it for
       // every synthesis on this call (null = deployment default voice).
       const voice = await getBranchVoice(branchId)
-      return NextResponse.json({ text: greeting, language, leadId, branchId, voice, hangup: false })
+      // Outpero-grade STT vocabulary: the lead's name + the branch's brand
+      // words ride back to the voicebot, whose per-call post-processor
+      // canonicalizes near-miss spellings of these tokens in every transcript
+      // ("soresh"→"Suresh", "sarma"→"Sharma") — the single most-mangled
+      // words on any call. Nicety only: never fail the start over it.
+      const vocabulary: string[] = []
+      try {
+        if (leadId) {
+          const lr = await query(`SELECT name FROM leads WHERE id = $1 LIMIT 1`, [leadId])
+          const nm = String(lr.rows[0]?.name || "").trim()
+          if (nm && !/^Caller \d+$/.test(nm)) {
+            for (const w of nm.split(/\s+/)) if (w.length >= 3 && w.length <= 40) vocabulary.push(w)
+          }
+        }
+        if (branchId) {
+          const br = await query(`SELECT brand_name FROM branches WHERE id = $1 LIMIT 1`, [branchId])
+          const brand = String(br.rows[0]?.brand_name || "").trim()
+          if (brand) for (const w of brand.split(/\s+/)) if (w.length >= 3 && w.length <= 40) vocabulary.push(w)
+        }
+      } catch { /* vocabulary is optional */ }
+      return NextResponse.json({ text: greeting, language, leadId, branchId, voice, vocabulary, hangup: false })
     }
 
     if (event === "turn") {

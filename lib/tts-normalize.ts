@@ -93,6 +93,20 @@ export function normalizeNumbersToEnglishWords(text: string): string {
   if (!text) return text
   let s = String(text)
 
+  // 0. TIMES before decimal handling — "6:30" must become "six thirty",
+  // never "six point three zero" (the old decimal rule mangled every time
+  // of day: "call you at 6:30pm" → "six point three zero p m").
+  s = s.replace(/\b(\d{1,2}):(\d{2})\s*([ap])\.?\s*m?\b/gi, (m, hh, mm, ap) =>
+    `${smallNumberToWords(parseInt(hh, 10))} ${smallNumberToWords(parseInt(mm, 10))} ${ap ? `${ap.toLowerCase()} m` : ""}`.trim())
+  s = s.replace(/\b(\d{1,2})\s*([ap])\.?m\b/gi, (m, hh, ap) =>
+    `${smallNumberToWords(parseInt(hh, 10))} ${ap.toLowerCase()} m`)
+  // 0b. ORDINALS before integer handling — "1st" used to read "one st".
+  const ORDINALS: Record<number, string> = { 1: "first", 2: "second", 3: "third", 4: "fourth", 5: "fifth", 6: "sixth", 7: "seventh", 8: "eighth", 9: "ninth", 10: "tenth", 11: "eleventh", 12: "twelfth", 13: "thirteenth", 14: "fourteenth", 15: "fifteenth", 16: "sixteenth", 17: "seventeenth", 18: "eighteenth", 19: "nineteenth", 20: "twentieth", 21: "twenty first", 22: "twenty second", 23: "twenty third", 24: "twenty fourth", 25: "twenty fifth", 26: "twenty sixth", 27: "twenty seventh", 28: "twenty eighth", 29: "twenty ninth", 30: "thirtieth", 31: "thirty first" }
+  s = s.replace(/\b(\d{1,2})(st|nd|rd|th)\b/gi, (m, num) => ORDINALS[parseInt(num, 10)] || m)
+  // 0c. DATES with month names — "12 Aug" / "August 12" read naturally.
+  s = s.replace(/\b(\d{1,2})\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b/gi, (m, d, mon) =>
+    `${integerToWords(parseInt(d, 10))} ${mon.toLowerCase()}`)
+
   // 1. Remove commas in numbers like 16,00,000 or 14,500
   while (/\b(\d+),(\d{2,3})\b/.test(s)) {
     s = s.replace(/\b(\d+),(\d{2,3})\b/g, "$1$2")
@@ -171,9 +185,13 @@ export function normalizeForTts(text: string): string {
   out = out.replace(/\*([^*]+)\*/g, "$1") // *single-asterisk* bold
   out = out.replace(/\p{Extended_Pictographic}/gu, "") // emoji
   out = out.replace(/[—–]/g, ", ") // dashes to gentle commas
-  out = out.replace(/\b1\s*minute\b/gi, "okka minute")
+  // REMOVED: "1 minute" → "okka minute" — a hard-coded Telugu substitution
+  // that leaked into English/Hindi replies spoken by the wrong voice. The
+  // number rules below already say "one minute" correctly.
   out = out.replace(/&/g, " and ")
   out = out.replace(/(\.{2,}|…)/g, ".") // ellipses to single period
+  out = out.replace(/!\s+/g, ", ") // soften exclamations (parity with the server normalizer)
+  out = out.replace(/!+$/g, ".")
 
   // Convert numbers to clean English words
   out = normalizeNumbersToEnglishWords(out)

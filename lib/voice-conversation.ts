@@ -12,6 +12,7 @@ import { createNotification } from "./notifications"
 import { maybeProposeLoanEdit } from "./loan-edit-requests"
 import { isAiPaused } from "./ai-pause"
 import { currentDateTimeInstruction } from "./compliance"
+import { buildReschedule, type RescheduleMatch } from "./speech-scheduler"
 import {
   DEFAULT_VOICE_CLOSINGS,
   DEFAULT_VOICE_OPENERS,
@@ -150,6 +151,40 @@ export const CUSTOMER_BYE_RE = new RegExp(
 // voicemail and burning one extra turn talking to a machine.
 const VOICEMAIL_RE =
   /leave (a|your) message|after the (tone|beep)|voice ?mail|mailbox( is full)?|record your message|please try your call (again )?later|message chhod|beep ke baad|message pettandi|beep tarvata/i
+
+/**
+ * Persist a speech-parsed callback (Outpero-style smart reschedule) onto the
+ * lead + a comm_logs line so the dashboard Calendar shows it immediately.
+ * NEVER overwrites a manually-set callback: an operator's explicit booking
+ * outranks a regex parse. Best-effort — a failed write must not block hangup.
+ */
+async function scheduleSpeechCallback(
+  leadId: string,
+  callSid: string | null,
+  reschedule: RescheduleMatch
+): Promise<void> {
+  try {
+    const existing = await query(`SELECT callback_note FROM leads WHERE id = $1 LIMIT 1`, [leadId])
+    const existingNote = String(existing.rows[0]?.callback_note || "")
+    if (existingNote && !existingNote.startsWith("Auto-scheduled")) {
+      console.log(`📅 reschedule skipped: lead ${leadId} has a manual callback (${existingNote.slice(0, 60)})`)
+      return
+    }
+    await query(
+      `UPDATE leads SET callback_at = $1, callback_note = $2 WHERE id = $3`,
+      [reschedule.whenIso, reschedule.note, leadId]
+    )
+    await db.from("comm_logs").insert({
+      lead_id: leadId,
+      type: "note",
+      summary: `Callback auto-scheduled ${reschedule.desc.english} (customer said it on ${callSid || "call"})`,
+      outcome: "pending",
+    }).catch(() => {})
+    console.log(`📅 reschedule: lead=${leadId} → ${reschedule.whenIso} (${reschedule.desc.english})`)
+  } catch (e) {
+    console.error("scheduleSpeechCallback error:", e instanceof Error ? e.message : e)
+  }
+}
 
 // Short, warm sign-off — NOT the link-sending 'qualified' closing, which
 // promises a WhatsApp message that may not exist yet. Text: voice_closings.goodbye.
@@ -799,6 +834,20 @@ export async function handleTurn(opts: {
 
   const messages = [...history, { role: "user" as const, content: speech }]
 
+  // SMART RESCHEDULE (Outpero): "రేపు చెప్తాను" / "call me at 6pm" / "कल शाम को
+  // call करना" books a REAL callback before the call ends — the promise used
+  // to live only in the transcript until an operator read it. Must run
+  // BEFORE the bye regex: several bye phrases ("repu cheptanu") ARE
+  // reschedules that used to end the call with nothing scheduled.
+  if (leadId && history.length > 0) {
+    const reschedule = buildReschedule(speech, language)
+    if (reschedule) {
+      await scheduleSpeechCallback(leadId, callSid, reschedule)
+      updateTranscriptAsync(callSid, speech, reschedule.confirm)
+      return { text: reschedule.confirm, hangup: true }
+    }
+  }
+
   // The CALLER said goodbye → say a short goodbye back and end the call.
   // No LLM turn: asking anything more after "bye" is exactly the pushy
   // behavior a human agent would never do. History must be non-empty so a
@@ -861,7 +910,10 @@ export async function handleTurn(opts: {
   const completed = await completeLeadIfReady({ leadId, callSid, callerPhone, isWhatsAppCall, messages, reply, branchId })
   if (completed) return { text: getVoiceClosingsSnapshot().qualified[language], hangup: true }
 
-  const isCustomerEnding = CUSTOMER_BYE_RE.test((speech || "").trim())
+  // Same guard as the early bye-check above: without history.length > 0 a
+  // pickup utterance like "sare andi" / "ok andi" matched here AFTER Priya's
+  // first reply and hung the call up immediately.
+  const isCustomerEnding = history.length > 0 && CUSTOMER_BYE_RE.test((speech || "").trim())
   const isPriyaEnding = GOODBYE_RE.test(reply)
   const hangup = isCustomerEnding || isPriyaEnding
   if (hangup && callSid) {
@@ -919,6 +971,18 @@ export async function handleTurnStream(
   }
 
   const messages = [...history, { role: "user" as const, content: speech }]
+
+  // SMART RESCHEDULE: see the twin block in handleTurn — books a real
+  // callback before the goodbye path can end the call with nothing scheduled.
+  if (leadId && history.length > 0) {
+    const reschedule = buildReschedule(speech, language)
+    if (reschedule) {
+      await scheduleSpeechCallback(leadId, callSid, reschedule)
+      updateTranscriptAsync(callSid, speech, reschedule.confirm)
+      onSentence(reschedule.confirm)
+      return { hangup: true }
+    }
+  }
 
   if (detectFrustration(speech, history.map((h) => ({ role: h.role === "model" ? "model" : "user", content: h.content })))) {
     flagFrustratedCall(callSid, leadId || null, speech)
@@ -986,7 +1050,9 @@ export async function handleTurnStream(
     return { hangup: true }
   }
 
-  const isCustomerEnding = CUSTOMER_BYE_RE.test((speech || "").trim())
+  // Same guard as the early bye-check: no history → never hang up on the
+  // strength of a single pickup utterance ("sare andi" right after pickup).
+  const isCustomerEnding = history.length > 0 && CUSTOMER_BYE_RE.test((speech || "").trim())
   const isPriyaEnding = GOODBYE_RE.test(reply)
   const hangup = isCustomerEnding || isPriyaEnding
   if (hangup && callSid) {

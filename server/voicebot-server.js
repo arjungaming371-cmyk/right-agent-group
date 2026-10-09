@@ -73,7 +73,7 @@ const FRAME_BYTES = (SAMPLE_RATE * BYTES_PER_SAMPLE * FRAME_MS) / 1000 // 320
 // Trimmed to 600ms for fast conversational turn-taking with zero dead air.
 const SILENCE_END_MS = parseInt(process.env.VOICEBOT_SILENCE_END_MS || "600")      // this much silence after speech = end of utterance
 const MIN_SPEECH_MS = parseInt(process.env.VOICEBOT_MIN_SPEECH_MS || "250")       // ignore blips shorter than this
-const MAX_UTTERANCE_MS = 15000  // hard cap per utterance
+const MAX_UTTERANCE_MS = Math.max(5_000, parseInt(process.env.VOICEBOT_MAX_UTTERANCE_MS || "20000") || 20_000)  // hard cap per utterance (15s used to cut long answers mid-word)
 // avg abs amplitude (0..32767) above this counts as speech. 500 was too high for
 // real phone lines — quieter callers never crossed it. 300 is a safer default;
 // override per-deployment with VOICEBOT_ENERGY_THRESHOLD once you see the live
@@ -157,13 +157,14 @@ function pcmToWav(pcm) {
 // that. Forcing the current call language here would transliterate English
 // speech into Telugu script and lock the call.
 const STT_TIMEOUT_MS = parseInt(process.env.VOICEBOT_STT_TIMEOUT_MS || "10000")
-async function speechToText(pcm, language) {
+async function speechToText(pcm, language, callSid) {
   // Cloud-only: Sarvam Saaras owns the full contract — returns
   // {text, lowConfidence}. Throws on failure; the caller-facing error
-  // handling below takes over.
+  // handling below takes over. callSid scopes the call's name/vocabulary
+  // corrections (see voiceProviders.setCallVocabulary).
   const t0 = Date.now()
   try {
-    const out = await voiceProviders.transcribe(pcmToWav(pcm), language)
+    const out = await voiceProviders.transcribe(pcmToWav(pcm), language, callSid)
     console.log(`⏱ STT: ${Date.now() - t0}ms`)
     return out
   } catch (e) {
@@ -718,6 +719,18 @@ class CallSession {
     const t0 = Date.now()
     try {
       const apiPromise = callTurnApi({ event: "start", callSid: this.callSid || "unknown", from, to })
+      // The start promise must NEVER float unhandled: when the caller speaks
+      // during the pickup window we return early WITHOUT awaiting it — an
+      // unhandled rejection here would take down the whole voicebot process
+      // (same fix as the WhatsApp session's start()).
+      apiPromise
+        .then((r) => {
+          if (!r || this.closed) return
+          if (r.language) this.language = r.language
+          if (r.voice && r.voice.speaker) this.voice = r.voice
+          if (Array.isArray(r.vocabulary)) voiceProviders.setCallVocabulary(this.callSid, r.vocabulary)
+        })
+        .catch(() => {})
 
       // Ear-pickup delay: give listener 2 seconds from answer to place phone to ear
       const greetingDelay = parseInt(process.env.CALL_GREETING_DELAY_MS || "2000")
@@ -888,7 +901,7 @@ class CallSession {
       // Pass the call's KNOWN language as the STT hint — this guides Saaras
       // to decode in the correct script, preventing language cross-talk.
       const turnT0 = Date.now()
-      const { text: transcript, lowConfidence } = await speechToText(pcm, this.language)
+      const { text: transcript, lowConfidence } = await speechToText(pcm, this.language, this.callSid)
       // FIX (2026-09-20): full transcripts in stdout = a call-content archive
       // outside the DB's access controls (DPDP compliance). Gate behind
       // VOICEBOT_DEBUG_LOGS=1; call flow is unaffected.
@@ -1429,13 +1442,31 @@ const httpServer = http.createServer((req, res) => {
     } else if (url === "/whatsapp/outbound-cancel") {
       json(200, { ok: waCalls.cancelOutboundOffer(str(body.pendingId, 128), str(body.reason, 64)) })
     } else {
-      const r = waCalls.endSession(str(body.callId, 128), str(body.reason, 64))
-      json(200, r)
+      // endSession is ASYNC (it awaits the session's end-report promise so the
+      // app never finalizes before the real duration landed). The old code
+      // passed the raw Promise to json() — JSON.stringify(Promise) → "{}" —
+      // so the bridge returned INSTANTLY and the app's finalizer raced the
+      // end-report, finalizing fully-conversed calls as MISSED (red bubble,
+      // missed-call follow-up after a real talk). Await it properly.
+      waCalls
+        .endSession(str(body.callId, 128), str(body.reason, 64))
+        .then((r) => json(200, r))
+        .catch((e) => json(200, { ok: false, ended: false, error: e.message }))
     }
   })
 })
 function gracefulShutdown(signal) {
   console.log(`[voicebot] ${signal} received, shutting down...`)
+  // End every live WhatsApp session FIRST: each end() reports real duration
+  // to the app, so calls in flight finalize honestly instead of hanging as
+  // duration-0 "missed" rows after the restart. endSession also tears down
+  // the pacer/pc/recorder — no zombie timers keep the loop alive.
+  try {
+    const ended = waCalls.endAllSessions?.("graceful-shutdown")
+    if (ended) console.log(`[voicebot] ended ${ended} live WhatsApp call(s) with end reports`)
+  } catch (e) {
+    console.error(`[voicebot] WhatsApp endAllSessions error: ${e.message}`)
+  }
   for (const ws of wss.clients) {
     try { ws.close(1001, "server shutting down") } catch {}
   }

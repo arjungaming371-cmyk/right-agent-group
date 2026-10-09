@@ -16,13 +16,21 @@ export type DialerSettings = {
   autoRetry: boolean // re-queue busy/no-answer automatically
   retryDelayMinutes: number // delay before an auto-retry dials again
   maxRetries: number // hard cap per queue row
+  speedToLead: boolean // dial every NEW lead the moment it lands (Outpero-style)
+  speedToLeadChannel: "phone" | "whatsapp_voice" | "auto" // network for the instant dial
 }
 
 export const DIALER_SETTINGS_DEFAULTS: DialerSettings = {
   concurrency: 1, // matches the historic sequential default
   autoRetry: true,
-  retryDelayMinutes: 120, // plan default: re-queue 2h later
+  // Outpero-grade speed: a busy/no-answer lead is re-dialed ~12 minutes later
+  // (still on the phone / still thinking about the offer), not 2 hours later
+  // when they've gone cold. maybeRequeueMissed multiplies this by the retry
+  // number for a simple backoff curve (12 → 24 → 36 …).
+  retryDelayMinutes: 12,
   maxRetries: 2, // plan default: max 2 retries per lead
+  speedToLead: true, // Outpero headline: call every new lead in seconds
+  speedToLeadChannel: "auto", // WhatsApp when callable there, else the phone line
 }
 
 let cache: { value: DialerSettings; at: number } | null = null
@@ -34,11 +42,14 @@ function clampSettings(raw: Partial<Record<string, unknown>>): DialerSettings {
     const n = Number(v)
     return Number.isFinite(n) ? n : def
   }
+  const channel = String(raw.speedToLeadChannel || DIALER_SETTINGS_DEFAULTS.speedToLeadChannel)
   return {
     concurrency: Math.min(10, Math.max(1, Math.round(num(raw.concurrency, DIALER_SETTINGS_DEFAULTS.concurrency)))),
     autoRetry: raw.autoRetry === undefined ? DIALER_SETTINGS_DEFAULTS.autoRetry : raw.autoRetry === true || raw.autoRetry === "true",
     retryDelayMinutes: Math.min(1440, Math.max(5, Math.round(num(raw.retryDelayMinutes, DIALER_SETTINGS_DEFAULTS.retryDelayMinutes)))),
     maxRetries: Math.min(5, Math.max(0, Math.round(num(raw.maxRetries, DIALER_SETTINGS_DEFAULTS.maxRetries)))),
+    speedToLead: raw.speedToLead === undefined ? DIALER_SETTINGS_DEFAULTS.speedToLead : raw.speedToLead === true || raw.speedToLead === "true",
+    speedToLeadChannel: (["phone", "whatsapp_voice", "auto"].includes(channel) ? channel : "auto") as DialerSettings["speedToLeadChannel"],
   }
 }
 
@@ -69,6 +80,8 @@ export async function getDialerSettings(): Promise<DialerSettings> {
       autoRetry: map.auto_retry,
       retryDelayMinutes: map.retry_delay_minutes,
       maxRetries: map.max_retries,
+      speedToLead: map.speed_to_lead,
+      speedToLeadChannel: map.speed_to_lead_channel,
     })
     cache = { value, at: Date.now() }
     return value
@@ -93,6 +106,8 @@ export async function setDialerSettings(
     ["auto_retry", String(merged.autoRetry)],
     ["retry_delay_minutes", String(merged.retryDelayMinutes)],
     ["max_retries", String(merged.maxRetries)],
+    ["speed_to_lead", String(merged.speedToLead)],
+    ["speed_to_lead_channel", merged.speedToLeadChannel],
   ]
   for (const [key, value] of entries) {
     await query(

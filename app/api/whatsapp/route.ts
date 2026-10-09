@@ -54,10 +54,6 @@ export async function GET(req: NextRequest) {
 
 // ---- POST: messages + statuses ----
 export async function POST(req: NextRequest) {
-  if (!rateLimit(`wa-webhook:${clientIp(req)}`, 60, 60_000)) {
-    return NextResponse.json({ error: "Too many requests" }, { status: 429 })
-  }
-
   const raw = await req.text()
 
   // Signature check — proves the request really came from Meta.
@@ -67,6 +63,7 @@ export async function POST(req: NextRequest) {
   // a worse outcome than a blocked one. For local development without Meta,
   // set ALLOW_UNSIGNED_WEBHOOK=1 in .env to restore the old fail-open behaviour.
   const appSecret = process.env.WHATSAPP_APP_SECRET || ""
+  let signatureVerified = false
   if (!appSecret && process.env.ALLOW_UNSIGNED_WEBHOOK !== "1") {
     console.error("🚫 Rejecting WhatsApp webhook: WHATSAPP_APP_SECRET is not set (fail-closed). " +
       "Set WHATSAPP_APP_SECRET in .env, or ALLOW_UNSIGNED_WEBHOOK=1 for local dev only.")
@@ -80,6 +77,7 @@ export async function POST(req: NextRequest) {
     if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
       return NextResponse.json({ error: "bad signature" }, { status: 401 })
     }
+    signatureVerified = true
   }
 
   let body: any
@@ -87,6 +85,21 @@ export async function POST(req: NextRequest) {
     body = JSON.parse(raw)
   } catch {
     return NextResponse.json({ error: "invalid JSON" }, { status: 400 })
+  }
+
+  // Rate limit AFTER the signature gate, calls-aware: a busy account bursts
+  // far past 60 events/min once voice calling is live (ring + accept +
+  // terminate per call, plus every message) — the old flat 60/min here 429'd
+  // Meta's CALL SETUP events, and Meta's retry added seconds of dead ring to
+  // every answered call. Verified Meta traffic gets a generous budget;
+  // unsigned local-dev traffic keeps the tight one.
+  const hasCallEvents = (body?.entry || []).some((e: any) =>
+    (e?.changes || []).some((c: any) => Array.isArray(c?.value?.calls) && c.value.calls.length > 0))
+  const webhookLimit = signatureVerified && hasCallEvents
+    ? parseInt(process.env.WA_WEBHOOK_CALLS_RATE_LIMIT || "600") || 600
+    : 60
+  if (!rateLimit(`wa-webhook:${clientIp(req)}`, webhookLimit, 60_000)) {
+    return NextResponse.json({ error: "Too many requests" }, { status: 429 })
   }
 
   try {
@@ -755,12 +768,17 @@ async function handleCallEvents(calls: WhatsAppCallEvent[], waBranch: BranchWhat
     // branch below: that flow treats session.sdp as a fresh OFFER, bridges
     // it to /whatsapp/connect, and on failure REJECTS the call — i.e. the
     // webhook used to hang up the very outbound dials this module places.
+    // An explicit USER_INITIATED direction (some webhook versions stamp it on
+    // every event of an inbound call, including answer-shaped accepts) always
+    // routes inbound — the direction is authoritative over the SDP guess.
     const connectSdp = String(call?.session?.sdp || call?.sdp?.sdp || "")
     const connectSdpType = String(call?.session?.sdp_type || call?.sdp?.type || "")
+    const callDirection = String(call?.direction || "").toUpperCase()
     const isOutboundAnswer =
       !!callId &&
       !!connectSdp &&
-      (connectSdpType === "answer" || String(call?.direction || "").toUpperCase() === "BUSINESS_INITIATED")
+      callDirection !== "USER_INITIATED" &&
+      (connectSdpType === "answer" || callDirection === "BUSINESS_INITIATED")
 
     if (event === "connect" && callId && !isOutboundAnswer) {
       const from = String(call?.from || "")
@@ -814,6 +832,13 @@ async function handleCallEvents(calls: WhatsAppCallEvent[], waBranch: BranchWhat
       if (!acc.ok) {
         console.error(`wa accept failed (***${callId.slice(-8)}):`, acc.error)
         await rejectWhatsAppCall(callId, waBranch).catch(() => {})
+        // The voicebot session is ALREADY LIVE (pacer + recorder temp files +
+        // a turn "start" row + the queued greeting). Tearing it down NOW —
+        // instead of letting it sit until the 90s stale timer — frees the
+        // media slot and honestly reports the end for this callId.
+        await bridgeToVoicebot("/whatsapp/terminated", { callId, reason: "accept-failed" }, 15000).catch((e) => {
+          console.error("wa accept-failed: voicebot teardown failed:", e instanceof Error ? e.message : e)
+        })
       } else {
         console.log(`✅ WhatsApp call accepted (***${callId.slice(-8)}) — Priya is live on WhatsApp`)
       }
@@ -830,7 +855,12 @@ async function handleCallEvents(calls: WhatsAppCallEvent[], waBranch: BranchWhat
     // event carries (registered at dial time).
     const outAnswerSdp = String(call?.session?.sdp || call?.sdp?.sdp || "")
     const outAnswerType = String(call?.session?.sdp_type || call?.sdp?.type || "")
-    if (callId && outAnswerSdp && (isOutboundAnswer || outAnswerType === "answer" || event === "accept")) {
+    // Only a BUSINESS-INITIATED call may take the outbound bridge. The old
+    // `event === "accept"` leg routed ANY SDP-bearing accept here — on
+    // webhook versions where an inbound (user-initiated) negotiated call
+    // emits "accept", that hit /whatsapp/outbound-accept, threw "no pending
+    // outbound offer", and the INBOUND call's negotiation was dropped.
+    if (callId && outAnswerSdp && (isOutboundAnswer || ((outAnswerType === "answer" || event === "accept") && callDirection === "BUSINESS_INITIATED"))) {
       console.log(`📞 WhatsApp OUTBOUND call answered callId=***${callId.slice(-8)} (event="${event || "answer"}") — completing negotiation`)
       try {
         await bridgeToVoicebot("/whatsapp/outbound-accept", {
