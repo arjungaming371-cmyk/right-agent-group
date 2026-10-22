@@ -119,15 +119,16 @@ export const DND_INTENT_RE = new RegExp(
     `\\b(?:please\\s+)?(?:remove|delete|take off)\\s+(?:my\\s+)?(?:number|contact|phone|details|me)\\b`,
     `\\b(?:unsubscribe|put me on (?:the )?do not call|don't call me again|stop calling me|do not call again|never call me again|take me off your list)\\b`,
     // Telugu
-    `\\b(?:call|calls)\\s+(?:cheyyakandi|cheyoddu|cheyakandi|cheyavaddu|vaddu)\\b`,
-    `\\b(?:malli|inkosari)\\s+call\\s+(?:cheyyakandi|cheyoddu|cheyakandi)\\b`,
+    `\\b(?:call|calls|phone)\\s+(?:cheyyakandi|cheyoddu|cheyyoddu|cheyakandi|cheyavaddu|vaddu)(?:\\s+andi)?\\b`,
+    `\\b(?:malli|inkosari)\\s+(?:call|phone)\\s+(?:cheyyakandi|cheyoddu|cheyyoddu|cheyakandi)\\b`,
     `\\b(?:naaku\\s+)?(?:calls?\\s+)?vaddu\\b`,
     `\\b(?:number|na number)\\s+(?:remove|delete|teeseyandi|theeseyandi)\\s*(?:cheyyandi)?\\b`,
-    `కాల్ చేయకండి|కాల్స్ వద్దు|మళ్లీ కాల్ చేయకండి|నెంబర్ తీసేయండి|కాల్ చేయొద్దు|నాకు వద్దు|ఫోన్ చేయకండి|నా నెంబర్ తీసేయండి`,
+    `కాల్ చేయకండి|కాల్స్ వద్దు|మళ్లీ కాల్ చేయకండి|నెంబర్ తీసేయండి|కాల్ చేయొద్దు|నాకు వద్దు|ఫోన్ చేయకండి|నా నెంబర్ తీసేయండి|ఫోన్ చేయొద్దు`,
     // Hindi
     `\\b(?:call|phone)\\s+(?:mat|nahi)\\s+(?:karo|karna|kariye)\\b`,
     `\\b(?:dobara|phir|kabhi)\\s+call\\s+mat\\s+(?:karo|karna|kariye)\\b`,
-    `\\bnumber\\s+(?:hatao|delete karo|nikalo)\\b`,
+    `\\b(?:mera\\s+)?number\\s+(?:hata\\s+do|hatao|delete karo|nikal\\s+do|nikalo)\\b`,
+    `\\blist\\s+se\\s+(?:nikal\\s+do|nikalo|hata\\s+do|hatao)\\b`,
     `कॉल मत करो|फोन मत करना|दोबारा कॉल मत करना|नंबर हटा दो|मुझे कॉल मत करो`,
   ].join("|"),
   "i"
@@ -143,10 +144,12 @@ export function detectDndIntent(speech: string): boolean {
 // (e.g., "Chalu, oka doubt undi", "Okay andi, interest rate entha?"), NEVER treat it as an ending!
 export const CONTINUATION_INTENT_RE = new RegExp(
   '\\b(' +
-  'doubt|doubts|oka doubt|oka question|adagali|entha|rate|interest|emi|ela|enduku|cheppandi|' +
-  'kani|kaani|but|wait|okati|ayithe|aithe|inka|malli|' +
-  'what|how|why|when|which|can you|tell me|kya|kaise|kitna|lekin|par' +
-  ')\\b|\\?|డౌట్|డౌట్స్|ఒక డౌట్|ఒక ప్రశ్న|ఎంత|ఎలా|ఎందుకు|చెప్పండి|కానీ|కాని|ఇంకా',
+  '(?<!no\\s+|no more\\s+|em\\s+|emi\\s+|koi\\s+)(?:doubt|doubts|question|questions)(?!\\s+(?:levu|em levu|levandi|ledu|nahi))|' +
+  'oka doubt|oka question|small doubt|last doubt|one last question|last question|actually|wait|adagali|entha|rate|interest|emi|ela|enduku|cheppandi|cheppu|' +
+  'clarification|clarify|meeru ippudu|ippudu cheppandi|malli cheppandi|' +
+  'kani|kaani|but|okati|ayithe|aithe|inka|' +
+  'what|how|why|when\\s+(?:can|will|do|is|are|did|does|should|would|to)|when\\?|which|can you|tell me|kya|kaise|kitna|lekin|par' +
+  ')\\b|\\?|డౌట్|డౌట్స్|ఒక డౌట్|ఒక ప్రశ్న|చిన్న డౌట్|చివరి డౌట్|ఎంత|ఎలా|ఎందుకు|చెప్పండి|కానీ|కాని|ఇంకా|ఇప్పుడు చెప్పండి',
   'i'
 )
 
@@ -177,8 +180,8 @@ export const AMBIGUOUS_CLOSING_RE = new RegExp(
   'untanu|untanu sir|untanandi|untanu mari|sare untanu|inka untanu|' +
   'koi doubt nahi|kuch nahi|sab clear hai|bas itna hi|itna hi|ho gaya' +
   ')\\b|' +
-  '^(no|no sir|no madam|ledu|ledu sir|ledandi|ledu andi|nahi|nahi sir|chalu|anthe|untanu)[.!? ]*$|' +
-  '^(లేదు|లేదండి|లేదు సర్|ఏం లేదు|ఏమీ లేదు|చాలు|చాలండి|అంతే|ఉంటాను)[.!? ]*$|' +
+  '^(no|no sir|no madam|ledu|ledu sir|ledandi|ledu andi|nahi|nahi sir|chalu|anthe|untanu|sare andi|ok andi|okay andi|okay|ok|sare)[.!? ]*$|' +
+  '^(లేదు|లేదండి|లేదు సర్|ఏం లేదు|ఏమీ లేదు|చాలు|చాలండి|అంతే|ఉంటాను|సరే అండి|సరే సర్|ఓకే)[.!? ]*$|' +
   'ఏం లేదు|ఏమీ లేదు|ఏం లేదండి|ఇంకేం లేదు|డౌట్స్ లేవు|డౌట్ లేదు|చాలు|చాలండి|అంతే|సరిపోతుంది|అంతా క్లియర్|క్లియర్ అయింది|' +
   'कोई डाउट नहीं|कुछ नहीं|बस इतना ही|हो गया',
   'i'
@@ -936,7 +939,7 @@ export async function handleTurn(opts: {
 
   const messages = [...history, { role: "user" as const, content: speech }]
 
-  // 1. DND (DO NOT CALL) — HIGHEST PRIORITY
+  // 1. DND (DO NOT CALL) — HIGHEST PREEMPTIVE PRIORITY (Absolute Override)
   if (detectDndIntent(speech)) {
     const dndReply = await handleDndOptOut(leadId, callSid, callerPhone, language)
     updateTranscriptAsync(callSid, speech, dndReply)
@@ -947,64 +950,71 @@ export async function handleTurn(opts: {
     return { text: dndReply, hangup: true }
   }
 
-  // 2. SMART RESCHEDULE: Caller explicitly requests the company/agent to call back
-  if (leadId && history.length > 0) {
-    const reschedule = buildReschedule(speech, language)
-    if (reschedule) {
-      await scheduleSpeechCallback(leadId, callSid, reschedule)
-      updateTranscriptAsync(callSid, speech, reschedule.confirm)
-      return { text: reschedule.confirm, hangup: true }
-    }
-  }
-
-  // 3. CALLER WILL CALL LATER: Caller says THEY will call or check later (do NOT book calendar callback)
-  if (history.length > 0 && detectCallerWillCall(speech)) {
-    const callerCallReplies: Record<Language, string> = {
-      telugu: "Sure sir, మీకు వీలైనప్పుడు తప్పకుండా call చేయండి. Have a great day, bye!",
-      english: "Sure sir, feel free to call us whenever you're free. Have a great day, goodbye!",
-      hindi: "Sure sir, जब भी आप free हों call कर लीजिएगा। Have a great day, bye!",
-    }
-    const reply = callerCallReplies[language] || callerCallReplies.telugu
-    updateTranscriptAsync(callSid, speech, reply)
-    if (callSid) {
-      await db.from("voice_calls").update({ status: "completed" }).eq("twilio_call_sid", callSid).catch(() => {})
-      runPostCallAnalysis(callSid)
-    }
-    return { text: reply, hangup: true }
-  }
-
-  // 4. UNAMBIGUOUS GOODBYE: Clear sign-off without contrast/continuation
+  // 2. EXPLICIT CONTINUATION / QUESTION CHECK
+  // If the caller is asking a doubt, clarifying, or continuing (e.g., "Chalu, oka doubt undi",
+  // "Okay sir, bye... actually one small doubt", "Repu call chesta, meeru ippudu cheppandi"),
+  // this MUST BEAT any ending, callback, or goodbye detection and proceed straight to the AI conversation!
   const hasContinuation = CONTINUATION_INTENT_RE.test(speech)
-  if (history.length > 0 && !hasContinuation && UNAMBIGUOUS_GOODBYE_RE.test(speech)) {
-    const reply = getVoiceClosingsSnapshot().goodbye[language]
-    updateTranscriptAsync(callSid, speech, reply)
-    if (callSid) {
-      await db.from("voice_calls").update({ status: "completed" }).eq("twilio_call_sid", callSid).catch(() => {})
-    }
-    return { text: reply, hangup: true }
-  }
 
-  // 5. AMBIGUOUS SHORT WORD WITH CONTEXT CONFIRMATION:
-  // e.g. caller said "chalu", "anthe", "untanu", "saripothundi", "ok andi"
-  if (history.length > 0 && !hasContinuation && AMBIGUOUS_CLOSING_RE.test((speech || "").trim())) {
-    if (isAfterDoubtInquiry(history)) {
-      // Caller confirms they have no more doubts -> conclude cleanly
+  if (!hasContinuation) {
+    // 3. SMART RESCHEDULE: Caller explicitly requests the company/agent to call back
+    if (leadId && history.length > 0) {
+      const reschedule = buildReschedule(speech, language)
+      if (reschedule) {
+        await scheduleSpeechCallback(leadId, callSid, reschedule)
+        updateTranscriptAsync(callSid, speech, reschedule.confirm)
+        return { text: reschedule.confirm, hangup: true }
+      }
+    }
+
+    // 4. CALLER WILL CALL LATER: Caller says THEY will call back (do NOT book calendar callback)
+    if (history.length > 0 && detectCallerWillCall(speech)) {
+      const callerCallReplies: Record<Language, string> = {
+        telugu: "Sure sir, మీకు వీలైనప్పుడు తప్పకుండా call చేయండి. Have a great day, bye!",
+        english: "Sure sir, feel free to call us whenever you're free. Have a great day, goodbye!",
+        hindi: "Sure sir, जब भी आप free हों call कर लीजिएगा। Have a great day, bye!",
+      }
+      const reply = callerCallReplies[language] || callerCallReplies.telugu
+      updateTranscriptAsync(callSid, speech, reply)
+      if (callSid) {
+        await db.from("voice_calls").update({ status: "completed" }).eq("twilio_call_sid", callSid).catch(() => {})
+        runPostCallAnalysis(callSid)
+      }
+      return { text: reply, hangup: true }
+    }
+
+    // 5. UNAMBIGUOUS GOODBYE: Clear sign-off without contrast/continuation
+    if (history.length > 0 && UNAMBIGUOUS_GOODBYE_RE.test(speech)) {
       const reply = getVoiceClosingsSnapshot().goodbye[language]
       updateTranscriptAsync(callSid, speech, reply)
       if (callSid) {
         await db.from("voice_calls").update({ status: "completed" }).eq("twilio_call_sid", callSid).catch(() => {})
       }
       return { text: reply, hangup: true }
-    } else {
-      // Caller said ambiguous word mid-conversation -> CONFIRM before hanging up!
-      const confirmInquiries: Record<Language, string> = {
-        telugu: "Sure sir, మీకు లోన్ ప్రాసెస్ గురించి ఇంకేమైనా doubts ఉన్నాయా?",
-        english: "Sure sir, do you have any other questions regarding the loan process?",
-        hindi: "Sure sir, क्या आपको लोन के बारे में कोई और सवाल पूछना है?",
+    }
+
+    // 6. AMBIGUOUS SHORT WORD WITH CONTEXT CONFIRMATION:
+    // e.g. caller said "chalu", "anthe", "untanu", "saripothundi", "ok andi", "okay"
+    if (history.length > 0 && AMBIGUOUS_CLOSING_RE.test((speech || "").trim())) {
+      if (isAfterDoubtInquiry(history)) {
+        // Caller confirms they have no more doubts -> conclude cleanly
+        const reply = getVoiceClosingsSnapshot().goodbye[language]
+        updateTranscriptAsync(callSid, speech, reply)
+        if (callSid) {
+          await db.from("voice_calls").update({ status: "completed" }).eq("twilio_call_sid", callSid).catch(() => {})
+        }
+        return { text: reply, hangup: true }
+      } else {
+        // Caller said ambiguous word mid-conversation -> CONFIRM before hanging up!
+        const confirmInquiries: Record<Language, string> = {
+          telugu: "Sure sir, మీకు లోన్ ప్రాసెస్ గురించి ఇంకేమైనా doubts ఉన్నాయా?",
+          english: "Sure sir, do you have any other questions regarding the loan process?",
+          hindi: "Sure sir, क्या आपको लोन के बारे में कोई और सवाल पूछना है?",
+        }
+        const reply = confirmInquiries[language] || confirmInquiries.telugu
+        updateTranscriptAsync(callSid, speech, reply)
+        return { text: reply, hangup: false }
       }
-      const reply = confirmInquiries[language] || confirmInquiries.telugu
-      updateTranscriptAsync(callSid, speech, reply)
-      return { text: reply, hangup: false }
     }
   }
 
@@ -1113,7 +1123,7 @@ export async function handleTurnStream(
     return { hangup: true }
   }
 
-  // 1. DND (DO NOT CALL) — HIGHEST PRIORITY
+  // 1. DND (DO NOT CALL) — HIGHEST PREEMPTIVE PRIORITY (Absolute Override)
   if (detectDndIntent(speech)) {
     const dndReply = await handleDndOptOut(leadId, callSid, callerPhone, language)
     updateTranscriptAsync(callSid, speech, dndReply)
@@ -1125,49 +1135,40 @@ export async function handleTurnStream(
     return { hangup: true }
   }
 
-  // 2. SMART RESCHEDULE: Caller requests company to call back
-  if (leadId && history.length > 0) {
-    const reschedule = buildReschedule(speech, language)
-    if (reschedule) {
-      await scheduleSpeechCallback(leadId, callSid, reschedule)
-      updateTranscriptAsync(callSid, speech, reschedule.confirm)
-      onSentence(reschedule.confirm)
+  // 2. EXPLICIT CONTINUATION / QUESTION CHECK
+  const hasContinuation = CONTINUATION_INTENT_RE.test(speech)
+
+  if (!hasContinuation) {
+    // 3. SMART RESCHEDULE: Caller requests company to call back
+    if (leadId && history.length > 0) {
+      const reschedule = buildReschedule(speech, language)
+      if (reschedule) {
+        await scheduleSpeechCallback(leadId, callSid, reschedule)
+        updateTranscriptAsync(callSid, speech, reschedule.confirm)
+        onSentence(reschedule.confirm)
+        return { hangup: true }
+      }
+    }
+
+    // 4. CALLER WILL CALL LATER: Caller says THEY will call back (no calendar booking)
+    if (history.length > 0 && detectCallerWillCall(speech)) {
+      const callerCallReplies: Record<Language, string> = {
+        telugu: "Sure sir, మీకు వీలైనప్పుడు తప్పకుండా call చేయండి. Have a great day, bye!",
+        english: "Sure sir, feel free to call us whenever you're free. Have a great day, goodbye!",
+        hindi: "Sure sir, जब भी आप free हों call कर लीजिएगा। Have a great day, bye!",
+      }
+      const reply = callerCallReplies[language] || callerCallReplies.telugu
+      updateTranscriptAsync(callSid, speech, reply)
+      onSentence(reply)
+      if (callSid) {
+        await db.from("voice_calls").update({ status: "completed" }).eq("twilio_call_sid", callSid).catch(() => {})
+        runPostCallAnalysis(callSid)
+      }
       return { hangup: true }
     }
-  }
 
-  // 3. CALLER WILL CALL LATER: Caller says THEY will call back (no calendar booking)
-  if (history.length > 0 && detectCallerWillCall(speech)) {
-    const callerCallReplies: Record<Language, string> = {
-      telugu: "Sure sir, మీకు వీలైనప్పుడు తప్పకుండా call చేయండి. Have a great day, bye!",
-      english: "Sure sir, feel free to call us whenever you're free. Have a great day, goodbye!",
-      hindi: "Sure sir, जब भी आप free हों call कर लीजिएगा। Have a great day, bye!",
-    }
-    const reply = callerCallReplies[language] || callerCallReplies.telugu
-    updateTranscriptAsync(callSid, speech, reply)
-    onSentence(reply)
-    if (callSid) {
-      await db.from("voice_calls").update({ status: "completed" }).eq("twilio_call_sid", callSid).catch(() => {})
-      runPostCallAnalysis(callSid)
-    }
-    return { hangup: true }
-  }
-
-  // 4. UNAMBIGUOUS GOODBYE
-  const hasContinuation = CONTINUATION_INTENT_RE.test(speech)
-  if (history.length > 0 && !hasContinuation && UNAMBIGUOUS_GOODBYE_RE.test(speech)) {
-    const reply = getVoiceClosingsSnapshot().goodbye[language]
-    updateTranscriptAsync(callSid, speech, reply)
-    onSentence(reply)
-    if (callSid) {
-      await db.from("voice_calls").update({ status: "completed" }).eq("twilio_call_sid", callSid).catch(() => {})
-    }
-    return { hangup: true }
-  }
-
-  // 5. AMBIGUOUS SHORT WORD WITH CONTEXT CONFIRMATION
-  if (history.length > 0 && !hasContinuation && AMBIGUOUS_CLOSING_RE.test((speech || "").trim())) {
-    if (isAfterDoubtInquiry(history)) {
+    // 5. UNAMBIGUOUS GOODBYE
+    if (history.length > 0 && UNAMBIGUOUS_GOODBYE_RE.test(speech)) {
       const reply = getVoiceClosingsSnapshot().goodbye[language]
       updateTranscriptAsync(callSid, speech, reply)
       onSentence(reply)
@@ -1175,16 +1176,29 @@ export async function handleTurnStream(
         await db.from("voice_calls").update({ status: "completed" }).eq("twilio_call_sid", callSid).catch(() => {})
       }
       return { hangup: true }
-    } else {
-      const confirmInquiries: Record<Language, string> = {
-        telugu: "Sure sir, మీకు లోన్ ప్రాసెస్ గురించి ఇంకేమైనా doubts ఉన్నాయా?",
-        english: "Sure sir, do you have any other questions regarding the loan process?",
-        hindi: "Sure sir, क्या आपको लोन के बारे में कोई और सवाल पूछना है?",
+    }
+
+    // 6. AMBIGUOUS SHORT WORD WITH CONTEXT CONFIRMATION
+    if (history.length > 0 && AMBIGUOUS_CLOSING_RE.test((speech || "").trim())) {
+      if (isAfterDoubtInquiry(history)) {
+        const reply = getVoiceClosingsSnapshot().goodbye[language]
+        updateTranscriptAsync(callSid, speech, reply)
+        onSentence(reply)
+        if (callSid) {
+          await db.from("voice_calls").update({ status: "completed" }).eq("twilio_call_sid", callSid).catch(() => {})
+        }
+        return { hangup: true }
+      } else {
+        const confirmInquiries: Record<Language, string> = {
+          telugu: "Sure sir, మీకు లోన్ ప్రాసెస్ గురించి ఇంకేమైనా doubts ఉన్నాయా?",
+          english: "Sure sir, do you have any other questions regarding the loan process?",
+          hindi: "Sure sir, क्या आपको लोन के बारे में कोई और सवाल पूछना है?",
+        }
+        const reply = confirmInquiries[language] || confirmInquiries.telugu
+        updateTranscriptAsync(callSid, speech, reply)
+        onSentence(reply)
+        return { hangup: false }
       }
-      const reply = confirmInquiries[language] || confirmInquiries.telugu
-      updateTranscriptAsync(callSid, speech, reply)
-      onSentence(reply)
-      return { hangup: false }
     }
   }
 
