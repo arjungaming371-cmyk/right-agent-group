@@ -27,30 +27,50 @@ export type RescheduleMatch = {
 
 const WEEKDAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]
 
-// Explicit FUTURE-CONTACT intent: a contact verb + a future-ish time word, in
-// either order, across English / Romanized Telugu+Hindi / native scripts.
+// Explicit REQUEST FOR PRIYA/COMPANY TO CALL:
+// Caller requests the agent to call back ("repu call cheyyandi", "call me tomorrow").
+// Does NOT match caller-initiated calls ("repu call chesta", "nenu tarvata chesta").
 const INTENT_RE = new RegExp(
   [
-    // English: "call me at 6", "talk tomorrow", "evening lo call cheyandi" style mixes
-    `\\b(?:call|talk|reach|ring|speak)\\b[^.?!]{0,40}\\b(?:later|tomorrow|tonight|today|morning|afternoon|evening|night|next week|${WEEKDAYS.join("|")})\\b`,
-    `\\b(?:later|tomorrow|tonight|next week|${WEEKDAYS.join("|")})\\b[^.?!]{0,40}\\b(?:call|talk|reach|ring|speak)\\b`,
-    // Romanized Telugu: repu/tarvata/malli + cheptanu/cheppu/call/matladu/vastha/ostha
-    `\\b(?:repu|tarvata|tarvatha|malli|sayanthram|udayam|evening lo|morning lo)\\b[^.?!]{0,30}\\b(?:cheptanu|cheptanu sir|cheppu|cheppandi|call chesta|call chestanu|call cheyandi|call cheyyandi|matladathanu|matladali|matladudham|vastaanu|vastanu|osthanu|ostanu)\\b`,
-    `\\b(?:cheptanu|cheppu|cheppandi|call chesta|call chestanu|matladathanu|vastaanu|vastanu|osthanu)\\b[^.?!]{0,20}\\b(?:repu|tarvata|sayanthram|udayam)\\b`,
-    // Native Telugu — needs a CONTACT verb too: bare "ఉదయం" (morning) or
-    // "రేపు" (tomorrow) alone appears in ordinary EMI/timing sentences.
-    `రేపు[^.?!]{0,25}(?:చెప్తాను|చెప్తా|కాల్|call|మాట్లాడు|వస్తా|ఫోన్)`,
-    `తర్వాత[^.?!]{0,25}(?:చెప్తాను|కాల్|call|మాట్లాడు|వస్తా)`,
-    `మళ్ళీ[^.?!]{0,15}(?:call|కాల్|మాట్లాడుదాం|ఫోన్)`,
-    `సాయంత్రం[^.?!]{0,25}(?:call|కాల్|మాట్లాడు|ఫోన్)`,
-    // Romanized Hindi: kal/baad/shaam/subah + call/bata/baat
-    `\\b(?:kal|baad me|baad mein|shaam|subah|dopahar)\\b[^.?!]{0,30}\\b(?:call|bata|batana|batayenge|baat|milenge|phone)\\b`,
-    `\\b(?:call|phone)\\b[^.?!]{0,25}\\b(?:kal|shaam|subah|baad me|baad mein)\\b`,
-    // Native Hindi
-    `कल.{0,15}(?:कॉल|बात|फोन)|(?:कॉल|फोन).{0,15}कल|शाम को.{0,15}(?:कॉल|फोन|बात)`,
+    // English: "call me at 6", "call me tomorrow", "please ring me later", "call me back"
+    `\\b(?:please\\s+)?(?:call\\s+me|call\\s+us|ring\\s+me|reach\\s+me|talk\\s+to\\s+me)\\b[^.?!]{0,40}\\b(?:later|tomorrow|tonight|today|morning|afternoon|evening|night|next week|${WEEKDAYS.join("|")})\\b`,
+    `\\b(?:later|tomorrow|tonight|next week|${WEEKDAYS.join("|")})\\b[^.?!]{0,40}\\b(?:please\\s+)?(?:call\\s+me|call\\s+us|ring\\s+me)\\b`,
+    `\\b(?:busy|busy right now|can't talk right now|in a meeting)\\b[^.?!]{0,35}\\b(?:call\\s+me|call\\s+later|call\\s+tomorrow)\\b`,
+    // Romanized Telugu: requesting the agent to call - cheyandi/cheyyandi/matladandi
+    `\\b(?:repu|tarvata|tarvatha|malli|sayanthram|udayam|evening lo|morning lo)\\b[^.?!]{0,30}\\b(?:call\\s+cheyandi|call\\s+cheyyandi|phone\\s+cheyandi|phone\\s+cheyyandi|matladandi|ring\\s+cheyandi)\\b`,
+    `\\b(?:call\\s+cheyandi|call\\s+cheyyandi|phone\\s+cheyandi|matladandi)\\b[^.?!]{0,20}\\b(?:repu|tarvata|sayanthram|udayam)\\b`,
+    `\\b(?:busy|busy ga unnanu|meeting lo unnanu)\\b[^.?!]{0,35}\\b(?:tarvata|repu)?\\s*(?:call\\s+cheyandi|call\\s+cheyyandi)\\b`,
+    // Native Telugu: asking agent to call
+    `(?:రేపు|తర్వాత|సాయంత్రం|మళ్ళీ)[^.?!]{0,25}(?:కాల్\\s*చేయండి|ఫోన్\\s*చేయండి|మాట్లాడండి)`,
+    `(?:కాల్\\s*చేయండి|ఫోన్\\s*చేయండి|మాట్లాడండి)[^.?!]{0,20}(?:రేపు|తర్వాత|సాయంత్రం)`,
+    // Hindi: asking agent to call
+    `\\b(?:kal|baad me|baad mein|shaam ko|subah)\\b[^.?!]{0,30}\\b(?:call\\s+kijiye|call\\s+karna|call\\s+kariyega|phone\\s+kijiye|phone\\s+karna)\\b`,
+    `\\b(?:call|phone)\\s+(?:kijiye|karna|kariyega)\\b[^.?!]{0,25}\\b(?:kal|shaam|subah|baad me)\\b`,
+    `कल.{0,15}(?:कॉल कीजिए|कॉल करना|फोन करना)|बाद में.{0,15}(?:कॉल कीजिए|कॉल करना)`,
   ].join("|"),
   "i"
 )
+
+// CALLER SAYS THEY WILL CALL OR CHECK LATER:
+// "repu call chesta" / "nenu tarvata call chesta" / "chusi cheptanu".
+// Caller-initiated -> DO NOT auto-schedule an outbound callback in Calendar.
+export const CALLER_WILL_CALL_RE = new RegExp(
+  [
+    `\\b(?:nenu|memu)?\\s*(?:repu|tarvata|tarvatha|malli|sayanthram|udayam|evening lo|morning lo)\\b[^.?!]{0,30}\\b(?:call\\s+chesta|call\\s+chestanu|matladathanu|matladathaa|cheptanu|cheptha|vastaanu|vastanu|osthanu)\\b`,
+    `\\b(?:nenu|memu)\\s+(?:tarvata|malli|repu)?\\s*(?:call\\s+chesta|call\\s+chestanu|matladathanu)\\b`,
+    `\\b(?:chusi|chuse)\\s+(?:cheptanu|cheptha)\\b`,
+    `(?:నేను|మేము)?\\s*(?:రేపు|తర్వాత|మళ్ళీ|సాయంత్రం)[^.?!]{0,25}(?:కాల్\\s*చేస్తా|కాల్\\s*చేస్తాను|మాట్లాడతాను|చెప్తాను|చూసి\\s*చెప్తాను|వస్తాను)`,
+    `\\b(?:i|i'll|i will|let me|we will)\\s+(?:call|reach out|contact|ring|check and call)\\s+(?:you\\s+)?(?:back|later|tomorrow|tonight|next week)?\\b`,
+    `\\b(?:main|hum)\\s+(?:baad me|kal|phir)\\s+(?:call\\s+karunga|call\\s+karenge|baat\\s+karunga)\\b`,
+    `मैं.{0,15}(?:कॉल करूँगा|बात करूँगा|फोन करूँगा)`,
+  ].join("|"),
+  "i"
+)
+
+export function detectCallerWillCall(speech: string): boolean {
+  if (!speech || speech.length > 300) return false
+  return CALLER_WILL_CALL_RE.test(speech)
+}
 
 // Explicit clock time in the speech ("6pm", "6:30", "6 baje", "18:00", "evening 5").
 const TIME_RE = /\b(\d{1,2})(?::(\d{2}))?\s*(am|pm|baje|बजे)?/i
