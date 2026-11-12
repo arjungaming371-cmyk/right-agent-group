@@ -113,6 +113,7 @@ export async function POST(req: NextRequest) {
     // one "What should Priya talk about?" text stamped on every queued row.
     // A per-contact talking_points field (if a caller sends one) wins.
     const campaignPoints = campaignTalkingPoints(body.talking_points)
+    const agendaLabel = typeof body.agenda_label === "string" ? body.agenda_label.slice(0, 100).trim() : null
     for (const contact of body.contacts) {
       if (!contact.phone) continue
       contact.phone = normalizePhone(contact.phone)
@@ -157,6 +158,7 @@ export async function POST(req: NextRequest) {
           product_interest: contact.product_interest,
           notes: (contact as Record<string, unknown>).notes as string | undefined || null,
           talking_points: campaignTalkingPoints((contact as Record<string, unknown>).talking_points) ?? campaignPoints,
+          agenda_label: ((contact as Record<string, unknown>).agenda_label as string | undefined)?.slice(0, 100)?.trim() || agendaLabel || null,
           // Outpero-style per-lead sheet data (city, budget, plan, …) — the
           // dialer renders {merge_fields} in the talking points from this at
           // dial time (lib/script-studio.renderForDial).
@@ -166,8 +168,72 @@ export async function POST(req: NextRequest) {
           branch_id: branchId,
         })
         queued++
+
+        if (leadId && agendaLabel) {
+          await query(
+            `INSERT INTO lead_interactions (lead_id, channel, direction, one_line_summary)
+             VALUES ($1, 'system', 'out', $2)`,
+            [leadId, `Added to call queue · agenda: ${agendaLabel}`]
+          ).catch(() => {})
+        }
       } catch (e) {
         console.error(`Failed to queue contact ${contact.phone}:`, e)
+      }
+    }
+    return NextResponse.json({ ok: true, queued, skipped })
+  }
+
+  // Selected leads batch mode: { lead_ids: [...] } — queue existing leads with talking points
+  if (body.lead_ids && Array.isArray(body.lead_ids) && body.lead_ids.length > 0) {
+    const campaignPoints = campaignTalkingPoints(body.talking_points)
+    const agendaLabel = typeof body.agenda_label === "string" ? body.agenda_label.slice(0, 100).trim() : null
+    let queued = 0
+    let skipped = 0
+
+    const leadsRes = await query(
+      `SELECT id, name, phone, language, product_interest, notes, custom_fields, branch_id
+       FROM leads WHERE id = ANY($1) AND ($2::uuid IS NULL OR branch_id = $2)`,
+      [body.lead_ids, branchId]
+    )
+
+    for (const lead of leadsRes.rows) {
+      if (!lead.phone) continue
+      const normPhone = normalizePhone(lead.phone)
+      try {
+        const dup = await query(
+          `SELECT id FROM outbound_queue
+            WHERE right(regexp_replace(phone, '\\D', '', 'g'), 10) = NULLIF($1, '')
+              AND status IN ('pending', 'dialing')
+              AND ($2::uuid IS NULL OR branch_id = $2)
+            LIMIT 1`,
+          [phoneLast10(normPhone), branchId]
+        )
+        if (dup.rows[0]) { skipped++; continue }
+
+        await db.from("outbound_queue").insert({
+          lead_id: lead.id,
+          name: lead.name,
+          phone: normPhone,
+          language: lead.language || "telugu",
+          product_interest: lead.product_interest,
+          notes: lead.notes || null,
+          custom_fields: sanitizeCustomFields(lead.custom_fields),
+          talking_points: campaignPoints,
+          agenda_label: agendaLabel || null,
+          status: "pending",
+          branch_id: branchId || lead.branch_id || null,
+        })
+        queued++
+
+        if (agendaLabel) {
+          await query(
+            `INSERT INTO lead_interactions (lead_id, channel, direction, one_line_summary)
+             VALUES ($1, 'system', 'out', $2)`,
+            [lead.id, `Added to call queue · agenda: ${agendaLabel}`]
+          ).catch(() => {})
+        }
+      } catch (e) {
+        console.error(`Failed to queue lead ${lead.id}:`, e)
       }
     }
     return NextResponse.json({ ok: true, queued, skipped })

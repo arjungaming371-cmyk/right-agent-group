@@ -1,7 +1,8 @@
 "use client"
-import { useCallback, useEffect, useState } from "react"
+import React, { useCallback, useEffect, useState } from "react"
 import { RefreshCw, Circle, Database, Brain, MessageCircle, Phone, Server, Mail, Music } from "lucide-react"
 import { SkeletonList } from "../ui/skeleton"
+import { usePolling } from "@/lib/use-poll"
 
 // SYSTEM HEALTH — admin view over GET /api/system/health.
 // Live reachability + configuration posture + provider failure bookkeeping.
@@ -59,22 +60,184 @@ function Row({ icon: Icon, title, sub, right, note }: {
   )
 }
 
-export default function SystemHealthView() {
+function HealthRow({
+  icon: Icon,
+  title,
+  ok,
+  note,
+  configured = true,
+}: {
+  icon: any
+  title: string
+  ok: boolean
+  note?: string | null
+  configured?: boolean
+}) {
+  const color = !configured ? "var(--text-muted)" : ok ? "var(--accent-green)" : "var(--accent-yellow)"
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        padding: "8px 0",
+        borderBottom: "1px solid var(--border-light)",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <Circle size={8} fill={color} strokeWidth={0} style={{ color, flexShrink: 0 }} />
+        <Icon size={14} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
+        <span style={{ fontSize: 13, fontWeight: 500, color: "var(--text-primary)" }}>{title}</span>
+      </div>
+      {note && (
+        <span
+          style={{
+            fontSize: 12,
+            color: "var(--text-muted)",
+            maxWidth: 160,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {note}
+        </span>
+      )}
+    </div>
+  )
+}
+
+function ProviderFailures({ providers }: { providers: Health["providers"] }) {
+  const entries = Object.entries(providers || {})
+  if (entries.length === 0) {
+    return (
+      <div
+        style={{
+          marginTop: 12,
+          padding: "8px 12px",
+          fontSize: 11.5,
+          color: "var(--text-muted)",
+          background: "var(--bg-secondary)",
+          borderRadius: 8,
+        }}
+      >
+        No provider failures recorded.
+      </div>
+    )
+  }
+  return (
+    <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-secondary)" }}>Provider activity</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 180, overflowY: "auto" }}>
+        {entries.map(([name, p]) => (
+          <div
+            key={name}
+            style={{
+              fontSize: 11.5,
+              padding: "7px 10px",
+              background: "var(--bg-secondary)",
+              borderRadius: 6,
+              border: "1px solid var(--border-light)",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 500 }}>
+              <span style={{ textTransform: "capitalize", color: "var(--text-primary)" }}>{name.replace(/-/g, " ")}</span>
+              <span style={{ color: p.consecutiveFails > 0 ? "var(--accent-yellow)" : "var(--accent-green)", fontSize: 11 }}>
+                {p.consecutiveFails > 0 ? `${p.consecutiveFails} in a row` : "OK"}
+              </span>
+            </div>
+            <div style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 2 }}>
+              last ok {fmtWhen(p.lastOkAt)} · last fail {fmtWhen(p.lastFailAt)}
+            </div>
+            {p.lastError && (
+              <div
+                style={{
+                  fontSize: 10.5,
+                  color: "var(--accent-yellow)",
+                  marginTop: 2,
+                  wordBreak: "break-word",
+                }}
+              >
+                {p.lastError}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+export default function SystemHealthView({ compact = false }: { compact?: boolean }) {
   const [health, setHealth] = useState<Health | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [open, setOpen] = useState(false)
 
-  const load = useCallback(async () => {
+  const refresh = useCallback(async () => {
     try {
       const res = await fetch("/api/system/health")
       if (!res.ok) throw new Error()
       setHealth(await res.json())
       setError(null)
     } catch {
-      setError("Could not load system health. Please try again.")
+      setError("Could not load system health.")
     }
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { refresh() }, [refresh])
+  usePolling(refresh, 60000)
+
+  if (compact) {
+    if (!health) {
+      return (
+        <div>
+          {error && (
+            <div style={{ marginBottom: 10, fontSize: 12, color: "var(--accent-yellow)" }}>{error}</div>
+          )}
+          <SkeletonList rows={6} />
+        </div>
+      )
+    }
+
+    return (
+      <div>
+        {error && (
+          <div style={{ marginBottom: 8, fontSize: 11.5, color: "var(--accent-yellow)" }}>{error}</div>
+        )}
+        {/* six dot rows */}
+        <HealthRow icon={Database}      title="Database"  ok={health.database.ok}  note={health.database.size || (health.database.ok ? "OK" : "Error")} />
+        <HealthRow icon={Brain}         title="AI brain"  ok={health.llm.ok}       note={health.llm.provider} />
+        <HealthRow icon={Music}         title="Voice"     ok={!!health.tts.sarvamConfigured} note={health.tts.primary} />
+        <HealthRow icon={Server}        title="Speech"    ok={!!health.stt.sarvamConfigured} note={health.stt.provider} />
+        <HealthRow icon={MessageCircle} title="WhatsApp"  ok={health.whatsapp.connected}    note={health.whatsapp.running ? "running" : "offline"} />
+        <HealthRow icon={Phone}         title="Telephony" ok={health.voicebot.running}      note={health.telephony.configured ? "Exotel" : "not configured"} />
+
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12 }}>
+          <span style={{ fontSize: 11.5, color: "var(--text-muted)" }}>Checked {fmtWhen(health.checkedAt)}</span>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button
+              type="button"
+              onClick={() => setOpen(!open)}
+              className="btn-ghost"
+              style={{ fontSize: 11.5, padding: "3px 10px", height: 26 }}
+            >
+              {open ? "Hide details" : "Details"}
+            </button>
+            <button
+              type="button"
+              onClick={refresh}
+              className="icon-btn"
+              title="Refresh"
+              style={{ width: 26, height: 26 }}
+            >
+              <RefreshCw size={13} />
+            </button>
+          </div>
+        </div>
+        {open && <ProviderFailures providers={health.providers} />}
+      </div>
+    )
+  }
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -86,7 +249,7 @@ export default function SystemHealthView() {
           </p>
         </div>
         <button
-          onClick={load}
+          onClick={refresh}
           aria-label="Refresh health"
           className="flex h-8 items-center gap-1.5 rounded-lg border border-[var(--border)] px-2.5 text-[12px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
         >

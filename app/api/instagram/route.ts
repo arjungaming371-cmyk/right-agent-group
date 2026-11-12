@@ -16,13 +16,13 @@ import { buildEmiInstruction, buildRateInstruction, detectLoanType } from "@/lib
 import { currentDateTimeInstruction } from "@/lib/compliance"
 import { extractIndianMobile } from "@/lib/phone"
 import { promoteInstagramLead } from "@/lib/ig-promote"
-import { detectApplicationRequest } from "@/lib/application-request"
 import {
   branchWhatsAppCtx,
   createOneTimeFormToken,
   formLinkMessage,
   recentFormLinkSent,
   sendApplicationLink,
+  detectApplicationRequest,
 } from "@/lib/whatsapp"
 import { createNotification } from "@/lib/notifications"
 import {

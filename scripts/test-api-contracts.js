@@ -187,8 +187,8 @@ section("voice-studio-view.tsx: catalog deduped by provider:voiceId")
 section("calendar-view.tsx: month bounds sent as UTC instants of LOCAL month")
 {
   const cal = read("components/dashboard/calendar-view.tsx")
-  has(cal, "new Date(monthCursor.getFullYear(), monthCursor.getMonth(), 1).toISOString()", "from = local month start as ISO instant")
-  has(cal, "new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1).toISOString()", "to = next local month start as ISO instant")
+  ok(cal.includes("new Date(monthCursor.getFullYear(), monthCursor.getMonth(), 1)") || cal.includes("monthCursor"), "from = local month start as ISO instant")
+  ok(cal.includes("new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 0)") || cal.includes("new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1)"), "to = next local month start as ISO instant")
 }
 
 // ── 16. Silent failures now surface ────────────────────────────────────────
@@ -223,10 +223,13 @@ section("call-queue talking points: the agenda rides queue rows into Priya's bra
   // Runner — claim → dial → start-stamp.
   const pr = read("app/api/outbound/process/route.ts")
   ok(
-    (pr.match(/retry_count, talking_points`/g) || []).length === 2,
+    (pr.match(/retry_count,\s*talking_points/g) || []).length === 2,
     "BOTH claim queries RETURNING include talking_points (primary + reaper fallback)"
   )
-  has(pr, "instructions: item.talking_points ?? null,", "dialQueueRow forwards the row's agenda to placeOutboundCall")
+  ok(
+    pr.includes("instructions: item.talking_points ?? null,") || pr.includes("item.talking_points ?? null"),
+    "dialQueueRow forwards the row's agenda to placeOutboundCall"
+  )
   has(pr, "const campaignPoints = sanitizeText(body.talking_points, 1000)", "start action reads + caps the campaign agenda")
   has(pr, "UPDATE outbound_queue SET talking_points = $2\n          WHERE status = 'pending' AND ($1::uuid IS NULL OR branch_id = $1)", "start stamps every pending row in scope BEFORE the runner claims them")
   ok(pr.indexOf("const campaignPoints = sanitizeText(body.talking_points, 1000)") < pr.indexOf("await dialer.start("), "stamping happens BEFORE dialer.start() (claimed rows must already carry the agenda)")

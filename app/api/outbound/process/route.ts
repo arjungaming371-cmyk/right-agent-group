@@ -211,7 +211,7 @@ function bulkDialerDeps(branchId: string | null) {
       const quota = await checkQuota(branchId, "call")
       return { ok: quota.ok, reason: quota.reason }
     },
-    maxConcurrency: 10,
+    maxConcurrency: 5,
     pauseMs: 500,
     log: (msg: string) => console.log(`[bulk-dialer] ${msg}`),
   }

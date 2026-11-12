@@ -48,14 +48,19 @@ const MAX_ROWS = 2000
 const SCRIPT_MAX_KB_ENTRIES = 500
 
 export async function POST(req: NextRequest) {
-  const session = await requireModuleOrRole(req, "upload", ["admin", "branch_manager"])
+  const session = (await requireModuleOrRole(req, "leads", ["admin", "branch_manager", "agent"]))
+    || (await requireModuleOrRole(req, "upload", ["admin", "branch_manager", "agent"]))
+    || (await requireModuleOrRole(req, "knowledge", ["admin", "branch_manager", "agent"]))
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   // Uploaded leads + the file record belong to the session's active branch.
   const branchId = sessionBranchId(session)
   const formData = await req.formData()
   const file = formData.get("file") as File | null
-  const type = formData.get("type") as string ?? "contacts"
+  const type = (formData.get("type") as string) ?? "contacts"
+  const destination = (formData.get("destination") as string) === "queue" ? "queue" : "leads"
+  const talkingPoints = ((formData.get("talking_points") as string) || "").trim()
+  const agendaLabel = ((formData.get("agenda_label") as string) || "").trim()
 
   if (!file) return NextResponse.json({ error: "No file" }, { status: 400 })
   if (file.size > MAX_UPLOAD_BYTES) {
@@ -218,8 +223,43 @@ export async function POST(req: NextRequest) {
     }
     const duplicates = duplicatesInFile + duplicatesExisting
 
+    let queued = 0
+    if (destination === "queue" && parsedContacts.length > 0) {
+      for (const c of parsedContacts) {
+        try {
+          await db.from("outbound_queue").insert({
+            lead_id: c.leadId,
+            name: c.name,
+            phone: c.phone,
+            language: c.language || "telugu",
+            product_interest: c.product_interest,
+            notes: c.notes || null,
+            custom_fields: c.custom_fields ?? null,
+            talking_points: talkingPoints || null,
+            agenda_label: agendaLabel || null,
+            status: "pending",
+            branch_id: branchId,
+          })
+          queued++
+
+          if (c.leadId && agendaLabel) {
+            await query(
+              `INSERT INTO lead_interactions (lead_id, channel, direction, one_line_summary)
+               VALUES ($1, 'system', 'out', $2)`,
+              [c.leadId, `Added to call queue · agenda: ${agendaLabel}`]
+            ).catch(() => {})
+          }
+        } catch {
+          // uq_outbound_queue_active_phone — already waiting in the queue. Skip, don't fail.
+        }
+      }
+    }
+
     if (uploadRecord) {
-      await db.from("uploaded_files").update({ processed: created, status: "pending_review" }).eq("id", uploadRecord.id)
+      await db.from("uploaded_files").update({
+        processed: created,
+        status: destination === "queue" ? "done" : "pending_review",
+      }).eq("id", uploadRecord.id)
     }
 
     if (created === 0) {
@@ -235,9 +275,11 @@ export async function POST(req: NextRequest) {
       created,
       duplicates,
       invalid,
+      queued,
+      destination,
       uploadId: uploadRecord?.id,
       contacts: parsedContacts,
-      message: `${created} contacts parsed${duplicates ? ` · ${duplicates} duplicate${duplicates === 1 ? "" : "s"} skipped` : ""}${invalid ? ` · ${invalid} invalid number${invalid === 1 ? "" : "s"}` : ""}. Review and confirm to add them to the outbound queue — nothing is dialed yet.`,
+      message: `${created} added${duplicates ? ` · ${duplicates} duplicates skipped` : ""}${invalid ? ` · ${invalid} invalid numbers` : ""}.${destination === "queue" ? ` ${queued} waiting in Call Queue.` : ""}`,
     })
   }
 

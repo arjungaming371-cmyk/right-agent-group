@@ -21,63 +21,22 @@ import {
 
 export const dynamic = "force-dynamic"
 
-const SYSTEM_PROMPT = `You are the Right Agent Group Executive Operations Commander & AI Assistant, built into the staff dashboard.
+const SYSTEM_PROMPT = `You are the Right Agent Group operations assistant, inside the staff dashboard.
+You answer questions about this business using ONLY the live data and search
+results provided below. You are not Priya and you are never talking to a customer.
 
-You are NOT Priya and you are NOT talking to a customer on a phone call. You are an internal executive AI co-pilot for Right Agent Group staff (admins, branch managers, and loan officers) with full command oversight across: leads, voice calls, loan applications, WhatsApp conversations, Priya's call scripts, Knowledge Base entries, security settings, audit logs, campaigns, and team members.
-
-You also receive LIVE DATA SNAPSHOTS and full-text SEARCH RESULTS covering all records.
-
-==================================================
-ADMIN COMMAND & DASHBOARD CONTROL CAPABILITIES:
-==================================================
-You have direct capability to draft, generate, and propose actions to control the entire dashboard:
-1. SCRIPT WRITING & TUNING: Write, refine, and tune Priya's calling scripts (Universal Base, English, Hindi, Telugu) for Personal Loans, Business Loans, Home Loans, etc. Always provide complete, production-ready, objection-tested scripts.
-2. BRIEF PRIYA (campaign scripts — like an AI HR briefing an employee): When the staff asks you to prepare a campaign, write a COMPLETE campaign brief with {merge_field} placeholders ({name}, {product_interest}, {city}, {loan_amount}, plus any CSV columns the leads were uploaded with, e.g. {budget}, {plan}) and propose it via update_campaign_template. The brief must follow this structure: CAMPAIGN BRIEF header line, TONE, OPENING (greet using {name}, reference the offer), CUSTOMER DATA ON FILE (use the sheet data, never re-ask), DISCOVERY (one question), PITCH (pain-relief, honest, NO invented figures), DETAILS TO CAPTURE (numbered, one question each), READBACK (confirm all captured details in one sentence before closing), CLOSE (send the simple loan application on WhatsApp, officer follows up), HARD RULES (no OTP/PIN/payment ever; never guarantee approval; 2 clear NOs → stop politely). Match the requested language style: Telugu = Tenglish in Roman letters ONLY, Hindi = Hinglish in Roman letters ONLY, English = simple spoken English.
-3. QUEUE A CALL: When the staff says "call this lead", "queue Ramesh for a callback", or gives a number to dial — propose queue_lead_call with the phone, a short talking_points agenda (use {merge_fields} when relevant), and priority "urgent" only when they say now/front/hot. You QUEUE, you never pretend a call already happened.
-4. SCHEDULE A CALLBACK: When the staff says "schedule a callback for tomorrow 6pm" for a known lead — propose update_lead with callback_at (resolve relative dates against the current time, ISO 8601, IST) and a short callback_note.
-5. KNOWLEDGE BASE WRITING: Draft structured policies, loan product guidelines, document checklists, interest rate cards, and FAQs for the Knowledge Base.
-6. ADDING LEADS ("ADDING NEADS"): Create new leads directly from user commands or extracted from attached business cards, screenshots, messages, or files.
-7. LEAD & LOAN PIPELINE MANAGEMENT: Update lead statuses (qualified, contacted, callback, lost), adjust scores, add notes, or update loan application stages (approved, underwriting, rejected).
-8. DND & COMPLIANCE: Add phone numbers to DND suppression or remove them.
-9. SECURITY & SETTINGS: Propose toggling security controls.
-
-==================================================
-MANDATORY ADMIN APPROVAL ACTION PROTOCOL:
-==================================================
-CRITICAL SECURITY RULE: You CANNOT modify the database directly on your own. All dashboard changes require explicit ADMIN COMMAND APPROVAL.
-
-Whenever the user commands or requests ANY change, creation, or update to dashboard data (scripts, knowledge base, leads, loans, DND, security):
-1. Provide your complete, high-quality work in your message (e.g. the full script, the full knowledge base article, or the parsed lead summary).
-2. Explicitly notify the user: "⚠️ **Admin Approval Required**: Please review the proposed action below and click **Approve & Execute** to apply this change to the dashboard."
-3. At the VERY END of your response, append the machine-readable proposal block formatted EXACTLY as:
-
-\`\`\`action:proposal
-{
-  "type": "update_script" | "update_campaign_template" | "add_kb_entry" | "update_kb_entry" | "delete_kb_entry" | "add_lead" | "update_lead" | "update_loan" | "add_dnd" | "remove_dnd" | "toggle_security" | "queue_lead_call",
-  "title": "<Concise Action Title>",
-  "description": "<1-sentence summary of what this action modifies>",
-  "payload": { ... }
-}
-\`\`\`
-
-SUPPORTED ACTION TYPES & PAYLOAD SCHEMAS:
-- update_script: { "language": "base", "content": "<full script content>" }
-- update_campaign_template: { "content": "<full campaign brief with {merge_field} placeholders>" }
-- queue_lead_call: { "phone": "<phone>", "name": "<name>", "language": "telugu" | "hindi" | "english", "talking_points": "<short agenda, {merge_fields} allowed>", "priority": "normal" | "urgent", "scheduled_at": "<optional ISO datetime>" }
-- add_kb_entry: { "title": "<title>", "content": "<content>", "category": "Loans" | "General" | "FAQ" | "Policies" }
-- update_kb_entry: { "id": "<id>", "title": "<title>", "content": "<content>", "category": "<category>" }
-- delete_kb_entry: { "id": "<id>", "title": "<title>" }
-- add_lead: { "name": "<name>", "phone": "<phone>", "product_interest": "personal" | "business" | "home", "loan_amount": <number>, "notes": "<notes>", "city": "<city>", "address": "<address>" }
-- update_lead: { "id": "<id>", "phone": "<phone>", "status": "new" | "contacted" | "qualified" | "callback" | "lost", "score": <number>, "notes": "<notes>", "product_interest": "<product>", "callback_at": "<ISO datetime or null>", "callback_note": "<short note>" }
-- update_loan: { "id": <number>, "status": "approved" | "underwriting" | "rejected" | "documents_pending", "notes": "<notes>" }
-- add_dnd: { "phone": "<phone>", "reason": "<reason>" }
-- remove_dnd: { "phone": "<phone>" }
-- toggle_security: { "key": "<key>", "enabled": true | false }
-
-RULES:
-- When the user asks a question without commanding a change, answer normally without the action proposal block.
-- Only output the action proposal block when an actionable dashboard change is intended.
-- RESPONSE STYLE — ANSWER THE REQUEST GIVEN: the first line must directly answer/execute the exact request; if the request is ambiguous, answer the most likely reading from the verified data and note the assumption in one short line. No preamble, no filler ("Certainly!", "Great question!"), never repeat the question back. Be concise by default: questions get the direct answer plus at most 5 short bullets, aiming under 120 words, unless the staff member explicitly asks for depth, a full script, or a detailed breakdown. Use chat-friendly markdown that renders in the bubble: bold labels, tight bullets, short headings only when the answer is genuinely long. Never pad, never lecture, never summarize what the staff member already knows.`
+1. Answer the exact question in the first line. No preamble, no repeating it back.
+2. Every number you state must come from the data below. If it is not there,
+   say "I don't have that" and name what you would need. Never estimate.
+3. Never do arithmetic yourself. Use the calculated figures provided.
+4. You cannot change anything in the dashboard. If asked to, say which screen
+   does it — Script, Knowledge Base, Leads, Call Queue, Security — and stop.
+5. You may draft text for the user to copy: a call script, a KB entry, a
+   campaign brief. Label it clearly as a draft. Use native Telugu/Devanagari
+   script for call scripts and Roman letters for WhatsApp.
+6. Be short: the direct answer plus at most five bullets, under 120 words,
+   unless the user asks for depth.
+7. Branch scope: only discuss data you were given. Never guess at another branch.`
 
 // FIX (2026-09-20): this fired 21 parallel queries on EVERY assistant message
 // (one user could occupy ~half the 25-connection pool; two concurrent users
@@ -534,14 +493,11 @@ export async function POST(req: NextRequest) {
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
         try {
-          // ACCURACY GATE (2026-10-04): the draft is generated in full BEFORE
-          // any byte reaches the client — raw model deltas are never forwar-
-          // ded. A reply whose figures cannot be traced to the verified
-          // corpus is withheld entirely and replaced with the honest fallback,
-          // so an assumed or invented number can never reach the screen.
-          // Replies carrying an action:proposal skip the numeric gate: that
-          // content is a creative draft gated by the admin Approve & Execute
-          // review, not a factual claim.
+          // ACCURACY GATE: the draft is generated in full BEFORE any byte
+          // reaches the client. Every reply is strictly verified against
+          // the verified corpus — no exceptions. If any figure cannot be
+          // traced to the verified data, the reply is withheld and replaced
+          // with the accurate fallback.
           const rawReply = await chatWithSystemPromptStream(
             messages,
             fullContext,
@@ -549,21 +505,18 @@ export async function POST(req: NextRequest) {
             { numCtx: 8192, numPredict: 600, timeoutMs: 90000, historyTurns: 12 }
           )
 
-          const hasProposal = /```(?:action:proposal|json:action|action)/.test(rawReply)
           let delivered = rawReply
-          if (!hasProposal) {
-            const verdict = checkReplyGrounded(rawReply, groundCorpus)
-            if (!verdict.grounded) {
-              console.warn(
-                "assistant accuracy guardrail withheld a reply — unverified figures:",
-                verdict.unverified.join(", "),
-                "| excerpt:",
-                rawReply.slice(0, 160)
-              )
-              delivered = UNVERIFIED_REPLY_FALLBACK
-            } else if (hasSignificantFigures(rawReply)) {
-              delivered = `${VERIFIED_BADGE}\n\n${rawReply}`
-            }
+          const verdict = checkReplyGrounded(rawReply, groundCorpus)
+          if (!verdict.grounded) {
+            console.warn(
+              "assistant accuracy guardrail withheld a reply — unverified figures:",
+              verdict.unverified.join(", "),
+              "| excerpt:",
+              rawReply.slice(0, 160)
+            )
+            delivered = UNVERIFIED_REPLY_FALLBACK
+          } else if (hasSignificantFigures(rawReply)) {
+            delivered = `${VERIFIED_BADGE}\n\n${rawReply}`
           }
 
           // Deliver the validated reply in small slices (surrogate-pair safe

@@ -681,7 +681,7 @@ export async function sendApplicationLink(
   if (!appUrl && !process.env.APPLICATION_FORM_URL) {
     return { ok: false, error: `Template failed (${result.error}) and NEXT_PUBLIC_APP_URL not set for fallback` }
   }
-  const formBase = (process.env.APPLICATION_FORM_URL || `${appUrl}/form`).replace(/\/$/, "")
+  const formBase = `${appUrl}/l`.replace(/\/$/, "")
   // Fallback copy is dashboard-editable (Script Manager → WhatsApp tab),
   // with {name} {brand} {link} placeholders — falls back to code defaults.
   const t = getWhatsAppFallbackTemplates()
@@ -708,15 +708,17 @@ export async function sendApplicationLink(
  * operator send-form route and IG promotion use. */
 export async function createOneTimeFormToken(leadId: string): Promise<string> {
   const { query } = await import("./db")
-  const token = crypto.randomUUID()
+  const token = crypto.randomUUID().slice(0, 8)
   try {
     await query(
-      `INSERT INTO form_links (token, lead_id, expires_at) VALUES ($1, $2, now() + interval '14 days')`,
+      `INSERT INTO link_sends (token, lead_id, bank, product, status) VALUES ($1, $2, 'SBI', 'Home Loan', 'sent')`,
       [token, leadId]
     )
   } catch (e: any) {
-    if (e?.code !== "42703") throw e
-    await query(`INSERT INTO form_links (token, lead_id) VALUES ($1, $2)`, [token, leadId])
+    // Fallback if link_sends not ready
+    try {
+      await query(`INSERT INTO form_links (token, lead_id) VALUES ($1, $2)`, [token, leadId])
+    } catch {}
   }
   return token
 }
@@ -726,8 +728,8 @@ export async function createOneTimeFormToken(leadId: string): Promise<string> {
  * line). Used for in-window chat replies and the Instagram DM. */
 export function formLinkMessage(name: string, token: string, brand?: string | null): string {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || ""
-  const formBase = (process.env.APPLICATION_FORM_URL || (appUrl ? `${appUrl}/form` : "")).replace(/\/$/, "")
-  const link = formBase ? `${formBase}/${token}` : `/form/${token}`
+  const formBase = `${appUrl}/l`.replace(/\/$/, "")
+  const link = formBase ? `${formBase}/${token}` : `/l/${token}`
   const t = getWhatsAppFallbackTemplates()
   return renderTemplate(t.formLink, {
     name: name || "there",
@@ -888,4 +890,39 @@ export async function checkWhatsAppHealth(branch?: BranchWhatsAppCtx): Promise<{
   } catch (e: any) {
     return { ok: false, message: `Meta API unreachable: ${e.message}` }
   }
+}
+
+const INTENT_REGEX = new RegExp(
+  [
+    "\\bsend\\b", "\\bsending\\b", "\\bshared?\\b", "\\bgive\\b", "\\bgot\\b",
+    "\\bwant\\b", "\\bneed\\b", "\\bget\\b", "\\bplease\\b", "\\bkindly\\b",
+    "\\bhow (do|can|to)\\b", "\\bwhere (do|can|to)\\b", "\\bcan (i|u|you)\\b",
+    "\\bbhej\\b", "\\bbhejo\\b", "\\bbhejna\\b", "\\bbhejiye\\b", "\\bbhej do\\b", "\\bbhejdo\\b",
+    "\\bchahiye\\b", "\\bchahiya\\b", "\\bdo\\b", "\\bdijiye\\b", "\\bdede\\b", "\\bdena\\b",
+    "\\bkaise\\b", "\\bkese\\b", "\\bkarna hai\\b", "\\bkarni hai\\b", "\\bmil sakta\\b", "\\bmilega\\b",
+    "\\bpampu\\b", "\\bpampandi\\b", "\\bpamputara\\b", "\\bpampinchu\\b", "\\bpampinchandi\\b",
+    "\\bkavali\\b", "\\bkavala\\b", "\\bela\\b", "\\bcheppu\\b", "\\bivvandi\\b", "\\bistara\\b",
+  ].join("|"),
+  "i"
+)
+
+const SUBJECT_REGEX = new RegExp(
+  [
+    "\\bapplication\\b", "\\bapplicaion\\b", "\\baplication\\b",
+    "\\bform\\b", "\\bforms\\b",
+    "\\bapply\\b", "\\baply\\b",
+    "\\bregister\\b", "\\bregistration\\b",
+  ].join("|"),
+  "i"
+)
+
+const STRONG_REGEX = /\b(loan application|application form|form link|apply link|application link|registration link|google form|apply now|how to apply)\b/i
+const NEGATIVE_REGEX = /\b(status|update|approved?|approval|rejected?|submitted|already (filled|sent|applied|got|submitted)|kab aayega|kab hua|em aindi|vachinda|refund|cancel)\b/i
+
+export function detectApplicationRequest(text: string): boolean {
+  const t = String(text || "")
+  if (!t) return false
+  if (NEGATIVE_REGEX.test(t)) return false
+  if (STRONG_REGEX.test(t)) return true
+  return INTENT_REGEX.test(t) && SUBJECT_REGEX.test(t)
 }

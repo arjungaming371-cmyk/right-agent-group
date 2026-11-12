@@ -1,777 +1,675 @@
 "use client"
 
-type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
-import { useEffect, useState } from "react"
-import { BadgeCheck, Download, PenLine, Check, X, History, Plus, Settings2, FileText, User, Phone, MapPin } from "lucide-react"
+import React, { useEffect, useState, useCallback, useMemo } from "react"
+import {
+  ExternalLink, CheckCircle2, Clock, Eye, AlertCircle, RefreshCw,
+  Plus, Search, Landmark, ArrowRight, DollarSign, Copy, Check,
+  Sparkles, Trash2, X, Filter, ChevronRight
+} from "lucide-react"
 import { formatCurrency, timeAgo, formatDateTime } from "@/lib/utils"
 import { usePolling } from "@/lib/use-poll"
 import { SkeletonList } from "../ui/skeleton"
-import { ClickableRow, useEscapeDismiss } from "../ui/interactive"
 import { useToast } from "../ui/toast"
-import { calculateEMI, totalInterest, formatINR, BEST_RATES, detectLoanType } from "@/lib/finance"
-import LoanFormCustomizerModal from "./loan-form-customizer-modal"
-import VoiceDictation from "../ui/voice-dictation"
-import { smartFilter } from "@/lib/smart-search"
+import { useEscapeDismiss } from "../ui/interactive"
 
-function EmiEstimate({ loanAmount, loanType }: { loanAmount: number; loanType: string }) {
-  const canonical = detectLoanType(loanType) || "Home Loan"
-  const rate = BEST_RATES[canonical] || BEST_RATES["Home Loan"]
-  const tenureMonths = rate.maxTenureYears * 12
-  const emi = calculateEMI(loanAmount, rate.ratePct, tenureMonths)
-  const interest = totalInterest(loanAmount, emi, tenureMonths)
-  return (
-    <div style={{ background: "var(--bg-secondary)", borderRadius: 8, padding: 14, display: "flex", gap: 24, flexWrap: "wrap" }}>
-      <div>
-        <div style={{ fontSize: 20, fontWeight: 700, color: "var(--accent-green)" }}>{formatINR(emi)}<span style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 500 }}> /month</span></div>
-        <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>at {rate.ratePct}% p.a. ({rate.lender}) over {rate.maxTenureYears} years</div>
-      </div>
-      <div>
-        <div style={{ fontSize: 13, fontWeight: 600 }}>{formatINR(interest)}</div>
-        <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>total interest over the loan</div>
-      </div>
-    </div>
-  )
+type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
+
+type LinkSend = {
+  id: string
+  token: string
+  lead_id: string | null
+  lead_name: string | null
+  lead_phone: string | null
+  lead_city: string | null
+  lead_loan_amount: number | null
+  bank: string
+  product: string
+  channel: string
+  sent_by: string | null
+  sent_at: string
+  clicked_at: string | null
+  applied_at: string | null
+  sanctioned_at: string | null
+  disbursed_at: string | null
+  loan_amount: number | null
+  notes: string | null
+  status: "sent" | "opened" | "applied" | "sanctioned" | "disbursed" | "lost"
+  target_bank_url?: string | null
 }
 
-type LoanApp = {
-  id: string; customer_name: string; city: string; loan_type: string
-  loan_amount: number; loan_tenure?: number; status: string; email: string; address: string; whatsapp_number: string
-  employment_type: string; monthly_income: number; pan_number?: string; aadhaar_number?: string; company_name?: string; notes?: string; form_data: any; submitted_at: string; created_at: string
-  last_edited_at?: string | null
+type BankLink = {
+  id: string
+  bank: string
+  product: string
+  url: string
+  active: boolean
 }
 
-type EditRequest = {
-  id: string; loan_application_id: string; lead_name: string | null; customer_name: string | null
-  proposed_by: string; reason: string | null
-  previous_values: { field: string; value: any }; proposed_values: { field: string; value: any }
-  created_at: string; status: string; reviewed_by?: string | null; reviewed_at?: string | null
-}
-
-const STATUS_COLORS: Record<string, { bg: string; color: string; label: string }> = {
-  pending:      { bg: "rgba(234,179,8,0.15)",   color: "var(--accent-yellow)", label: "Pending Review" },
-  under_review: { bg: "rgba(59,130,246,0.15)",  color: "var(--accent-blue)",   label: "Under Review" },
-  approved:     { bg: "rgba(34,197,94,0.15)",   color: "var(--accent-green)",  label: "Approved" },
-  rejected:     { bg: "rgba(239,68,68,0.15)",   color: "var(--accent-red)",    label: "Rejected" },
-}
-
-function fieldLabel(field: string): string {
-  const map: Record<string, string> = {
-    customer_name: "Customer Name",
-    loan_amount: "Loan Amount",
-    loan_type: "Loan Type",
-    loan_tenure: "Loan Tenure",
-    city: "City",
-    address: "Address",
-    email: "Email",
-    whatsapp_number: "WhatsApp",
-    employment_type: "Employment",
-    monthly_income: "Monthly Income",
-    pan_number: "PAN Number",
-  }
-  return map[field] || field.replace(/_/g, " ")
+const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
+  sent: { label: "Link Sent", color: "var(--accent-blue)", bg: "rgba(59,130,246,0.12)" },
+  opened: { label: "Opened / Clicked", color: "var(--accent-yellow)", bg: "rgba(234,179,8,0.12)" },
+  applied: { label: "Applied at Bank", color: "var(--accent-violet)", bg: "rgba(139,124,255,0.15)" },
+  sanctioned: { label: "Sanctioned", color: "var(--accent-cyan)", bg: "rgba(56,189,248,0.15)" },
+  disbursed: { label: "Disbursed", color: "var(--accent-green)", bg: "rgba(34,197,94,0.15)" },
+  lost: { label: "Dropped / Rejected", color: "var(--accent-red)", bg: "rgba(239,68,68,0.12)" },
 }
 
 export default function LoanAppsView({ role, initialSearch }: { role: Role; initialSearch?: string }) {
   const canEdit = role !== "viewer"
   const toast = useToast()
-  const [apps, setApps] = useState<LoanApp[]>([])
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+
+  const [links, setLinks] = useState<LinkSend[]>([])
+  const [stats, setStats] = useState<any>({})
   const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState<string | null>(null)
   const [search, setSearch] = useState(initialSearch || "")
-  // Keep-alive parity with leads-view: the view stays mounted across tab
-  // switches now, so a command-palette jump must re-seed the search box even
-  // when this view is already open (prop change instead of a remount).
-  useEffect(() => { if (initialSearch !== undefined) setSearch(initialSearch) }, [initialSearch])
-  const [pendingEdits, setPendingEdits] = useState<EditRequest[]>([])
-  const [reviewing, setReviewing] = useState<string | null>(null)
-  const [historyFor, setHistoryFor] = useState<string | null>(null)
-  const [history, setHistory] = useState<EditRequest[]>([])
-  const [historyLoading, setHistoryLoading] = useState(false)
-  // Quick status lane — the owner usually reviews ONE bucket (pending first);
-  // search alone made them scroll the whole list to find it.
   const [statusFilter, setStatusFilter] = useState<string>("all")
+  const [actingId, setActingId] = useState<string | null>(null)
+  const [copiedToken, setCopiedToken] = useState<string | null>(null)
 
-  // Modals state
-  const [showAddModal, setShowAddModal] = useState(false)
-  // A11y (2026-10-05): the add-application modal closes on Escape.
-  useEscapeDismiss(showAddModal, () => setShowAddModal(false))
-  const [showCustomizer, setShowCustomizer] = useState(false)
-  const [adding, setAdding] = useState(false)
-  const [newApp, setNewApp] = useState({
-    customer_name: "",
-    whatsapp_number: "",
-    loan_type: "Home Loan",
-    loan_amount: "",
-    loan_tenure: "120",
-    employment_type: "Salaried",
-    monthly_income: "",
-    city: "",
-    pan_number: "",
-    address: "",
-    status: "pending",
-  })
+  // Bank library modal
+  const [showLibrary, setShowLibrary] = useState(false)
+  useEscapeDismiss(showLibrary, () => setShowLibrary(false))
+  const [library, setLibrary] = useState<BankLink[]>([])
+  const [newBank, setNewBank] = useState({ bank: "", product: "Home Loan", url: "" })
+  const [savingBank, setSavingBank] = useState(false)
 
-  async function load(silent = false) {
-    if (!silent) setLoading(true)
+  // Disbursed modal
+  const [disburseTarget, setDisburseTarget] = useState<LinkSend | null>(null)
+  const [disburseAmount, setDisburseAmount] = useState<string>("")
+
+  const loadData = useCallback(async () => {
     try {
-      const res = await fetch("/api/loans")
+      const q = new URLSearchParams()
+      if (statusFilter !== "all") q.set("status", statusFilter)
+      if (search.trim()) q.set("search", search.trim())
+
+      const res = await fetch(`/api/links/sends?${q.toString()}`)
       if (res.ok) {
         const data = await res.json()
-        setApps(data)
-        if (data.length > 0 && !selectedId) setSelectedId(data[0].id)
-      } else {
-        setLoadError(`Could not load applications (HTTP ${res.status}). Check server logs.`)
+        setLinks(data.links || [])
+        setStats(data.stats || {})
       }
     } catch {
-      setLoadError("Could not load applications — network error.")
+      // keep previous state
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
-  }
+  }, [statusFilter, search])
 
-  async function loadPendingEdits() {
-    if (!canEdit) return
+  const loadLibrary = useCallback(async () => {
     try {
-      const res = await fetch("/api/loans/edit-requests?status=pending")
-      if (res.ok) setPendingEdits(await res.json())
+      const res = await fetch("/api/links/library")
+      if (res.ok) setLibrary(await res.json())
     } catch {}
-  }
-
-  useEffect(() => {
-    load()
-    loadPendingEdits()
   }, [])
 
-  usePolling(() => { load(true); loadPendingEdits() }, 15000)
+  useEffect(() => {
+    loadData()
+  }, [loadData])
 
-  const filtered = smartFilter(apps, search, (a) => [
-    a.customer_name,
-    a.whatsapp_number,
-    a.loan_type,
-    a.city,
-    a.status,
-    a.employment_type,
-    a.company_name,
-    a.pan_number,
-    a.aadhaar_number,
-    a.notes,
-  ]).filter((a) => statusFilter === "all" || a.status === statusFilter)
-  const statusCounts: Record<string, number> = { all: apps.length }
-  for (const a of apps) statusCounts[a.status] = (statusCounts[a.status] || 0) + 1
-  const selected = apps.find((a) => a.id === selectedId) || null
+  useEffect(() => {
+    if (showLibrary) loadLibrary()
+  }, [showLibrary, loadLibrary])
 
-  async function markStatus(id: string, status: string) {
-    // FIX (2026-10-01): was fire-and-forget — a 401/404/500 silently reverted
-    // the select on the next reload with no feedback.
+  usePolling(loadData, 15000)
+
+  // Update link status
+  async function updateStatus(id: string, newStatus: string, loanAmount?: number) {
+    setActingId(id)
     try {
-      const r = await fetch("/api/loans", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, status }) })
-      if (!r.ok) {
-        const d = await r.json().catch(() => ({}))
-        toast.error(d.error || "Could not update the loan status")
-        return
-      }
-    } catch {
-      toast.error("Network error — status not saved")
-      return
-    }
-    load(true)
-  }
-
-  async function reviewEditRequest(id: string, action: "approve" | "reject") {
-    setReviewing(id)
-    try {
-      const res = await fetch(`/api/loans/edit-requests/${id}`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }),
-      })
-      if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || "Failed")
-      toast.success(action === "approve" ? "Change applied" : "Request rejected")
-      setPendingEdits((prev) => prev.filter((e) => e.id !== id))
-      if (action === "approve") load(true)
-    } catch (e: any) {
-      toast.error(e.message || "Couldn't review this request")
-    }
-    setReviewing(null)
-  }
-
-  async function openHistory(applicationId: string) {
-    setHistoryFor(applicationId)
-    setHistoryLoading(true)
-    try {
-      const res = await fetch(`/api/loans/edit-requests?status=all&applicationId=${applicationId}`)
-      if (res.ok) setHistory(await res.json())
-    } catch {}
-    setHistoryLoading(false)
-  }
-
-  async function handleAddLoan(e: React.FormEvent) {
-    e.preventDefault()
-    if (!newApp.customer_name.trim() || !newApp.whatsapp_number.trim()) {
-      toast.error("Customer name and phone number required")
-      return
-    }
-    setAdding(true)
-    try {
-      const res = await fetch("/api/loans", {
-        method: "POST",
+      const res = await fetch("/api/links/sends", {
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          customer_name: newApp.customer_name.trim(),
-          whatsapp_number: newApp.whatsapp_number.trim(),
-          loan_type: newApp.loan_type,
-          loan_amount: newApp.loan_amount ? Number(newApp.loan_amount) : 0,
-          loan_tenure: newApp.loan_tenure ? Number(newApp.loan_tenure) : 12,
-          employment_type: newApp.employment_type,
-          monthly_income: newApp.monthly_income ? Number(newApp.monthly_income) : null,
-          city: newApp.city.trim() || null,
-          address: newApp.address.trim() || null,
-          pan_number: newApp.pan_number.trim().toUpperCase() || null,
-          status: newApp.status,
-          submitted_at: new Date().toISOString(),
+          id,
+          status: newStatus,
+          loan_amount: loanAmount !== undefined ? loanAmount : undefined,
         }),
       })
-      if (!res.ok) {
-        const d = await res.json().catch(() => ({}))
-        throw new Error(d.error || "Failed to create application")
+      if (res.ok) {
+        toast.success(`Status updated to ${STATUS_CONFIG[newStatus]?.label || newStatus}`)
+        loadData()
+      } else {
+        toast.error("Failed to update status")
       }
-      const created = await res.json()
-      toast.success("New loan application added successfully!")
-      setShowAddModal(false)
-      setNewApp({
-        customer_name: "",
-        whatsapp_number: "",
-        loan_type: "Home Loan",
-        loan_amount: "",
-        loan_tenure: "120",
-        employment_type: "Salaried",
-        monthly_income: "",
-        city: "",
-        pan_number: "",
-        address: "",
-        status: "pending",
-      })
-      await load()
-      if (created?.id) setSelectedId(created.id)
-    } catch (err: any) {
-      toast.error(err.message || "Failed to add application")
+    } catch {
+      toast.error("Failed to update status")
     } finally {
-      setAdding(false)
+      setActingId(null)
     }
   }
 
-  let formExtras: Record<string, any> = {}
-  if (selected?.form_data) {
-    try { formExtras = typeof selected.form_data === "string" ? JSON.parse(selected.form_data) : selected.form_data } catch {}
+  async function handleAddBank() {
+    if (!newBank.bank.trim() || !newBank.url.trim()) return
+    setSavingBank(true)
+    try {
+      const res = await fetch("/api/links/library", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newBank),
+      })
+      if (res.ok) {
+        toast.success(`Added ${newBank.bank} ${newBank.product} link`)
+        setNewBank({ bank: "", product: "Home Loan", url: "" })
+        loadLibrary()
+      } else {
+        toast.error("Failed to add bank link")
+      }
+    } catch {
+      toast.error("Failed to add bank link")
+    } finally {
+      setSavingBank(false)
+    }
   }
 
+  async function handleDeleteBank(id: string) {
+    try {
+      const res = await fetch(`/api/links/library?id=${id}`, { method: "DELETE" })
+      if (res.ok) {
+        toast.success("Bank link removed")
+        loadLibrary()
+      }
+    } catch {
+      toast.error("Could not remove bank link")
+    }
+  }
+
+  function copyLink(token: string) {
+    const origin = typeof window !== "undefined" ? window.location.origin : ""
+    const url = `${origin}/l/${token}`
+    navigator.clipboard.writeText(url)
+    setCopiedToken(token)
+    toast.success("Short link copied to clipboard")
+    setTimeout(() => setCopiedToken(null), 2000)
+  }
+
+  // Calculate commission estimate (~0.6% average DSA payout)
+  const totalDisbursed = Number(stats.disbursed_volume || 0)
+  const estCommission = totalDisbursed * 0.006
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {canEdit && pendingEdits.length > 0 && (
-        <div style={{ background: "rgba(247,183,49,0.06)", border: "1px solid rgba(247,183,49,0.25)", borderRadius: 12, padding: 16 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, fontWeight: 700, fontSize: 14, color: "var(--accent-yellow)" }}>
-            <PenLine size={16} strokeWidth={2.2} /> Priya flagged {pendingEdits.length} application correction{pendingEdits.length > 1 ? "s" : ""} — needs your review
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {pendingEdits.map((e) => (
-              <div key={e.id} style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600 }}>{e.customer_name || e.lead_name || "Unknown"}</div>
-                  <div style={{ fontSize: 12.5, color: "var(--text-secondary)", marginTop: 3, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                    {fieldLabel(e.previous_values.field)}:
-                    <span style={{ color: "var(--accent-red)", textDecoration: "line-through" }}>{String(e.previous_values.value ?? "—")}</span>
-                    →
-                    <span style={{ color: "var(--accent-green)", fontWeight: 600 }}>{String(e.proposed_values.value)}</span>
-                  </div>
-                  {e.reason && <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 3, fontStyle: "italic" }}>"{e.reason}"</div>}
-                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3 }}>
-                    Flagged by Priya on {e.proposed_by === "priya_voice" ? "a call" : "WhatsApp"} · {timeAgo(e.created_at)} · {formatDateTime(e.created_at)}
-                  </div>
-                </div>
-                <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-                  <button
-                    onClick={() => reviewEditRequest(e.id, "approve")}
-                    disabled={reviewing === e.id}
-                    style={{ background: "rgba(45,212,160,0.12)", border: "1px solid rgba(45,212,160,0.3)", color: "var(--accent-green)", borderRadius: 8, padding: "7px 14px", fontSize: 12.5, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 5, opacity: reviewing === e.id ? 0.5 : 1 }}
-                  ><Check size={13} strokeWidth={2.2} /> Approve</button>
-                  <button
-                    onClick={() => reviewEditRequest(e.id, "reject")}
-                    disabled={reviewing === e.id}
-                    style={{ background: "rgba(248,113,113,0.1)", border: "1px solid rgba(248,113,113,0.28)", color: "var(--accent-red)", borderRadius: 8, padding: "7px 14px", fontSize: 12.5, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 5, opacity: reviewing === e.id ? 0.5 : 1 }}
-                  ><X size={13} strokeWidth={2.2} /> Reject</button>
-                </div>
-              </div>
-            ))}
-          </div>
+    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+
+      {/* Top Banner & Financial Metrics */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14 }}>
+        <div className="card" style={{ padding: "16px 20px" }}>
+          <div style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 500, marginBottom: 4 }}>Links Sent</div>
+          <div style={{ fontSize: 24, fontWeight: 700, color: "var(--text-primary)" }}>{stats.total || 0}</div>
+          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>Across all products</div>
         </div>
-      )}
 
-      {/* Main Grid */}
-      <div className="grid grid-cols-1 gap-4 md:h-[calc(100vh-160px)] md:grid-cols-[340px_1fr]">
-        {/* List */}
-        <div className="max-h-[360px] md:max-h-none" style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-          <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border)" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, flexWrap: "wrap", gap: 6 }}>
-              <div style={{ fontWeight: 700, fontSize: 15 }}>Loan Applications</div>
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                {canEdit && (
-                  <button
-                    onClick={() => setShowAddModal(true)}
-                    className="btn-primary"
-                    style={{ height: 28, padding: "0 10px", fontSize: 11.5, display: "inline-flex", alignItems: "center", gap: 4 }}
-                    title="Add new application manually"
-                  >
-                    <Plus size={13} strokeWidth={2.5} /> Add Loan +
-                  </button>
-                )}
-                {(role === "admin" || role === "branch_manager") && (
-                  <button
-                    onClick={() => setShowCustomizer(true)}
-                    className="icon-btn"
-                    style={{ width: 28, height: 28 }}
-                    title="Customize WhatsApp Loan Form"
-                    aria-label="Customize WhatsApp Loan Form"
-                  >
-                    <Settings2 size={13.5} strokeWidth={2} />
-                  </button>
-                )}
-                <a href="/api/loans/export" className="icon-btn" style={{ width: 28, height: 28 }} title="Export all loan applications as CSV" aria-label="Export CSV">
-                  <Download size={13.5} strokeWidth={2} />
-                </a>
-              </div>
-            </div>
-            <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
-              <input
-                placeholder="Search name or phone..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                style={{ width: "100%", height: 34, fontSize: 12.5, paddingRight: 34 }}
-              />
-              <div style={{ position: "absolute", right: 2, top: "50%", transform: "translateY(-50%)" }}>
-                <VoiceDictation
-                  onTranscript={(spoken) => setSearch(prev => (prev ? `${prev} ${spoken}` : spoken))}
-                  size={14}
-                  style={{ width: 28, height: 28, border: "none", background: "transparent" }}
-                  title="Speak to search applications"
-                />
-              </div>
-            </div>
-            {/* Status lanes — one tap to the bucket the owner actually reviews */}
-            <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 10 }}>
-              {(["all", "pending", "under_review", "approved", "rejected"] as const).map((st) => {
-                const active = statusFilter === st
-                const c = STATUS_COLORS[st]
-                const count = statusCounts[st] || 0
-                return (
-                  <button
-                    key={st}
-                    onClick={() => setStatusFilter(st)}
-                    style={{
-                      height: 24, padding: "0 9px", borderRadius: 6, fontSize: 11, fontWeight: 600,
-                      cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5,
-                      border: `1px solid ${active && c ? c.color : "var(--border)"}`,
-                      background: active && c ? c.bg : "transparent",
-                      color: active && c ? c.color : "var(--text-muted)",
-                    }}
-                  >
-                    {st === "all" ? "All" : (c?.label || st)}
-                    <span style={{ fontSize: 10, opacity: 0.85 }}>{count}</span>
-                  </button>
-                )
-              })}
-            </div>
+        <div className="card" style={{ padding: "16px 20px" }}>
+          <div style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 500, marginBottom: 4 }}>Opened by Leads</div>
+          <div style={{ fontSize: 24, fontWeight: 700, color: "var(--accent-yellow)" }}>
+            {stats.opened || 0}
+            <span style={{ fontSize: 13, fontWeight: 500, color: "var(--text-muted)", marginLeft: 6 }}>
+              ({stats.total > 0 ? Math.round(((stats.opened || 0) / stats.total) * 100) : 0}%)
+            </span>
           </div>
+          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>Clicked redirect link</div>
+        </div>
 
-          <div style={{ flex: 1, overflowY: "auto" }}>
-            {loading && <SkeletonList rows={4} />}
-            {!loading && loadError && <div style={{ padding: 30, textAlign: "center", color: "var(--accent-red)", fontSize: 13 }}>{loadError}</div>}
-            {!loading && !loadError && filtered.length === 0 && <div style={{ padding: 30, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>No applications found.</div>}
-            {filtered.map((app) => (
-              <ClickableRow
-                key={app.id}
-                onActivate={() => setSelectedId(app.id)}
-                label={`Open application for ${app.customer_name}`}
-                style={{
-                  padding: "12px 16px", borderBottom: "1px solid var(--border-light)", cursor: "pointer",
-                  background: selectedId === app.id ? "var(--overlay-soft)" : "transparent",
-                  borderLeft: selectedId === app.id ? "3px solid var(--accent-violet)" : "3px solid transparent",
-                }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 3 }}>
-                  <div style={{ fontWeight: 600, fontSize: 13 }}>{app.customer_name}</div>
-                  <span style={{
-                    fontSize: 10.5, fontWeight: 700, padding: "2px 7px", borderRadius: 4,
-                    background: (STATUS_COLORS[app.status] || STATUS_COLORS.pending).bg,
-                    color: (STATUS_COLORS[app.status] || STATUS_COLORS.pending).color,
-                    textTransform: "uppercase", letterSpacing: "0.04em",
-                  }}>
-                    {app.status?.replace("_", " ")}
-                  </span>
-                </div>
-                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                  {app.loan_type} · {formatCurrency(app.loan_amount)}
-                </div>
-                <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2, display: "flex", justifyContent: "space-between" }}>
-                  <span>{app.city || "—"}</span>
-                  <span>{timeAgo(app.submitted_at || app.created_at)}</span>
-                </div>
-              </ClickableRow>
-            ))}
-            {!loading && filtered.length > 0 && (
-              <div style={{ padding: "10px 16px", fontSize: 11, color: "var(--text-muted)", textAlign: "center" }}>
-                Showing {filtered.length} of {apps.length} application{apps.length === 1 ? "" : "s"}
-              </div>
-            )}
+        <div className="card" style={{ padding: "16px 20px" }}>
+          <div style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 500, marginBottom: 4 }}>Applied & In Progress</div>
+          <div style={{ fontSize: 24, fontWeight: 700, color: "var(--accent-violet)" }}>
+            {(stats.applied || 0) - (stats.disbursed || 0)}
+          </div>
+          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+            {stats.sanctioned || 0} already sanctioned
           </div>
         </div>
 
-        {/* Detail */}
-        <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: 24, overflowY: "auto" }}>
-          {!selected ? (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--text-muted)", fontSize: 13 }}>
-              Select an application to view details
-            </div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12 }}>
-                <div>
-                  <div style={{ fontSize: 20, fontWeight: 700 }}>{selected.customer_name}</div>
-                  <div style={{ fontSize: 12.5, color: "var(--text-muted)", marginTop: 2 }}>
-                    Submitted {formatDateTime(selected.submitted_at || selected.created_at)} ({timeAgo(selected.submitted_at || selected.created_at)})
-                    {selected.last_edited_at && <> · edited {timeAgo(selected.last_edited_at)}</>}
-                  </div>
-                </div>
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <button
-                    onClick={() => openHistory(selected.id)}
-                    className="btn-ghost"
-                    style={{ height: 32, fontSize: 12, display: "inline-flex", alignItems: "center", gap: 5 }}
-                  >
-                    <History size={13} /> History
-                  </button>
-                  {canEdit && (
-                    <select
-                      value={selected.status}
-                      onChange={(e) => markStatus(selected.id, e.target.value)}
-                      style={{ height: 32, fontSize: 12, fontWeight: 600, padding: "0 10px" }}
-                    >
-                      <option value="pending">Pending</option>
-                      <option value="under_review">Under Review</option>
-                      <option value="approved">Approved</option>
-                      <option value="rejected">Rejected</option>
-                    </select>
-                  )}
-                </div>
-              </div>
-
-              {/* Quick stats cards */}
-              <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-                <div style={{ background: "var(--bg-secondary)", borderRadius: 8, padding: 12 }}>
-                  <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Loan Type</div>
-                  <div style={{ fontSize: 15, fontWeight: 700, marginTop: 2 }}>{selected.loan_type}</div>
-                </div>
-                <div style={{ background: "var(--bg-secondary)", borderRadius: 8, padding: 12 }}>
-                  <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Requested Amount</div>
-                  <div style={{ fontSize: 15, fontWeight: 700, marginTop: 2, color: "var(--accent-green)" }}>{formatCurrency(selected.loan_amount)}</div>
-                </div>
-                <div style={{ background: "var(--bg-secondary)", borderRadius: 8, padding: 12 }}>
-                  <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Tenure</div>
-                  <div style={{ fontSize: 15, fontWeight: 700, marginTop: 2 }}>{selected.loan_tenure ? `${selected.loan_tenure} Mo` : "—"}</div>
-                </div>
-                <div style={{ background: "var(--bg-secondary)", borderRadius: 8, padding: 12 }}>
-                  <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Monthly Income</div>
-                  <div style={{ fontSize: 15, fontWeight: 700, marginTop: 2 }}>{selected.monthly_income ? formatINR(selected.monthly_income) : "—"}</div>
-                </div>
-              </div>
-
-              {selected.loan_amount > 0 && (
-                <EmiEstimate loanAmount={selected.loan_amount} loanType={selected.loan_type} />
-              )}
-
-              {/* Applicant Details */}
-              <div style={{ background: "var(--bg-secondary)", borderRadius: 10, padding: 16 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Applicant Information</div>
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2" style={{ fontSize: 12.5 }}>
-                  <div><span style={{ color: "var(--text-muted)" }}>WhatsApp / Phone:</span> <span style={{ fontWeight: 600 }}>{selected.whatsapp_number}</span></div>
-                  <div><span style={{ color: "var(--text-muted)" }}>Email:</span> <span style={{ fontWeight: 600 }}>{selected.email || "—"}</span></div>
-                  <div><span style={{ color: "var(--text-muted)" }}>Employment:</span> <span style={{ fontWeight: 600 }}>{selected.employment_type || "—"}</span></div>
-                  <div><span style={{ color: "var(--text-muted)" }}>PAN Card:</span> <span style={{ fontWeight: 600, letterSpacing: "0.04em" }}>{selected.pan_number || "—"}</span></div>
-                  <div><span style={{ color: "var(--text-muted)" }}>City:</span> <span style={{ fontWeight: 600 }}>{selected.city || "—"}</span></div>
-                  <div><span style={{ color: "var(--text-muted)" }}>Address:</span> <span style={{ fontWeight: 600 }}>{selected.address || "—"}</span></div>
-                </div>
-              </div>
-
-              {/* Extra customized fields if submitted */}
-              {Object.keys(formExtras).length > 0 && (
-                <div style={{ background: "var(--bg-secondary)", borderRadius: 10, padding: 16 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>Additional Form Responses</div>
-                  <div className="grid grid-cols-1 gap-2 md:grid-cols-2" style={{ fontSize: 12 }}>
-                    {Object.entries(formExtras).map(([k, v]) => (
-                      <div key={k}>
-                        <span style={{ color: "var(--text-muted)", textTransform: "capitalize" }}>{k.replace(/_/g, " ")}:</span>{" "}
-                        <span style={{ fontWeight: 600 }}>{String(v)}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+        <div className="card" style={{ padding: "16px 20px", background: "linear-gradient(145deg, rgba(34,197,94,0.06), rgba(34,197,94,0.02))", borderColor: "rgba(34,197,94,0.25)" }}>
+          <div style={{ fontSize: 12, color: "var(--accent-green)", fontWeight: 600, marginBottom: 4, display: "flex", alignItems: "center", gap: 6 }}>
+            <DollarSign size={13} strokeWidth={2.2} /> Total Disbursed
+          </div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: "var(--text-primary)" }}>
+            {totalDisbursed > 0 ? formatCurrency(totalDisbursed) : "₹0"}
+          </div>
+          <div style={{ fontSize: 11.5, color: "var(--accent-green)", marginTop: 4, fontWeight: 500 }}>
+            Est. Commission: ~{formatCurrency(estCommission)}
+          </div>
         </div>
       </div>
 
-      {/* Add Loan Application Modal */}
-      {showAddModal && (
-        <div style={{
-          position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", backdropFilter: "blur(4px)",
-          display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, padding: 16,
-        }}>
-          <div style={{
-            background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16,
-            maxWidth: 540, width: "100%", maxHeight: "90vh", display: "flex", flexDirection: "column",
-            boxShadow: "0 24px 48px rgba(0,0,0,0.4)", overflow: "hidden",
-          }}>
-            <div style={{ padding: "18px 24px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      {/* Control bar */}
+      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: "14px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 260 }}>
+          <div style={{ position: "relative", width: "100%", maxWidth: 360 }}>
+            <Search size={14} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)" }} />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search lead, phone, bank, or product…"
+              style={{ width: "100%", height: 34, fontSize: 12.5, paddingLeft: 32, paddingRight: 10, borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)" }}
+            />
+          </div>
+
+          <div style={{ display: "flex", gap: 4, overflowX: "auto" }}>
+            {[
+              { id: "all", label: "All" },
+              { id: "sent", label: "Sent" },
+              { id: "opened", label: "Opened" },
+              { id: "applied", label: "Applied" },
+              { id: "sanctioned", label: "Sanctioned" },
+              { id: "disbursed", label: "Disbursed" },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setStatusFilter(tab.id)}
+                style={{
+                  height: 32,
+                  padding: "0 11px",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  borderRadius: 7,
+                  border: statusFilter === tab.id ? "1px solid rgba(139,124,255,0.4)" : "1px solid transparent",
+                  background: statusFilter === tab.id ? "rgba(139,124,255,0.12)" : "transparent",
+                  color: statusFilter === tab.id ? "var(--accent-violet)" : "var(--text-secondary)",
+                }}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button
+            type="button"
+            onClick={() => setShowLibrary(true)}
+            className="btn-ghost"
+            style={{ height: 34, fontSize: 12, padding: "0 12px", display: "inline-flex", alignItems: "center", gap: 6 }}
+          >
+            <Landmark size={14} /> Bank Library
+          </button>
+
+          <button
+            type="button"
+            onClick={loadData}
+            className="icon-btn"
+            title="Refresh"
+            style={{ width: 34, height: 34 }}
+          >
+            <RefreshCw size={14} />
+          </button>
+        </div>
+      </div>
+
+      {/* Main Link Sends Table */}
+      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
+        {loading ? (
+          <div style={{ padding: 24 }}><SkeletonList rows={6} /></div>
+        ) : links.length === 0 ? (
+          <div style={{ padding: 48, textAlign: "center", color: "var(--text-muted)" }}>
+            <Landmark size={36} strokeWidth={1.5} style={{ margin: "0 auto 12px", opacity: 0.4 }} />
+            <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>No bank application links sent yet</div>
+            <div style={{ fontSize: 12, marginTop: 4 }}>
+              Open any lead in the Leads tab and click &quot;Send Bank Link&quot; to send official bank application links.
+            </div>
+          </div>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", minWidth: 840, borderCollapse: "collapse", textAlign: "left", fontSize: 12.5 }}>
+              <thead>
+                <tr style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-muted)", fontSize: 11.5, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                  <th style={{ padding: "10px 16px" }}>Lead & Contact</th>
+                  <th style={{ padding: "10px 16px" }}>Bank & Product</th>
+                  <th style={{ padding: "10px 16px" }}>Tracking Link</th>
+                  <th style={{ padding: "10px 16px" }}>Timeline</th>
+                  <th style={{ padding: "10px 16px" }}>Status</th>
+                  <th style={{ padding: "10px 16px", textAlign: "right" }}>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {links.map((item) => {
+                  const cfg = STATUS_CONFIG[item.status] || STATUS_CONFIG.sent
+                  const isActing = actingId === item.id
+
+                  return (
+                    <tr key={item.id} style={{ borderBottom: "1px solid var(--border-light)" }}>
+                      {/* Lead */}
+                      <td style={{ padding: "12px 16px" }}>
+                        <div style={{ fontWeight: 600, color: "var(--text-primary)" }}>{item.lead_name || "Unknown Lead"}</div>
+                        <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2 }}>
+                          {item.lead_phone || "—"} {item.lead_city ? `· ${item.lead_city}` : ""}
+                        </div>
+                      </td>
+
+                      {/* Bank & Product */}
+                      <td style={{ padding: "12px 16px" }}>
+                        <div style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
+                          <span style={{ padding: "2px 7px", borderRadius: 5, background: "var(--overlay-soft)", color: "var(--text-primary)", fontSize: 11.5 }}>
+                            {item.bank}
+                          </span>
+                          <span>{item.product}</span>
+                        </div>
+                        {item.target_bank_url && (
+                          <a
+                            href={item.target_bank_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, color: "var(--accent-blue)", marginTop: 3, textDecoration: "none" }}
+                          >
+                            Bank portal <ExternalLink size={10} />
+                          </a>
+                        )}
+                      </td>
+
+                      {/* Tracking link */}
+                      <td style={{ padding: "12px 16px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <code style={{ fontSize: 11.5, padding: "2px 6px", background: "var(--bg-secondary)", borderRadius: 4, border: "1px solid var(--border)" }}>
+                            /l/{item.token}
+                          </code>
+                          <button
+                            type="button"
+                            onClick={() => copyLink(item.token)}
+                            className="icon-btn"
+                            title="Copy link"
+                            style={{ width: 24, height: 24 }}
+                          >
+                            {copiedToken === item.token ? <Check size={12} color="var(--accent-green)" /> : <Copy size={12} />}
+                          </button>
+                        </div>
+                      </td>
+
+                      {/* Timeline */}
+                      <td style={{ padding: "12px 16px", fontSize: 11.5 }}>
+                        <div style={{ color: "var(--text-secondary)" }}>
+                          Sent {timeAgo(item.sent_at)} {item.sent_by ? `by ${item.sent_by.split("@")[0]}` : ""}
+                        </div>
+                        {item.clicked_at ? (
+                          <div style={{ color: "var(--accent-yellow)", marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}>
+                            <Eye size={11} /> Clicked {timeAgo(item.clicked_at)}
+                          </div>
+                        ) : (
+                          <div style={{ color: "var(--text-muted)", marginTop: 2 }}>Not clicked yet</div>
+                        )}
+                      </td>
+
+                      {/* Status */}
+                      <td style={{ padding: "12px 16px" }}>
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 5,
+                            padding: "3px 9px",
+                            borderRadius: 6,
+                            fontSize: 11.5,
+                            fontWeight: 600,
+                            background: cfg.bg,
+                            color: cfg.color,
+                          }}
+                        >
+                          <span style={{ width: 6, height: 6, borderRadius: "50%", background: cfg.color }} />
+                          {cfg.label}
+                        </span>
+                        {item.loan_amount && (
+                          <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--accent-green)", marginTop: 4 }}>
+                            {formatCurrency(item.loan_amount)}
+                          </div>
+                        )}
+                      </td>
+
+                      {/* Quick Status Action Stepper */}
+                      <td style={{ padding: "12px 16px", textAlign: "right" }}>
+                        {canEdit && (
+                          <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                            {item.status === "sent" && (
+                              <button
+                                type="button"
+                                disabled={isActing}
+                                onClick={() => updateStatus(item.id, "applied")}
+                                className="btn-ghost"
+                                style={{ height: 28, fontSize: 11.5, padding: "0 8px" }}
+                                title="Mark as submitted to bank"
+                              >
+                                Mark Applied
+                              </button>
+                            )}
+
+                            {item.status === "opened" && (
+                              <button
+                                type="button"
+                                disabled={isActing}
+                                onClick={() => updateStatus(item.id, "applied")}
+                                className="btn-ghost"
+                                style={{ height: 28, fontSize: 11.5, padding: "0 8px", color: "var(--accent-violet)" }}
+                                title="Customer submitted form to bank"
+                              >
+                                Mark Applied
+                              </button>
+                            )}
+
+                            {item.status === "applied" && (
+                              <button
+                                type="button"
+                                disabled={isActing}
+                                onClick={() => updateStatus(item.id, "sanctioned")}
+                                className="btn-ghost"
+                                style={{ height: 28, fontSize: 11.5, padding: "0 8px", color: "var(--accent-cyan)" }}
+                                title="Bank sanctioned the loan"
+                              >
+                                Sanctioned
+                              </button>
+                            )}
+
+                            {item.status === "sanctioned" && (
+                              <button
+                                type="button"
+                                disabled={isActing}
+                                onClick={() => {
+                                  setDisburseTarget(item)
+                                  setDisburseAmount(item.lead_loan_amount ? String(item.lead_loan_amount) : "")
+                                }}
+                                className="btn-primary"
+                                style={{ height: 28, fontSize: 11.5, padding: "0 10px" }}
+                                title="Bank disbursed loan amount"
+                              >
+                                Disburse
+                              </button>
+                            )}
+
+                            {item.status === "disbursed" && (
+                              <span style={{ fontSize: 11.5, color: "var(--accent-green)", fontWeight: 600 }}>
+                                Completed ✓
+                              </span>
+                            )}
+
+                            {item.status !== "disbursed" && item.status !== "lost" && (
+                              <button
+                                type="button"
+                                disabled={isActing}
+                                onClick={() => updateStatus(item.id, "lost")}
+                                className="icon-btn"
+                                title="Mark lost / dropped"
+                                style={{ width: 28, height: 28, color: "var(--text-muted)" }}
+                              >
+                                <X size={12} />
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Disbursed Amount Entry Modal */}
+      {disburseTarget && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}>
+          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, padding: 24, width: "100%", maxWidth: 380 }}>
+            <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 8, color: "var(--text-primary)" }}>Mark Loan Disbursed</div>
+            <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16 }}>
+              Enter the final disbursed loan amount for {disburseTarget.lead_name || "this customer"} ({disburseTarget.bank}).
+            </p>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", fontSize: 12, color: "var(--text-secondary)", marginBottom: 6 }}>
+                Disbursed Amount (₹)
+              </label>
+              <input
+                type="number"
+                value={disburseAmount}
+                onChange={(e) => setDisburseAmount(e.target.value)}
+                placeholder="2500000"
+                style={{ width: "100%", height: 38, fontSize: 14, padding: "0 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)" }}
+              />
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button
+                type="button"
+                onClick={() => setDisburseTarget(null)}
+                className="btn-ghost"
+                style={{ flex: 1, height: 38 }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const amt = disburseAmount ? parseFloat(disburseAmount) : undefined
+                  updateStatus(disburseTarget.id, "disbursed", amt)
+                  setDisburseTarget(null)
+                }}
+                className="btn-primary"
+                style={{ flex: 1, height: 38 }}
+              >
+                Confirm Disbursed
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bank Library Modal */}
+      {showLibrary && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}>
+          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, padding: 28, width: "100%", maxWidth: 640, maxHeight: "90vh", display: "flex", flexDirection: "column" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ width: 28, height: 28, borderRadius: 7, background: "rgba(34,197,94,0.15)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--accent-green)" }}>
-                  <Plus size={16} strokeWidth={2.4} />
-                </span>
-                <div style={{ fontSize: 16, fontWeight: 700 }}>Add Loan Application +</div>
+                <Landmark size={18} strokeWidth={2} style={{ color: "var(--accent-violet)" }} />
+                <div style={{ fontWeight: 700, fontSize: 16 }}>Bank Link Library</div>
               </div>
-              <button onClick={() => setShowAddModal(false)} aria-label="Close" style={{ background: "transparent", border: "none", color: "var(--text-muted)", cursor: "pointer" }}>
-                <X size={18} />
+              <button
+                type="button"
+                onClick={() => setShowLibrary(false)}
+                className="icon-btn"
+                style={{ width: 28, height: 28 }}
+              >
+                <X size={15} />
               </button>
             </div>
 
-            <form onSubmit={handleAddLoan} style={{ flex: 1, overflowY: "auto", padding: "20px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <div>
-                  <label style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", display: "block", marginBottom: 4 }}>
-                    Customer Name *
-                  </label>
-                  <div style={{ position: "relative" }}>
-                    <input
-                      required
-                      value={newApp.customer_name}
-                      onChange={(e) => setNewApp({ ...newApp, customer_name: e.target.value })}
-                      placeholder="e.g. Rahul Sharma"
-                      style={{ width: "100%", height: 38, paddingRight: 34 }}
-                    />
-                    <div style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)" }}>
-                      <VoiceDictation onTranscript={(t: string) => setNewApp((prev) => ({ ...prev, customer_name: prev.customer_name ? `${prev.customer_name} ${t}` : t }))} title="Speak customer name" />
-                    </div>
-                  </div>
-                </div>
-                <div>
-                  <label style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", display: "block", marginBottom: 4 }}>
-                    WhatsApp / Phone *
-                  </label>
-                  <input
-                    required
-                    value={newApp.whatsapp_number}
-                    onChange={(e) => setNewApp({ ...newApp, whatsapp_number: e.target.value })}
-                    placeholder="e.g. 9876543210"
-                    style={{ width: "100%", height: 38 }}
-                  />
-                </div>
-              </div>
+            <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16 }}>
+              Official loan application URLs. When you or Priya send a link to a lead, it creates a short redirect that logs click analytics before sending the customer straight to the bank portal.
+            </p>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <div>
-                  <label style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", display: "block", marginBottom: 4 }}>
-                    Loan Type
-                  </label>
+            {/* Add Bank Form */}
+            {canEdit && (
+              <div style={{ background: "var(--bg-secondary)", borderRadius: 10, padding: 14, marginBottom: 18, border: "1px solid var(--border-light)" }}>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10 }}>Add Lender Application Link</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+                  <input
+                    value={newBank.bank}
+                    onChange={(e) => setNewBank({ ...newBank, bank: e.target.value })}
+                    placeholder="Bank / NBFC Name (e.g. SBI)"
+                    style={{ height: 34, fontSize: 12.5, padding: "0 10px", borderRadius: 7, border: "1px solid var(--border)", background: "var(--bg-primary)", color: "var(--text-primary)" }}
+                  />
                   <select
-                    value={newApp.loan_type}
-                    onChange={(e) => setNewApp({ ...newApp, loan_type: e.target.value })}
-                    style={{ width: "100%", height: 38 }}
+                    value={newBank.product}
+                    onChange={(e) => setNewBank({ ...newBank, product: e.target.value })}
+                    style={{ height: 34, fontSize: 12.5, padding: "0 10px", borderRadius: 7, border: "1px solid var(--border)", background: "var(--bg-primary)", color: "var(--text-primary)" }}
                   >
                     <option value="Home Loan">Home Loan</option>
-                    <option value="Business Loan">Business Loan</option>
                     <option value="Personal Loan">Personal Loan</option>
-                    <option value="Loan Against Property (LAP)">Loan Against Property (LAP)</option>
-                    <option value="Education Loan">Education Loan</option>
-                    <option value="Vehicle Loan">Vehicle Loan</option>
-                    <option value="Gold Loan">Gold Loan</option>
+                    <option value="Business Loan">Business Loan</option>
+                    <option value="Loan Against Property">Loan Against Property</option>
                   </select>
                 </div>
-                <div>
-                  <label style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", display: "block", marginBottom: 4 }}>
-                    Loan Amount (₹)
-                  </label>
+                <div style={{ display: "flex", gap: 10 }}>
                   <input
-                    type="number"
-                    value={newApp.loan_amount}
-                    onChange={(e) => setNewApp({ ...newApp, loan_amount: e.target.value })}
-                    placeholder="e.g. 2500000"
-                    style={{ width: "100%", height: 38 }}
+                    value={newBank.url}
+                    onChange={(e) => setNewBank({ ...newBank, url: e.target.value })}
+                    placeholder="Official URL (e.g. https://homeloans.sbi/)"
+                    style={{ flex: 1, height: 34, fontSize: 12.5, padding: "0 10px", borderRadius: 7, border: "1px solid var(--border)", background: "var(--bg-primary)", color: "var(--text-primary)" }}
                   />
-                </div>
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <div>
-                  <label style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", display: "block", marginBottom: 4 }}>
-                    Tenure (Months)
-                  </label>
-                  <input
-                    type="number"
-                    value={newApp.loan_tenure}
-                    onChange={(e) => setNewApp({ ...newApp, loan_tenure: e.target.value })}
-                    placeholder="e.g. 120"
-                    style={{ width: "100%", height: 38 }}
-                  />
-                </div>
-                <div>
-                  <label style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", display: "block", marginBottom: 4 }}>
-                    Monthly Income (₹)
-                  </label>
-                  <input
-                    type="number"
-                    value={newApp.monthly_income}
-                    onChange={(e) => setNewApp({ ...newApp, monthly_income: e.target.value })}
-                    placeholder="e.g. 75000"
-                    style={{ width: "100%", height: 38 }}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <div>
-                  <label style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", display: "block", marginBottom: 4 }}>
-                    Employment Type
-                  </label>
-                  <select
-                    value={newApp.employment_type}
-                    onChange={(e) => setNewApp({ ...newApp, employment_type: e.target.value })}
-                    style={{ width: "100%", height: 38 }}
+                  <button
+                    type="button"
+                    onClick={handleAddBank}
+                    disabled={!newBank.bank.trim() || !newBank.url.trim() || savingBank}
+                    className="btn-primary"
+                    style={{ height: 34, padding: "0 14px", fontSize: 12 }}
                   >
-                    <option value="Salaried">Salaried</option>
-                    <option value="Self-Employed">Self-Employed</option>
-                    <option value="Business Owner">Business Owner</option>
-                    <option value="Retired">Retired</option>
-                  </select>
+                    {savingBank ? "Saving…" : "Add"}
+                  </button>
                 </div>
-                <div>
-                  <label style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", display: "block", marginBottom: 4 }}>
-                    PAN Number
-                  </label>
-                  <input
-                    value={newApp.pan_number}
-                    onChange={(e) => setNewApp({ ...newApp, pan_number: e.target.value.toUpperCase() })}
-                    placeholder="e.g. ABCDE1234F"
-                    style={{ width: "100%", height: 38 }}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <div>
-                  <label style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", display: "block", marginBottom: 4 }}>
-                    City
-                  </label>
-                  <div style={{ position: "relative" }}>
-                    <input
-                      value={newApp.city}
-                      onChange={(e) => setNewApp({ ...newApp, city: e.target.value })}
-                      placeholder="e.g. Hyderabad"
-                      style={{ width: "100%", height: 38, paddingRight: 34 }}
-                    />
-                    <div style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)" }}>
-                      <VoiceDictation onTranscript={(t: string) => setNewApp((prev) => ({ ...prev, city: prev.city ? `${prev.city} ${t}` : t }))} title="Speak city" />
-                    </div>
-                  </div>
-                </div>
-                <div>
-                  <label style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", display: "block", marginBottom: 4 }}>
-                    Initial Status
-                  </label>
-                  <select
-                    value={newApp.status}
-                    onChange={(e) => setNewApp({ ...newApp, status: e.target.value })}
-                    style={{ width: "100%", height: 38 }}
-                  >
-                    <option value="pending">Pending</option>
-                    <option value="under_review">Under Review</option>
-                    <option value="approved">Approved</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", display: "block", marginBottom: 4 }}>
-                  Residential Address
-                </label>
-                <div style={{ position: "relative" }}>
-                  <input
-                    value={newApp.address}
-                    onChange={(e) => setNewApp({ ...newApp, address: e.target.value })}
-                    placeholder="Plot/Flat No, Street, Landmark"
-                    style={{ width: "100%", height: 38, paddingRight: 34 }}
-                  />
-                  <div style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)" }}>
-                    <VoiceDictation onTranscript={(t: string) => setNewApp((prev) => ({ ...prev, address: prev.address ? `${prev.address} ${t}` : t }))} title="Speak address" />
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 10 }}>
-                <button type="button" onClick={() => setShowAddModal(false)} className="btn-ghost" style={{ height: 38, padding: "0 16px" }}>
-                  Cancel
-                </button>
-                <button type="submit" disabled={adding} className="btn-primary" style={{ height: 38, padding: "0 22px", opacity: adding ? 0.6 : 1 }}>
-                  {adding ? "Saving…" : "Add Application +"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* WhatsApp Form Customizer Modal */}
-      {showCustomizer && (
-        <LoanFormCustomizerModal
-          onClose={() => setShowCustomizer(false)}
-        />
-      )}
-
-      {/* Edit History Modal */}
-      {historyFor && (
-        <div
-          onClick={() => setHistoryFor(null)}
-          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}
-        >
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: 24, width: "100%", maxWidth: 480, maxHeight: "80vh", overflowY: "auto" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-              <div style={{ fontWeight: 700, fontSize: 16, display: "flex", alignItems: "center", gap: 8 }}><History size={16} strokeWidth={2.2} /> Edit history</div>
-              <button onClick={() => setHistoryFor(null)} style={{ background: "transparent", border: "none", color: "var(--text-muted)", cursor: "pointer" }}><X size={18} /></button>
-            </div>
-            {historyLoading && <div style={{ color: "var(--text-muted)", fontSize: 13 }}>Loading…</div>}
-            {!historyLoading && history.length === 0 && <div style={{ color: "var(--text-muted)", fontSize: 13 }}>No edit history for this application.</div>}
-            {!historyLoading && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {history.map((h) => (
-                  <div key={h.id} style={{ background: "var(--bg-secondary)", borderRadius: 8, padding: 12, fontSize: 12.5 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 4 }}>
-                      <span style={{ fontWeight: 600 }}>{fieldLabel(h.previous_values.field)}:</span>
-                      <span style={{ color: "var(--accent-red)", textDecoration: "line-through" }}>{String(h.previous_values.value ?? "—")}</span>
-                      →
-                      <span style={{ color: h.status === "approved" ? "var(--accent-green)" : "var(--text-muted)", fontWeight: 600 }}>{String(h.proposed_values.value)}</span>
-                      <span style={{
-                        marginLeft: "auto", fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em",
-                        color: h.status === "approved" ? "var(--accent-green)" : h.status === "rejected" ? "var(--accent-red)" : "var(--accent-yellow)",
-                      }}>{h.status}</span>
-                    </div>
-                    {h.reason && <div style={{ color: "var(--text-muted)", fontStyle: "italic", marginBottom: 4 }}>"{h.reason}"</div>}
-                    <div style={{ color: "var(--text-muted)", fontSize: 11 }}>
-                      Proposed {timeAgo(h.created_at)} ({formatDateTime(h.created_at)}) by Priya ({h.proposed_by === "priya_voice" ? "call" : "WhatsApp"})
-                      {h.reviewed_by && <> · reviewed by {h.reviewed_by} {timeAgo(h.reviewed_at!)} ({formatDateTime(h.reviewed_at!)})</>}
-                    </div>
-                  </div>
-                ))}
               </div>
             )}
+
+            {/* List */}
+            <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8 }}>
+              {library.map((b) => (
+                <div
+                  key={b.id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "10px 14px",
+                    borderRadius: 8,
+                    border: "1px solid var(--border-light)",
+                    background: "var(--bg-secondary)",
+                    fontSize: 12.5,
+                  }}
+                >
+                  <div>
+                    <div style={{ fontWeight: 600, color: "var(--text-primary)" }}>
+                      {b.bank} <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>· {b.product}</span>
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--accent-blue)", marginTop: 2, wordBreak: "break-all" }}>
+                      {b.url}
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: 12 }}>
+                    <a
+                      href={b.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="icon-btn"
+                      title="Test URL"
+                      style={{ width: 28, height: 28 }}
+                    >
+                      <ExternalLink size={13} />
+                    </a>
+                    {canEdit && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteBank(b.id)}
+                        className="icon-btn"
+                        title="Delete"
+                        style={{ width: 28, height: 28, color: "var(--text-muted)" }}
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}
+
     </div>
   )
 }

@@ -278,8 +278,9 @@ export async function persistCalendarEvent(
 
     let outboundQueueId: string | null = null
 
-    // Synchronize Call Queue if callback or reminder
-    if (opts.autoSyncQueue !== false && event.status === "confirmed" && (event.eventType === "callback" || event.eventType === "reminder") && last10) {
+    // Synchronize Call Queue if callback or reminder AND event is in the future
+    const isFutureEvent = new Date(event.eventAt).getTime() > Date.now() - 60000
+    if (opts.autoSyncQueue !== false && event.status === "confirmed" && (event.eventType === "callback" || event.eventType === "reminder") && last10 && isFutureEvent) {
       const activeQueue = await client.query(
         `SELECT id FROM outbound_queue 
          WHERE right(regexp_replace(phone, '\\D', '', 'g'), 10) = $1 AND status IN ('pending', 'dialing')
@@ -321,15 +322,35 @@ export async function persistCalendarEvent(
       const newTimelineEntry = `• [${sourceLabel} - ${timeStr} IST]: ${event.title}${event.notes ? ` — ${event.notes}` : ""}`
 
       let consolidatedNotes = existing.notes || ""
-      if (!consolidatedNotes.includes("--- CONSOLIDATED LEAD TIMELINE")) {
-        consolidatedNotes = [
-          consolidatedNotes,
-          "\n--- CONSOLIDATED LEAD TIMELINE (ALL INTERACTIONS AT ONE POINT) ---",
-          newTimelineEntry,
-        ].filter(Boolean).join("\n")
-      } else {
-        consolidatedNotes += `\n${newTimelineEntry}`
+      const isAlreadyInNotes = consolidatedNotes.includes(newTimelineEntry) || (event.sourceId && consolidatedNotes.includes(event.sourceId))
+      if (!isAlreadyInNotes) {
+        if (!consolidatedNotes.includes("--- CONSOLIDATED LEAD TIMELINE")) {
+          consolidatedNotes = [
+            consolidatedNotes,
+            "\n--- CONSOLIDATED LEAD TIMELINE (ALL INTERACTIONS AT ONE POINT) ---",
+            newTimelineEntry,
+          ].filter(Boolean).join("\n")
+        } else {
+          // Cap timeline to 20 most recent entries
+          const lines = consolidatedNotes.split("\n")
+          const header = lines.slice(0, 3)
+          const timeline = lines.slice(3).filter((l: string) => l.trim().startsWith("•"))
+          timeline.push(newTimelineEntry)
+          const cappedTimeline = timeline.slice(-20)
+          consolidatedNotes = [...header, ...cappedTimeline].join("\n")
+        }
       }
+
+      // Only advance the event's scheduled date/time and title if this source event is newer or equal to existing source_at
+      const isNewerSource = !existing.source_at || new Date(event.sourceAt).getTime() >= new Date(existing.source_at).getTime()
+      const titleToSet = isNewerSource ? event.title : existing.title
+      const eventTypeToSet = isNewerSource ? event.eventType : existing.event_type
+      const eventAtToSet = isNewerSource ? event.eventAt : existing.event_at
+      const endAtToSet = isNewerSource ? event.endAt : existing.end_at
+      const statusToSet = isNewerSource ? event.status : existing.status
+      const quoteToSet = isNewerSource ? event.rawQuote : existing.raw_quote
+      const sourceIdToSet = isNewerSource ? event.sourceId : existing.source_id
+      const sourceTypeToSet = isNewerSource ? event.sourceType : existing.source_type
 
       await client.query(
         `UPDATE calendar_events
@@ -348,18 +369,18 @@ export async function persistCalendarEvent(
              updated_at = now()
          WHERE id = $13`,
         [
-          event.title,
-          event.eventType,
-          event.eventAt,
-          event.endAt,
+          titleToSet,
+          eventTypeToSet,
+          eventAtToSet,
+          endAtToSet,
           event.location,
           event.channel,
-          event.status,
-          event.rawQuote,
+          statusToSet,
+          quoteToSet,
           consolidatedNotes,
           outboundQueueId,
-          event.sourceType,
-          event.sourceId,
+          sourceTypeToSet,
+          sourceIdToSet,
           existing.id,
         ]
       )
@@ -561,6 +582,7 @@ export async function scanVoiceCalls(opts: {
        LEFT JOIN leads l ON v.lead_id = l.id
        WHERE v.transcript IS NOT NULL AND jsonb_array_length(CASE WHEN jsonb_typeof(v.transcript::jsonb) = 'array' THEN v.transcript::jsonb ELSE '[]'::jsonb END) >= 2
          AND ($1::uuid IS NULL OR v.branch_id = $1)
+         AND v.calendar_scanned_at IS NULL
        ORDER BY v.created_at DESC
        LIMIT $2
      ) recent_calls
@@ -614,6 +636,15 @@ export async function scanVoiceCalls(opts: {
     }
   }
 
+  // Mark scanned calls so they are never re-scanned repeatedly
+  if (!dryRun && callsRes.rows.length > 0) {
+    const scannedIds = callsRes.rows.map((r: any) => r.id)
+    await query(
+      `UPDATE voice_calls SET calendar_scanned_at = now() WHERE id = ANY($1::uuid[])`,
+      [scannedIds]
+    ).catch(() => {})
+  }
+
   // Audit log scan
   await query(
     `INSERT INTO calendar_scans (
@@ -657,6 +688,7 @@ export async function syncOutboundQueueEvents(opts: {
      FROM outbound_queue q
      LEFT JOIN leads l ON q.lead_id = l.id
      WHERE q.scheduled_at IS NOT NULL
+       AND q.scheduled_at > now() - interval '1 hour'
        AND q.status IN ('pending', 'dialing')
        AND ($1::uuid IS NULL OR q.branch_id = $1)
      ORDER BY q.scheduled_at ASC`,
@@ -718,6 +750,7 @@ export async function syncCrmLeadCallbacks(opts: {
     `SELECT l.id, l.name, l.phone, l.callback_at, l.callback_note, l.branch_id
      FROM leads l
      WHERE l.callback_at IS NOT NULL
+       AND l.callback_at > now() - interval '1 hour'
        AND ($1::uuid IS NULL OR l.branch_id = $1)
      ORDER BY l.callback_at ASC`,
     [opts.branchId || null]

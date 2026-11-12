@@ -4,8 +4,8 @@ type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
 import { useEffect, useState, useMemo } from "react"
 import {
   Users, Target, IndianRupee, BadgeCheck, Phone, MessageCircle, MessageSquare, RotateCcw,
-  Plus, Search, Link2, Check, Download, Brain, Pin, Sparkles, CheckSquare,
-  PhoneCall, Instagram, X, ExternalLink, Clock, CheckCircle2, ArrowRight, Pencil
+  Plus, Search, Link2, Check, Download, Upload, Brain, Pin, Sparkles, CheckSquare,
+  PhoneCall, Instagram, X, ExternalLink, Clock, CheckCircle2, ArrowRight, Pencil, Landmark, AlertCircle
 } from "lucide-react"
 import { formatCurrency, timeAgo, formatDateTime } from "@/lib/utils"
 import { pctOf } from "@/lib/maths"
@@ -16,6 +16,7 @@ import { Skeleton } from "../ui/skeleton"
 import LeadMemoryModal from "./lead-memory-modal"
 import VoiceDictation from "../ui/voice-dictation"
 import { smartFilter } from "@/lib/smart-search"
+import { checkAgendaRules } from "@/lib/agenda-rules"
 
 import { PRODUCT_GROUPS, LOAN_TYPES } from "@/lib/products"
 
@@ -120,11 +121,11 @@ function FormLinkCell({ lead }: { lead: Lead }) {
 
   const submitted = lead.form_completed || !!lead.form_used_at
   const tone = submitted ? "var(--accent-green)" : "var(--accent-yellow)"
-  const label = submitted ? "Submitted" : "Sent"
+  const label = submitted ? "Opened" : "Sent"
 
   async function copy() {
     try {
-      await navigator.clipboard.writeText(`${window.location.origin}/form/${lead.form_token}`)
+      await navigator.clipboard.writeText(`${window.location.origin}/l/${lead.form_token}`)
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
     } catch {}
@@ -210,6 +211,131 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
   useEscapeDismiss(showAdd, () => setShowAdd(false))
   const [form, setForm] = useState({ name: "", phone: "", address: "", product_interest: "Home Loan", loan_amount: "", language: "telugu" })
 
+  type AgendaPreset = {
+    id: string
+    label: string
+    text: string
+    product?: string | null
+    language?: string | null
+  }
+
+  const DEFAULT_PRESETS: AgendaPreset[] = [
+    { id: "p1", label: "Standard intro", text: "" },
+    { id: "p2", label: "New enquiry — send link", text: "Reference what they enquired about, offer to send the official bank link, and book a callback." },
+    { id: "p3", label: "Balance transfer offer", text: "Introduce our balance-transfer offer and ask if their current EMI feels heavy. Don't pitch personal loans." },
+    { id: "p4", label: "Top-up on existing loan", text: "Ask if they need extra liquidity or renovation funds with an instant pre-approved top-up on their existing loan." },
+    { id: "p5", label: "Documents pending", text: "Politely follow up regarding pending documents needed to proceed with their loan submission." },
+    { id: "p6", label: "Old lead — still looking?", text: "Re-engage regarding their earlier loan enquiry with today's current competitive bank interest rates." },
+  ]
+
+  const [presets, setPresets] = useState<AgendaPreset[]>(DEFAULT_PRESETS)
+  const [uploadAgendaPreset, setUploadAgendaPreset] = useState("Standard intro")
+  const [uploadTalkingPoints, setUploadTalkingPoints] = useState("")
+  const [saveAsPresetName, setSaveAsPresetName] = useState("")
+  const [showSavePreset, setShowSavePreset] = useState(false)
+  const [savingPreset, setSavingPreset] = useState(false)
+
+  const [queueAgendaPreset, setQueueAgendaPreset] = useState("Standard intro")
+  const [queueTalkingPoints, setQueueTalkingPoints] = useState("")
+  const [queueShowSavePreset, setQueueShowSavePreset] = useState(false)
+  const [queueSavePresetName, setQueueSavePresetName] = useState("")
+
+  async function loadPresets() {
+    try {
+      const res = await fetch("/api/agenda-presets")
+      const d = await res.json()
+      if (res.ok && Array.isArray(d.presets) && d.presets.length > 0) {
+        setPresets(d.presets)
+      }
+    } catch {}
+  }
+
+  useEffect(() => {
+    loadPresets()
+  }, [])
+
+  function onSelectUploadPreset(lbl: string) {
+    setUploadAgendaPreset(lbl)
+    const match = presets.find((p) => p.label === lbl)
+    if (match) {
+      setUploadTalkingPoints(match.text)
+    }
+  }
+
+  function onSelectQueuePreset(lbl: string) {
+    setQueueAgendaPreset(lbl)
+    const match = presets.find((p) => p.label === lbl)
+    if (match) {
+      setQueueTalkingPoints(match.text)
+    }
+  }
+
+  async function handleSavePreset(label: string, text: string) {
+    if (!label.trim()) return
+    setSavingPreset(true)
+    try {
+      const res = await fetch("/api/agenda-presets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ label, text }),
+      })
+      const d = await res.json()
+      if (res.ok) {
+        toast.success(`Saved preset "${label}"`)
+        setShowSavePreset(false)
+        setQueueShowSavePreset(false)
+        setSaveAsPresetName("")
+        setQueueSavePresetName("")
+        await loadPresets()
+      } else {
+        toast.error(d.error || "Failed to save preset")
+      }
+    } catch {
+      toast.error("Failed to save preset")
+    }
+    setSavingPreset(false)
+  }
+
+  const [showUpload, setShowUpload] = useState(false)
+  useEscapeDismiss(showUpload, () => setShowUpload(false))
+  const [uploadFile, setUploadFile] = useState<File | null>(null)
+  const [uploadDestination, setUploadDestination] = useState<"leads" | "queue">("leads")
+  const [uploading, setUploading] = useState(false)
+  const [uploadResult, setUploadResult] = useState<{
+    created: number
+    duplicates?: number
+    invalid?: number
+    queued?: number
+    destination?: string
+  } | null>(null)
+
+  async function handleUploadCsv() {
+    if (!uploadFile) return
+    setUploading(true)
+    try {
+      const fd = new FormData()
+      fd.append("file", uploadFile)
+      fd.append("type", "contacts")
+      fd.append("destination", uploadDestination)
+      if (uploadDestination === "queue") {
+        fd.append("talking_points", uploadTalkingPoints.trim())
+        fd.append("agenda_label", uploadAgendaPreset.trim())
+      }
+      const res = await fetch("/api/upload", { method: "POST", body: fd })
+      const data = await res.json()
+      if (!res.ok) {
+        toast.error(data.error || "Upload failed")
+        return
+      }
+      setUploadResult(data)
+      load()
+    } catch {
+      toast.error("Upload failed")
+    } finally {
+      setUploading(false)
+    }
+  }
+
   const [callTarget, setCallTarget] = useState<Lead | null>(null)
   const [callInstructions, setCallInstructions] = useState("")
   const [calling, setCalling] = useState<string | null>(null)
@@ -217,6 +343,57 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
   const [waTarget, setWaTarget] = useState<Lead | null>(null)
   const [waText, setWaText] = useState("")
   const [waSending, setWaSending] = useState(false)
+
+  // Send Bank Link modal state
+  const [bankLinkTarget, setBankLinkTarget] = useState<Lead | null>(null)
+  const [selectedBank, setSelectedBank] = useState("SBI")
+  const [bankProduct, setBankProduct] = useState("Home Loan")
+  const [sendingBankLink, setSendingBankLink] = useState(false)
+  const [availableBanks, setAvailableBanks] = useState<{ id: string; bank: string; product: string }[]>([])
+
+  async function openSendBankLinkModal(lead: Lead) {
+    setBankLinkTarget(lead)
+    const prod = lead.product_interest || "Home Loan"
+    setBankProduct(prod)
+    setSelectedBank("SBI")
+    try {
+      const res = await fetch("/api/links/library")
+      if (res.ok) {
+        const data = await res.json()
+        setAvailableBanks(data)
+        const match = data.find((b: any) => b.product.toLowerCase() === prod.toLowerCase())
+        if (match) setSelectedBank(match.bank)
+      }
+    } catch {}
+  }
+
+  async function handleSendBankLink() {
+    if (!bankLinkTarget) return
+    setSendingBankLink(true)
+    try {
+      const res = await fetch("/api/links/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          leadId: bankLinkTarget.id,
+          bank: selectedBank,
+          product: bankProduct,
+        }),
+      })
+      const d = await res.json()
+      if (res.ok) {
+        toast.success(`Sent ${selectedBank} ${bankProduct} link to ${bankLinkTarget.name || "customer"} via WhatsApp`)
+        setBankLinkTarget(null)
+        load()
+      } else {
+        toast.error(d.error || "Failed to send bank link")
+      }
+    } catch {
+      toast.error("Failed to send bank link")
+    } finally {
+      setSendingBankLink(false)
+    }
+  }
 
   const [memoryLeadId, setMemoryLeadId] = useState<string | null>(null)
 
@@ -411,6 +588,8 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
           channel: queueForm.channel,
           scheduledAt: queueForm.timing === "later" && queueForm.scheduledAt ? new Date(queueForm.scheduledAt).toISOString() : null,
           language: queueForm.language,
+          talking_points: queueTalkingPoints.trim() || undefined,
+          agenda_label: queueAgendaPreset.trim() || undefined,
         }),
       })
       const d = await res.json()
@@ -852,6 +1031,16 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
             <a href="/api/leads/export" className="btn-ghost" style={{ height: 34, fontSize: 12, padding: "0 12px", textDecoration: "none" }} title="Export all leads as CSV">
               <Download size={13} strokeWidth={2} /> Export
             </a>
+            {canEdit && (
+              <button
+                type="button"
+                onClick={() => { setShowUpload(true); setUploadResult(null); setUploadFile(null); }}
+                className="btn-ghost"
+                style={{ height: 34, fontSize: 12, padding: "0 12px" }}
+              >
+                <Upload size={13} strokeWidth={2} /> Upload CSV
+              </button>
+            )}
             {canEdit && scopeTab === "crm" && (
               <button onClick={() => setShowAdd(true)} className="btn-primary" style={{ height: 34, fontSize: 12, padding: "0 14px" }}>
                 <Plus size={14} strokeWidth={2.2} /> Add Lead
@@ -1372,6 +1561,12 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                             title="Send WhatsApp"
                             style={{ background: "rgba(45,212,160,0.1)", border: "1px solid rgba(45,212,160,0.28)", color: "var(--accent-green)", borderRadius: 7, width: 28, height: 28, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
                           ><MessageCircle size={12.5} strokeWidth={1.9} /></button>
+                          <button
+                            onClick={() => openSendBankLinkModal(lead)}
+                            disabled={!lead.phone && !lead.whatsapp_number}
+                            title="Send Official Bank Application Link"
+                            style={{ background: "rgba(56,189,248,0.1)", border: "1px solid rgba(56,189,248,0.28)", color: "var(--accent-cyan)", borderRadius: 7, width: 28, height: 28, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+                          ><Landmark size={12.5} strokeWidth={1.9} /></button>
                         </>
                       )}
                       <button
@@ -1417,9 +1612,95 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
       {/* Add-to-Call-Queue modal */}
       {showQueueModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={() => !queueBusy && setShowQueueModal(false)}>
-          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, padding: 28, width: "min(460px, calc(100vw - 32px))" }} onClick={(e) => e.stopPropagation()}>
+          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, padding: 28, width: "min(520px, calc(100vw - 32px))" }} onClick={(e) => e.stopPropagation()}>
             <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 4 }}>Add {selectedIds.length} lead{selectedIds.length === 1 ? "" : "s"} to Call Queue</div>
             <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 18 }}>Priya dials them through the bulk dialer — nothing is dialed until a campaign is started.</div>
+
+            {/* What should Priya talk about? — Agenda picker */}
+            <div style={{ marginBottom: 14, padding: "12px 14px", borderRadius: 10, background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>
+                  What should Priya talk about?
+                </label>
+                <select
+                  value={queueAgendaPreset}
+                  onChange={(e) => onSelectQueuePreset(e.target.value)}
+                  style={{ fontSize: 11.5, padding: "3px 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)" }}
+                >
+                  {presets.map((p) => (
+                    <option key={p.id} value={p.label}>{p.label}</option>
+                  ))}
+                  <option value="Custom brief">Custom brief</option>
+                </select>
+              </div>
+
+              <textarea
+                value={queueTalkingPoints}
+                onChange={(e) => setQueueTalkingPoints(e.target.value.slice(0, 1000))}
+                rows={3}
+                maxLength={1000}
+                placeholder="e.g. Introduce our balance-transfer offer and ask if their current EMI feels heavy. Don't pitch personal loans."
+                style={{
+                  width: "100%",
+                  fontSize: 12.5,
+                  lineHeight: 1.45,
+                  padding: "8px 10px",
+                  borderRadius: 8,
+                  border: "1px solid var(--border)",
+                  background: "var(--bg-card)",
+                  color: "var(--text-primary)",
+                  resize: "vertical",
+                }}
+              />
+
+              {/* Soft compliance warnings */}
+              {checkAgendaRules(queueTalkingPoints).length > 0 && (
+                <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
+                  {checkAgendaRules(queueTalkingPoints).map((w, idx) => (
+                    <div key={idx} style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 11, color: "var(--accent-yellow)", background: "rgba(234,179,8,0.08)", padding: "4px 8px", borderRadius: 6, border: "1px solid rgba(234,179,8,0.2)" }}>
+                      <AlertCircle size={13} style={{ flexShrink: 0, marginTop: 1 }} />
+                      <span>{w.message}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 6 }}>
+                <div style={{ fontSize: 11, color: "var(--text-muted)", fontStyle: "italic" }}>
+                  Priya opens with this in mind — she&apos;ll say it naturally, in the customer&apos;s language, not word for word.
+                </div>
+                {queueTalkingPoints.trim() && !presets.some((p) => p.label === queueAgendaPreset && p.text === queueTalkingPoints.trim()) && (
+                  <button
+                    type="button"
+                    onClick={() => setQueueShowSavePreset(!queueShowSavePreset)}
+                    style={{ fontSize: 11, color: "var(--accent-violet)", background: "none", border: "none", cursor: "pointer", textDecoration: "underline", padding: 0 }}
+                  >
+                    Save as preset
+                  </button>
+                )}
+              </div>
+
+              {queueShowSavePreset && (
+                <div style={{ display: "flex", gap: 6, marginTop: 8, alignItems: "center" }}>
+                  <input
+                    type="text"
+                    placeholder="Preset name (e.g. Balance Transfer 8.5%)"
+                    value={queueSavePresetName}
+                    onChange={(e) => setQueueSavePresetName(e.target.value)}
+                    style={{ flex: 1, fontSize: 11.5, padding: "4px 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)" }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleSavePreset(queueSavePresetName, queueTalkingPoints)}
+                    disabled={!queueSavePresetName.trim() || savingPreset}
+                    className="btn-primary"
+                    style={{ height: 26, fontSize: 11, padding: "0 10px" }}
+                  >
+                    Save
+                  </button>
+                </div>
+              )}
+            </div>
 
             <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Dialing channel</label>
             <select value={queueForm.channel} onChange={(e) => setQueueForm({ ...queueForm, channel: e.target.value })} style={{ width: "100%", marginBottom: 14 }}>
@@ -1566,6 +1847,225 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
               <button onClick={() => setShowAdd(false)} style={{ flex: 1, padding: 10, background: "transparent", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text-secondary)" }}>Cancel</button>
               <button onClick={addLead} disabled={!form.name || !form.phone} className="btn-primary" style={{ flex: 1, height: 40 }}>Add Lead</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Upload CSV Dialog */}
+      {showUpload && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}>
+          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, padding: 28, width: "100%", maxWidth: 540 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+              <div style={{ fontWeight: 700, fontSize: 16 }}>Upload Leads CSV</div>
+              <button
+                type="button"
+                onClick={() => { setShowUpload(false); setUploadResult(null); setUploadFile(null); }}
+                className="icon-btn"
+                style={{ width: 28, height: 28 }}
+              >
+                <X size={15} />
+              </button>
+            </div>
+
+            {uploadResult ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                <div style={{ padding: "14px 16px", borderRadius: 10, background: "rgba(45,212,160,0.1)", border: "1px solid rgba(45,212,160,0.25)", color: "var(--accent-green)", fontSize: 13, lineHeight: 1.5 }}>
+                  <div style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                    <CheckCircle2 size={16} />
+                    <span>{uploadResult.created} leads processed</span>
+                  </div>
+                  <div style={{ color: "var(--text-secondary)", fontSize: 12 }}>
+                    ✓ {uploadResult.created} added · {uploadResult.duplicates ?? 0} duplicates skipped · {uploadResult.invalid ?? 0} invalid numbers
+                  </div>
+                  {uploadResult.destination === "queue" && (
+                    <div style={{ marginTop: 8, fontWeight: 500, color: "var(--text-primary)", fontSize: 12.5 }}>
+                      → {uploadResult.queued ?? uploadResult.created} waiting in Call Queue. Open Call Queue to start.
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 6 }}>
+                  <button
+                    type="button"
+                    onClick={() => { setShowUpload(false); setUploadResult(null); setUploadFile(null); }}
+                    className="btn-primary"
+                    style={{ height: 36, padding: "0 18px" }}
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+                <div>
+                  <label style={{ display: "block", fontSize: 12, color: "var(--text-secondary)", marginBottom: 6 }}>
+                    Choose file (CSV or TXT, max 2000 rows)
+                  </label>
+                  <input
+                    type="file"
+                    accept=".csv,.txt"
+                    onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
+                    style={{
+                      width: "100%",
+                      fontSize: 12.5,
+                      padding: "8px 10px",
+                      borderRadius: 8,
+                      border: "1px solid var(--border)",
+                      background: "var(--bg-secondary)",
+                      color: "var(--text-primary)",
+                    }}
+                  />
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+                    Columns expected: name, phone (10 digits). Optional: language, product, notes.
+                  </div>
+                </div>
+
+                <div>
+                  <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--text-primary)", marginBottom: 8 }}>
+                    What should happen to these contacts?
+                  </label>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer", fontSize: 13 }}>
+                      <input
+                        type="radio"
+                        name="uploadDestination"
+                        value="leads"
+                        checked={uploadDestination === "leads"}
+                        onChange={() => setUploadDestination("leads")}
+                        style={{ marginTop: 3 }}
+                      />
+                      <div>
+                        <div style={{ fontWeight: 500, color: "var(--text-primary)" }}>Just add to Leads — no calls. Call them later.</div>
+                      </div>
+                    </label>
+
+                    <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer", fontSize: 13 }}>
+                      <input
+                        type="radio"
+                        name="uploadDestination"
+                        value="queue"
+                        checked={uploadDestination === "queue"}
+                        onChange={() => setUploadDestination("queue")}
+                        style={{ marginTop: 3 }}
+                      />
+                      <div>
+                        <div style={{ fontWeight: 500, color: "var(--text-primary)" }}>Add to Leads and Call Queue — they wait until you press Start.</div>
+                        <div style={{ fontSize: 11, color: "var(--accent-yellow)", marginTop: 4 }}>
+                          Calls only go out 8:00 AM–7:00 PM, Mon–Sat. Uploaded outside those hours? They&apos;ll wait for the next window.
+                        </div>
+                      </div>
+                    </label>
+
+                    {uploadDestination === "queue" && (
+                      <div style={{ marginTop: 6, padding: "12px 14px", borderRadius: 10, background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                          <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>
+                            What should Priya talk about?
+                          </label>
+                          <select
+                            value={uploadAgendaPreset}
+                            onChange={(e) => onSelectUploadPreset(e.target.value)}
+                            style={{ fontSize: 11.5, padding: "3px 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)" }}
+                          >
+                            {presets.map((p) => (
+                              <option key={p.id} value={p.label}>{p.label}</option>
+                            ))}
+                            <option value="Custom brief">Custom brief</option>
+                          </select>
+                        </div>
+
+                        <textarea
+                          value={uploadTalkingPoints}
+                          onChange={(e) => setUploadTalkingPoints(e.target.value.slice(0, 1000))}
+                          rows={3}
+                          maxLength={1000}
+                          placeholder="e.g. Introduce our balance-transfer offer and ask if their current EMI feels heavy. Don't pitch personal loans."
+                          style={{
+                            width: "100%",
+                            fontSize: 12.5,
+                            lineHeight: 1.45,
+                            padding: "8px 10px",
+                            borderRadius: 8,
+                            border: "1px solid var(--border)",
+                            background: "var(--bg-card)",
+                            color: "var(--text-primary)",
+                            resize: "vertical",
+                          }}
+                        />
+
+                        {/* Soft compliance warnings */}
+                        {checkAgendaRules(uploadTalkingPoints).length > 0 && (
+                          <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
+                            {checkAgendaRules(uploadTalkingPoints).map((w, idx) => (
+                              <div key={idx} style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 11, color: "var(--accent-yellow)", background: "rgba(234,179,8,0.08)", padding: "4px 8px", borderRadius: 6, border: "1px solid rgba(234,179,8,0.2)" }}>
+                                <AlertCircle size={13} style={{ flexShrink: 0, marginTop: 1 }} />
+                                <span>{w.message}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 6 }}>
+                          <div style={{ fontSize: 11, color: "var(--text-muted)", fontStyle: "italic" }}>
+                            Priya opens with this in mind — she&apos;ll say it naturally, in the customer&apos;s language, not word for word.
+                          </div>
+                          {uploadTalkingPoints.trim() && !presets.some((p) => p.label === uploadAgendaPreset && p.text === uploadTalkingPoints.trim()) && (
+                            <button
+                              type="button"
+                              onClick={() => setShowSavePreset(!showSavePreset)}
+                              style={{ fontSize: 11, color: "var(--accent-violet)", background: "none", border: "none", cursor: "pointer", textDecoration: "underline", padding: 0 }}
+                            >
+                              Save as preset
+                            </button>
+                          )}
+                        </div>
+
+                        {showSavePreset && (
+                          <div style={{ display: "flex", gap: 6, marginTop: 8, alignItems: "center" }}>
+                            <input
+                              type="text"
+                              placeholder="Preset name (e.g. Diwali BT Offer)"
+                              value={saveAsPresetName}
+                              onChange={(e) => setSaveAsPresetName(e.target.value)}
+                              style={{ flex: 1, fontSize: 11.5, padding: "4px 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)" }}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleSavePreset(saveAsPresetName, uploadTalkingPoints)}
+                              disabled={!saveAsPresetName.trim() || savingPreset}
+                              className="btn-primary"
+                              style={{ height: 26, fontSize: 11, padding: "0 10px" }}
+                            >
+                              Save
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", gap: 10, marginTop: 6 }}>
+                  <button
+                    type="button"
+                    onClick={() => { setShowUpload(false); setUploadFile(null); }}
+                    className="btn-ghost"
+                    style={{ flex: 1, height: 38 }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleUploadCsv}
+                    disabled={!uploadFile || uploading}
+                    className="btn-primary"
+                    style={{ flex: 1, height: 38 }}
+                  >
+                    {uploading ? "Uploading…" : "Upload"}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1774,6 +2274,94 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
               <button onClick={() => setWaTarget(null)} style={{ flex: 1, padding: 10, background: "transparent", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text-secondary)" }}>Cancel</button>
               <button onClick={sendWa} disabled={waSending || !waText.trim()} style={{ flex: 1, height: 40, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7, background: "linear-gradient(135deg, var(--accent-green), var(--accent-green))", border: "none", borderRadius: 10, color: "white", fontWeight: 600, fontSize: 13, boxShadow: "0 4px 16px -4px rgba(45,212,160,0.45)", opacity: waSending || !waText.trim() ? 0.5 : 1 }}>
                 <MessageCircle size={14} strokeWidth={2} /> {waSending ? "Sending…" : "Send Message"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Send Bank Link Modal */}
+      {bankLinkTarget && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}>
+          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, padding: 26, width: "100%", maxWidth: 440 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <Landmark size={18} strokeWidth={2} style={{ color: "var(--accent-cyan)" }} />
+                <div style={{ fontWeight: 700, fontSize: 16 }}>Send Bank Application Link</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setBankLinkTarget(null)}
+                className="icon-btn"
+                style={{ width: 28, height: 28 }}
+              >
+                <X size={15} />
+              </button>
+            </div>
+
+            <div style={{ fontSize: 12.5, color: "var(--text-secondary)", marginBottom: 14 }}>
+              Customer: <strong style={{ color: "var(--text-primary)" }}>{bankLinkTarget.name || "Customer"}</strong> · {bankLinkTarget.phone || bankLinkTarget.whatsapp_number}
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16 }}>
+              <div>
+                <label style={{ display: "block", fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>Select Bank / Lender</label>
+                <select
+                  value={selectedBank}
+                  onChange={(e) => setSelectedBank(e.target.value)}
+                  style={{ width: "100%", height: 38, fontSize: 13, padding: "0 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)" }}
+                >
+                  <option value="SBI">State Bank of India (SBI)</option>
+                  <option value="HDFC Bank">HDFC Bank</option>
+                  <option value="ICICI Bank">ICICI Bank</option>
+                  <option value="IDFC First">IDFC First Bank</option>
+                  <option value="Axis Bank">Axis Bank</option>
+                  <option value="Bajaj Finserv">Bajaj Finserv</option>
+                  <option value="IIFL Home">IIFL Home Loans</option>
+                  {availableBanks
+                    .filter((b) => !["SBI", "HDFC Bank", "ICICI Bank", "IDFC First", "Axis Bank", "Bajaj Finserv", "IIFL Home"].includes(b.bank))
+                    .map((b) => (
+                      <option key={b.id} value={b.bank}>{b.bank}</option>
+                    ))}
+                </select>
+              </div>
+
+              <div>
+                <label style={{ display: "block", fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>Loan Product</label>
+                <select
+                  value={bankProduct}
+                  onChange={(e) => setBankProduct(e.target.value)}
+                  style={{ width: "100%", height: 38, fontSize: 13, padding: "0 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)" }}
+                >
+                  <option value="Home Loan">Home Loan</option>
+                  <option value="Personal Loan">Personal Loan</option>
+                  <option value="Business Loan">Business Loan</option>
+                  <option value="Loan Against Property">Loan Against Property</option>
+                </select>
+              </div>
+            </div>
+
+            <div style={{ padding: "10px 12px", borderRadius: 8, background: "rgba(56,189,248,0.08)", border: "1px solid rgba(56,189,248,0.2)", fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.5, marginBottom: 18 }}>
+              💡 Sends a branded short link via WhatsApp. The customer taps it, their click is tracked in the Applications tab, and they land on the bank&apos;s official application page. No sensitive documents touch your database.
+            </div>
+
+            <div style={{ display: "flex", gap: 10 }}>
+              <button
+                type="button"
+                onClick={() => setBankLinkTarget(null)}
+                className="btn-ghost"
+                style={{ flex: 1, height: 38 }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSendBankLink}
+                disabled={sendingBankLink}
+                className="btn-primary"
+                style={{ flex: 1, height: 38 }}
+              >
+                {sendingBankLink ? "Sending…" : "Send via WhatsApp"}
               </button>
             </div>
           </div>

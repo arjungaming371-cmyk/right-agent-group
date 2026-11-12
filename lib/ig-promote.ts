@@ -244,14 +244,8 @@ export async function promoteInstagramLead(opts: PromoteOptions): Promise<Promot
   let whatsappSent: boolean | null = null
   if (opts.sendWelcome !== false && !alreadyPromoted) {
     try {
-      const token = randomUUID()
-      await query(
-        `INSERT INTO form_links (token, lead_id, expires_at) VALUES ($1, $2, now() + interval '14 days')`,
-        [token, opts.leadId]
-      ).catch(async (e: any) => {
-        if (e?.code !== "42703") throw e
-        await query(`INSERT INTO form_links (token, lead_id) VALUES ($1, $2)`, [token, opts.leadId])
-      })
+      const { createOneTimeFormToken } = await import("./whatsapp")
+      const token = await createOneTimeFormToken(opts.leadId)
       const waBranch = await branchWhatsAppCtx(lead.branch_id)
       const sent = await sendApplicationLink(phone!, lead.name || "there", token, waBranch)
       whatsappSent = sent.ok

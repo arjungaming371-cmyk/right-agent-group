@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from "react"
 import Image from "next/image"
 import dynamic from "next/dynamic"
 import {
-  Users, FileText, Phone, MessageCircle, Activity, ShieldCheck, UploadCloud,
+  Users, FileText, Phone, MessageCircle, ShieldCheck,
   ScrollText, LogOut, Mic, BarChart3, UserCog, Search, Menu, X, BookOpen,
   Sparkles, Instagram, PhoneCall, type LucideIcon,
   BellRing, HeartPulse, CalendarDays,
@@ -38,17 +38,9 @@ const InstagramView = dynamic(() => import("./instagram-view"), {
   ssr: false,
   loading: () => <ViewFallback label="Instagram Chat" />,
 })
-const CommLogView   = dynamic(() => import("./comm-log-view"), {
-  ssr: false,
-  loading: () => <ViewFallback label="Communication Log" />,
-})
 const SecurityView  = dynamic(() => import("./security-view"), {
   ssr: false,
   loading: () => <ViewFallback label="Security" />,
-})
-const UploadView    = dynamic(() => import("./upload-view"), {
-  ssr: false,
-  loading: () => <ViewFallback label="Upload & Data" />,
 })
 const ScriptView    = dynamic(() => import("./script-view"), {
   ssr: false,
@@ -61,7 +53,7 @@ const KnowledgeBaseView = dynamic(() => import("./knowledge-base-view"), {
 
 // Floating ops chatbot (Executive Operations Commander) — drag bubble bottom-
 // right, chat history, attachments, voice dictation, action proposals with
-// admin approval (POST /api/assistant + /api/assistant/action). Was unmounted
+// operations assistant (POST /api/assistant).
 // during the initial import; restored on request. Lazy-loaded and SSR-off:
 // it's a floating widget, so there is intentionally no visible loading state.
 const QuickChat = dynamic(() => import("./quick-chat"), {
@@ -91,11 +83,7 @@ const AttentionView = dynamic(() => import("./attention-view"), {
   ssr: false,
   loading: () => <ViewFallback label="Needs Human" />,
 })
-const SystemHealthView = dynamic(() => import("./system-health-view"), {
-  ssr: false,
-  loading: () => <ViewFallback label="System Health" />,
-})
-const VoiceAssistant = dynamic(() => import("./voice-assistant"), { ssr: false })
+
 import { usePolling, setActivePollingView, PollingViewContext } from "@/lib/use-poll"
 
 // Shimmer skeleton matching the list layouts every view opens with — the old
@@ -115,7 +103,7 @@ function ViewFallback({ label }: { label: string }) {
 // NOTE 2026-10-03: the Branches & Staff AI console was removed per owner
 // decision — the multi-branch backend (session scoping, per-branch script
 // fallback, usage meters) stays intact, just with no management UI.
-export type ViewKey = "leads" | "loans" | "queue" | "voice" | "whatsapp" | "instagram" | "comms" | "calendar" | "security" | "upload" | "script" | "knowledge" | "analytics" | "dev-logs" | "attention" | "system"
+export type ViewKey = "leads" | "loans" | "queue" | "voice" | "whatsapp" | "instagram" | "calendar" | "security" | "script" | "knowledge" | "analytics" | "dev-logs" | "attention"
 export type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
 
 const ROLE_LABEL: Record<Role, string> = { admin: "Administrator", agent: "Loan Officer", viewer: "Viewer", developer: "Administrator", branch_manager: "Branch Manager" }
@@ -143,15 +131,12 @@ const NAV_SECTIONS: NavSection[] = [
       { key: "voice",    label: "Voice Logs",        icon: Phone,          roles: ["admin", "agent", "viewer", "branch_manager"] },
       { key: "whatsapp", label: "WhatsApp Chat",     icon: MessageCircle,  roles: ["admin", "agent", "viewer", "branch_manager"] },
       { key: "instagram",label: "Instagram Chat",    icon: Instagram,      roles: ["admin", "agent", "viewer", "branch_manager"] },
-      { key: "comms",    label: "Communication Log", icon: Activity,       roles: ["admin", "agent", "viewer", "branch_manager"] },
     ],
   },
   {
     title: "System",
     items: [
       { key: "security", label: "Security",       icon: ShieldCheck,  roles: ["admin", "developer"] },
-      { key: "system",   label: "System Health",  icon: HeartPulse,   roles: ["admin", "developer"] },
-      { key: "upload",   label: "Upload & Data",  icon: UploadCloud,  roles: ["admin", "agent", "viewer", "branch_manager"] },
       { key: "script",   label: "Priya's Script", icon: ScrollText,   roles: ["admin", "agent", "viewer", "branch_manager"] },
       { key: "knowledge",label: "Knowledge Base", icon: BookOpen,     roles: ["admin", "agent", "viewer", "branch_manager"] },
     ],
@@ -173,12 +158,9 @@ const VIEW_TITLES: Record<ViewKey, { title: string; sub: string }> = {
   voice:    { title: "Voice Logs",         sub: "Voice bot call activity and outcomes" },
   whatsapp: { title: "WhatsApp Chat",      sub: "Live customer conversations" },
   instagram:{ title: "Instagram Chat",     sub: "Direct messages and post comment auto-replies" },
-  comms:    { title: "Communication Log",  sub: "Automated calls and WhatsApp activity" },
   calendar: { title: "Calendar",           sub: "Upcoming calls and follow-up callbacks" },
-  security: { title: "Security",           sub: "Access control and audit policy" },
-  upload:   { title: "Upload & Data",      sub: "Upload contacts, scripts, and files for AI campaigns" },
+  security: { title: "Security",           sub: "Access control, compliance policy, and live system health" },
   script:   { title: "Priya's Script",     sub: "View and edit what Priya says on every call" },
-  system:   { title: "System Health",       sub: "Providers, voice server, database — live status and recent failures" },
   knowledge:{ title: "Knowledge Base",     sub: "Facts Priya can pull into any call or chat, on any turn" },
   "dev-logs": { title: "Activity Logs",   sub: "Your activity, login history, and system events" },
 }
@@ -223,7 +205,6 @@ export default function DashboardShell() {
   const [seedSearch, setSeedSearch] = useState<{ view: ViewKey; q: string } | null>(null)
   // Sidebar is a slide-in drawer below the md breakpoint — closed by default.
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
-  const [voiceAssistantOpen, setVoiceAssistantOpen] = useState(false)
 
   // A11y (2026-10-05): the mobile nav drawer closes on Escape (matching the
   // marketing nav) instead of only on backdrop tap.
@@ -235,9 +216,9 @@ export default function DashboardShell() {
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
   }, [mobileNavOpen])
+
   // Heavy overlays mount on first open — their chunks are only fetched when
-  // actually needed (VoiceAssistant alone is a ~2k-line component).
-  const [voiceAssistantEverOpened, setVoiceAssistantEverOpened] = useState(false)
+  // actually needed.
   const [paletteEverOpened, setPaletteEverOpened] = useState(false)
 
   // KEEP-ALIVE: once a view has been opened it stays mounted (hidden) for the
@@ -277,20 +258,13 @@ export default function DashboardShell() {
     return () => cancelAnimationFrame(raf)
   }, [view])
 
-  // Global shortcuts: Ctrl+K for palette, Alt+V for Personal Voice Assistant
+  // Global shortcuts: Ctrl+K for palette
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault()
         setPaletteOpen(o => !o)
       }
-      if (e.altKey && e.key.toLowerCase() === "v") {
-        e.preventDefault()
-        setVoiceAssistantOpen(o => !o)
-      }
-    }
-    function onOpenVoice() {
-      setVoiceAssistantOpen(true)
     }
     function onNavigate(e: Event) {
       const ce = e as CustomEvent<{ view: ViewKey; search?: string }>
@@ -302,11 +276,9 @@ export default function DashboardShell() {
       }
     }
     window.addEventListener("keydown", onKey)
-    window.addEventListener("rag:open-voice-assistant", onOpenVoice)
     window.addEventListener("rag:navigate", onNavigate)
     return () => {
       window.removeEventListener("keydown", onKey)
-      window.removeEventListener("rag:open-voice-assistant", onOpenVoice)
       window.removeEventListener("rag:navigate", onNavigate)
     }
   }, [])
@@ -402,9 +374,6 @@ export default function DashboardShell() {
 
   // Mount-on-first-open gates (see state above).
   useEffect(() => {
-    if (voiceAssistantOpen) setVoiceAssistantEverOpened(true)
-  }, [voiceAssistantOpen])
-  useEffect(() => {
     if (paletteOpen) setPaletteEverOpened(true)
   }, [paletteOpen])
 
@@ -456,13 +425,10 @@ export default function DashboardShell() {
       case "voice":        return <VoiceLogsView role={role} />
       case "whatsapp":     return <WhatsAppView role={role} />
       case "instagram":    return <InstagramView initialSearch={seedSearch?.view === "instagram" ? seedSearch.q : undefined} />
-      case "comms":        return <CommLogView />
       case "calendar":     return <CalendarView role={role} />
       case "security":     return <SecurityView role={role} />
-      case "upload":       return <UploadView role={role} />
       case "script":       return <ScriptView />
       case "attention":    return <AttentionView role={role} />
-      case "system":       return <SystemHealthView />
       case "knowledge":    return <KnowledgeBaseView role={role} />
       case "dev-logs":     return role === "developer" ? <DeveloperLogsView userEmail={userEmail} /> : null
       default:             return null
@@ -601,7 +567,7 @@ export default function DashboardShell() {
               className="text-[12px] font-semibold"
               style={{ color: systemOk === false ? "var(--accent-yellow)" : "var(--text-primary)" }}
             >
-              {systemOk === null ? "Checking status…" : systemOk ? "All systems operational" : "Service degraded — check System"}
+              {systemOk === null ? "Checking status…" : systemOk ? "All systems operational" : "Service degraded — check Security"}
             </span>
           </div>
           <div className="mt-0.5 pl-[15px] text-[10.5px] text-[var(--text-muted)]">Voice · WhatsApp · AI Engine</div>
@@ -655,24 +621,6 @@ export default function DashboardShell() {
 
           <StatusPill icon={Mic} label="Voice Bot" ok={systemOk} />
           <StatusPill icon={MessageCircle} label="WhatsApp" ok={systemOk} />
-
-          {/* Personal Voice Assistant trigger button */}
-          <button
-            onClick={() => setVoiceAssistantOpen(true)}
-            title="Open Personal Voice Assistant (Alt+V)"
-            aria-label="Open Personal Voice Assistant"
-            className="flex h-9 items-center gap-2 rounded-[10px] px-3 text-[12.5px] font-semibold text-white transition-all hover:opacity-95 shadow-sm"
-            style={{
-              background: "linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)",
-              border: "1px solid rgba(139, 92, 246, 0.4)",
-              boxShadow: "0 0 14px rgba(99, 102, 241, 0.35)",
-            }}
-          >
-            <Sparkles size={14} className="animate-pulse text-yellow-300" />
-            <span className="font-semibold hidden sm:inline">Voice Assistant</span>
-            <span className="sm:hidden font-semibold">Voice</span>
-            <span className="hidden lg:inline text-[10px] bg-white/20 px-1.5 py-0.5 rounded font-mono font-normal">Alt V</span>
-          </button>
 
           {/* Global search — opens the command palette (also Ctrl+K) */}
           <button
@@ -736,14 +684,6 @@ export default function DashboardShell() {
       </div>
       {/* Floating ops chatbot — back by popular demand. */}
       <QuickChat role={role} userEmail={userEmail} />
-      {voiceAssistantEverOpened && (
-        <VoiceAssistant
-          isOpen={voiceAssistantOpen}
-          onClose={() => setVoiceAssistantOpen(false)}
-          userEmail={userEmail}
-          role={role}
-        />
-      )}
       {showProfile && <ProfileModal email={userEmail} role={role} onClose={() => setShowProfile(false)} />}
       {/* Neutralizes the mobile slide-in transform at md+ so the sidebar is
           always visible on desktop regardless of mobileNavOpen state. */}

@@ -45,8 +45,10 @@ export default function KnowledgeBaseView({ role }: { role: Role }) {
 
   const csvInputRef = useRef<HTMLInputElement>(null)
   const pdfInputRef = useRef<HTMLInputElement>(null)
+  const docInputRef = useRef<HTMLInputElement>(null)
   const [csvUploading, setCsvUploading] = useState(false)
   const [pdfUploading, setPdfUploading] = useState(false)
+  const [docUploading, setDocUploading] = useState(false)
   const [urlInput, setUrlInput] = useState("")
   const [urlFetching, setUrlFetching] = useState(false)
   const [refreshingUrl, setRefreshingUrl] = useState<string | null>(null)
@@ -169,6 +171,30 @@ export default function KnowledgeBaseView({ role }: { role: Role }) {
     setPdfUploading(false)
   }
 
+  async function handleDocFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ""
+    if (!file) return
+    setDocUploading(true)
+    try {
+      const fd = new FormData()
+      fd.append("file", file)
+      fd.append("type", "script")
+      const res = await fetch("/api/upload", { method: "POST", body: fd })
+      const d = await res.json().catch(() => ({}))
+      if (res.ok) {
+        toast.success(d.message || `Uploaded ${file.name} to knowledge base`)
+        await load()
+      } else {
+        toast.error(d.error || "Document upload failed")
+      }
+    } catch {
+      toast.error("Document upload failed")
+    } finally {
+      setDocUploading(false)
+    }
+  }
+
   async function fetchUrl(url: string, isRefresh = false) {
     if (!url.trim()) return
     if (isRefresh) setRefreshingUrl(url); else setUrlFetching(true)
@@ -210,6 +236,11 @@ export default function KnowledgeBaseView({ role }: { role: Role }) {
         <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: 18 }}>
           <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 12 }}>Bulk Import</div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+            <input ref={docInputRef} type="file" accept=".pdf,.txt,.csv" onChange={handleDocFile} style={{ display: "none" }} />
+            <button onClick={() => docInputRef.current?.click()} disabled={docUploading} className="btn-ghost" style={{ height: 34 }}>
+              <FileUp size={14} strokeWidth={2} /> {docUploading ? "Uploading…" : "Upload documents (PDF, TXT, CSV)"}
+            </button>
+
             <input ref={csvInputRef} type="file" accept=".csv,.txt" onChange={handleCsvFile} style={{ display: "none" }} />
             <button onClick={() => csvInputRef.current?.click()} disabled={csvUploading} className="btn-ghost" style={{ height: 34 }}>
               <FileUp size={14} strokeWidth={2} /> {csvUploading ? "Importing…" : "Upload CSV"}

@@ -2,8 +2,7 @@
 import { useState, useRef, useEffect } from "react"
 import {
   MessageSquareText, Bot, X, Send, Sparkles, Plus, History, Trash2, ArrowLeft,
-  MessageCircle, Maximize2, Minimize2, Paperclip, Shield, ShieldCheck, CheckCircle2,
-  Lock, ChevronDown, ChevronUp, Loader2, FileText, Mic
+  MessageCircle, Maximize2, Minimize2, Paperclip, CheckCircle2, FileText
 } from "lucide-react"
 import VoiceDictation from "../ui/voice-dictation"
 import ChatMarkdown from "./chat-markdown"
@@ -21,29 +20,20 @@ type Message = {
 type ChatSummary = { id: string; title: string; created_at: string; updated_at: string }
 type UserRole = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
 
-export type ActionProposal = {
-  type: string
-  title: string
-  description: string
-  payload: any
-}
-
-export type ActionStatus = "pending" | "executing" | "approved" | "rejected" | "error"
-
 const GREETINGS: Record<UserRole, string> = {
-  admin: "Hi! I'm the Executive Operations Commander with full command access across leads, scripts, knowledge base, calls, loans, WhatsApp, compliance, and security. What command or task can I execute for you?",
+  admin: "Hi! I'm the Operations Commander co-pilot. I answer questions about your leads, calls, loans, WhatsApp, and team using verified live data. How can I help?",
   agent: "Hi! I'm the ops assistant. I can help with leads, calls, scripts, and WhatsApp insights. What would you like to know?",
   viewer: "Hi! I'm the ops assistant. I can show you reporting and pipeline insights. What would you like to explore?",
-  developer: "Hi! I'm your private developer assistant with console & database command access. All actions require your explicit admin approval before executing.",
+  developer: "Hi! I'm the operations assistant. I answer questions about this system using verified live data. What would you like to know?",
   branch_manager: "Hi! I'm the ops assistant for your branch. I can help with your branch's leads, calls, scripts, and WhatsApp activity. How can I help?",
 }
 
 const QUICK_COMMANDS = [
-  { label: "✍️ Write Calling Script", query: "Write a complete high-converting Universal calling script for Priya for personal and business loans with objection handling." },
-  { label: "📚 Add Home Loan KB", query: "Draft and add a Knowledge Base entry for Home Loan eligibility, interest rates, and required KYC documents." },
-  { label: "➕ Add New Lead", query: "Add a new lead to the pipeline: Rahul Verma, phone 9876543210, looking for Personal Loan of 5 Lakhs." },
   { label: "📊 Pipeline Health", query: "Give me an executive summary breakdown of all leads, voice calls, and loan applications." },
-  { label: "🛡️ DND Suppression", query: "Add phone number 9999988888 to the DND suppression list." },
+  { label: "📞 Today's Calls", query: "How many calls were placed today and what were the outcomes?" },
+  { label: "🟢 WhatsApp Activity", query: "Summarize today's WhatsApp conversations and active chats." },
+  { label: "🎯 Hot Leads", query: "Show me the top high-scoring leads that need attention." },
+  { label: "✍️ Draft Script", query: "Draft a high-converting calling script for Priya for balance transfer home loans." },
 ]
 
 function timeAgoShort(dateStr: string) {
@@ -54,234 +44,6 @@ function timeAgoShort(dateStr: string) {
   const hrs = Math.floor(mins / 60)
   if (hrs < 24) return `${hrs}h`
   return `${Math.floor(hrs / 24)}d`
-}
-
-function extractActionProposal(content: string): { cleanText: string; proposal: ActionProposal | null } {
-  if (!content) return { cleanText: "", proposal: null }
-  const match = content.match(/```(?:action:proposal|json:action|action)\s*([\s\S]*?)\s*```/)
-  if (!match) return { cleanText: content, proposal: null }
-  try {
-    const parsed = JSON.parse(match[1].trim())
-    if (parsed && parsed.type) {
-      return {
-        cleanText: content.replace(match[0], "").trim(),
-        proposal: {
-          type: parsed.type,
-          title: parsed.title || parsed.type,
-          description: parsed.description || "",
-          payload: parsed.payload || {},
-        },
-      }
-    }
-  } catch {}
-  return { cleanText: content, proposal: null }
-}
-
-function ActionApprovalCard({
-  proposal,
-  role,
-  onApprove,
-  onReject,
-  actionState,
-}: {
-  proposal: ActionProposal
-  role: UserRole
-  onApprove: () => void
-  onReject: () => void
-  actionState?: { status: ActionStatus; error?: string; executedAt?: string }
-}) {
-  const [showPayload, setShowPayload] = useState(false)
-  const isAdmin = role === "admin" || role === "developer"
-  const status = actionState?.status || "pending"
-
-  const typeConfig: Record<string, { label: string; color: string; bg: string }> = {
-    update_script: { label: "Script Command", color: "#f59e0b", bg: "rgba(245, 158, 11, 0.15)" },
-    add_kb_entry: { label: "Knowledge Base", color: "#10b981", bg: "rgba(16, 185, 129, 0.15)" },
-    update_kb_entry: { label: "KB Update", color: "#10b981", bg: "rgba(16, 185, 129, 0.15)" },
-    delete_kb_entry: { label: "KB Delete", color: "#ef4444", bg: "rgba(239, 68, 68, 0.15)" },
-    add_lead: { label: "Add Lead", color: "#3b82f6", bg: "rgba(59, 130, 246, 0.15)" },
-    update_lead: { label: "Lead Update", color: "#3b82f6", bg: "rgba(59, 130, 246, 0.15)" },
-    update_loan: { label: "Loan Application", color: "#8b5cf6", bg: "rgba(139, 92, 246, 0.15)" },
-    add_dnd: { label: "Compliance DND", color: "#f43f5e", bg: "rgba(244, 63, 94, 0.15)" },
-    remove_dnd: { label: "Remove DND", color: "#10b981", bg: "rgba(16, 185, 129, 0.15)" },
-    toggle_security: { label: "Security Setting", color: "#eab308", bg: "rgba(234, 179, 8, 0.15)" },
-  }
-
-  const cfg = typeConfig[proposal.type] || { label: "Admin Action", color: "#818cf8", bg: "rgba(129, 140, 248, 0.15)" }
-
-  return (
-    <div style={{
-      marginTop: 10,
-      borderRadius: 12,
-      border: "1px solid rgba(129, 140, 248, 0.35)",
-      background: "linear-gradient(135deg, rgba(20, 27, 45, 0.88), rgba(12, 16, 28, 0.96))",
-      padding: "13px 15px",
-      boxShadow: "0 8px 24px -4px rgba(0, 0, 0, 0.45)",
-    }}>
-      {/* Header bar */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-          <Shield size={15} style={{ color: cfg.color }} />
-          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.05em", color: "#c7d2fe", textTransform: "uppercase" }}>
-            Admin Command Approval
-          </span>
-        </div>
-        <span style={{
-          fontSize: 10.5, fontWeight: 650, padding: "2px 8px", borderRadius: 6,
-          background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.color}33`
-        }}>
-          {cfg.label}
-        </span>
-      </div>
-
-      {/* Action Title & Description */}
-      <div style={{ fontSize: 13.5, fontWeight: 650, color: "var(--text-primary)", marginBottom: 4 }}>
-        {proposal.title}
-      </div>
-      {proposal.description && (
-        <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.45, marginBottom: 8 }}>
-          {proposal.description}
-        </div>
-      )}
-
-      {/* Payload summary toggle */}
-      <button
-        type="button"
-        onClick={() => setShowPayload(!showPayload)}
-        style={{
-          background: "none", border: "none", padding: 0,
-          color: "#818cf8", fontSize: 11.5, fontWeight: 500,
-          cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4,
-          marginBottom: showPayload ? 8 : 0
-        }}
-      >
-        {showPayload ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-        {showPayload ? "Hide details" : "View details"}
-      </button>
-
-      {showPayload && (
-        <div style={{
-          marginTop: 6, marginBottom: 8, padding: "8px 10px", borderRadius: 8,
-          background: "rgba(0,0,0,0.35)", border: "1px solid var(--border)",
-          fontSize: 11, fontFamily: "ui-monospace, monospace", color: "var(--text-secondary)",
-          maxHeight: 180, overflowY: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word"
-        }}>
-          {proposal.type === "update_script" && proposal.payload?.content ? (
-            <div>
-              <div style={{ fontWeight: 600, color: "#818cf8", marginBottom: 4 }}>
-                Target: {proposal.payload.language || "base"} script ({proposal.payload.content.length} characters)
-              </div>
-              <div>{proposal.payload.content.slice(0, 450)}{proposal.payload.content.length > 450 ? "..." : ""}</div>
-            </div>
-          ) : proposal.type === "add_lead" ? (
-            <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 10px" }}>
-              <span style={{ color: "var(--text-muted)" }}>Name:</span>
-              <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>{proposal.payload.name || "—"}</span>
-              <span style={{ color: "var(--text-muted)" }}>Phone:</span>
-              <span style={{ color: "var(--accent-cyan)", fontWeight: 600 }}>{proposal.payload.phone || "—"}</span>
-              <span style={{ color: "var(--text-muted)" }}>Product:</span>
-              <span>{proposal.payload.product_interest || "—"}</span>
-              <span style={{ color: "var(--text-muted)" }}>Amount:</span>
-              <span>{proposal.payload.loan_amount ? `₹${Number(proposal.payload.loan_amount).toLocaleString("en-IN")}` : "—"}</span>
-              {proposal.payload.notes && (
-                <>
-                  <span style={{ color: "var(--text-muted)" }}>Notes:</span>
-                  <span>{proposal.payload.notes}</span>
-                </>
-              )}
-            </div>
-          ) : proposal.type === "add_kb_entry" ? (
-            <div>
-              <div style={{ fontWeight: 600, color: "#34d399", marginBottom: 2 }}>Title: {proposal.payload.title}</div>
-              <div style={{ color: "var(--text-muted)", marginBottom: 4 }}>Category: {proposal.payload.category || "General"}</div>
-              <div>{proposal.payload.content?.slice(0, 300)}...</div>
-            </div>
-          ) : (
-            JSON.stringify(proposal.payload, null, 2)
-          )}
-        </div>
-      )}
-
-      {/* Action state footer */}
-      {status === "pending" && (
-        <div style={{ marginTop: 10 }}>
-          {isAdmin ? (
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <button
-                type="button"
-                onClick={onApprove}
-                style={{
-                  display: "inline-flex", alignItems: "center", gap: 6,
-                  background: "var(--gradient-brand)", border: "none", color: "#fff",
-                  borderRadius: 8, padding: "7px 14px", fontSize: 12, fontWeight: 600,
-                  cursor: "pointer", boxShadow: "0 2px 8px rgba(99, 102, 241, 0.4)"
-                }}
-              >
-                <ShieldCheck size={14} /> Approve & Execute
-              </button>
-              <button
-                type="button"
-                onClick={onReject}
-                style={{
-                  display: "inline-flex", alignItems: "center", gap: 5,
-                  background: "transparent", border: "1px solid var(--border)",
-                  color: "var(--text-muted)", borderRadius: 8, padding: "7px 12px",
-                  fontSize: 12, cursor: "pointer"
-                }}
-              >
-                <X size={14} /> Reject
-              </button>
-            </div>
-          ) : (
-            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "#facc15" }}>
-              <Lock size={13} /> Only an Administrator can approve and execute this command.
-            </div>
-          )}
-        </div>
-      )}
-
-      {status === "executing" && (
-        <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 7, fontSize: 12, color: "#818cf8" }}>
-          <Loader2 size={14} className="animate-spin" /> Executing command on dashboard...
-        </div>
-      )}
-
-      {status === "approved" && (
-        <div style={{
-          marginTop: 10, padding: "7px 12px", borderRadius: 8,
-          background: "rgba(16, 185, 129, 0.14)", border: "1px solid rgba(16, 185, 129, 0.3)",
-          color: "#34d399", fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", gap: 6
-        }}>
-          <CheckCircle2 size={14} /> Approved & Executed on Dashboard {actionState?.executedAt ? `(${actionState.executedAt})` : ""}
-        </div>
-      )}
-
-      {status === "rejected" && (
-        <div style={{
-          marginTop: 10, padding: "7px 12px", borderRadius: 8,
-          background: "rgba(239, 68, 68, 0.1)", border: "1px solid rgba(239, 68, 68, 0.25)",
-          color: "#f87171", fontSize: 12, display: "flex", alignItems: "center", gap: 6
-        }}>
-          <X size={14} /> Rejected by Admin. No changes applied.
-        </div>
-      )}
-
-      {status === "error" && (
-        <div style={{ marginTop: 10, fontSize: 12, color: "#f87171" }}>
-          Error: {actionState?.error || "Execution failed"}
-          {isAdmin && (
-            <button
-              type="button"
-              onClick={onApprove}
-              style={{ marginLeft: 8, textDecoration: "underline", background: "none", border: "none", color: "#818cf8", cursor: "pointer" }}
-            >
-              Retry
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-  )
 }
 
 const POS_KEY = "opsAssistantFabPos"
@@ -358,9 +120,6 @@ export default function QuickChat({ role = "agent", userEmail = "" }: { role?: U
   const bottomRef = useRef<HTMLDivElement>(null)
   const streamEpochRef = useRef(0)
 
-  // Action execution state
-  const [actionStates, setActionStates] = useState<Record<number, { status: ActionStatus; error?: string; executedAt?: string }>>({})
-
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages, open])
@@ -386,7 +145,6 @@ export default function QuickChat({ role = "agent", userEmail = "" }: { role?: U
     setLoading(false)
     setChatId(null)
     setMessages([greeting])
-    setActionStates({})
     setView("chat")
   }
 
@@ -395,7 +153,6 @@ export default function QuickChat({ role = "agent", userEmail = "" }: { role?: U
     setChatId(c.id)
     setView("chat")
     setLoading(true)
-    setActionStates({})
     try {
       const res = await fetch(`/api/assistant/chats/${c.id}`)
       const data = await res.json()
@@ -442,50 +199,6 @@ export default function QuickChat({ role = "agent", userEmail = "" }: { role?: U
       }
       reader.readAsText(file)
     }
-  }
-
-  async function handleExecuteAction(msgIndex: number, proposal: ActionProposal) {
-    setActionStates(prev => ({ ...prev, [msgIndex]: { status: "executing" } }))
-    try {
-      const res = await fetch("/api/assistant/action", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: proposal.type,
-          payload: proposal.payload,
-        }),
-      })
-
-      const data = await res.json()
-      if (!res.ok) {
-        throw new Error(data.error || "Action execution failed")
-      }
-
-      setActionStates(prev => ({
-        ...prev,
-        [msgIndex]: {
-          status: "approved",
-          executedAt: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-        },
-      }))
-
-      toast.success(data.message || "Command executed successfully!")
-      window.dispatchEvent(new CustomEvent("rag:refresh", { detail: { type: proposal.type } }))
-    } catch (err: any) {
-      setActionStates(prev => ({
-        ...prev,
-        [msgIndex]: { status: "error", error: err.message || "Execution failed" },
-      }))
-      toast.error(err.message || "Failed to execute command")
-    }
-  }
-
-  function handleRejectAction(msgIndex: number) {
-    setActionStates(prev => ({
-      ...prev,
-      [msgIndex]: { status: "rejected" },
-    }))
-    toast.info("Action proposal rejected.")
   }
 
   async function send(text?: string) {
@@ -685,31 +398,6 @@ export default function QuickChat({ role = "agent", userEmail = "" }: { role?: U
                   <History size={15} strokeWidth={2} />
                 </button>
                 <button
-                  onClick={() => {
-                    setOpen(false)
-                    window.dispatchEvent(new CustomEvent("rag:open-voice-assistant"))
-                  }}
-                  aria-label="Switch to Voice Assistant"
-                  title="Switch to Personal Voice Assistant (Alt+V)"
-                  style={{
-                    background: "rgba(99, 102, 241, 0.15)",
-                    border: "1px solid rgba(99, 102, 241, 0.3)",
-                    color: "#818cf8",
-                    cursor: "pointer",
-                    height: 28,
-                    padding: "0 8px",
-                    borderRadius: 7,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 5,
-                    fontSize: 11.5,
-                    fontWeight: 600,
-                  }}
-                >
-                  <Mic size={13} strokeWidth={2.2} />
-                  <span>Voice</span>
-                </button>
-                <button
                   onClick={() => setExpanded(!expanded)}
                   aria-label={expanded ? "Minimize window" : "Maximize window"}
                   title={expanded ? "Minimize window" : "Maximize to full workspace"}
@@ -772,8 +460,6 @@ export default function QuickChat({ role = "agent", userEmail = "" }: { role?: U
             <div style={{ flex: 1, overflowY: "auto", padding: 14, display: "flex", flexDirection: "column", gap: 12 }}>
               {messages.map((msg, i) => {
                 const isPendingStream = loading && i === messages.length - 1 && msg.role === "assistant" && msg.content === ""
-                const { cleanText, proposal } = msg.role === "assistant" ? extractActionProposal(msg.content) : { cleanText: msg.content, proposal: null }
-                const actionState = actionStates[i]
 
                 return (
                   <div key={msg.id || (msg.id = `qc-${i}-${msg.role}`)} style={{ display: "flex", flexDirection: "column", alignItems: msg.role === "user" ? "flex-end" : "flex-start", gap: 4 }}>
@@ -813,24 +499,11 @@ export default function QuickChat({ role = "agent", userEmail = "" }: { role?: U
                       ) : msg.role === "assistant" ? (
                         // Commander replies render as real markdown (bold,
                         // lists, code, verification chip) — never raw symbols
-                        <ChatMarkdown content={cleanText} />
+                        <ChatMarkdown content={msg.content} />
                       ) : (
-                        cleanText
+                        msg.content
                       )}
                     </div>
-
-                    {/* Inline Admin Approval Card for this specific message */}
-                    {proposal && (
-                      <div style={{ maxWidth: expanded ? "82%" : "90%", width: "100%" }}>
-                        <ActionApprovalCard
-                          proposal={proposal}
-                          role={role}
-                          onApprove={() => handleExecuteAction(i, proposal)}
-                          onReject={() => handleRejectAction(i)}
-                          actionState={actionState}
-                        />
-                      </div>
-                    )}
                   </div>
                 )
               })}

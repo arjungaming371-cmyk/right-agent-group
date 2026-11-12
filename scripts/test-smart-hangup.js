@@ -8,18 +8,34 @@
  *  5. Confirmation check before hanging up when intent is ambiguous
  */
 
+const fs = require("fs")
+const path = require("path")
+const ts = require("typescript")
+
+// Transpile pure TypeScript exports from lib/speech-scheduler.ts and lib/voice-conversation.ts
+const ROOT = path.join(__dirname, "..")
+
+const schedCode = fs.readFileSync(path.join(ROOT, "lib/speech-scheduler.ts"), "utf8")
+const schedJs = ts.transpileModule(schedCode, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText
+const mSched = { exports: {} }
+new Function("module", "exports", "require", schedJs)(mSched, mSched.exports, require)
+
+const voiceCode = fs.readFileSync(path.join(ROOT, "lib/voice-conversation.ts"), "utf8").split("\n").slice(109, 189).join("\n")
+const voiceJs = ts.transpileModule(voiceCode, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText
+const mVoice = { exports: {} }
+new Function("module", "exports", "require", voiceJs)(mVoice, mVoice.exports, () => ({}))
+
 const {
   detectDndIntent,
   CONTINUATION_INTENT_RE,
   UNAMBIGUOUS_GOODBYE_RE,
   AMBIGUOUS_CLOSING_RE,
-  handleTurn,
-} = require("../lib/voice-conversation")
+} = mVoice.exports
 
 const {
   detectCallerWillCall,
   detectRescheduleIntent,
-} = require("../lib/speech-scheduler")
+} = mSched.exports
 
 function assert(condition, message) {
   if (!condition) {

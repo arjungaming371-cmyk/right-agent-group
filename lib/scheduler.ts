@@ -198,6 +198,76 @@ async function runCalendarAgentScan() {
   }
 }
 
+// Automated Due Callbacks Runner: dials scheduled callbacks whose scheduled_at time has arrived
+let dueCallbacksRunning = false
+async function runDueCallbacksTick() {
+  if (dueCallbacksRunning) return
+  dueCallbacksRunning = true
+  try {
+    const { isWithinCallingWindow } = await import("@/lib/compliance")
+    if (!(await isWithinCallingWindow())) return
+
+    const { isAiPaused } = await import("@/lib/ai-pause")
+    if (await isAiPaused("calls")) return
+
+    const { query, db } = await import("@/lib/db")
+    const { placeOutboundCall } = await import("@/lib/outbound-dial")
+    const { normalizePhone } = await import("@/lib/phone")
+    const { renderInstructionsForLead } = await import("@/lib/script-studio")
+
+    // Claim up to 2 due callbacks atomically
+    const claimRes = await query(
+      `UPDATE outbound_queue
+       SET status = 'dialing', claimed_at = now()
+       WHERE id IN (
+         SELECT id FROM outbound_queue
+         WHERE status = 'pending' AND scheduled_at <= now()
+         ORDER BY priority DESC, scheduled_at ASC
+         LIMIT 2
+         FOR UPDATE SKIP LOCKED
+       )
+       RETURNING id, lead_id, phone, name, language, product_interest, notes, branch_id, channel, talking_points`
+    )
+
+    for (const item of claimRes.rows) {
+      try {
+        const phone = normalizePhone(item.phone)
+        if (!phone) {
+          await db.from("outbound_queue").update({ status: "failed", outcome: "failed", outcome_detail: "invalid phone" }).eq("id", item.id)
+          continue
+        }
+
+        const requested = item.channel === "whatsapp_voice" ? "whatsapp" : item.channel === "phone" ? "phone" : "auto"
+        const instructions = renderInstructionsForLead(item.talking_points || item.notes || null, item, null)
+
+        const placed = await placeOutboundCall({
+          phone,
+          leadId: item.lead_id || null,
+          language: item.language || "telugu",
+          requested,
+          branchId: item.branch_id || null,
+          instructions,
+        })
+
+        await db.from("outbound_queue")
+          .update({ status: "called", call_sid: placed.callSid, called_at: new Date().toISOString() })
+          .eq("id", item.id)
+
+        console.log(`[scheduler] Auto-dialed due callback for ${item.name || phone} via ${placed.channel}`)
+      } catch (dialErr: any) {
+        console.error(`[scheduler] Due callback dial error for ${item.phone}:`, dialErr?.message || dialErr)
+        await db.from("outbound_queue")
+          .update({ status: "failed", outcome: "failed", outcome_detail: String(dialErr?.message || dialErr).slice(0, 300) })
+          .eq("id", item.id)
+      }
+    }
+  } catch (err: any) {
+    console.error("[scheduler] runDueCallbacksTick error:", err?.message || err)
+  } finally {
+    dueCallbacksRunning = false
+  }
+}
+
 export function startScheduler() {
   // instrumentation.ts's register() can fire more than once in dev under
   // Next.js hot-reload — guard so we never register the same cron job twice.
@@ -215,10 +285,15 @@ export function startScheduler() {
   // Calendar Agent periodic background scan, every 15 minutes.
   cron.schedule("*/15 * * * *", () => runCalendarAgentScan())
 
+  // Automated Due Callback Runner: checks every 30s to dial scheduled callbacks on time
+  setInterval(() => {
+    runDueCallbacksTick().catch(() => {})
+  }, 30_000)
+
   // Automated Instagram comment poller: runs every 20s to catch new comments
   setInterval(() => {
     runInstagramCommentScan().catch(() => {})
   }, 20_000)
 
-  console.log("[scheduler] in-app cron started — daily digest 08:00, weekly digest Mon 08:00, lead brain scan every 5m, prompt tuner Sun 09:00, calendar agent scan every 15m, ig comment scan every 20s")
+  console.log("[scheduler] in-app cron started — due callbacks every 30s, daily digest 08:00, weekly digest Mon 08:00, lead brain scan every 5m, prompt tuner Sun 09:00, calendar agent scan every 15m, ig comment scan every 20s")
 }

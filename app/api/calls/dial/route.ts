@@ -78,7 +78,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: aiPauseMessage("calls"), paused: true }, { status: 503 })
   }
 
-  let body: { leadId?: string; channel?: string; instructions?: string }
+  let body: { leadId?: string; channel?: string; instructions?: string; queueId?: string }
   try {
     body = await req.json()
   } catch {
@@ -232,6 +232,13 @@ export async function POST(req: NextRequest) {
           : `Outbound WhatsApp call initiated to ${phone}`,
         outcome: "pending",
       }).catch(() => {})
+      // Bind call to outbound_queue row so Call Queue stays 100% up to date
+      if (body?.queueId) {
+        await db.from("outbound_queue").update({ status: "dialing", call_sid: callSid, called_at: new Date().toISOString() }).eq("id", body.queueId).catch(() => {})
+      } else {
+        await db.from("outbound_queue").update({ status: "dialing", call_sid: callSid, called_at: new Date().toISOString() }).eq("lead_id", leadId).eq("status", "pending").catch(() => {})
+      }
+
       console.log(`📤 WhatsApp outbound dial lead=${leadId} to=***${phone.slice(-4)} callId=***${placed.callId.slice(-8)} registered=${reg.ok ? "yes" : "no"}`)
       return NextResponse.json({ ok: true, channel: "whatsapp", callSid, status: "ringing" })
     }
@@ -257,6 +264,13 @@ export async function POST(req: NextRequest) {
         : `Outbound AI call initiated to ${phone}`,
       outcome: "pending",
     }).catch(() => {})
+    // Bind call to outbound_queue row so Call Queue stays 100% up to date
+    if (body?.queueId) {
+      await db.from("outbound_queue").update({ status: "dialing", call_sid: call.sid, called_at: new Date().toISOString() }).eq("id", body.queueId).catch(() => {})
+    } else {
+      await db.from("outbound_queue").update({ status: "dialing", call_sid: call.sid, called_at: new Date().toISOString() }).eq("lead_id", leadId).eq("status", "pending").catch(() => {})
+    }
+
     return NextResponse.json({ ok: true, channel: "phone", callSid: call.sid, status: "initiated" })
   } catch (e) {
     return apiError(e)

@@ -1357,38 +1357,49 @@ class WhatsAppCallSession {
         })
         .catch(() => {})
 
-      // Wait for WebRTC media connection to establish
-      await this.waitForConnected(3500)
+      // Wait for WebRTC media connection (fast check: 800ms max for inbound, 2500ms for outbound)
+      await this.waitForConnected(this.outbound ? 2500 : 800)
       if (this.closed) return
 
-      // Ear-pickup delay: give listener brief moment from connect to place phone to ear
-      const greetingDelay = parseInt(process.env.CALL_GREETING_DELAY_MS || "800")
-      const elapsedSinceAnswer = this.connectedAt ? (Date.now() - this.connectedAt) : (Date.now() - t0)
-      const remainingDelay = Math.max(0, greetingDelay - elapsedSinceAnswer)
-      if (remainingDelay > 0) {
-        console.log(`⏳ WhatsApp call ${this.callSid}: holding greeting for ${remainingDelay}ms (target ${greetingDelay}ms from connect)`)
-        await new Promise((resolve) => {
-          const timer = setTimeout(resolve, remainingDelay)
-          this._greetingWakeup = () => {
-            clearTimeout(timer)
-            resolve()
-          }
-        })
+      // Ear-pickup delay: only on outbound calls where business dialed the customer
+      if (this.outbound) {
+        const greetingDelay = parseInt(process.env.CALL_GREETING_DELAY_MS || "400")
+        const elapsedSinceAnswer = this.connectedAt ? (Date.now() - this.connectedAt) : (Date.now() - t0)
+        const remainingDelay = Math.max(0, greetingDelay - elapsedSinceAnswer)
+        if (remainingDelay > 0) {
+          await sleep(remainingDelay)
+        }
       }
       if (this.closed) return
 
-      // If caller spoke early during the pickup window, let utterance handler take over
+      // If caller spoke early during pickup, let utterance handler take over
       if (this.processing || this.speaking) {
-        console.log(`🎙 WhatsApp call ${this.callSid}: caller spoke first during pickup window, skipping auto-greeting`)
+        console.log(`🎙 WhatsApp call ${this.callSid}: caller spoke first, skipping auto-greeting`)
         return
       }
 
-      const r = await apiPromise
+      // Race start API with 1200ms timeout so caller never hears dead silence
+      let r = null
+      try {
+        r = await Promise.race([
+          apiPromise,
+          sleep(1200).then(() => null)
+        ])
+      } catch (err) {
+        console.error("wa start API error:", err.message)
+      }
+
+      if (!r || !r.text) {
+        const line = START_FALLBACK_PHRASE[this.language] || START_FALLBACK_PHRASE.telugu
+        console.log(`⏱ wa start API slow or empty — speaking immediate cached greeting in ${this.language}`)
+        await this.speak(line)
+        console.log(`⏱ wa answer → greeting fully queued (instant fallback): ${Date.now() - t0}ms`)
+        return
+      }
+
       console.log(`⏱ wa start API: ${Date.now() - t0}ms  lead=${r.leadId || "?"}  branch=${r.branchId || "hq"}`)
-      this.language = r.language || "english"
+      this.language = r.language || "telugu"
       this.voice = r.voice && r.voice.speaker ? r.voice : null
-      // Recording consent BEFORE the greeting — the caller must know the
-      // call is recorded from the first spoken word onward.
       const notice = this.recordingNotice()
       if (notice) await this.speak(notice)
       await this.speak(r.text)

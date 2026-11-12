@@ -71,11 +71,11 @@ export async function GET(req: Request) {
     const { count: lc } = await db.from("leads").select("*", { count: "exact", head: true })
     const { count: vc } = await db.from("voice_calls").select("*", { count: "exact", head: true })
     const { count: la } = await db.from("loan_applications").select("*", { count: "exact", head: true })
-    const { count: fl } = await db.from("form_links").select("*", { count: "exact", head: true })
+    const { count: fl } = await db.from("link_sends").select("*", { count: "exact", head: true })
     results.db_leads            = `✅ ${lc} leads`
     results.db_voice_calls      = `✅ ${vc} calls`
     results.db_loan_applications= `✅ ${la} applications`
-    results.db_form_links       = `✅ ${fl} form links`
+    results.db_link_sends       = `✅ ${fl} bank link sends`
   } catch (e: any) {
     results.db_tables = `❌ ${e.message} — run: npm run db:setup (or psql -f local-setup.sql)`
   }

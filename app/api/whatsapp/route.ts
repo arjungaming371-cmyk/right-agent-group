@@ -3,8 +3,7 @@ import crypto from "crypto"
 import pool, { query, db } from "@/lib/db"
 import { chatWithLLM, detectLanguage, type Language } from "@/lib/llm"
 import { sendWhatsAppText, downloadBranchWhatsAppMedia, answerWhatsAppCall, rejectWhatsAppCall, type BranchWhatsAppCtx } from "@/lib/whatsapp"
-import { createOneTimeFormToken, recentFormLinkSent, sendApplicationLinkText } from "@/lib/whatsapp"
-import { detectApplicationRequest } from "@/lib/application-request"
+import { createOneTimeFormToken, recentFormLinkSent, sendApplicationLinkText, detectApplicationRequest } from "@/lib/whatsapp"
 import { finalizeWhatsAppCall, mapCallOutcome, callSidFor } from "@/lib/whatsapp-call-finalize"
 import { resolveBranchByWhatsAppPhoneId, type BranchRow } from "@/lib/branches"
 import { buildLeadBrief } from "@/lib/lead-brain"
@@ -490,7 +489,6 @@ async function handleInbound(msg: any, profileName: string | null, waBranch: Bra
   if (await isAiPaused("messages", waBranch?.id || null)) return
   let aiReply: string | null = null
   try {
-    const lang = detectLanguage(text) as Language
     // Newest 15 rows, flipped back to chronological — ASC LIMIT would pin the
     // context to the oldest 15 messages forever once a chat outgrows the limit.
     const historyRes = await query(
@@ -517,6 +515,41 @@ async function handleInbound(msg: any, profileName: string | null, waBranch: Bra
       flagHumanRequestedWhatsApp(lead.id, text)
     }
 
+    // SPEED: brief / KB search / memory lookup fired together
+    const [brief, kbContext, memRes] = await Promise.all([
+      buildLeadBrief(lead.id),
+      searchKnowledgeBase(text),
+      query(`SELECT facts, summary, facts->>'monthly_income' AS income FROM lead_memory WHERE lead_id = $1`, [lead.id]),
+    ])
+    const memData = memRes.rows[0]
+    const memFacts = memData?.facts || {}
+    const memSummary = memData?.summary || ""
+
+    const isKnownCustomer = !!(lead.name && !/^(WA|Caller)\s*\d+$/i.test(lead.name))
+    const customerName = isKnownCustomer ? lead.name : (memFacts.name || null)
+    const customerCity = lead.address || memFacts.city || (memSummary.includes("Hyderabad") ? "Hyderabad" : null)
+    const customerLoan = memFacts.loan_type ? (memFacts.loan_type + (memFacts.loan_amount_needed ? ` (₹${Number(memFacts.loan_amount_needed).toLocaleString("en-IN")})` : "")) : lead.product_interest || null
+
+    let knownProfileBlock = ""
+    if (customerName) {
+      knownProfileBlock = `=== CRITICAL: RETURNING / KNOWN CUSTOMER PROFILE ===
+- Customer Name: "${customerName}"
+- Phone: ${lead.phone || `+${from}`}
+${customerCity ? `- City / Area: ${customerCity} (ALREADY KNOWN - NEVER ASK!)\n` : ""}${customerLoan ? `- Loan Requirement: ${customerLoan} (ALREADY KNOWN - NEVER ASK!)\n` : ""}${memSummary ? `- Details from Recent Conversation / Call: ${memSummary}\n` : ""}
+STRICT INSTRUCTIONS FOR KNOWN CUSTOMER:
+1. YOU ALREADY KNOW THEIR NAME ("${customerName}")! If the customer asks "What is my name?" or "Do you know my name?", IMMEDIATELY reply: "Your name is ${customerName} sir!"
+2. NEVER ask for their name, city/area, or what loan they need! All of these are ALREADY on file from their phone call.
+3. If the customer mentions having told everything on the call or asks for updates, warmly acknowledge their specific loan details: "${customerName} sir, yes! I have all your details from our call regarding your ${customerLoan || "loan"}."
+4. If they write in English, reply in helpful professional English. If they write in Telugu or Tenglish, reply in friendly Tenglish. Maintain a warm, highly professional loan advisor tone at all times.`
+    }
+
+    const detectedLang = detectLanguage(text) as Language
+    const leadPreferredLang = (memFacts.preferred_language || lead.language) as Language | undefined
+    // If incoming message is short (<= 4 words) and detected as English, but lead preferred language is Telugu:
+    const lang = (leadPreferredLang === "telugu" && text.trim().split(/\s+/).length <= 4 && detectedLang === "english")
+      ? "telugu"
+      : detectedLang
+
     // CHANNEL OVERRIDE: the shared script is written for live phone calls —
     // without this the AI "speaks" on WhatsApp (call greetings, hold-style
     // brevity) instead of texting like a chat agent.
@@ -533,13 +566,14 @@ async function handleInbound(msg: any, profileName: string | null, waBranch: Bra
       "complete answers, WhatsApp formatting allowed (single-asterisk *bold* only — never " +
       "**double** — and bullet lists), as long as needed to answer properly. " +
       "NEVER ask for their WhatsApp number — the number they are texting you from RIGHT NOW " +
-      "is their WhatsApp number, you already have it. If the base script's goal mentions " +
-      "collecting a WhatsApp number, treat that as already done on this channel — do not ask, " +
-      "do not confirm it, just skip straight to name and city if those are still missing. " +
+      "is their WhatsApp number, you already have it. " +
+      "If name and city are already known from the customer profile below, NEVER ask for them! " +
       "If the customer explicitly asks for the loan application, application form, or the link: " +
       "confirm it is DONE — say the form was just sent right here in this chat (the system " +
       "delivers it automatically with your reply). Never say you will send it later, never " +
       "point them to email or another app."
+
+    if (knownProfileBlock) extraContext = [extraContext, knownProfileBlock].filter(Boolean).join("\n\n")
 
     // OPERATOR REQUEST — shape this reply exactly like the call path does
     // (see lib/default-scripts.ts SPEAK TO A HUMAN + lib/frustration.ts).
@@ -547,28 +581,9 @@ async function handleInbound(msg: any, profileName: string | null, waBranch: Bra
       extraContext = [extraContext, OPERATOR_CHAT_INSTRUCTION].filter(Boolean).join("\n\n")
     }
 
-    // DATE/TIME AWARENESS: same reasoning as the voice path — without this
-    // the model has no idea what the real date/time is.
+    // DATE/TIME AWARENESS
     extraContext = [extraContext, currentDateTimeInstruction()].filter(Boolean).join("\n\n")
 
-    // LEAD BRAIN: brief the WhatsApp AI with the same cross-channel picture
-    // Priya gets on calls — known facts, rolling summary, recent
-    // interactions, sentiment warnings — every turn. Raw history alone isn't
-    // reliable enough at tracking "already answered" facts (observed live:
-    // the model re-asked for a name/WhatsApp number the customer had already
-    // given), so the brief's explicit "don't re-ask known facts" instruction
-    // needs to stay in context for the whole conversation, not just the open.
-    //
-    // SPEED: brief / KB search / income lookup are three independent reads
-    // that used to run as three separate sequential awaits — none needs
-    // another's result. Same fix as the voice path (lib/voice-conversation.ts):
-    // firing them together cuts the stacked wait down to whichever is
-    // slowest, which matters more per-message the more chats are active at once.
-    const [brief, kbContext, memRow] = await Promise.all([
-      buildLeadBrief(lead.id),
-      searchKnowledgeBase(text),
-      query(`SELECT facts->>'monthly_income' AS income FROM lead_memory WHERE lead_id = $1`, [lead.id]),
-    ])
     if (brief) extraContext = [extraContext, brief].join("\n\n")
     if (kbContext) extraContext = [extraContext, kbContext].filter(Boolean).join("\n\n")
 
@@ -593,7 +608,7 @@ async function handleInbound(msg: any, profileName: string | null, waBranch: Bra
 
     const eligibility = buildEligibilityInstruction(text, {
       loanType: detectedType,
-      monthlyIncome: memRow.rows[0]?.income ? Number(memRow.rows[0].income) : null,
+      monthlyIncome: memRes.rows[0]?.income ? Number(memRes.rows[0].income) : null,
     })
     if (eligibility) extraContext = [extraContext, eligibility.instruction].filter(Boolean).join("\n\n")
 
@@ -653,7 +668,9 @@ async function handleInbound(msg: any, profileName: string | null, waBranch: Bra
   // chat request), they already hold a live one-time link — don't mint and
   // message a fresh token on every ask.
   try {
-    if (detectApplicationRequest(text) && !(await recentFormLinkSent(lead.id))) {
+    const aiMentionedForm = !!(aiReply && /\b(sent (the )?(simple )?(application|form)|link on (this )?chat|fill it (when|here)|application link|form link|లింక్ పంపించా|లింక్ పంపిస్తా|form right here)\b/i.test(aiReply))
+    const customerRequested = detectApplicationRequest(text)
+    if ((customerRequested || aiMentionedForm) && !(await recentFormLinkSent(lead.id))) {
       const token = await createOneTimeFormToken(lead.id)
       const linkResult = await sendApplicationLinkText(from, lead.name || "there", token, waBranch)
       // Mirror the operator send-form route: mark the lead as "form sent,

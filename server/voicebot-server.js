@@ -478,6 +478,7 @@ class CallSession {
     this.botTalking = false   // we're currently sending audio (mic muted)
     this.processing = false
     this.closed = false
+    this.isVobiz = (process.env.TELEPHONY_PROVIDER || "vobiz").toLowerCase().trim() === "vobiz"
     this.started = false      // guards against a duplicate Exotel "start" event replaying the greeting mid-call
     // Two-stage playback pipeline: synthChain serializes GPU synthesis (one
     // F5 inference at a time), sendChain serializes playback. Synthesis of
@@ -671,9 +672,14 @@ class CallSession {
           return
         }
         this.ws.send(JSON.stringify({
-          event: "media",
+          event: this.isVobiz ? "playAudio" : "media",
           stream_sid: this.streamSid,
-          media: { payload },
+          streamId: this.streamSid,
+          media: {
+            contentType: "audio/x-l16",
+            sampleRate: SAMPLE_RATE,
+            payload
+          },
         }))
       } catch {}
     }, 100)
@@ -701,9 +707,12 @@ class CallSession {
       return
     }
     this.started = true
-    this.streamSid = msg.stream_sid || msg.streamSid || null
+    this.streamSid = msg.stream_sid || msg.streamSid || msg.start?.streamId || msg.streamId || null
     const start = msg.start || {}
-    this.callSid = start.call_sid || start.callSid || start.CallSid || null
+    this.callSid = start.call_sid || start.callSid || start.CallSid || start.callId || start.call_uuid || msg.call_uuid || null
+    if (msg.start?.mediaFormat || msg.start?.streamId || msg.streamId || (!start.call_sid && start.callId)) {
+      this.isVobiz = true
+    }
     const from = start.from || start.From || ""
     // Multi-branch routing: the CALLED number (the branch's DLT-approved
     // ExoPhone) decides which branch serves an inbound call. Exotel's field
@@ -791,6 +800,14 @@ class CallSession {
     // paying for tokens nobody will hear (the stream reader also checks its
     // epoch and exits early).
     if (this.turnAbort) { try { this.turnAbort.abort() } catch {} this.turnAbort = null }
+    if (this.isVobiz && this.streamSid) {
+      try {
+        this.ws.send(JSON.stringify({
+          event: "clearAudio",
+          streamId: this.streamSid,
+        }))
+      } catch {}
+    }
     // Carry the frames that triggered the barge-in into the new utterance —
     // dropping them would clip the first third of a second off whatever the
     // caller said, which is usually the word that matters ("no", "wait").
@@ -1027,9 +1044,14 @@ class CallSession {
           chunk = Buffer.concat([chunk, Buffer.alloc(FRAME_BYTES - (chunk.length % FRAME_BYTES))])
         }
         this.ws.send(JSON.stringify({
-          event: "media",
+          event: this.isVobiz ? "playAudio" : "media",
           stream_sid: this.streamSid,
-          media: { payload: chunk.toString("base64") },
+          streamId: this.streamSid,
+          media: {
+            contentType: "audio/x-l16",
+            sampleRate: SAMPLE_RATE,
+            payload: chunk.toString("base64")
+          },
         }))
         queuedMs += bytesToMs(chunk.length)
         // Hand over the next chunk only once we've drifted back inside the
@@ -1278,6 +1300,10 @@ wss.on("connection", (ws, req) => {
         // EVERY concurrent call. Guard all floating async entries.
         case "start": session.onStart(msg).catch((e) => console.error("start error:", e.message)); break
         case "media": session.onMedia(msg); break
+        case "playedStream": break
+        case "clearedAudio":
+          console.log(`🧹 Vobiz audio buffer cleared sid=${session.callSid}`)
+          break
         case "stop":
           session.closed = true
           session.stopComfortNoise()

@@ -142,6 +142,86 @@ async function applyAnalysis(leadId: string, result: LeadAnalysisResult): Promis
          stage = $6, last_analysis_at = now(), updated_at = now()`,
       [leadId, JSON.stringify(mergedFacts), result.updated_summary || existing.summary, result.sentiment, JSON.stringify(history), nextStage]
     )
+
+    // Sync extracted core facts back to the leads table so CRM and other channels immediately see them
+    try {
+      const updates: string[] = []
+      const params: any[] = [leadId]
+      let pIdx = 2
+      if (mergedFacts.loan_type) {
+        updates.push(`product_interest = $${pIdx++}`)
+        const lt = String(mergedFacts.loan_type).toLowerCase()
+        params.push(lt === "education" ? "Education Loan" : lt === "home" ? "Home Loan" : lt === "personal" ? "Personal Loan" : mergedFacts.loan_type)
+      }
+      if (mergedFacts.loan_amount_needed) {
+        updates.push(`loan_amount = $${pIdx++}`)
+        params.push(String(mergedFacts.loan_amount_needed))
+      }
+      if ((mergedFacts as any).city) {
+        updates.push(`address = $${pIdx++}`)
+        params.push(String((mergedFacts as any).city))
+      }
+      if (mergedFacts.preferred_language) {
+        updates.push(`language = $${pIdx++}`)
+        params.push(String(mergedFacts.preferred_language))
+      }
+      if (updates.length > 0) {
+        await client.query(`UPDATE leads SET ${updates.join(", ")}, updated_at = now() WHERE id = $1`, params)
+      }
+    } catch (syncErr: any) {
+      console.warn("[lead-brain] sync to leads table skipped:", syncErr.message)
+    }
+
+    // Automatically create or update a pending loan application in loan_applications so the Dashboard > Loan Applications tab displays it
+    try {
+      if (mergedFacts.loan_amount_needed || mergedFacts.loan_type) {
+        const leadRes = await client.query(`SELECT name, phone, branch_id, address FROM leads WHERE id = $1`, [leadId])
+        const leadRow = leadRes.rows[0]
+        if (leadRow && (leadRow.phone || leadRow.name)) {
+          const custName = leadRow.name || "Customer"
+          const custPhone = leadRow.phone || ""
+          const custCity = (mergedFacts as any).city || leadRow.address || ""
+          const lt = mergedFacts.loan_type ? String(mergedFacts.loan_type) : "Personal"
+          const cleanLt = lt.toLowerCase().includes("education") || lt.toLowerCase().includes("student")
+            ? "Education"
+            : lt.toLowerCase().includes("home")
+            ? "Home"
+            : lt.toLowerCase().includes("business")
+            ? "Business"
+            : lt.toLowerCase().includes("gold")
+            ? "Gold"
+            : "Personal"
+          const loanAmt = mergedFacts.loan_amount_needed ? Number(mergedFacts.loan_amount_needed) : null
+
+          const existingApp = await client.query(`SELECT id FROM loan_applications WHERE lead_id = $1 LIMIT 1`, [leadId])
+          if (existingApp.rows.length === 0) {
+            await client.query(
+              `INSERT INTO loan_applications (lead_id, customer_name, full_name, phone, whatsapp_number, city, address, loan_type, loan_amount, status, submitted_at, branch_id)
+               VALUES ($1, $2, $2, $3, $3, $4, $4, $5, $6, 'pending', now(), $7)`,
+              [leadId, custName, custPhone, custCity, cleanLt, loanAmt, leadRow.branch_id || null]
+            )
+          } else {
+            await client.query(
+              `UPDATE loan_applications
+               SET customer_name = COALESCE(NULLIF($2, ''), customer_name),
+                   full_name = COALESCE(NULLIF($2, ''), full_name),
+                   phone = COALESCE(NULLIF($3, ''), phone),
+                   whatsapp_number = COALESCE(NULLIF($3, ''), whatsapp_number),
+                   city = COALESCE(NULLIF($4, ''), city),
+                   address = COALESCE(NULLIF($4, ''), address),
+                   loan_type = COALESCE(NULLIF($5, ''), loan_type),
+                   loan_amount = COALESCE($6, loan_amount),
+                   last_edited_at = now()
+               WHERE id = $1`,
+              [existingApp.rows[0].id, custName, custPhone, custCity, cleanLt, loanAmt]
+            )
+          }
+        }
+      }
+    } catch (appSyncErr: any) {
+      console.warn("[lead-brain] sync to loan_applications skipped:", appSyncErr.message)
+    }
+
     await client.query("COMMIT")
   } catch (e) {
     await client.query("ROLLBACK").catch(() => {})
@@ -375,7 +455,7 @@ export async function buildLeadBrief(leadId: string): Promise<string> {
          lm.facts, lm.summary, lm.sentiment, lm.stage, lm.last_analysis_at,
          (SELECT json_build_object(
             'id', la.id,
-            'ref_number', la.ref_number,
+            'ref_number', la.id,
             'loan_type', la.loan_type,
             'loan_amount', la.loan_amount,
             'status', la.status,
@@ -489,6 +569,13 @@ export async function buildLeadBrief(leadId: string): Promise<string> {
         `LOAN APPLICATION ALREADY ON FILE (${[refNum, appType, appAmt, `status: ${appStatus}`].filter(Boolean).join(", ")}):\n` +
         `- The customer ALREADY submitted their loan application. NEVER say "we are sending you a loan application" or ask them to fill any form.\n` +
         `- Acknowledge their submitted application directly if asked. Answer all caller questions (office visits, timings 9 AM to 6 PM, insurance, rates, process, eligibility) directly using the Knowledge Base. NEVER deflect by repeatedly saying our loan officer will review and call them.`
+      )
+    } else {
+      lines.push(
+        `LOAN APPLICATION STATUS — NO APPLICATION ON FILE:\n` +
+        `- The customer has NOT submitted any loan application form yet (zero applications exist in the database).\n` +
+        `- NEVER claim or tell the customer "we already have your application" or "your application is in our system" — you do NOT have any form from them.\n` +
+        `- When the customer asks for the application form or link ("application pampandi" / "link pampandi"), ALWAYS agree immediately: "Sure sir, నేను మీ WhatsApp కి application link పంపిస్తున్నాను, fill చేయండి."`
       )
     }
 

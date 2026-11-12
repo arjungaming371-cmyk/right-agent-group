@@ -32,9 +32,7 @@ const VIEW_ACTIONS: { key: ViewKey; label: string }[] = [
   { key: "loans", label: "Loan Applications" },
   { key: "voice", label: "Voice Logs" },
   { key: "whatsapp", label: "WhatsApp Chat" },
-  { key: "comms", label: "Communication Log" },
   { key: "security", label: "Security" },
-  { key: "upload", label: "Upload & Data" },
   { key: "script", label: "Priya's Script" },
   { key: "knowledge", label: "Knowledge Base" },
   // "branches" removed 2026-10-03 — Branches & Staff AI console taken out per owner decision.

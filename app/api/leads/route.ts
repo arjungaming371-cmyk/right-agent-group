@@ -170,9 +170,9 @@ export async function GET(req: NextRequest) {
               igm.last_message, igm.last_direction, igm.last_type, igm.last_interaction_at
        FROM leads
        LEFT JOIN LATERAL (
-         SELECT token AS form_token, used_at AS form_used_at, created_at AS form_sent_at
-         FROM form_links
-         WHERE form_links.lead_id = leads.id
+         SELECT token AS form_token, clicked_at AS form_used_at, created_at AS form_sent_at
+         FROM link_sends
+         WHERE link_sends.lead_id = leads.id
          ORDER BY created_at DESC LIMIT 1
        ) fl ON true
        LEFT JOIN LATERAL (

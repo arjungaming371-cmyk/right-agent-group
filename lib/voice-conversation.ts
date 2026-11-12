@@ -199,7 +199,7 @@ function isAfterDoubtInquiry(history: { role: "user" | "model"; content: string 
 async function handleDndOptOut(
   leadId: string | null,
   callSid: string | null,
-  callerPhone: string | null,
+  callerPhone: string | null | undefined,
   language: Language
 ): Promise<string> {
   try {
@@ -528,7 +528,8 @@ async function buildTurnInstructions(
   speech: string,
   callerPhone: string | undefined,
   contextPromise: Promise<TurnContext>,
-  voiceChannel: "whatsapp" | "phone" = "phone"
+  voiceChannel: "whatsapp" | "phone" = "phone",
+  direction?: "inbound" | "outbound"
 ): Promise<string> {
   // LEAD BRAIN: brief Priya with the full cross-channel picture — known
   // facts, rolling relationship summary, recent interactions, sentiment
@@ -554,6 +555,18 @@ async function buildTurnInstructions(
   // date/time is — can't correctly say "today"/"tomorrow", the right
   // weekday, or judge whether a promised callback slot has already passed.
   merged = [merged, currentDateTimeInstruction()].filter(Boolean).join("\n\n")
+
+  if (direction === "inbound") {
+    merged = [
+      merged,
+      "CALL DIRECTION RULE: THIS IS AN INCOMING / INBOUND CALL. The customer CALLED YOU (Right Agent Group). You ANSWERED their incoming call. NEVER say \"I called you\", \"నేను call చేశాను\", \"call chesaanu\", or \"maine call kiya\" — you did NOT call them, THEY called you. Say \"Right Agent Group ki call chesinanduku thanks\", \"Cheppandi sir, meeku ela help cheyagalanu?\", or \"How can I help you today?\"." ,
+    ].filter(Boolean).join("\n\n")
+  } else if (direction === "outbound") {
+    merged = [
+      merged,
+      "CALL DIRECTION RULE: THIS IS AN OUTBOUND CALL. You placed this call to follow up with the customer about their loan requirement.",
+    ].filter(Boolean).join("\n\n")
+  }
 
   // SPEED: brief/KB-search/finance-rows are three independent reads that
   // used to run as three separate sequential awaits — none of them needs
@@ -588,8 +601,25 @@ async function buildTurnInstructions(
   // This deterministic scan of the FULL retained transcript (getHistory keeps
   // the last 40 messages) re-surfaces every answered item, every turn, at
   // zero LLM cost. lib/call-facts.ts is unit-tested.
-  const inCallFactsBlock = formatInCallFactsBlock(extractCallFacts(history, speech))
+  const inCallFacts = extractCallFacts(history, speech)
+  const inCallFactsBlock = formatInCallFactsBlock(inCallFacts)
   if (inCallFactsBlock) merged = [merged, inCallFactsBlock].filter(Boolean).join("\n\n")
+
+  if (leadId && (inCallFacts.name || inCallFacts.area || inCallFacts.loanAmount)) {
+    const liveUpdates: Record<string, any> = {}
+    if (inCallFacts.name) liveUpdates.name = inCallFacts.name
+    if (inCallFacts.area) liveUpdates.address = inCallFacts.area
+    if (inCallFacts.loanAmount) {
+      const numMatch = inCallFacts.loanAmount.match(/\d+/)
+      if (numMatch) {
+        const amt = inCallFacts.loanAmount.includes("lakh") ? Number(numMatch[0]) * 100000 : Number(numMatch[0])
+        liveUpdates.loan_amount = amt
+      }
+    }
+    if (Object.keys(liveUpdates).length) {
+      db.from("leads").update(liveUpdates).eq("id", leadId).catch(() => {})
+    }
+  }
 
   // GROUNDING: give Priya the real caller number every turn. Without it, a
   // customer saying "same number / this number" left the model with nothing
@@ -605,29 +635,41 @@ async function buildTurnInstructions(
   if (callerPhone && voiceChannel === "whatsapp") {
     merged = [
       merged,
-      `THIS CALL IS HAPPENING ON THE CUSTOMER'S WHATSAPP. The customer is calling from ${callerPhone} — that number IS their WhatsApp number. NEVER ask "is this your WhatsApp number" or "same or different" — that question is WRONG on a WhatsApp call and insults the customer's intelligence. When it is time to send the loan form, simply say you are sending it to this same WhatsApp — the send happens automatically to this number. Never say or invent any other phone number.`,
+      `THIS CALL IS HAPPENING ON THE CUSTOMER'S WHATSAPP. The customer is calling from ${callerPhone} — that number IS their WhatsApp number.
+- NEVER ask "is this your WhatsApp number" or "same or different" or in Telugu "ఇదే WhatsApp number కదా sir?" — that question is WRONG on a WhatsApp call.
+- DO NOT push the loan application form link immediately in the early turns! First listen to the caller's requirement, find out what loan they need, and answer their questions. Only suggest sending the application link when they are actually ready to apply.
+- When it is time to send the loan form, simply say you are sending it to this same WhatsApp ("నేను మీ WhatsApp కి link పంపిస్తున్నాను") — the send happens automatically to this number. Never say or invent any other phone number.`,
     ].filter(Boolean).join("\n\n")
   } else if (callerPhone) {
     merged = [
       merged,
-      `The customer is calling from ${callerPhone}. If they say their WhatsApp is this same number, use it — never say or invent any phone number yourself.`,
+      `The customer is calling from ${callerPhone}. If they say their WhatsApp is this same number, use it — never say or invent any phone number yourself.
+- DO NOT push the loan application form link immediately in the early turns! First listen to the caller's requirement and answer their questions.`,
     ].filter(Boolean).join("\n\n")
   }
 
   // -------------------------------------------------------------------------
   // LIVE IN-CALL CONVERSATION SCANNER (Enforce cross-turn memory & prevent contradiction)
   // -------------------------------------------------------------------------
-  const allConversationText = [...history.map((h) => `${h.role}: ${h.content}`), `customer: ${speech}`].join("\n").toLowerCase()
-  const customerMentionedFormFilled = /\b(fill\s*(?:ches[a-z]*|chey|already|chesanu)|form|application|submitt|already\s*sent|pampinch|vacchindaa|received)\b/i.test(allConversationText)
+  const customerMessages = [...history.filter((h) => h.role === "user").map((h) => h.content), speech].join(" ").toLowerCase()
+  const customerExplicitlySaidFormFilled = /\b(already\s*(?:apply|applied|submitted|fill|filled|pampinch)|form\s*(?:fill\s*ches|submitt)|apply\s*ches[a-z]*)\b/i.test(customerMessages)
   const hasAppOnRecord = /LOAN APPLICATION ALREADY ON FILE/i.test(brief || "")
 
-  if (customerMentionedFormFilled || hasAppOnRecord) {
+  if (hasAppOnRecord || customerExplicitlySaidFormFilled) {
     merged = [
       merged,
       `=== LIVE STATE: LOAN APPLICATION ON FILE ===
 - The customer has ALREADY submitted their loan application. NEVER ask them to fill out another application or promise to send a new application link.
 - ANSWER ALL CALLER QUERIES DIRECTLY: Answer whatever the customer is asking (office visits, office timings 9 AM to 6 PM, insurance plans, rates, eligibility, documents, or products) directly using the Knowledge Base.
 - BANNED DEFLECTION: NEVER say "మా loan officer మీ profile review చేసి త్వరలోనే మీకు call చేస్తారు" or refuse to answer by deflecting to the loan officer. You are the knowledgeable advisor — answer their questions clearly now!`,
+    ].filter(Boolean).join("\n\n")
+  } else {
+    merged = [
+      merged,
+      `=== CRITICAL GROUNDING: NO LOAN APPLICATION ON FILE ===
+- This caller has ZERO submitted loan applications with us.
+- NEVER say or claim "మీ application already మా దగ్గర ఉంది sir" (we already have your application) or "already in our system"!
+- Listen attentively to their requirement, answer their questions with exact facts, and guide them politely.`,
     ].filter(Boolean).join("\n\n")
   }
 
@@ -653,7 +695,7 @@ async function buildTurnInstructions(
   // read as robotic and pushed real questions out of the 1-2 sentence budget.
   // Doubt-checking is asked AT MOST ONCE in the entire call, never repeated every turn.
   const alreadyAskedDoubts = history.some(
-    (h) => h.role === "model" && /doubts?|help కావాలా|ప్రశ్నలు|సందేహాలు/i.test(h.content || "")
+    (h) => h.role === "model" && /(?:doubts?|help కావాలా|ప్రశ్నలు|సందేహాలు|అడగాలా|వివరాలు కావాలా|queries|questions|anything else|ఇంకేమైనా)/i.test(h.content || "")
   )
   merged = [
     merged,
@@ -686,9 +728,12 @@ async function buildTurnInstructions(
   * If the customer asks for any unverified detail or direction not in the Knowledge Base, honestly state: "పూర్తి details మరియు exact location link మా loan officer మీకు WhatsApp లో పంపిస్తారు sir."
 
 - NATURAL TURN TAKING & CONCLUSION:
-  * When the customer asks a doubt or question, answer it clearly and briefly (1 to 2 short sentences).
-  * DOUBT QUESTION MANDATE: Ask whether they have more doubts AT MOST ONCE per call. ${alreadyAskedDoubts ? 'CRITICAL: You have ALREADY asked about doubts in this call. NEVER ask "దీని గురించి ఇంకా ఏమైనా doubts ఉన్నాయా sir?" or any doubt question again! Answer the question directly and stop.' : 'You may ask "దీని గురించి ఇంకా ఏమైనా doubts ఉన్నాయా sir?" at most once after an answer, but NEVER repeat it in later turns.'}
-  * CUT THE CALL WHEN FINISHED: When the customer says they are done, have no more doubts, says "sare", "chalu", "bye", or finishes the conversation, say a warm polite goodbye ("Thank you so much sir, have a great day, bye!") and conclude immediately!`,
+  * When the customer asks a doubt or question, answer it clearly and briefly (1 to 2 short sentences), then STOP.
+  * RESPECT CUSTOMER DEFERRAL (PARENTS DETAILS / DOCUMENTS):
+    When the customer says they will provide parents details or documents later ("tarvata chepta", "maare cheptha", "ippudu cheppanu", "later", "not now"), RESPECT IT IMMEDIATELY! NEVER ask again, NEVER repeat "చెప్పండి వింటున్నాను" or pressure them. Acknowledge warmly: "సరే sir, no problem, ఆ details తర్వాత అయినా ఇవ్వొచ్చు. నేను మీ WhatsApp కి application link పంపిస్తాను." and proceed.
+  * STRICT BAN ON TRAILING REPETITIVE QUESTIONS: NEVER append "ఇంకేమైనా doubts ఉన్నాయా sir?", "ఇంకేమైనా అడగాలా sir?", "ఇంకేమైనా వివరాలు కావాలా sir?", or any closing question at the end of every turn! Answer what was asked and STOP talking. Let the caller speak.
+  * ${alreadyAskedDoubts ? 'CRITICAL: You have ALREADY asked about doubts in this call. NEVER ask "దీని గురించి ఇంకా ఏమైనా doubts ఉన్నాయా sir?" or any doubt question again! Answer the question directly and stop.' : 'You may ask "దీని గురించి ఇంకా ఏమైనా doubts ఉన్నాయా sir?" at most ONCE in the entire call, but NEVER repeat it in later turns.'}
+  * NO UNILATERAL HANGUPS: NEVER say goodbye ("Thank you sir, have a great day, bye" or "bye") while the customer is still speaking, asking questions, or discussing banks/loans. ONLY say goodbye when the customer EXPLICITLY indicates they are done (e.g. "chalu andi", "em ledu", "thank you bye", "untanu"). Conclude politely ONLY when the customer has finished.`,
   ].filter(Boolean).join("\n\n")
 
   // KNOWLEDGE BASE: unlike the Lead Brain brief above, this runs on EVERY
@@ -837,8 +882,8 @@ async function completeLeadIfReady(opts: {
       return false
     }
 
-    const token = randomUUID()
-    await db.from("form_links").insert({ token, lead_id: leadId })
+    const { createOneTimeFormToken } = await import("./whatsapp")
+    const token = await createOneTimeFormToken(leadId)
 
     // FIX (2026-09-26): send to the EFFECTIVE number (extraction → lead row →
     // caller on WhatsApp calls), not raw extraction — the fallback above can
@@ -870,8 +915,8 @@ async function completeLeadIfReady(opts: {
         lead_id: leadId,
         type: "whatsapp",
         summary: result.ok
-          ? `Application form link sent on WhatsApp to ${waNumber}: ${appUrl}/form/${token}`
-          : `Application form link generated but WhatsApp send FAILED (${result.error}) — share manually: ${appUrl}/form/${token}`,
+          ? `Bank application link sent on WhatsApp to ${waNumber}: ${appUrl}/l/${token}`
+          : `Bank application link generated but WhatsApp send FAILED (${result.error}) — share manually: ${appUrl}/l/${token}`,
         outcome: result.ok ? "sent" : "failed",
       }).catch((e) => console.error("comm_log form-link entry error:", e instanceof Error ? e.message : e))
       // Priya just told the customer "the link is on its way" — if the send
@@ -881,7 +926,7 @@ async function completeLeadIfReady(opts: {
         createNotification({
           type: "whatsapp_message",
           title: "Form link send FAILED — share manually",
-          body: `${extracted.name || waNumber}: WhatsApp send failed (${result.error}). Link: ${appUrl}/form/${token}`,
+          body: `${extracted.name || waNumber}: WhatsApp send failed (${result.error}). Link: ${appUrl}/l/${token}`,
           linkView: "leads",
         })
       }
@@ -1027,7 +1072,7 @@ export async function handleTurn(opts: {
     flagHumanRequested(callSid, leadId || null, speech)
   }
 
-  const mergedInstructions = await buildTurnInstructions(leadId, history, instructions, speech, callerPhone, contextPromise, isWhatsAppCall ? "whatsapp" : "phone")
+  const mergedInstructions = await buildTurnInstructions(leadId, history, instructions, speech, callerPhone, contextPromise, isWhatsAppCall ? "whatsapp" : "phone", direction)
 
   let reply = ""
   let rateLimited = false
@@ -1067,14 +1112,14 @@ export async function handleTurn(opts: {
   updateTranscriptAsync(callSid, speech, reply)
   maybeProposeLoanEdit(leadId, "priya_voice", speech)
 
-  const completed = await completeLeadIfReady({ leadId, callSid, callerPhone, isWhatsAppCall, messages, reply, branchId })
-  if (completed) return { text: getVoiceClosingsSnapshot().qualified[language], hangup: true }
+  await completeLeadIfReady({ leadId, callSid, callerPhone, isWhatsAppCall, messages, reply, branchId })
 
   // Same guard as the early bye-check above: without history.length > 0 a
   // pickup utterance like "sare andi" / "ok andi" matched here AFTER Priya's
   // first reply and hung the call up immediately.
   const isCustomerEnding = history.length > 0 && !hasContinuation && (UNAMBIGUOUS_GOODBYE_RE.test(speech) || (AMBIGUOUS_CLOSING_RE.test((speech || "").trim()) && isAfterDoubtInquiry(history)))
-  const isPriyaEnding = !hasContinuation && GOODBYE_RE.test(reply)
+  const isCustomerActive = /\b(bank|loan|rate|interest|emi|lakh|address|office|document|sbi|hdfc|icici|kavali|cheppandi|enduku|ela|details|doubt|process)\b/i.test(speech)
+  const isPriyaEnding = !hasContinuation && !isCustomerActive && GOODBYE_RE.test(reply) && (history.length >= 3 && (UNAMBIGUOUS_GOODBYE_RE.test(speech) || AMBIGUOUS_CLOSING_RE.test((speech || "").trim()) || isAfterDoubtInquiry(history)))
   const hangup = isCustomerEnding || isPriyaEnding
   if (hangup && callSid) {
     db.from("voice_calls").update({ status: "completed" }).eq("twilio_call_sid", callSid).catch(() => {})
@@ -1211,7 +1256,7 @@ export async function handleTurnStream(
     flagHumanRequested(callSid, leadId || null, speech)
   }
 
-  const mergedInstructions = await buildTurnInstructions(leadId, history, instructions, speech, callerPhone, contextPromise, isWhatsAppCall ? "whatsapp" : "phone")
+  const mergedInstructions = await buildTurnInstructions(leadId, history, instructions, speech, callerPhone, contextPromise, isWhatsAppCall ? "whatsapp" : "phone", direction)
 
   let reply = ""
   let pending = ""
@@ -1264,16 +1309,13 @@ export async function handleTurnStream(
   await updateTranscriptAsync(callSid, speech, reply)
   maybeProposeLoanEdit(leadId, "priya_voice", speech)
 
-  const completed = await completeLeadIfReady({ leadId, callSid, callerPhone, isWhatsAppCall, messages, reply, branchId })
-  if (completed) {
-    onSentence(getVoiceClosingsSnapshot().qualified[language])
-    return { hangup: true }
-  }
+  await completeLeadIfReady({ leadId, callSid, callerPhone, isWhatsAppCall, messages, reply, branchId })
 
   // Same guard as the early bye-check: no history → never hang up on the
   // strength of a single pickup utterance ("sare andi" right after pickup).
   const isCustomerEnding = history.length > 0 && !hasContinuation && (UNAMBIGUOUS_GOODBYE_RE.test(speech) || (AMBIGUOUS_CLOSING_RE.test((speech || "").trim()) && isAfterDoubtInquiry(history)))
-  const isPriyaEnding = !hasContinuation && GOODBYE_RE.test(reply)
+  const isCustomerActive = /\b(bank|loan|rate|interest|emi|lakh|address|office|document|sbi|hdfc|icici|kavali|cheppandi|enduku|ela|details|doubt|process)\b/i.test(speech)
+  const isPriyaEnding = !hasContinuation && !isCustomerActive && GOODBYE_RE.test(reply) && (history.length >= 3 && (UNAMBIGUOUS_GOODBYE_RE.test(speech) || AMBIGUOUS_CLOSING_RE.test((speech || "").trim()) || isAfterDoubtInquiry(history)))
   const hangup = isCustomerEnding || isPriyaEnding
   if (hangup && callSid) {
     db.from("voice_calls").update({ status: "completed" }).eq("twilio_call_sid", callSid).catch(() => {})

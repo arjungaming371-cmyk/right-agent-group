@@ -90,6 +90,7 @@ export function resolveSpokenLanguage(
 export type InCallFacts = {
   name?: string
   area?: string
+  college?: string
   loanAmount?: string
   loanType?: string
   whatsappSame?: boolean
@@ -99,9 +100,14 @@ type Turn = { role: "user" | "model"; content: string }
 
 // Priya's collection questions — a SHORT customer turn right after one of
 // these is the ANSWER, even though it contains no self-intro phrase.
-const NAME_QUESTION_RE = /(your (full |good )?name|may i know your name|mee peru|mi peru|me peru|aapka naam|aapka shubh naam)/i
-const AREA_QUESTION_RE = /(which area|your area|which city|your city|where (do|are) you (live|living|from)|ekkada|e ooru|mi ooru|meeru ekkada|kondeyaru|where are you located)/i
-const WHATSAPP_QUESTION_RE = /whatsapp/i
+const NAME_QUESTION_RE = /(your (full |good )?name|may i know your name|mee peru|mi peru|me peru|aapka naam|aapka shubh naam|మీ పేరు|పేరు చెప్తారా|పేరేంటి|పేరు ఏమిటి)/i
+const AREA_QUESTION_RE = /(which area|your area|which city|your city|where (do|are) you (live|living|from)|ekkada|e ooru|mi ooru|meeru ekkada|kondeyaru|where are you located|ఏ area|ఏ ప్రాంతం|ఎక్కడి నుంచి|ఎక్కడ ఉంటారు|ఏ ఊరు|ఏ నగరం|ఏ ప్లేస్)/i
+const WHATSAPP_QUESTION_RE = /whatsapp|వాట్సాప్|వాట్సప్/i
+const COLLEGE_QUESTION_RE = /(college|school|university|studying|study|చదువుతున్న|కాలేజ్)/i
+
+// Direct city and college recognition regexes (instant capture even without a question)
+const TELUGU_CITIES_RE = /\b(hyderabad|secunderabad|warangal|vizag|visakhapatnam|vijayawada|guntur|tirupati|khammam|karimnagar|nizamabad|kurnool|nellore|bengaluru|bangalore|chennai|delhi|mumbai|pune|medchal|gandimaisamma|kukatpally|ameerpet|dilsukhnagar|madhapur|hitec city|kondapur|gachibowli|uppal|lb nagar|హైదరాబాద్|సికింద్రాబాద్|వరంగల్|విజయవాడ|గుంటూరు|వైజాగ్)\b/i
+const COLLEGE_RE = /\b([a-z0-9 .`'-]{2,25}\s+college|[a-z0-9 .`'-]{2,25}\s+university|mallareddy|malla reddy|cbit|vnr|jntu|osmania|gitam|snist|మల్లారెడ్డి|మల్లారెడ్డి కాలేజ్)\b/i
 
 // Self-intro name patterns (customer volunteering it unprompted).
 const SELF_NAME_RE =
@@ -169,12 +175,25 @@ export function extractCallFacts(history: Turn[], speech: string): InCallFacts {
       }
     }
 
-    // AREA — self-intro phrases.
+    // AREA — self-intro phrases OR direct city mention.
     if (!facts.area) {
       const m = t.match(SELF_AREA_RE)
       if (m && !sentenceHasQ) {
         const candidate = cleanCapture(m[1], AREA_ANSWER_FILLER_RE, 3)
         if (candidate && !NOT_A_NAME_RE.test(candidate) && candidate.length >= 2) facts.area = candidate
+      } else {
+        const cityMatch = t.match(TELUGU_CITIES_RE)
+        if (cityMatch && !sentenceHasQ) {
+          facts.area = cityMatch[1].charAt(0).toUpperCase() + cityMatch[1].slice(1).toLowerCase()
+        }
+      }
+    }
+
+    // COLLEGE / EDUCATION
+    if (!facts.college) {
+      const cm = t.match(COLLEGE_RE)
+      if (cm && !sentenceHasQ) {
+        facts.college = cm[0].charAt(0).toUpperCase() + cm[0].slice(1).trim()
       }
     }
 
@@ -216,7 +235,7 @@ export function extractCallFacts(history: Turn[], speech: string): InCallFacts {
   // phone call, and invisible to phrase-based regexes.
   const isShortAnswer = (s: string) => {
     const words = s.trim().split(/\s+/)
-    return words.length >= 1 && words.length <= 5
+    return words.length >= 1 && words.length <= 6
   }
   for (let i = 0; i < turns.length - 1; i++) {
     const q = turns[i]
@@ -237,6 +256,12 @@ export function extractCallFacts(history: Turn[], speech: string): InCallFacts {
         facts.area = candidate
       }
     }
+    if (!facts.college && COLLEGE_QUESTION_RE.test(q.content || "")) {
+      const candidate = cleanCapture(answer, AREA_ANSWER_FILLER_RE, 4)
+      if (candidate && candidate.length >= 2 && !NOT_A_NAME_RE.test(candidate)) {
+        facts.college = candidate
+      }
+    }
     if (!facts.whatsappSame && WHATSAPP_QUESTION_RE.test(q.content || "") && YES_SAME_RE.test(answer)) {
       facts.whatsappSame = true
     }
@@ -252,8 +277,9 @@ export function extractCallFacts(history: Turn[], speech: string): InCallFacts {
  */
 export function formatInCallFactsBlock(facts: InCallFacts): string {
   const lines: string[] = []
-  if (facts.name) lines.push(`- name: ${facts.name}`)
-  if (facts.area) lines.push(`- city/area: ${facts.area}`)
+  if (facts.name) lines.push(`- name: ${facts.name} (DO NOT ask for their name again)`)
+  if (facts.area) lines.push(`- city/area: ${facts.area} (Customer already stated their city is ${facts.area} — NEVER ask for area, city, or where they live again!)`)
+  if (facts.college) lines.push(`- college/study: ${facts.college} (Customer already stated their college — NEVER ask for college name again!)`)
   if (facts.loanAmount || facts.loanType) {
     lines.push(`- loan: ${[facts.loanAmount, facts.loanType].filter(Boolean).join(", ")}`)
   }

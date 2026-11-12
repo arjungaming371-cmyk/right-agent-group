@@ -53,6 +53,21 @@ function looksLikeQuestion(q: string): boolean {
   return true
 }
 
+
+const INDIC_FAST_MAP: Array<{ regex: RegExp; keywords: string }> = [
+  { regex: /(?:enduku|endhuku|kyun|kyu|reason|endhukandi)/i, keywords: "documents required process" },
+  { regex: /(?:ekkada|ekkadiki|kahan|kidhar|address|location|place|branch|office|gandimaisamma|complex)/i, keywords: "office address contact location details" },
+  { regex: /(?:timings?|samayam|hours?|epudu|kab|morning|evening)/i, keywords: "office timings morning evening 9 AM 6 PM" },
+  { regex: /(?:documents?|papers?|aadhaar|aadhar|pan|salary|bank statement|slips?|patralu|kagithalu)/i, keywords: "documents required loan application" },
+  { regex: /(?:vaddi|byaj|interest|rate|percentage|sbi|himsab|emi)/i, keywords: "home loan interest rates banking partners" },
+  { regex: /(?:ela|kaise|how|apply|process|vidhanam|steps?)/i, keywords: "how loan application process works" },
+  { regex: /(?:insurance|bima|health|term|life|suraksha|cover)/i, keywords: "insurance plans partners" },
+  { regex: /(?:fraud|otp|pin|cvv|scam|donga|paisa|payment|money)/i, keywords: "fraud safety never ask otp payments" },
+  { regex: /(?:dnd|vaddu|call cheyoddu|matladoddu|stop calling|don't call|nahi chahiye)/i, keywords: "do not call contact preferences" },
+  { regex: /(?:eligibility|arhatha|eligible|maximum|minimum|limit)/i, keywords: "loan eligibility basics" },
+  { regex: /(?:real estate|flat|apartment|plot|illu|makan|property|buy|sell)/i, keywords: "real estate services" },
+]
+
 type KbHit = { title: string; content: string; rank: number }
 
 async function ftsSearch(q: string): Promise<KbHit[]> {
@@ -87,9 +102,18 @@ export async function searchKnowledgeBase(userQuery: string): Promise<string> {
 
   try {
     const isIndicScript = /[ऀ-ॿఀ-౿]/.test(q)
-    const cleanLatin = (q.match(/[A-Za-z]{3,}/g) || []).filter((w) => !SKIP_PATTERNS.test(w)).join(" ")
+    let cleanLatin = (q.match(/[A-Za-z]{3,}/g) || []).filter((w) => !SKIP_PATTERNS.test(w)).join(" ")
+
+    // Enrich with fast Indic/conversational keywords before running FTS
+    for (const entry of INDIC_FAST_MAP) {
+      if (entry.regex.test(q)) {
+        cleanLatin = (cleanLatin + " " + entry.keywords).trim()
+        break
+      }
+    }
+
     if (!isIndicScript || cleanLatin.length >= 3) {
-      const searchTarget = isIndicScript ? cleanLatin : q
+      const searchTarget = isIndicScript ? cleanLatin : (cleanLatin || q)
       const firstPass = await ftsSearch(searchTarget)
       if (firstPass.length > 0 && firstPass[0].rank >= MIN_RANK) {
         return formatHits(firstPass)

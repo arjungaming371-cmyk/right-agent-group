@@ -37,9 +37,7 @@
  * - Small integers (0-31: days of month, short lists, times) and years
  *   (1900-2100) are tolerated ONLY when not prefixed by a currency marker
  *   (₹ $ Rs INR) — a currency-attached figure must always be traced.
- * - Replies containing an action:proposal block skip the numeric gate: that
- *   content is a CREATIVE DRAFT (script / KB article) whose numbers are
- *   examples, and it is gated by the admin Approve & Execute review.
+ * - Every reply is strictly checked against the verified corpus.
  */
 
 export const VERIFIED_BADGE = "✅ Figures verified against live dashboard data."

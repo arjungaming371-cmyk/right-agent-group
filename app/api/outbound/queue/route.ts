@@ -58,6 +58,8 @@ export async function POST(req: NextRequest) {
   const priority = body?.priority === true ? 100 : 0
   const skipRecentHours = Math.min(Math.max(Number(body?.skipRecentCalledHours ?? 24) || 0, 0), 168)
   const forceLanguage = ["telugu", "hindi", "english"].includes(String(body?.language)) ? String(body.language) : null
+  const talkingPoints = typeof body?.talking_points === "string" ? body.talking_points.slice(0, 1000).trim() : null
+  const agendaLabel = typeof body?.agenda_label === "string" ? body.agenda_label.slice(0, 100).trim() : null
   let scheduledAt: Date | null = null
   if (body?.scheduledAt) {
     const d = new Date(String(body.scheduledAt))
@@ -144,8 +146,8 @@ export async function POST(req: NextRequest) {
     try {
       await query(
         `INSERT INTO outbound_queue
-           (lead_id, name, phone, language, product_interest, status, branch_id, channel, priority, scheduled_at)
-         VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7, $8, $9)`,
+           (lead_id, name, phone, language, product_interest, status, branch_id, channel, priority, scheduled_at, talking_points, agenda_label)
+         VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7, $8, $9, $10, $11)`,
         [
           lead.id,
           lead.name,
@@ -156,9 +158,19 @@ export async function POST(req: NextRequest) {
           channel,
           priority,
           scheduledAt || new Date().toISOString(),
+          talkingPoints || null,
+          agendaLabel || null,
         ]
       )
       queuedCount++
+
+      if (agendaLabel) {
+        await query(
+          `INSERT INTO lead_interactions (lead_id, channel, direction, one_line_summary)
+           VALUES ($1, 'system', 'out', $2)`,
+          [lead.id, `Added to call queue · agenda: ${agendaLabel}`]
+        ).catch(() => {})
+      }
     } catch (e: unknown) {
       if ((e as { code?: string })?.code === "23505") {
         skippedDuplicate++ // lost the anti-stacking race — exactly correct

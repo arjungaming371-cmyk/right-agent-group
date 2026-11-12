@@ -21,10 +21,8 @@ export const ALL_MODULES: ModuleOption[] = [
   { key: "voice", label: "Voice Logs", section: "Engagement", description: "Voice call recordings, transcripts, & durations" },
   { key: "whatsapp", label: "WhatsApp Chat", section: "Engagement", description: "Live customer chat & automated messages" },
   { key: "instagram", label: "Instagram Chat", section: "Engagement", description: "Direct messages & post comment auto-replies" },
-  { key: "comms", label: "Communication Log", section: "Engagement", description: "Combined automated activity log" },
 
   // System
-  { key: "upload", label: "Upload & Data", section: "System", description: "Bulk CSV contact uploads & file data" },
   { key: "script", label: "Priya's Script", section: "System", description: "AI system prompts & call scripts" },
   { key: "knowledge", label: "Knowledge Base", section: "System", description: "Contextual facts repository" },
   // Security + Calendar were missing from this catalog while the roles-config

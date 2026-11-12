@@ -20,6 +20,7 @@ import { refreshLeadScore } from "@/lib/scoring"
 import { runPostCallAnalysis } from "@/lib/lead-brain"
 import { runCalendarExtractionForCall } from "@/lib/calendar-agent"
 import { isAiPaused } from "@/lib/ai-pause"
+import { stampQueueCallOutcome } from "@/lib/queue-outcome"
 
 export type WhatsAppCallOutcome = "resolved" | "missed" | "rejected" | "failed"
 
@@ -367,5 +368,60 @@ export async function finalizeWhatsAppCall(opts: {
       summary: trailText,
       outcome: outcome === "failed" ? "failed" : "missed",
     }).catch(() => {})
+  }
+
+  // ---- 8. Queue outcome feedback + Call Queue / Calendar synchronization ----
+  try {
+    await stampQueueCallOutcome({ callSid, outcome, detail: (call?.status as string) || outcome })
+  } catch (qErr) {
+    console.error("wa finalize: queue-outcome stamp failed:", qErr)
+  }
+
+  // If this call connected or was answered, resolve any pending/dialing queue items for this lead
+  if (answered && (leadId || last10)) {
+    try {
+      await query(
+        `UPDATE outbound_queue
+         SET status = 'called',
+             called_at = COALESCE(called_at, now()),
+             call_sid = COALESCE(call_sid, $1),
+             outcome = $2,
+             outcome_at = now(),
+             outcome_detail = 'Call answered and completed'
+         WHERE (lead_id = $3 OR right(regexp_replace(phone, '\\D', '', 'g'), 10) = $4)
+           AND status IN ('pending', 'dialing')`,
+        [callSid, outcome, leadId, last10]
+      )
+    } catch (qSyncErr) {
+      console.error("wa finalize: queue sync error:", qSyncErr)
+    }
+
+    // Mark any past/due callback calendar events for this lead as completed
+    try {
+      await query(
+        `UPDATE calendar_events
+         SET status = 'completed',
+             updated_at = now()
+         WHERE (lead_id = $1 OR lead_id IN (
+           SELECT id FROM leads WHERE right(regexp_replace(phone, '\\D', '', 'g'), 10) = $2
+         ))
+         AND event_type = 'callback'
+         AND event_at <= now() + interval '2 hours'
+         AND status IN ('confirmed', 'needs_review')`,
+        [leadId, last10]
+      )
+    } catch (cSyncErr) {
+      console.error("wa finalize: calendar event completion error:", cSyncErr)
+    }
+  }
+
+  // ---- 9. Autonomous Calendar Extraction for this WhatsApp Call ----
+  if (answered && transcript.length >= 2) {
+    try {
+      runCalendarExtractionForCall(callSid)
+      await query(`UPDATE voice_calls SET calendar_scanned_at = now() WHERE twilio_call_sid = $1`, [callSid]).catch(() => {})
+    } catch (calErr) {
+      console.error("wa finalize: calendar extraction trigger error:", calErr)
+    }
   }
 }

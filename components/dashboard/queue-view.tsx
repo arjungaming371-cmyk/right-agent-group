@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useMemo } from "react"
 import {
   PhoneCall, Phone, MessageCircle, Zap, XCircle, RotateCcw, Download, Play,
-  Pause, ListChecks, Clock, ShieldAlert, RefreshCw,
+  Pause, ListChecks, Clock, ShieldAlert, RefreshCw, Plus,
 } from "lucide-react"
 import { formatDateTime } from "@/lib/utils"
 import { usePolling } from "@/lib/use-poll"
@@ -36,6 +36,7 @@ type QueueItem = {
   // 2026-10-01_queue_talking_points); shown under the phone so the operator
   // can verify what Priya will pitch before starting the campaign.
   talking_points?: string | null
+  agenda_label?: string | null
   created_at: string
 }
 
@@ -139,12 +140,49 @@ export default function QueueView({ role }: { role: Role }) {
   // arrives priority DESC, created_at DESC); "Show history" reveals every
   // entry for the full audit trail. Nothing is deleted from the database.
   const [showAll, setShowAll] = useState(false)
-  // "What should Priya talk about?" — the campaign agenda. Sent on Start
-  // Campaign: the server stamps it across every pending row BEFORE the
-  // runner claims them, so a new offer can be pushed to an existing queue
-  // without re-uploading the CSV. Left blank → rows keep the agenda they
-  // were queued with.
-  const [talkPoints, setTalkPoints] = useState("")
+
+  // Single manual contact add form
+  const [queueForm, setQueueForm] = useState({ name: "", phone: "", language: "telugu", product_interest: "Home Loan", notes: "" })
+  const [queueTalkPoints, setQueueTalkPoints] = useState("")
+  const [addingSingle, setAddingSingle] = useState(false)
+
+  async function addToQueue() {
+    if (!queueForm.name || !queueForm.phone) return
+    setAddingSingle(true)
+    try {
+      const res = await fetch("/api/outbound", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contacts: [{
+            name: queueForm.name,
+            phone: queueForm.phone,
+            language: queueForm.language,
+            product_interest: queueForm.product_interest,
+            notes: queueForm.notes,
+          }],
+          talking_points: queueTalkPoints.trim() || undefined,
+        }),
+      })
+      const d = await res.json()
+      if (res.ok) {
+        if (d.queued > 0) {
+          toast.success(`Added to outbound queue${d.skipped ? " — was already queued, no duplicate created" : ""}`)
+          setQueueForm({ name: "", phone: "", language: "telugu", product_interest: "Home Loan", notes: "" })
+          setQueueTalkPoints("")
+        } else {
+          toast.error("Already in the queue — each number can wait in the queue only once")
+        }
+        await load(true)
+      } else {
+        toast.error(d.error || "Could not add to queue")
+      }
+    } catch {
+      toast.error("Could not add to queue")
+    } finally {
+      setAddingSingle(false)
+    }
+  }
 
   const shown = items.filter((i) => statusGroup(i.status) === tab)
   const g = (k: QueueStatusGroup) => counts[k] || 0
@@ -272,7 +310,7 @@ export default function QueueView({ role }: { role: Role }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
           action === "start"
-            ? { action, concurrency: settings?.concurrency, talking_points: talkPoints.trim() || undefined }
+            ? { action, concurrency: settings?.concurrency }
             : { action }
         ),
       })
@@ -285,7 +323,7 @@ export default function QueueView({ role }: { role: Role }) {
         toast.info(d.reason || "Paused — outside the calling window. Rows stay pending and resume automatically.")
         return
       }
-      if (action === "start") toast.success(`Campaign started — ${d.concurrency} call${d.concurrency === 1 ? "" : "s"} at a time${d.talkingPointsStamped ? ` · agenda applied to ${d.talkingPointsStamped} call${d.talkingPointsStamped === 1 ? "" : "s"}` : ""}`)
+      if (action === "start") toast.success(`Campaign started — ${d.concurrency} call${d.concurrency === 1 ? "" : "s"} at a time`)
       else toast.info("Stop requested — the current wave finishes, the rest stay pending")
       await load(true)
     } catch {
@@ -428,13 +466,21 @@ export default function QueueView({ role }: { role: Role }) {
       const res = await fetch("/api/calls/dial", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // Dial now keeps the row's agenda — a manual one-off dial of a queued
-        // contact must pitch the same thing the campaign would have.
-        body: JSON.stringify({ leadId: item.lead_id, channel: item.channel === "whatsapp_voice" ? "whatsapp" : item.channel === "auto" ? "auto" : "phone", instructions: item.talking_points || undefined }),
+        // Dial now passes queueId so the queue row is immediately linked and updated
+        body: JSON.stringify({
+          leadId: item.lead_id,
+          queueId: item.id,
+          channel: item.channel === "whatsapp_voice" ? "whatsapp" : item.channel === "auto" ? "auto" : "phone",
+          instructions: item.talking_points || undefined
+        }),
       })
       const d = await res.json()
-      if (res.ok) toast.success(`Dialing ${item.name || item.phone} on ${d.channel === "whatsapp" ? "WhatsApp" : "phone"} now`)
-      else toast.error(d.error || "Dial failed")
+      if (res.ok) {
+        toast.success(`Dialing ${item.name || item.phone} on ${d.channel === "whatsapp" ? "WhatsApp" : "phone"} now`)
+        setItems((prev) => prev.map((x) => x.id === item.id ? { ...x, status: "dialing", call_sid: d.callSid } : x))
+      } else {
+        toast.error(d.error || "Dial failed")
+      }
     } catch {
       toast.error("Dial failed — check your connection and try again")
     }
@@ -523,25 +569,7 @@ export default function QueueView({ role }: { role: Role }) {
               ))}
             </div>
           )}
-          {/* "What should Priya talk about?" — the campaign agenda box */}
-          {canRunCampaign && !running && (
-            <div style={{ marginBottom: 12 }}>
-              <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-secondary)", display: "block", marginBottom: 4 }}>
-                What should Priya talk about? <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>(optional)</span>
-              </label>
-              <textarea
-                value={talkPoints}
-                onChange={(e) => setTalkPoints(e.target.value.slice(0, 1000))}
-                rows={2}
-                maxLength={1000}
-                placeholder="e.g. Introduce our new 8.5% home-loan balance-transfer offer, ask if their current EMI feels heavy, offer a free eligibility check — don't pitch personal loans"
-                style={{ width: "100%", fontSize: 13, lineHeight: 1.5, padding: "8px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", resize: "vertical" }}
-              />
-              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3 }}>
-                Priya opens with this agenda on every call in this run. Leave blank to keep the talking points set when the numbers were queued ({talkPoints.length}/1000).
-              </div>
-            </div>
-          )}
+
           <div style={{ marginTop: 14, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
             {canRunCampaign && (
               running ? (
@@ -740,7 +768,31 @@ export default function QueueView({ role }: { role: Role }) {
                         )}
                       </div>
                       <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{item.phone}</div>
-                      {item.talking_points && (
+                      {item.agenda_label && (
+                        <div style={{ marginTop: 4 }}>
+                          <span
+                            title={item.talking_points || item.agenda_label}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              fontSize: 10.5,
+                              fontWeight: 600,
+                              padding: "2px 7px",
+                              borderRadius: 4,
+                              background: "rgba(59, 130, 246, 0.12)",
+                              color: "#3b82f6",
+                              border: "1px solid rgba(59, 130, 246, 0.25)",
+                              maxWidth: 240,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {item.agenda_label}
+                          </span>
+                        </div>
+                      )}
+                      {item.talking_points && !item.agenda_label && (
                         <div title={item.talking_points} style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3, maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           Talk: {item.talking_points}
                         </div>
@@ -819,6 +871,72 @@ export default function QueueView({ role }: { role: Role }) {
           </table>
         </div>
       </div>
+
+      {/* Manual single entry to queue */}
+      {canOperate && (
+        <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: 22 }}>
+          <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 14, display: "flex", alignItems: "center", gap: 8 }}>
+            <Plus size={16} strokeWidth={2.1} style={{ color: "var(--accent-violet)" }} /> Add Single Number to Queue
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12, marginBottom: 12 }}>
+            <div>
+              <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Full Name *</label>
+              <input
+                value={queueForm.name}
+                onChange={(e) => setQueueForm({ ...queueForm, name: e.target.value })}
+                placeholder="Ramesh Kumar"
+                style={{ width: "100%", height: 36, fontSize: 13, padding: "0 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)" }}
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Phone Number *</label>
+              <input
+                value={queueForm.phone}
+                onChange={(e) => setQueueForm({ ...queueForm, phone: e.target.value })}
+                placeholder="+91 98765 43210"
+                style={{ width: "100%", height: 36, fontSize: 13, padding: "0 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)" }}
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Language</label>
+              <select
+                value={queueForm.language}
+                onChange={(e) => setQueueForm({ ...queueForm, language: e.target.value })}
+                style={{ width: "100%", height: 36, fontSize: 13, padding: "0 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)" }}
+              >
+                <option value="telugu">Tenglish</option>
+                <option value="hindi">Hinglish</option>
+                <option value="english">English</option>
+              </select>
+            </div>
+          </div>
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-secondary)", display: "block", marginBottom: 4 }}>
+              What should Priya talk about? <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>(optional)</span>
+            </label>
+            <textarea
+              value={queueTalkPoints}
+              onChange={(e) => setQueueTalkPoints(e.target.value.slice(0, 1000))}
+              rows={2}
+              maxLength={1000}
+              placeholder="e.g. Remind them about pending loan documents, offer senior loan advisor callback"
+              style={{ width: "100%", fontSize: 13, lineHeight: 1.5, padding: "8px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", resize: "vertical" }}
+            />
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3 }}>
+              Priya steers this call toward this agenda when dialed ({queueTalkPoints.length}/1000).
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={addToQueue}
+            disabled={!queueForm.name || !queueForm.phone || addingSingle}
+            className="btn-primary"
+            style={{ height: 36, padding: "0 20px" }}
+          >
+            {addingSingle ? "Adding…" : "Add to Queue"}
+          </button>
+        </div>
+      )}
     </div>
   )
 }

@@ -18,11 +18,29 @@
 
 export type Language = "english" | "hindi" | "telugu"
 
+import fs from "fs"
+import path from "path"
 import { DEFAULT_SCRIPTS as SHARED_DEFAULT_SCRIPTS } from "./default-scripts"
 // Only the WHATSAPP Roman-guard fallback uses this now — native-script call
 // replies must NEVER pass through it (see CALL_LANGUAGE_STYLES above).
 import { toTanglish } from "./transliterate"
 import { recordProviderHealth } from "./provider-health"
+
+function getLiveEnvKey(name: string): string {
+  try {
+    const envPath = path.resolve(process.cwd(), ".env")
+    if (fs.existsSync(envPath)) {
+      const content = fs.readFileSync(envPath, "utf8")
+      const match = content.match(new RegExp(`^${name}=(.*)$`, "m"))
+      if (match) return match[1].split("#")[0].trim()
+    }
+  } catch {}
+  return String(process.env[name] || "").split("#")[0].trim()
+}
+
+export function getLiveSarvamKey(): string {
+  return getLiveEnvKey("SARVAM_API_KEY") || (process.env.SARVAM_API_KEY || "").trim()
+}
 
 const LLM_PROVIDER = (process.env.LLM_PROVIDER || "sarvam").toLowerCase()
 
@@ -67,7 +85,7 @@ if (ACTIVE_LLM_PROVIDER === "sarvam") {
  * Groq — a fast external API with real concurrency headroom.
  */
 export function canAffordExtraCompletion(): boolean {
-  return true
+  return ACTIVE_LLM_PROVIDER === "groq"
 }
 
 // Default fallback scripts (used when DB is unavailable)
@@ -465,10 +483,9 @@ function groqBody(messages: ChatMessage[], opts: CompletionOpts, stream: boolean
 // parsers work for both providers; only the URL, auth headers, and body
 // tweaks differ (see groqBody above).
 const GROQ_HEADERS = { "Content-Type": "application/json", Authorization: `Bearer ${GROQ_API_KEY}` }
-const SARVAM_HEADERS = {
-  "Content-Type": "application/json",
-  "api-subscription-key": SARVAM_API_KEY,
-  Authorization: `Bearer ${SARVAM_API_KEY}`,
+function sarvamHeaders() {
+  const k = getLiveSarvamKey();
+  return { "Content-Type": "application/json", "api-subscription-key": k, Authorization: `Bearer ${k}` };
 }
 
 function llmEndpoint(): string {
@@ -476,8 +493,8 @@ function llmEndpoint(): string {
 }
 
 function llmHeaders(): Record<string, string> {
-  const groqKey = process.env.GROQ_API_KEY || GROQ_API_KEY
-  const sarvamKey = process.env.SARVAM_API_KEY || SARVAM_API_KEY
+  const groqKey = getLiveEnvKey("GROQ_API_KEY") || process.env.GROQ_API_KEY || GROQ_API_KEY
+  const sarvamKey = getLiveSarvamKey()
   if (ACTIVE_LLM_PROVIDER === "sarvam") {
     return {
       "Content-Type": "application/json",
@@ -492,8 +509,8 @@ function llmHeaders(): Record<string, string> {
 }
 
 function assertLlmConfigured(): void {
-  const groqKey = process.env.GROQ_API_KEY || GROQ_API_KEY
-  const sarvamKey = process.env.SARVAM_API_KEY || SARVAM_API_KEY
+  const groqKey = getLiveEnvKey("GROQ_API_KEY") || process.env.GROQ_API_KEY || GROQ_API_KEY
+  const sarvamKey = getLiveSarvamKey()
   if (ACTIVE_LLM_PROVIDER === "sarvam") {
     if (!sarvamKey && !groqKey) throw new Error("LLM provider sarvam but neither SARVAM_API_KEY nor GROQ_API_KEY is set — the AI brain cannot run without it")
     return
@@ -1324,7 +1341,7 @@ export async function checkLLMHealth(): Promise<{ ok: boolean; message: string }
           try {
             const res = await fetch(`${SARVAM_LLM_URL}/chat/completions`, {
               method: "POST",
-              headers: SARVAM_HEADERS,
+              headers: sarvamHeaders(),
               signal: AbortSignal.timeout(15000),
               body: JSON.stringify({
                 model,

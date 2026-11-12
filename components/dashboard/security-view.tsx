@@ -1,10 +1,11 @@
 "use client"
 import { useEffect, useState } from "react"
-import { ShieldCheck, AlertTriangle, RotateCcw, FileLock2, PhoneOff, Clock, X, Plus } from "lucide-react"
+import { ShieldCheck, AlertTriangle, RotateCcw, FileLock2, PhoneOff, Clock, X, Plus, HeartPulse } from "lucide-react"
 import { SkeletonList } from "../ui/skeleton"
 import { useToast } from "../ui/toast"
 import { formatDateTime } from "@/lib/utils"
 import AiPauseCard from "./ai-pause-card"
+import SystemHealthView from "./system-health-view"
 
 type Setting = { key: string; enabled: boolean }
 type AuditLog = { id: string; action: string; performed_by: string; created_at: string }
@@ -391,6 +392,13 @@ export default function SecurityView({ role = "admin" }: { role?: Role }) {
             <div style={{ width:`${score}%`,height:"100%",background: score >= 75 ? "var(--accent-green)" : "var(--accent-yellow)",borderRadius:4,transition:"width 0.5s" }} />
           </div>
           <div style={{ fontSize:12,color:"var(--text-muted)" }}>{score}% compliance score</div>
+        </div>
+
+        <div style={{ background:"var(--bg-card)", border:"1px solid var(--border)", borderRadius:12, padding:20 }}>
+          <div style={{ fontWeight:600, fontSize:15, marginBottom:14, display:"flex", alignItems:"center", gap:8 }}>
+            <HeartPulse size={15} strokeWidth={2} style={{ color:"var(--text-muted)" }} /> System Health
+          </div>
+          <SystemHealthView compact />
         </div>
       </div>
     </div>

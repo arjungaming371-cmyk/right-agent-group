@@ -13,7 +13,8 @@ import { isAiPaused } from "@/lib/ai-pause"
 
 export async function POST(req: NextRequest) {
   try {
-    if (!verifyExotelWebhookKey(req)) {
+    const isExotel = (process.env.TELEPHONY_PROVIDER || "vobiz").toLowerCase().trim() === "exotel"
+    if (isExotel && !verifyExotelWebhookKey(req)) {
       return new NextResponse("OK", { status: 200 }) // Exotel expects 200 either way; just drop it silently.
     }
 
@@ -28,9 +29,9 @@ export async function POST(req: NextRequest) {
     const contentType = req.headers.get("content-type") || ""
     if (contentType.includes("application/json")) {
       const body = ((await req.json().catch(() => ({}))) ?? {}) as Record<string, unknown>
-      callSid      = String(body.CallSid ?? body.call_sid ?? "")
-      callStatus   = String(body.Status ?? body.CallStatus ?? body.status ?? "").toLowerCase()
-      duration     = parseInt(String(body.ConversationDuration ?? body.CallDuration ?? body.duration ?? "0")) || 0
+      callSid      = String(body.CallSid ?? body.call_sid ?? body.call_uuid ?? body.callId ?? body.call_id ?? body.request_id ?? "")
+      callStatus   = String(body.Status ?? body.CallStatus ?? body.status ?? body.call_status ?? "").toLowerCase()
+      duration     = parseInt(String(body.ConversationDuration ?? body.CallDuration ?? body.duration ?? body.call_duration ?? "0")) || 0
       recordingUrl = typeof body.RecordingUrl === "string" ? body.RecordingUrl : typeof body.recording_url === "string" ? body.recording_url : null
     } else {
       const fd = await req.formData()

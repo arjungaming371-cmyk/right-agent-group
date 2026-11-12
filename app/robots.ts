@@ -11,7 +11,7 @@ export default function robots(): MetadataRoute.Robots {
         // The operations console and all APIs are session/secret protected —
         // keep crawlers out of them entirely (they'd only see login walls or
         // 401 JSON).
-        disallow: ["/dashboard", "/api/", "/form/"],
+        disallow: ["/dashboard", "/api/", "/l/"],
       },
     ],
     sitemap: `${SITE_URL}/sitemap.xml`,

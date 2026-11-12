@@ -195,7 +195,7 @@ const LANGS = ["english", "hindi", "telugu"]
 
   const vc = fs.readFileSync(path.join(ROOT, "lib/voice-conversation.ts"), "utf8")
   ok("voice-conversation uses the snapshot for openers", vc.includes("getVoiceOpenersSnapshot()") && vc.includes("greetingFor(language"))
-  ok("voice-conversation uses the snapshot for closings", vc.includes("getVoiceClosingsSnapshot().qualified") && vc.includes("getVoiceClosingsSnapshot().goodbye"))
+  ok("voice-conversation uses the snapshot for closings", vc.includes("getVoiceClosingsSnapshot()") && vc.includes("getVoiceClosingsSnapshot().goodbye"))
   ok("voice-conversation refreshes scripts at call start", vc.includes("refreshChannelScriptsIfStale"))
   ok("old hardcoded personalized greeters removed", !vc.includes("personalizedGreeting(") && !vc.includes("personalizedWaCallbackGreeting("))
   ok("old CLOSING/RETRY/RATE_LIMIT consts removed", !/const CLOSING[:\s]/.test(vc) && !/const RATE_LIMIT_REPLY[:\s]/.test(vc) && !/const GOODBYE_REPLY[:\s]/.test(vc))

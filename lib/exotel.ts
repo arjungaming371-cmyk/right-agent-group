@@ -146,11 +146,17 @@ export async function makeExotelCall(
   }
 }
 
-/** Kept for API compatibility with the outbound routes. */
+import { makeVobizCall } from "./vobiz"
+
+/** Kept for API compatibility with the outbound routes. Defaults to Vobiz. */
 export async function makeCall(to: string, leadId: string, language: string = "telugu", instructions?: string, branchId?: string | null): Promise<CallResult> {
+  if (activeProvider() === "vobiz") {
+    return makeVobizCall(to, leadId, language, instructions, branchId)
+  }
   return makeExotelCall(to, leadId, language, instructions, branchId)
 }
 
-export function activeProvider(): "exotel" {
-  return "exotel"
+export function activeProvider(): "vobiz" | "exotel" {
+  const p = (process.env.TELEPHONY_PROVIDER || "vobiz").toLowerCase().trim()
+  return p === "exotel" ? "exotel" : "vobiz"
 }

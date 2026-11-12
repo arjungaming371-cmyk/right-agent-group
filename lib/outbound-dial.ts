@@ -88,6 +88,7 @@ export async function assertNoActiveDial(phone: string): Promise<void> {
         WHERE direction = 'outbound'
           AND right(regexp_replace(phone, '\\D', '', 'g'), 10) = $1
           AND status IN ('initiated', 'ringing', 'in-progress')
+          AND created_at > now() - interval '3 minutes'
         LIMIT 1`,
       [last10]
     ),

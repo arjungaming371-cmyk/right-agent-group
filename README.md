@@ -35,7 +35,7 @@ See **DEPLOYMENT-GUIDE.md** (full deployment), **CLOUD-VOICE-GUIDE.md** (the 100
 ## Built-in Safeguards & Smart Features
 - **Webhook signature verification** — every Meta webhook POST is HMAC-verified against `WHATSAPP_APP_SECRET`; message dedupe by `wa_message_id` makes Meta's retries safe.
 - **Cross-channel memory** — Priya references the lead's recent WhatsApp chat on calls; the WhatsApp AI continues from recent phone calls. Same lead, one conversation.
-- **Frustration radar** — multilingual (EN/HI/TE) detection on every call turn; frustrated callers are flagged as `needs_human` in Voice Logs + Communication Log instantly, with zero added call latency.
+- **Frustration radar** — multilingual (EN/HI/TE) detection on every call turn; frustrated callers are flagged as `needs_human` in Voice Logs and on the lead's timeline, with zero added call latency.
 - **One-time form links** — application links can only ever be submitted once (atomic claim, race-proof) and the public form is rate-limited per IP and per token.
 - **Email confirmations** — optional; set the `SMTP_*` vars and applicants with an email get a branded confirmation with a reference number.
 - **Backups** — `BACKUP.ps1` does a `pg_dump` with 14-day rotation. Schedule it daily with: `PowerShell -File BACKUP.ps1 -Install`. Point `backups/` at a Google Drive-synced folder.

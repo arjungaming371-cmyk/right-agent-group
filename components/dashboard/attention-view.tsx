@@ -286,7 +286,7 @@ export default function AttentionView({ role }: { role: Role }) {
 
       <p className="mt-4 flex items-center gap-1.5 text-[11.5px] text-[var(--text-muted)]">
         <ExternalLink size={12} />
-        Resolved escalations stay in the Communication Log for audit.
+        Resolved escalations stay on the lead's timeline for audit.
       </p>
     </div>
   )
