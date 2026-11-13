@@ -81,6 +81,7 @@ Provide a short public reply (under 40 words) acknowledging their comment and of
 }
 
 export type VoiceOpenerFamily =
+  | "disclosure"
   | "cold"
   | "returning"
   | "inbound"
@@ -92,6 +93,25 @@ export type VoiceOpeners = Record<
 >
 
 export const DEFAULT_VOICE_OPENERS: VoiceOpeners = {
+  // AI + recording disclosure (2026-11-13). Spoken FIRST, before any greeting,
+  // on every call. Deliberately a fixed server-side line and NOT model
+  // generated: a compliance statement has to be exact every single time.
+  disclosure: {
+    english:
+      "Hello, this is Priya, an AI assistant calling from Right Agent Group. This call is recorded for quality and training.",
+    hindi:
+      "नमस्ते, मैं Priya हूँ, Right Agent Group से एक AI assistant. यह call quality और training के लिए record हो रही है.",
+    telugu:
+      "నమస్కారం, నేను Priya, Right Agent Group నుంచి AI assistant మాట్లాడుతున్నాను. ఈ call quality మరియు training కోసం record అవుతుంది.",
+  },
+  disclosureWithName: {
+    english:
+      "Hello {name}, this is Priya, an AI assistant calling from Right Agent Group. This call is recorded for quality and training.",
+    hindi:
+      "नमस्ते {name} ji, मैं Priya हूँ, Right Agent Group से एक AI assistant. यह call quality और training के लिए record हो रही है.",
+    telugu:
+      "నమస్కారం {name} garu, నేను Priya, Right Agent Group నుంచి AI assistant మాట్లాడుతున్నాను. ఈ call quality మరియు training కోసం record అవుతుంది.",
+  },
   cold: {
     english:
       "Hello, good morning! This is Priya calling from Right Agent Group, Hyderabad — we help people get loans from over 20 banks without the running around. Do you have a minute? I'd love to know if you have any loan or financial need right now.",

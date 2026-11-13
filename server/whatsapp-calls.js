@@ -260,7 +260,7 @@ const TURN_STREAM_TIMEOUT_MS = parseInt(process.env.VOICEBOT_TURN_STREAM_TIMEOUT
 // Call recording (RECORD_CALLS=0 disables both the capture AND the notice).
 // The consent line is spoken BEFORE the greeting ONLY when explicitly configured —
 // prevents 7-10s greeting delay and caller hangup.
-const RECORDING_NOTICE_ENABLED = (process.env.VOICEBOT_WA_RECORDING_NOTICE || "0").trim() === "1"
+const RECORDING_NOTICE_ENABLED = (process.env.VOICEBOT_WA_RECORDING_NOTICE || "1").trim() === "1"
 const RECORDING_NOTICE_TEXT = (process.env.RECORDING_NOTICE_TEXT || "").trim()
 const RECORDING_NOTICE_PHRASE = {
   english: "Please note, this call is recorded for quality and training purposes.",
@@ -1400,7 +1400,7 @@ class WhatsAppCallSession {
       console.log(`⏱ wa start API: ${Date.now() - t0}ms  lead=${r.leadId || "?"}  branch=${r.branchId || "hq"}`)
       this.language = r.language || "telugu"
       this.voice = r.voice && r.voice.speaker ? r.voice : null
-      const notice = this.recordingNotice()
+      const notice = (r && r.disclosure) || this.recordingNotice()
       if (notice) await this.speak(notice)
       await this.speak(r.text)
       console.log(`⏱ wa answer → greeting fully queued: ${Date.now() - t0}ms`)

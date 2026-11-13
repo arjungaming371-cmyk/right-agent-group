@@ -785,6 +785,8 @@ class CallSession {
       // The branch's AI-Employee voice for this call (null = default).
       this.voice = r.voice && r.voice.speaker ? r.voice : null
       if (this.voice) console.log(`🎙 voice: ${this.voice.provider}/${this.voice.speaker}`)
+      // AI + recording disclosure, always the first thing the caller hears.
+      if (r.disclosure) await this.speak(r.disclosure).catch(() => {})
       await this.speak(r.text)
       console.log(`⏱ answer → greeting fully spoken: ${Date.now() - t0}ms`)
     } catch (e) {
@@ -1293,7 +1295,10 @@ if (!WS_KEY && process.env.VOICEBOT_ALLOW_UNAUTH !== "1") {
 }
 
 wss.on("connection", (ws, req) => {
-  const ip = req.socket?.remoteAddress || "unknown"
+  // Behind nginx every socket arrives from 127.0.0.1 — key the per-caller cap
+  // on the forwarded address so one campaign can't look like one caller.
+  const hdrIp = String(req.headers["x-real-ip"] || String(req.headers["x-forwarded-for"] || "").split(",").pop() || "").trim()
+  const ip = hdrIp || req.socket?.remoteAddress || "unknown"
   const count = [...wss.clients].filter(c => c._remoteIp === ip).length
   if (count >= 5) {
     ws.close(1008, "too many connections from this IP")

@@ -284,7 +284,7 @@ export default function ChatWindow({
             display: "flex", alignItems: "center", gap: 7, boxShadow: "0 1px 0.5px rgba(11,20,26,0.13)",
           }}>
             <Lock size={12} style={{ flexShrink: 0, color: WA.textSecondary }} />
-            <span>Messages are end-to-end encrypted. No one outside of this chat, not even WhatsApp, can read or listen to them.</span>
+            <span>These messages are stored on this platform as business records. They are not end-to-end encrypted.</span>
           </div>
         </div>
 

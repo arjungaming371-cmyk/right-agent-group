@@ -61,6 +61,8 @@ const TAB_KEYS: Record<Tab, string[]> = {
 }
 
 const OPENER_FIELDS: { key: string; label: string; hint: string }[] = [
+  { key: "disclosure", label: "AI + recording disclosure (MANDATORY)", hint: "Spoken first on EVERY call, before the opener. Keep the AI disclosure and the recording notice in it." },
+  { key: "disclosureWithName", label: "Disclosure (name known)", hint: "Disclosure when the lead's name is already known — {name} is replaced" },
   { key: "cold", label: "Cold opener (first call)", hint: "Spoken when Priya dials a brand-new lead" },
   { key: "coldWithName", label: "Cold opener (name known)", hint: "Used when the lead's name is already in the system — {name} is replaced" },
   { key: "returning", label: "Returning opener (repeat call)", hint: "Repeat calls — warm follow-up instead of the cold pitch" },

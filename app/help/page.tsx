@@ -39,7 +39,7 @@ const CATEGORIES: Category[] = [
     articles: [
       {
         title: "Creating an AI employee",
-        body: "AI Employees are managed from their own console screen. You define the employee's name, script, languages and channels, and scope them to branches. Each employee works the channels you assign — phone, WhatsApp or both.",
+        body: "AI employees are configured with your administrator: the name, the script and the languages they speak. In this console you control what she says from Priya's Script, and which calls go out from Call Queue.",
       },
       {
         title: "Pausing the AI instantly",
@@ -109,7 +109,7 @@ const CATEGORIES: Category[] = [
     articles: [
       {
         title: "Adding a branch",
-        body: "Create branches from the Branches screen. Each branch can have its own phone numbers, scripts, AI employees and call quotas. Branch staff see only their branch; Admins see everything.",
+        body: "Branches are created and configured by your administrator. Each branch can have its own phone numbers, scripts and call quotas. Branch staff see only their own branch; administrators see everything.",
       },
     ],
   },

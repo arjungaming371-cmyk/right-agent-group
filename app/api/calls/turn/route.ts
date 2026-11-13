@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db, query } from "@/lib/db"
-import { startCall, handleTurn, handleTurnStream, correctLastSpokenReply, parseTranscriptHistory } from "@/lib/voice-conversation"
+import { startCall, handleTurn, handleTurnStream, correctLastSpokenReply, parseTranscriptHistory, disclosureFor } from "@/lib/voice-conversation"
 import { detectLanguage, type Language } from "@/lib/llm"
 import { normalizeCallLanguage, resolveSpokenLanguage } from "@/lib/call-facts"
 import { PHONE_MATCH_SQL } from "@/lib/phone"
@@ -198,7 +198,7 @@ export async function POST(req: NextRequest) {
           if (brand) for (const w of brand.split(/\s+/)) if (w.length >= 3 && w.length <= 40) vocabulary.push(w)
         }
       } catch { /* vocabulary is optional */ }
-      return NextResponse.json({ text: greeting, language, leadId, branchId, voice, vocabulary, hangup: false })
+      return NextResponse.json({ text: greeting, disclosure: disclosureFor(language), language, leadId, branchId, voice, vocabulary, hangup: false })
     }
 
     if (event === "turn") {
