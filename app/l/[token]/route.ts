@@ -13,18 +13,22 @@ export async function GET(
   }
 
   try {
-    // Look up token in link_sends + get bank URL from link_library
+    // Look up token in link_sends + get bank URL from link_library.
+    // Check direct library_id first, fallback to active bank + product match
     const res = await query(
-      `SELECT s.id, s.bank, s.product, s.status, s.clicked_at, l.url AS lib_url
+      `SELECT s.id, s.bank, s.product, s.status, s.clicked_at, s.library_id,
+              COALESCE(l_direct.url, l_match.url) AS lib_url,
+              COALESCE(l_direct.active, l_match.active, true) AS is_active
        FROM link_sends s
-       LEFT JOIN link_library l ON (lower(l.bank) = lower(s.bank) AND lower(l.product) = lower(s.product))
+       LEFT JOIN link_library l_direct ON s.library_id = l_direct.id
+       LEFT JOIN link_library l_match ON (lower(l_match.bank) = lower(s.bank) AND lower(l_match.product) = lower(s.product) AND l_match.active = true)
        WHERE s.token = $1
        LIMIT 1`,
       [token]
     )
 
     if (!res.rows || res.rows.length === 0) {
-      return NextResponse.redirect(new URL("/help", req.url))
+      return NextResponse.redirect(new URL("/help?msg=link_not_found", req.url))
     }
 
     const row = res.rows[0]
@@ -38,10 +42,10 @@ export async function GET(
       [row.id]
     )
 
-    // Fallback if the link wasn't in library: direct bank search or standard portal
-    let targetUrl = row.lib_url
-    if (!targetUrl) {
-      targetUrl = `https://www.google.com/search?q=${encodeURIComponent(row.bank + " " + row.product + " official loan application")}`
+    const targetUrl = row.lib_url
+    if (!targetUrl || row.is_active === false) {
+      console.warn(`[BankLink] Target URL not found or inactive for bank="${row.bank}", product="${row.product}", token="${token}"`)
+      return NextResponse.redirect(new URL("/help?msg=link_unavailable", req.url))
     }
 
     return NextResponse.redirect(targetUrl, 302)

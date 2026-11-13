@@ -62,14 +62,24 @@ async function main() {
   await db.connect()
   console.log("Running local-setup.sql ...")
   await db.query(sql)
+  await db.end()
+
+  console.log("Running migrations to ensure all schema updates are applied...")
+  const { spawnSync } = require("child_process")
+  const migRes = spawnSync(process.execPath, [path.join(__dirname, "run-migrations.js")], { stdio: "inherit" })
+  if (migRes.status !== 0) {
+    console.warn("⚠️ Warning: migration runner exited with status", migRes.status)
+  }
 
   // 3. Quick sanity check
-  const tables = await db.query(
+  const checkDb = new Client({ host, port, user, password, database })
+  await checkDb.connect()
+  const tables = await checkDb.query(
     "SELECT table_name FROM information_schema.tables WHERE table_schema='public' ORDER BY table_name"
   )
   console.log(`\n✅ Done. ${tables.rowCount} tables ready:`)
   console.log("   " + tables.rows.map((r) => r.table_name).join(", "))
-  await db.end()
+  await checkDb.end()
 }
 
 main().catch((e) => {

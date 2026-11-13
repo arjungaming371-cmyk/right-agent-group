@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS link_sends (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   token         TEXT UNIQUE NOT NULL,
   lead_id       UUID REFERENCES leads(id) ON DELETE SET NULL,
+  library_id    UUID REFERENCES link_library(id) ON DELETE SET NULL,
   bank          TEXT NOT NULL,
   product       TEXT NOT NULL,
   channel       TEXT NOT NULL DEFAULT 'whatsapp',
@@ -29,14 +30,23 @@ CREATE TABLE IF NOT EXISTS link_sends (
   created_at    TIMESTAMPTZ DEFAULT now()
 );
 
+-- Ensure library_id column exists if table was already created
+ALTER TABLE link_sends ADD COLUMN IF NOT EXISTS library_id UUID REFERENCES link_library(id) ON DELETE SET NULL;
+
 CREATE INDEX IF NOT EXISTS idx_link_sends_token ON link_sends(token);
 CREATE INDEX IF NOT EXISTS idx_link_sends_lead_id ON link_sends(lead_id);
+CREATE INDEX IF NOT EXISTS idx_link_sends_library_id ON link_sends(library_id);
 CREATE INDEX IF NOT EXISTS idx_link_sends_status ON link_sends(status);
 
 -- Seed default bank application links if empty
 INSERT INTO link_library (bank, product, url)
-SELECT 'SBI', 'Home Loan', 'https://homeloans.sbi/'
+SELECT 'SBI', 'Home Loan', 'https://onlineapply.sbi.bank.in/personal-banking/home-loan'
 WHERE NOT EXISTS (SELECT 1 FROM link_library WHERE bank = 'SBI' AND product = 'Home Loan');
+
+-- Correct any previously-seeded invalid SBI link
+UPDATE link_library
+   SET url = 'https://onlineapply.sbi.bank.in/personal-banking/home-loan'
+ WHERE bank = 'SBI' AND (url = 'https://homeloans.sbi/' OR url LIKE '%homeloans.sbi%');
 
 INSERT INTO link_library (bank, product, url)
 SELECT 'HDFC Bank', 'Home Loan', 'https://www.hdfcbank.com/personal/borrow/popular-loans/home-loan'

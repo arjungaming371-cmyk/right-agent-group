@@ -119,9 +119,10 @@ function FormLinkCell({ lead }: { lead: Lead }) {
   const [copied, setCopied] = useState(false)
   if (!lead.form_token) return <span style={{ color: "var(--text-muted)", fontSize: 11.5 }}>—</span>
 
-  const submitted = lead.form_completed || !!lead.form_used_at
-  const tone = submitted ? "var(--accent-green)" : "var(--accent-yellow)"
-  const label = submitted ? "Opened" : "Sent"
+  const isApplied = lead.status === "applied"
+  const isOpened = lead.form_completed || !!lead.form_used_at || lead.status === "opened"
+  const tone = isApplied || isOpened ? "var(--accent-green)" : "var(--accent-yellow)"
+  const label = isApplied ? "Applied" : isOpened ? "Opened" : "Sent"
 
   async function copy() {
     try {
@@ -134,7 +135,7 @@ function FormLinkCell({ lead }: { lead: Lead }) {
   return (
     <button
       onClick={copy}
-      title={copied ? "Link copied!" : `Copy form link — sent ${timeAgo(lead.form_sent_at || "")}`}
+      title={copied ? "Link copied!" : `Copy bank link (${lead.form_token}) — sent ${timeAgo(lead.form_sent_at || "")}`}
       style={{
         display: "inline-flex", alignItems: "center", gap: 4,
         background: `${tone}14`, border: `1px solid ${tone}3d`, color: tone,

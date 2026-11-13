@@ -40,3 +40,29 @@ export function verifyExotelWebhookKey(req: NextRequest): boolean {
   if (a.length !== b.length) return false
   return crypto.timingSafeEqual(a, b)
 }
+
+export function verifyVobizWebhookKey(req: NextRequest): boolean {
+  const expected = (process.env.VOBIZ_WEBHOOK_KEY || process.env.EXOTEL_WEBHOOK_KEY || "").trim()
+  if (!expected) {
+    if (process.env.ALLOW_UNSIGNED_WEBHOOK === "1") return true // explicit dev escape hatch
+    console.error("🚫 Rejecting Vobiz webhook: VOBIZ_WEBHOOK_KEY (or EXOTEL_WEBHOOK_KEY) is not set (fail-closed). " +
+      "Set VOBIZ_WEBHOOK_KEY in .env, or ALLOW_UNSIGNED_WEBHOOK=1 for local dev only.")
+    return false
+  }
+
+  const { searchParams } = new URL(req.url)
+  const provided = searchParams.get("key") || ""
+  const a = Buffer.from(provided)
+  const b = Buffer.from(expected)
+  if (a.length !== b.length) return false
+  return crypto.timingSafeEqual(a, b)
+}
+
+export function verifyTelephonyWebhookKey(req: NextRequest, provider?: string): boolean {
+  const p = (provider || process.env.TELEPHONY_PROVIDER || "vobiz").toLowerCase().trim()
+  if (p === "exotel") {
+    return verifyExotelWebhookKey(req)
+  }
+  return verifyVobizWebhookKey(req)
+}
+

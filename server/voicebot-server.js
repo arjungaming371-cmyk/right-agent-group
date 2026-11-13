@@ -478,7 +478,9 @@ class CallSession {
     this.botTalking = false   // we're currently sending audio (mic muted)
     this.processing = false
     this.closed = false
-    this.isVobiz = (process.env.TELEPHONY_PROVIDER || "vobiz").toLowerCase().trim() === "vobiz"
+    const isVobizExplicit = (process.env.TELEPHONY_PROVIDER || "exotel").toLowerCase().trim() === "vobiz"
+    const isVobizHeld = process.env.VOBIZ_HOLD !== "false" // Vobiz kept on hold by default
+    this.isVobiz = isVobizExplicit && !isVobizHeld
     this.started = false      // guards against a duplicate Exotel "start" event replaying the greeting mid-call
     // Two-stage playback pipeline: synthChain serializes GPU synthesis (one
     // F5 inference at a time), sendChain serializes playback. Synthesis of
@@ -671,16 +673,24 @@ class CallSession {
           try { this.ws.terminate() } catch {}
           return
         }
-        this.ws.send(JSON.stringify({
-          event: this.isVobiz ? "playAudio" : "media",
-          stream_sid: this.streamSid,
-          streamId: this.streamSid,
-          media: {
-            contentType: "audio/x-l16",
-            sampleRate: SAMPLE_RATE,
-            payload
-          },
-        }))
+        if (this.isVobiz) {
+          this.ws.send(JSON.stringify({
+            event: "playAudio",
+            streamId: this.streamSid,
+            media: {
+              contentType: "audio/x-l16",
+              sampleRate: SAMPLE_RATE,
+              payload
+            },
+          }))
+        } else {
+          this.ws.send(JSON.stringify({
+            event: "media",
+            streamSid: this.streamSid,
+            stream_sid: this.streamSid,
+            media: { payload },
+          }))
+        }
       } catch {}
     }, 100)
     if (this.comfortTimer.unref) this.comfortTimer.unref()
@@ -710,8 +720,14 @@ class CallSession {
     this.streamSid = msg.stream_sid || msg.streamSid || msg.start?.streamId || msg.streamId || null
     const start = msg.start || {}
     this.callSid = start.call_sid || start.callSid || start.CallSid || start.callId || start.call_uuid || msg.call_uuid || null
-    if (msg.start?.mediaFormat || msg.start?.streamId || msg.streamId || (!start.call_sid && start.callId)) {
-      this.isVobiz = true
+    // Only detect Vobiz stream if Vobiz is explicitly enabled and not on hold.
+    // Exotel sends mediaFormat in start; do NOT falsely classify Exotel as Vobiz!
+    if (this.isVobiz) {
+      if (msg.start?.streamId || msg.streamId || (!start.call_sid && start.callId)) {
+        this.isVobiz = true
+      }
+    } else {
+      this.isVobiz = false
     }
     const from = start.from || start.From || ""
     // Multi-branch routing: the CALLED number (the branch's DLT-approved
@@ -805,6 +821,14 @@ class CallSession {
         this.ws.send(JSON.stringify({
           event: "clearAudio",
           streamId: this.streamSid,
+        }))
+      } catch {}
+    } else if (this.streamSid) {
+      try {
+        this.ws.send(JSON.stringify({
+          event: "clear",
+          streamSid: this.streamSid,
+          stream_sid: this.streamSid,
         }))
       } catch {}
     }
@@ -1043,16 +1067,24 @@ class CallSession {
         if (chunk.length % FRAME_BYTES !== 0) {
           chunk = Buffer.concat([chunk, Buffer.alloc(FRAME_BYTES - (chunk.length % FRAME_BYTES))])
         }
-        this.ws.send(JSON.stringify({
-          event: this.isVobiz ? "playAudio" : "media",
-          stream_sid: this.streamSid,
-          streamId: this.streamSid,
-          media: {
-            contentType: "audio/x-l16",
-            sampleRate: SAMPLE_RATE,
-            payload: chunk.toString("base64")
-          },
-        }))
+        if (this.isVobiz) {
+          this.ws.send(JSON.stringify({
+            event: "playAudio",
+            streamId: this.streamSid,
+            media: {
+              contentType: "audio/x-l16",
+              sampleRate: SAMPLE_RATE,
+              payload: chunk.toString("base64")
+            },
+          }))
+        } else {
+          this.ws.send(JSON.stringify({
+            event: "media",
+            streamSid: this.streamSid,
+            stream_sid: this.streamSid,
+            media: { payload: chunk.toString("base64") },
+          }))
+        }
         queuedMs += bytesToMs(chunk.length)
         // Hand over the next chunk only once we've drifted back inside the
         // lead. Keeping a lead (rather than sending exactly in real time)

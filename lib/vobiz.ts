@@ -63,8 +63,12 @@ export async function makeVobizCall(
     throw new Error("NEXT_PUBLIC_APP_URL is not set or invalid — Vobiz Answer/Status callback URL cannot be constructed")
   }
 
-  const answerUrl = `${appUrl.replace(/\/+$/, "")}/api/calls/vobiz-answer?leadId=${encodeURIComponent(leadId)}&branchId=${encodeURIComponent(branchId || "")}&lang=${encodeURIComponent(language)}`
-  const statusCallback = `${appUrl.replace(/\/+$/, "")}/api/calls/status`
+  const webhookKey = (process.env.VOBIZ_WEBHOOK_KEY || process.env.EXOTEL_WEBHOOK_KEY || "").trim()
+  const keyParam = webhookKey ? `&key=${encodeURIComponent(webhookKey)}` : ""
+  const statusKeyParam = webhookKey ? `?key=${encodeURIComponent(webhookKey)}` : ""
+
+  const answerUrl = `${appUrl.replace(/\/+$/, "")}/api/calls/vobiz-answer?leadId=${encodeURIComponent(leadId)}&branchId=${encodeURIComponent(branchId || "")}&lang=${encodeURIComponent(language)}${keyParam}`
+  const statusCallback = `${appUrl.replace(/\/+$/, "")}/api/calls/status${statusKeyParam}`
 
   const payload = {
     from: creds.callerId,

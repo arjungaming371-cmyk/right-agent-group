@@ -6,16 +6,15 @@ import { refreshLeadScore } from "@/lib/scoring"
 import { rateLimit, clientIp } from "@/lib/rate-limit"
 import { runPostCallAnalysis } from "@/lib/lead-brain"
 import { runCalendarExtractionForCall } from "@/lib/calendar-agent"
-import { verifyExotelWebhookKey } from "@/lib/exotel-webhook-auth"
+import { verifyTelephonyWebhookKey } from "@/lib/exotel-webhook-auth"
 import { maybeRequeueMissed } from "@/lib/auto-retry"
 import { stampQueueCallOutcome } from "@/lib/queue-outcome"
 import { isAiPaused } from "@/lib/ai-pause"
 
 export async function POST(req: NextRequest) {
   try {
-    const isExotel = (process.env.TELEPHONY_PROVIDER || "vobiz").toLowerCase().trim() === "exotel"
-    if (isExotel && !verifyExotelWebhookKey(req)) {
-      return new NextResponse("OK", { status: 200 }) // Exotel expects 200 either way; just drop it silently.
+    if (!verifyTelephonyWebhookKey(req)) {
+      return new NextResponse("OK", { status: 200 }) // Fail silently to outside callers
     }
 
     if (!rateLimit(`call-status:${clientIp(req)}`, 60, 60000)) {

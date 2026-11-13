@@ -1,19 +1,19 @@
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
-import { getLiveSession } from "@/lib/auth"
+import { requireModuleOrRole } from "@/lib/auth"
 import { sessionBranchId } from "@/lib/branches"
-import { sendWhatsAppText, branchWhatsAppCtx } from "@/lib/whatsapp"
+import { sendApplicationLink, branchWhatsAppCtx } from "@/lib/whatsapp"
 import crypto from "crypto"
 
 export const dynamic = "force-dynamic"
 
 function genShortToken(): string {
-  return crypto.randomBytes(4).toString("hex") // 8 chars e.g. "a7f3k29b"
+  return crypto.randomBytes(12).toString("hex") // 24 hex characters
 }
 
 export async function POST(req: NextRequest) {
-  const session = await getLiveSession(req)
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  const session = await requireModuleOrRole(req, "leads", ["admin", "agent", "branch_manager"])
+  if (!session) return NextResponse.json({ error: "Forbidden: insufficient permissions to send links" }, { status: 403 })
 
   try {
     const { leadId, bank, product, phone: customPhone } = await req.json()
@@ -21,10 +21,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "leadId and bank required" }, { status: 400 })
     }
 
-    // Fetch lead
-    const leadRes = await query(`SELECT * FROM leads WHERE id = $1 LIMIT 1`, [leadId])
+    const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "").trim().replace(/\/+$/, "")
+    if (!appUrl) {
+      return NextResponse.json({ error: "NEXT_PUBLIC_APP_URL is not configured on server" }, { status: 500 })
+    }
+
+    // Fetch lead with branch isolation check
+    const userBranch = sessionBranchId(session)
+    const leadRes = userBranch
+      ? await query(`SELECT * FROM leads WHERE id = $1 AND (branch_id = $2 OR branch_id IS NULL) LIMIT 1`, [leadId, userBranch])
+      : await query(`SELECT * FROM leads WHERE id = $1 LIMIT 1`, [leadId])
+
     if (!leadRes.rows || leadRes.rows.length === 0) {
-      return NextResponse.json({ error: "Lead not found" }, { status: 404 })
+      return NextResponse.json({ error: "Lead not found or access denied" }, { status: 404 })
     }
     const lead = leadRes.rows[0]
     const phone = customPhone || lead.whatsapp_number || lead.phone
@@ -35,27 +44,29 @@ export async function POST(req: NextRequest) {
 
     const prod = product || lead.product_interest || "Home Loan"
     const token = genShortToken()
-    const branchId = sessionBranchId(session) || lead.branch_id || null
+    const branchId = userBranch || lead.branch_id || null
+
+    // Look up library entry if available
+    const libRes = await query(
+      `SELECT id FROM link_library WHERE lower(bank) = lower($1) AND lower(product) = lower($2) AND active = true LIMIT 1`,
+      [bank, prod]
+    )
+    const libraryId = libRes.rows?.[0]?.id || null
 
     // Record in link_sends
     const insertRes = await query(
-      `INSERT INTO link_sends (token, lead_id, bank, product, channel, sent_by, status, branch_id)
-       VALUES ($1, $2, $3, $4, 'whatsapp', $5, 'sent', $6)
+      `INSERT INTO link_sends (token, lead_id, library_id, bank, product, channel, sent_by, status, branch_id)
+       VALUES ($1, $2, $3, $4, $5, 'whatsapp', $6, 'sent', $7)
        RETURNING *`,
-      [token, leadId, bank, prod, session.email || "staff", branchId]
+      [token, leadId, libraryId, bank, prod, session.email || "staff", branchId]
     )
 
     const linkSend = insertRes.rows[0]
-    const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "https://13.201.0.111.sslip.io").replace(/\/$/, "")
     const redirectUrl = `${appUrl}/l/${token}`
 
-    // Send via WhatsApp
+    // Send via WhatsApp using the approved template (with automatic fallback to text in-window)
     const waBranch = await branchWhatsAppCtx(branchId)
-    const brand = waBranch?.brandName || "Right Agent Group"
-
-    const message = `Hello ${lead.name || "there"},\n\nHere is your official *${bank}* ${prod} application link from ${brand}:\n\n👉 ${redirectUrl}\n\nIt takes ~10 minutes to submit. Once you submit, our loan officer will follow up to assist with your sanction and disbursement.`
-
-    const waRes = await sendWhatsAppText(phone, message, waBranch)
+    const waRes = await sendApplicationLink(phone, lead.name || "there", token, waBranch)
 
     // Update lead status
     await query(

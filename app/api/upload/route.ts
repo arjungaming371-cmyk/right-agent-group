@@ -249,8 +249,9 @@ export async function POST(req: NextRequest) {
               [c.leadId, `Added to call queue · agenda: ${agendaLabel}`]
             ).catch(() => {})
           }
-        } catch {
-          // uq_outbound_queue_active_phone — already waiting in the queue. Skip, don't fail.
+        } catch (e: any) {
+          // uq_outbound_queue_active_phone or duplicate — skip row and log
+          console.warn(`[Upload Queue] Skipped queuing for ${c.phone}: ${e?.message || e}`)
         }
       }
     }
