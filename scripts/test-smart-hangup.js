@@ -20,7 +20,10 @@ const schedJs = ts.transpileModule(schedCode, { compilerOptions: { module: ts.Mo
 const mSched = { exports: {} }
 new Function("module", "exports", "require", schedJs)(mSched, mSched.exports, require)
 
-const voiceCode = fs.readFileSync(path.join(ROOT, "lib/voice-conversation.ts"), "utf8").split("\n").slice(109, 189).join("\n")
+const fileLines = fs.readFileSync(path.join(ROOT, "lib/voice-conversation.ts"), "utf8").split("\n")
+const startIdx = fileLines.findIndex(l => l.includes("export const DND_INTENT_RE = new RegExp"))
+const endIdx = fileLines.findIndex((l, idx) => idx > startIdx && l.includes("export const CUSTOMER_BYE_RE"))
+const voiceCode = fileLines.slice(startIdx, endIdx !== -1 ? endIdx : startIdx + 85).join("\n")
 const voiceJs = ts.transpileModule(voiceCode, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText
 const mVoice = { exports: {} }
 new Function("module", "exports", "require", voiceJs)(mVoice, mVoice.exports, () => ({}))

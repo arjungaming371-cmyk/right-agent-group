@@ -269,7 +269,7 @@ function validateEntry(
   // DOCUMENT types (they appear in the documents-required entry), not claims
   // about where we are.
   if (
-    /\b(?:(?:our\s+office|the\s+office|office\s+(?:address|location|is\s+(?:at|in|on|located))|visit\s+us|our\s+branch|head\s+office|branch\s+address)|address(?!\s*(?:proof|and|&)))/i.test(hay) &&
+    /\b(?:(?:our\s+office\b|the\s+office\b|office\s+(?:address|location|is\s+(?:at|in|on|located))|visit\s+us\b|our\s+branch\b|head\s+office\b|branch\s+address\b)|address\b(?!\s*(?:proof|and|&)))/i.test(hay) &&
     !KB_CANON.addressTokens.some((t) => hay.toLowerCase().includes(t))
   ) {
     push(

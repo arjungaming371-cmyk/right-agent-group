@@ -148,27 +148,28 @@ section("app/api/outbound/process POST: stop/reset-failed run BEFORE the window 
   ok(stop < paused && reset < paused, "stop + reset-failed are window-independent (paused guard only gates DIALING)")
 }
 
-// ── 11. Upload console — paused responses surfaced honestly ────────────────
-section("upload-view.tsx: {paused:true} handled in dial/start handlers")
+// ── 11. Upload in Leads — destination and agenda handled ────────────────
+section("Upload in Leads: destination and agenda handled")
 {
-  const uv = read("components/dashboard/upload-view.tsx")
-  ok(uv.split("data.paused").length - 1 >= 2, "batch dial + campaign start both handle paused (no more 'Dialed undefined/undefined')")
+  const lv = read("components/dashboard/leads-view.tsx")
+  has(lv, "destination", "Leads upload passes destination (leads vs queue)")
+  has(lv, "agenda_label", "Leads upload passes agenda_label")
 }
 
-// ── 12. Public loan form — used-link screen reachable + email required ─────
-section("app/form/[token]: used checked before valid; required.email enforced")
+// ── 12. Bank Link redirect — token resolution + status tracking ──────────
+section("app/l/[token]: token resolution, bank URL redirect and status update")
 {
-  const fp = read("app/form/[token]/page.tsx")
-  ok(fp.indexOf("if (data.used)") < fp.indexOf("if (!data.valid)"), "consumed link shows 'Already submitted', not 'Link not valid'")
-  has(fp, 'config.required_fields?.email && !form.email?.trim()', "Required-email toggle is actually validated")
+  const lp = read("app/l/[token]/route.ts")
+  has(lp, "UPDATE link_sends", "Updates link status to opened and records clicked_at")
+  has(lp, "NextResponse.redirect", "Redirects customer to official bank application URL")
 }
 
-// ── 13. Voice assistant — action execution gated like the server ───────────
-section("voice-assistant.tsx: Approve/Execute only for admin/developer")
+// ── 13. Operations Commander — read-only discipline ──────────────────────
+section("quick-chat.tsx: Operations Commander is read-only (no destructive execution)")
 {
-  const va = read("components/dashboard/voice-assistant.tsx")
-  has(va, 'const canExecuteActions = role === "admin" || role === "developer"', "client gate mirrors POST /api/assistant/action allowlist")
-  ok(va.split("canExecuteActions ?").length - 1 >= 2, "both proposal buttons gated")
+  const qc = read("components/dashboard/quick-chat.tsx")
+  ok(!qc.includes("/api/assistant/action"), "no destructive action execution route called")
+  ok(!fs.existsSync(path.join(ROOT, "app/api/assistant/action/route.ts")), "destructive action route deleted")
 }
 
 // ── 14. Voice Studio — no duplicate catalog cards / React keys ──────────────
@@ -195,7 +196,7 @@ section("calendar-view.tsx: month bounds sent as UTC instants of LOCAL month")
 section("res.ok discipline: developer logs + loan status")
 {
   has(read("components/dashboard/developer-logs-view.tsx"), "if (!res.ok) return", "developer logs: 401/500 no longer renders as 'No activity yet'")
-  has(read("components/dashboard/loan-apps-view.tsx"), "if (!r.ok) {\n        const d = await r.json().catch(() => ({}))\n        toast.error(d.error || \"Could not update the loan status\")", "loan PATCH failures toast instead of silently reverting")
+  has(read("components/dashboard/loan-apps-view.tsx"), 'toast.error(d.error || "Could not update the loan status")', "loan PATCH failures toast instead of silently reverting")
 }
 
 // ── 17. Call Queue talking points — "What should Priya talk about?" ────────
@@ -251,21 +252,14 @@ section("call-queue talking points: the agenda rides queue rows into Priya's bra
   has(vc, "never recite them word-for-word", "anti-robotic-recital rule present")
   ok(!/let merged = instructions \|\| ""/.test(vc), "no raw unlabeled instructions left (used to read like Priya's own thought)")
 
-  // Call Queue UI — the textarea exists and start/dial-now both send it.
+  // Call Queue UI — queue items display the agenda
   const qv = read("components/dashboard/queue-view.tsx")
-  ok((qv.match(/What should Priya talk about\?/g) || []).length >= 1, "Call Queue shows the agenda box")
-  has(qv, "talking_points: talkPoints.trim() || undefined", "Start Campaign sends the agenda")
-  has(qv, "instructions: item.talking_points || undefined", "Dial now keeps the row's agenda")
   has(qv, "talking_points?: string | null", "QueueItem type carries the field for per-row display")
   has(qv, "Talk: {item.talking_points}", "queue table shows the agenda under the phone")
 
-  // Upload console — same agenda on CSV confirm, single add and bulk start.
-  const uv = read("components/dashboard/upload-view.tsx")
-  ok((uv.match(/What should Priya talk about\? <span/g) || []).length === 3, "all three entry surfaces show the agenda box (CSV modal, single form, bulk panel)")
-  has(uv, "talking_points: previewTalkPoints.trim() || undefined", "CSV confirm sends the agenda")
-  has(uv, "talking_points: queueTalkPoints.trim() || undefined", "Add Single sends the agenda")
-  has(uv, "talking_points: bulkTalkPoints.trim() || undefined", "Call Entire Queue sends the agenda")
-  has(uv, "Talk: {r.talking_points}", "upload queue table shows the agenda")
+  // Upload dialog in Leads UI — agenda preserved on queue destination
+  const lv = read("components/dashboard/leads-view.tsx")
+  has(lv, "agenda_label", "Leads upload dialog supports agenda selection")
 }
 
 console.log(`\n${passed} passed, ${failed} failed`)

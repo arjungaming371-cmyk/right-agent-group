@@ -130,7 +130,8 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
         toast.success(`Status updated to ${STATUS_CONFIG[newStatus]?.label || newStatus}`)
         loadData()
       } else {
-        toast.error("Failed to update status")
+        const d = await res.json().catch(() => ({}))
+        toast.error(d.error || "Could not update the loan status")
       }
     } catch {
       toast.error("Failed to update status")

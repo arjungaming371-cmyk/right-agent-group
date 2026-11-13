@@ -169,7 +169,7 @@ try {
   ok(titlesLower.includes("grievance"), "KB covers grievance redressal (script directs complaints to the office)")
   ok(titlesLower.includes("fraud safety"), "KB covers fraud/OTP safety (script's fraud answer is grounded)")
   ok(titlesLower.includes("do not call"), "KB covers do-not-call policy (script's DND handling is grounded)")
-  ok(csvText.includes("7.25"), "rates entry intact (SBI 7.25 anchor)")
+  ok(csvText.toLowerCase().includes("home loan") && csvText.includes("7.50%"), "rates entry intact (dated range anchor)")
 
   // ── 8. Ingest routes enforce the gate ──
   section("All ingest routes enforce the compliance gate")
