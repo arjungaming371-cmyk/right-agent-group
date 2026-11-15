@@ -111,7 +111,7 @@ function MediaBody({ msg, onOpenImage }: { msg: Msg; onOpenImage: (url: string) 
 }
 
 export default function MessageBubble({
-  msg, contactName, showTail, grouped, onReply, onReact, onForward, onJump, onOpenImage,
+  msg, contactName, showTail, grouped, onReply, onReact, onForward, onJump, onOpenImage, onRetry,
 }: {
   msg: Msg
   contactName: string
@@ -123,6 +123,7 @@ export default function MessageBubble({
   onJump?: (id: string) => void
   /** fullscreen photo viewer — parent renders the overlay (lightbox) */
   onOpenImage?: (url: string) => void
+  onRetry?: (m: Msg) => void
 }) {
   const out = msg.direction === "outbound"
   const [reactOpen, setReactOpen] = useState(false)
@@ -276,7 +277,13 @@ export default function MessageBubble({
               userSelect: "none", whiteSpace: "nowrap",
             }}>
               {fmtMsgTime(msg.created_at)}
-              {out && <Ticks status={msg.status} />}
+              {out && (
+                <Ticks
+                  status={msg.status}
+                  title={msg.status === "failed" ? (msg.error_message || "Delivery failed (Meta token/window error). Click to retry.") : undefined}
+                  onRetry={onRetry ? () => onRetry(msg) : undefined}
+                />
+              )}
             </span>
             {bodyText}
           </div>
@@ -290,7 +297,14 @@ export default function MessageBubble({
             fontSize: 11, color: "rgba(255,255,255,0.92)", userSelect: "none",
           }}>
             {fmtMsgTime(msg.created_at)}
-            {out && <Ticks status={msg.status} size={14} />}
+            {out && (
+              <Ticks
+                status={msg.status}
+                size={14}
+                title={msg.status === "failed" ? (msg.error_message || "Delivery failed. Click to retry.") : undefined}
+                onRetry={onRetry ? () => onRetry(msg) : undefined}
+              />
+            )}
           </span>
         )}
       </div>

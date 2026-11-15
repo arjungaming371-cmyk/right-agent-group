@@ -210,6 +210,26 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
   const totalDisbursed = Number(stats.disbursed_volume || 0)
   const estCommission = totalDisbursed * 0.006
 
+  const internalStats = useMemo(() => {
+    const total = internalApps.length
+    const approved = internalApps.filter((a) => /approved|sanctioned/i.test(a.status || "")).length
+    const pending = internalApps.filter((a) => /pending|review|new/i.test(a.status || "")).length
+    const disbursed = internalApps.filter((a) => /disbursed/i.test(a.status || "")).length
+    const totalVolume = internalApps.reduce((acc, a) => acc + (Number(a.loan_amount) || 0), 0)
+    const approvedVolume = internalApps
+      .filter((a) => /approved|sanctioned|disbursed/i.test(a.status || ""))
+      .reduce((acc, a) => acc + (Number(a.loan_amount) || 0), 0)
+
+    return {
+      total,
+      approved,
+      pending,
+      disbursed,
+      totalVolume,
+      approvedVolume: approvedVolume || totalVolume,
+    }
+  }, [internalApps])
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
 
@@ -265,49 +285,76 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
       {/* Top Banner & Financial Metrics */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14 }}>
         <div className="card" style={{ padding: "16px 20px" }}>
-          <div style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 500, marginBottom: 4 }}>Links Sent</div>
-          <div style={{ fontSize: 24, fontWeight: 700, color: "var(--text-primary)" }}>{stats.total || 0}</div>
-          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>Across all products</div>
-        </div>
-
-        <div className="card" style={{ padding: "16px 20px" }}>
-          <div style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 500, marginBottom: 4 }}>Opened by Leads</div>
-          <div style={{ fontSize: 24, fontWeight: 700, color: "var(--accent-yellow)" }}>
-            {stats.opened || 0}
-            <span style={{ fontSize: 13, fontWeight: 500, color: "var(--text-muted)", marginLeft: 6 }}>
-              ({stats.total > 0 ? Math.round(((stats.opened || 0) / stats.total) * 100) : 0}%)
-            </span>
+          <div style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 500, marginBottom: 4 }}>
+            {sourceTab === "internal" ? "Customer Applications" : "Links Sent"}
           </div>
-          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>Clicked redirect link</div>
-        </div>
-
-        <div className="card" style={{ padding: "16px 20px" }}>
-          <div style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 500, marginBottom: 4 }}>Applied & In Progress</div>
-          <div style={{ fontSize: 24, fontWeight: 700, color: "var(--accent-violet)" }}>
-            {(stats.applied || 0) - (stats.disbursed || 0)}
+          <div style={{ fontSize: 24, fontWeight: 700, color: "var(--text-primary)" }}>
+            {sourceTab === "internal" ? internalStats.total : (stats.total || 0)}
           </div>
           <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
-            {stats.sanctioned || 0} already sanctioned
+            {sourceTab === "internal" ? "Submitted via WhatsApp & Web" : "Across all products"}
+          </div>
+        </div>
+
+        <div className="card" style={{ padding: "16px 20px" }}>
+          <div style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 500, marginBottom: 4 }}>
+            {sourceTab === "internal" ? "Approved / Sanctioned" : "Opened by Leads"}
+          </div>
+          <div style={{ fontSize: 24, fontWeight: 700, color: sourceTab === "internal" ? "var(--accent-green)" : "var(--accent-yellow)" }}>
+            {sourceTab === "internal" ? (
+              <>
+                {internalStats.approved}
+                <span style={{ fontSize: 13, fontWeight: 500, color: "var(--text-muted)", marginLeft: 6 }}>
+                  ({internalStats.total > 0 ? Math.round((internalStats.approved / internalStats.total) * 100) : 0}%)
+                </span>
+              </>
+            ) : (
+              <>
+                {stats.opened || 0}
+                <span style={{ fontSize: 13, fontWeight: 500, color: "var(--text-muted)", marginLeft: 6 }}>
+                  ({stats.total > 0 ? Math.round(((stats.opened || 0) / stats.total) * 100) : 0}%)
+                </span>
+              </>
+            )}
+          </div>
+          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+            {sourceTab === "internal" ? "Verified & credit eligible" : "Clicked redirect link"}
+          </div>
+        </div>
+
+        <div className="card" style={{ padding: "16px 20px" }}>
+          <div style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 500, marginBottom: 4 }}>
+            {sourceTab === "internal" ? "Under Review / In Progress" : "Applied & In Progress"}
+          </div>
+          <div style={{ fontSize: 24, fontWeight: 700, color: "var(--accent-violet)" }}>
+            {sourceTab === "internal" ? internalStats.pending : ((stats.applied || 0) - (stats.disbursed || 0))}
+          </div>
+          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+            {sourceTab === "internal" ? `${internalStats.approved} ready for disbursal` : `${stats.sanctioned || 0} already sanctioned`}
           </div>
         </div>
 
         <div className="card" style={{ padding: "16px 20px", background: "linear-gradient(145deg, rgba(34,197,94,0.06), rgba(34,197,94,0.02))", borderColor: "rgba(34,197,94,0.25)" }}>
           <div style={{ fontSize: 12, color: "var(--accent-green)", fontWeight: 600, marginBottom: 4, display: "flex", alignItems: "center", gap: 6 }}>
-            <DollarSign size={13} strokeWidth={2.2} /> Total Disbursed
+            <DollarSign size={13} strokeWidth={2.2} /> {sourceTab === "internal" ? "Pipeline / Approved Volume" : "Total Disbursed"}
           </div>
           <div style={{ fontSize: 22, fontWeight: 700, color: "var(--text-primary)" }}>
-            {totalDisbursed > 0 ? formatCurrency(totalDisbursed) : "₹0"}
+            {sourceTab === "internal"
+              ? formatCurrency(internalStats.approvedVolume)
+              : (totalDisbursed > 0 ? formatCurrency(totalDisbursed) : "₹0")}
           </div>
           <div style={{ fontSize: 11.5, color: "var(--accent-green)", marginTop: 4, fontWeight: 500 }}>
-            Est. Commission: ~{formatCurrency(estCommission)}
+            {sourceTab === "internal"
+              ? `Est. DSA Payout: ~${formatCurrency(Math.round(internalStats.approvedVolume * 0.015))}`
+              : `Est. Commission: ~${formatCurrency(estCommission)}`}
           </div>
         </div>
       </div>
 
       {/* Control bar */}
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: "14px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 260 }}>
-          <div style={{ position: "relative", width: "100%", maxWidth: 360 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", flex: 1, minWidth: 260 }}>
+          <div style={{ position: "relative", width: "100%", maxWidth: 300, minWidth: 200 }}>
             <Search size={14} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)" }} />
             <input
               type="text"
@@ -318,7 +365,7 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
             />
           </div>
 
-          <div style={{ display: "flex", gap: 4, overflowX: "auto" }}>
+          <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
             {[
               { id: "all", label: "All" },
               { id: "sent", label: "Sent" },

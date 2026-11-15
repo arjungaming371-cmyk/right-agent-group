@@ -483,7 +483,19 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
   function openEditModal(lead: Lead) {
     setEditModalLead(lead)
     const rawProd = (lead.product_interest || (lead as any).loan_type || "").trim()
-    const matched = LOAN_TYPES.find((p) => p.toLowerCase() === rawProd.toLowerCase()) || rawProd
+    const normalizeProduct = (p: string) => {
+      const lower = p.toLowerCase().trim()
+      if (!lower) return ""
+      if (lower.includes("edu") || lower.includes("student")) return "Education Loan"
+      if (lower.includes("home") || lower.includes("housing")) return "Home Loan"
+      if (lower.includes("biz") || lower.includes("business") || lower.includes("commercial")) return "Business Loan"
+      if (lower.includes("person")) return "Personal Loan"
+      if (lower.includes("lap") || lower.includes("property")) return "Loan Against Property (LAP)"
+      if (lower.includes("gold")) return "Gold Loan"
+      if (lower.includes("car") || lower.includes("vehicle") || lower.includes("auto")) return "Vehicle Loan"
+      return LOAN_TYPES.find((t) => t.toLowerCase() === lower) || p
+    }
+    const matched = normalizeProduct(rawProd)
 
     setEditForm({
       name: lead.name || "",
@@ -717,19 +729,29 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
   // closure), so it no longer needs its own deps list.
   usePolling(() => load(true), 15000)
 
+  const isQualified = (l: Lead) =>
+    l.status === "qualified" ||
+    l.status === "interested" ||
+    l.status === "form_opened" ||
+    l.status === "approved" ||
+    l.status === "link_sent" ||
+    l.status === "docs_pending" ||
+    l.interested === "interested" ||
+    (Number(l.score) || 0) >= 70
+
   const totalLeads = leads.length
-  const qualified = leads.filter((l) => l.status === "qualified").length
+  const qualified = leads.filter(isQualified).length
   // Pipeline value = sum of loan_amount only where it's a valid positive number
   const pipelineValue = leads.reduce((s, l) => {
     const amt = Number(l.loan_amount)
     return s + (isFinite(amt) && amt > 0 ? amt : 0)
   }, 0)
-  // Qualified value = the same sum, but only for leads marked "qualified".
+  // Qualified value = the sum for qualified/high-intent leads (score >= 70 or active pipeline stage).
   // The raw total is inflated by junk/test entries (a single ₹1,234Cr test
   // lead once showed a ₹1,235Cr pipeline), so the tile leads with the
   // qualified money and shows the total as context — qualified vs total.
   const qualifiedValue = leads.reduce((s, l) => {
-    if (l.status !== "qualified") return s
+    if (!isQualified(l)) return s
     const amt = Number(l.loan_amount)
     return s + (isFinite(amt) && amt > 0 ? amt : 0)
   }, 0)
@@ -799,6 +821,17 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
   }
 
   async function addLead() {
+    if (!form.name.trim()) {
+      toast.error("Full name is required")
+      return
+    }
+    const phoneDigits = (form.phone || "").replace(/\D/g, "")
+    const isValidPhone = phoneDigits.length === 10 || (phoneDigits.length === 12 && phoneDigits.startsWith("91"))
+    if (!isValidPhone) {
+      toast.error("Please enter a valid 10-digit Indian mobile number")
+      return
+    }
+
     const res = await fetch("/api/leads", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1838,23 +1871,40 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
           <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, padding: 28, width: 440 }}>
             <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 20 }}>Add New Lead</div>
-            {[["name", "Full Name *"], ["phone", "Phone *"], ["address", "Address"], ["loan_amount", "Loan Amount (₹)"]].map(([k, l]) => (
-              <div key={k} style={{ marginBottom: 12 }}>
-                <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>{l}</label>
-                <div style={{ position: "relative" }}>
-                  <input
-                    value={(form as any)[k]}
-                    onChange={(e) => setForm({ ...form, [k]: e.target.value })}
-                    style={{ width: "100%", paddingRight: (k === "name" || k === "address") ? 36 : undefined }}
-                  />
-                  {(k === "name" || k === "address") && (
-                    <div style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)" }}>
-                      <VoiceDictation onTranscript={(t: string) => setForm((prev) => ({ ...prev, [k]: (prev as any)[k] ? `${(prev as any)[k]} ${t}` : t }))} title={`Speak ${l}`} />
+            {[["name", "Full Name *"], ["phone", "Phone *"], ["address", "Address"], ["loan_amount", "Loan Amount (₹)"]].map(([k, l]) => {
+              const isPhone = k === "phone"
+              const cleanDigits = (form.phone || "").replace(/\D/g, "")
+              const phoneValid = cleanDigits.length === 10 || (cleanDigits.length === 12 && cleanDigits.startsWith("91"))
+              const hasPhoneError = isPhone && form.phone.trim().length > 0 && !phoneValid
+
+              return (
+                <div key={k} style={{ marginBottom: 12 }}>
+                  <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>{l}</label>
+                  <div style={{ position: "relative" }}>
+                    <input
+                      value={(form as any)[k]}
+                      onChange={(e) => setForm({ ...form, [k]: e.target.value })}
+                      placeholder={isPhone ? "+91 98765 43210" : undefined}
+                      style={{
+                        width: "100%",
+                        paddingRight: (k === "name" || k === "address") ? 36 : undefined,
+                        borderColor: hasPhoneError ? "var(--accent-red)" : undefined,
+                      }}
+                    />
+                    {(k === "name" || k === "address") && (
+                      <div style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)" }}>
+                        <VoiceDictation onTranscript={(t: string) => setForm((prev) => ({ ...prev, [k]: (prev as any)[k] ? `${(prev as any)[k]} ${t}` : t }))} title={`Speak ${l}`} />
+                      </div>
+                    )}
+                  </div>
+                  {hasPhoneError && (
+                    <div style={{ fontSize: 11, color: "var(--accent-red)", marginTop: 4 }}>
+                      Please enter a valid 10-digit Indian mobile number (e.g. 9876543210)
                     </div>
                   )}
                 </div>
-              </div>
-            ))}
+              )
+            })}
             <div style={{ marginBottom: 12 }}>
               <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Loan Type</label>
               <select value={form.product_interest} onChange={(e) => setForm({ ...form, product_interest: e.target.value })}>
@@ -1865,10 +1915,18 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                 ))}
               </select>
             </div>
-            <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
-              <button onClick={() => setShowAdd(false)} style={{ flex: 1, padding: 10, background: "transparent", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text-secondary)" }}>Cancel</button>
-              <button onClick={addLead} disabled={!form.name || !form.phone} className="btn-primary" style={{ flex: 1, height: 40 }}>Add Lead</button>
-            </div>
+            {(() => {
+              const cleanDigits = (form.phone || "").replace(/\D/g, "")
+              const phoneValid = cleanDigits.length === 10 || (cleanDigits.length === 12 && cleanDigits.startsWith("91"))
+              const canSubmit = form.name.trim().length > 0 && phoneValid
+
+              return (
+                <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+                  <button onClick={() => setShowAdd(false)} style={{ flex: 1, padding: 10, background: "transparent", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text-secondary)" }}>Cancel</button>
+                  <button onClick={addLead} disabled={!canSubmit} className="btn-primary" style={{ flex: 1, height: 40 }}>Add Lead</button>
+                </div>
+              )
+            })()}
           </div>
         </div>
       )}

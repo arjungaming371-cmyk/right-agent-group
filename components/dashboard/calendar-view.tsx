@@ -71,6 +71,12 @@ type ScanResult = {
   eventsCreated: number
   needsReview: number
   skippedCount: number
+  callsProcessed?: number
+  eventsDetected?: number
+  scanned?: number
+  skipped?: number
+  skippedDuplicates?: number
+  discovered?: any[]
   details?: {
     callSid: string
     leadName?: string
@@ -430,10 +436,12 @@ export default function CalendarView({ role }: { role: Role }) {
       const data = await res.json().catch(() => ({}))
       if (res.ok) {
         setScanResult(data)
+        const evCount = data.eventsCreated ?? data.eventsDetected ?? data.discovered?.length ?? 0
+        const callsCount = data.processedCount ?? data.callsProcessed ?? data.scanned ?? 0
         if (dryRun) {
-          toast.success(`Preview completed: ${data.eventsCreated} events discovered in ${data.processedCount} calls`)
+          toast.success(`Preview completed: ${evCount} events discovered in ${callsCount} calls`)
         } else {
-          toast.success(`Scan applied! Created ${data.eventsCreated} events, ${data.needsReview} in Review Queue`)
+          toast.success(`Scan applied! Created ${evCount} events, ${data.needsReview ?? 0} in Review Queue`)
           loadData()
         }
       } else {
@@ -1293,19 +1301,19 @@ export default function CalendarView({ role }: { role: Role }) {
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                 <div style={{ background: "var(--bg-secondary)", padding: "10px 14px", borderRadius: 8 }}>
                   <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Calls Processed</div>
-                  <div style={{ fontSize: 16, fontWeight: 700 }}>{scanResult.processedCount}</div>
+                  <div style={{ fontSize: 16, fontWeight: 700 }}>{scanResult.processedCount ?? scanResult.callsProcessed ?? scanResult.scanned ?? 0}</div>
                 </div>
                 <div style={{ background: "rgba(16, 185, 129, 0.12)", padding: "10px 14px", borderRadius: 8, color: "#10b981" }}>
                   <div style={{ fontSize: 11, opacity: 0.8 }}>Events Detected</div>
-                  <div style={{ fontSize: 16, fontWeight: 700 }}>{scanResult.eventsCreated}</div>
+                  <div style={{ fontSize: 16, fontWeight: 700 }}>{scanResult.eventsCreated ?? scanResult.eventsDetected ?? scanResult.discovered?.length ?? 0}</div>
                 </div>
                 <div style={{ background: "rgba(245, 158, 11, 0.12)", padding: "10px 14px", borderRadius: 8, color: "#f59e0b" }}>
                   <div style={{ fontSize: 11, opacity: 0.8 }}>Sent to Review Queue</div>
-                  <div style={{ fontSize: 16, fontWeight: 700 }}>{scanResult.needsReview}</div>
+                  <div style={{ fontSize: 16, fontWeight: 700 }}>{scanResult.needsReview ?? 0}</div>
                 </div>
                 <div style={{ background: "var(--bg-secondary)", padding: "10px 14px", borderRadius: 8 }}>
                   <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Skipped (No Schedule Intent)</div>
-                  <div style={{ fontSize: 16, fontWeight: 700 }}>{scanResult.skippedCount}</div>
+                  <div style={{ fontSize: 16, fontWeight: 700 }}>{scanResult.skippedCount ?? scanResult.skippedDuplicates ?? scanResult.skipped ?? 0}</div>
                 </div>
               </div>
 

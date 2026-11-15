@@ -529,6 +529,8 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
             gap: 6,
             padding: "4px 14px 10px",
             overflowX: "auto",
+            scrollbarWidth: "none",
+            msOverflowStyle: "none",
             borderBottom: `1px solid ${IG_THEME.hairline}`,
           }}
         >

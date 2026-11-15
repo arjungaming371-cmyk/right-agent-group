@@ -37,6 +37,7 @@ export type Msg = {
   reaction?: string | null
   wa_message_id?: string | null
   branch_id?: string | null
+  error_message?: string | null
 }
 
 export const WA = {

@@ -181,7 +181,12 @@ export default function SecurityView({ role = "admin" }: { role?: Role }) {
   async function toggleDndList() {
     const next = !showDndList
     setShowDndList(next)
-    if (next) await loadDndEntries()
+    if (next) {
+      await loadDndEntries()
+      if (dndCount === 0 && dndEntries.length === 0) {
+        toast.info("DND suppression list is currently empty (0 numbers)")
+      }
+    }
   }
 
   async function toggle(key: string, current: boolean) {

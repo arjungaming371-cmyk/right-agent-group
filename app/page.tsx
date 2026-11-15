@@ -121,7 +121,6 @@ const PLATFORM = [
   {
     icon: Brain,
     title: "Lead Brain",
-    wide: true,
     desc: "AI remembers every conversation per lead — known facts, summaries and sentiment history, so no customer is ever re-asked what they already said and your team walks into every follow-up fully briefed.",
   },
   {
@@ -192,7 +191,7 @@ export default function HomePage() {
             Turn Every Loan Lead Into a <span className="rg-grad">Conversation.</span>
           </h1>
           <p className="rg-sub">
-            Turn every loan lead into a conversation. AI employees automatically call, qualify, follow up and manage loan leads across Phone, WhatsApp and Instagram — from one powerful operations console.
+            AI employees automatically call, qualify, follow up and manage loan leads across Phone, WhatsApp and Instagram — from one powerful operations console.
           </p>
           <div className="rg-hero-cta">
             <Link href="/demo" className="rg-btn rg-btn-primary">
@@ -423,8 +422,8 @@ export default function HomePage() {
         </div>
 
         <div className="rg-bento">
-          {PLATFORM.map(({ icon: Icon, title, desc, wide }) => (
-            <div key={title} className={`rg-glass rg-card ${wide ? "rg-wide" : ""}`}>
+          {PLATFORM.map(({ icon: Icon, title, desc }) => (
+            <div key={title} className="rg-glass rg-card">
               <div className="rg-card-icon">
                 <Icon size={19} strokeWidth={1.9} />
               </div>

@@ -342,6 +342,7 @@ export default function ChatWindow({
                   onForward={canEdit ? onForward : undefined}
                   onJump={jumpToMsg}
                   onOpenImage={setLightbox}
+                  onRetry={canEdit ? (m) => setText(m.content) : undefined}
                 />
               </div>
             </div>

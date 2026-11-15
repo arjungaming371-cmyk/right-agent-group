@@ -7,14 +7,14 @@ export const dynamic = "force-dynamic"
 
 // GET — list recent DND/suppression entries.
 export async function GET(req: NextRequest) {
-  const session = await requireModuleOrRole(req, "security", ["admin", "developer"])
+  const session = await requireModuleOrRole(req, "security", ["admin", "developer", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const res = await query(`SELECT phone, reason, source, added_by, created_at FROM dnd_suppression ORDER BY created_at DESC LIMIT 500`)
   return NextResponse.json({ entries: res.rows })
 }
 
 export async function POST(req: NextRequest) {
-  const session = await requireModuleOrRole(req, "security", ["admin", "developer"])
+  const session = await requireModuleOrRole(req, "security", ["admin", "developer", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const body = await req.json().catch(() => ({}))

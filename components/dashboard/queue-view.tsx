@@ -733,7 +733,7 @@ export default function QueueView({ role }: { role: Role }) {
               )}
               {!loading && !loadError && visibleRows.length === 0 && (
                 <tr><td colSpan={8} style={{ padding: 40, textAlign: "center", color: "var(--text-muted)" }}>
-                  Nothing here yet — select leads in the Leads view and click "Add to Call Queue", or upload a CSV in Upload & Data.
+                  Nothing here yet — select leads in the Leads view and click &quot;Add to Call Queue&quot;, or click Upload CSV in the Leads tab.
                 </td></tr>
               )}
               {visibleRows.map((item) => {

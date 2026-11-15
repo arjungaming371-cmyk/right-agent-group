@@ -27,6 +27,7 @@ export async function GET(req: NextRequest) {
   }
 
   const params = branchId ? [branchId] : []
+  const queryParams = branchId ? [branchId, days] : [days]
   // B() wraps a predicate with the branch filter when one applies.
   const B = (col: string) => (branchId ? `${col} = $1` : "TRUE")
   const dayParam = branchId ? "$2" : "$1"
@@ -44,45 +45,51 @@ export async function GET(req: NextRequest) {
         ) c ON c.day = d.day
         ORDER BY d.day
       `,
-        branchId ? [branchId, days] : [days]
+        queryParams
       ),
       query(
         `
         SELECT
           count(*) FILTER (WHERE status = 'new')       AS new,
           count(*) FILTER (WHERE status = 'contacted')  AS contacted,
-          count(*) FILTER (WHERE status = 'qualified')  AS qualified,
+          count(*) FILTER (WHERE (status IN ('qualified', 'interested', 'form_opened', 'approved', 'docs_pending', 'link_sent') OR score >= 70))  AS qualified,
           (SELECT count(*) FROM loan_applications WHERE ${B("branch_id")})      AS applied
         FROM leads
         WHERE ${B("branch_id")}
       `,
         params
       ),
-      query(`SELECT language, count(*)::int AS count FROM voice_calls WHERE ${B("branch_id")} GROUP BY language`, params),
-      query(`SELECT sentiment, count(*)::int AS count FROM voice_calls WHERE sentiment IS NOT NULL AND ${B("branch_id")} GROUP BY sentiment`, params),
+      query(
+        `SELECT language, count(*)::int AS count FROM voice_calls WHERE ${B("branch_id")} AND created_at > now() - (${dayParam}::int * interval '1 day') GROUP BY language`,
+        queryParams
+      ),
+      query(
+        `SELECT sentiment, count(*)::int AS count FROM voice_calls WHERE sentiment IS NOT NULL AND ${B("branch_id")} AND created_at > now() - (${dayParam}::int * interval '1 day') GROUP BY sentiment`,
+        queryParams
+      ),
       query(
         `
         SELECT extract(hour from created_at)::int AS hour, count(*)::int AS count
-        FROM voice_calls WHERE ${B("branch_id")} GROUP BY 1 ORDER BY 1
+        FROM voice_calls WHERE ${B("branch_id")} AND created_at > now() - (${dayParam}::int * interval '1 day') GROUP BY 1 ORDER BY 1
       `,
-        params
+        queryParams
       ),
       query(
         `
         SELECT
           (SELECT count(*)::int FROM leads WHERE ${B("branch_id")})                                          AS total_leads,
-          (SELECT count(*)::int FROM voice_calls WHERE ${B("branch_id")})                                    AS total_calls,
-          (SELECT count(*)::int FROM whatsapp_messages WHERE ${B("branch_id")})                              AS total_messages,
-          (SELECT count(*)::int FROM leads WHERE ${B("branch_id")} AND status = 'qualified')                 AS qualified_leads,
-          (SELECT COALESCE(avg(duration), 0)::int FROM voice_calls WHERE ${B("branch_id")} AND duration > 0) AS avg_duration,
-          (SELECT count(*)::int FROM voice_calls WHERE ${B("branch_id")} AND (duration > 0 OR outcome IN ('completed', 'answered', 'resolved'))) AS connected_calls,
-          (SELECT count(*)::int FROM voice_calls WHERE ${B("branch_id")} AND (outcome IN ('resolved', 'completed', 'answered') OR status = 'completed')) AS resolved_calls,
-          (SELECT count(*)::int FROM voice_calls WHERE ${B("branch_id")} AND outcome = 'needs_human')         AS needs_human,
+          (SELECT count(*)::int FROM voice_calls WHERE ${B("branch_id")} AND created_at > now() - (${dayParam}::int * interval '1 day')) AS total_calls,
+          (SELECT count(*)::int FROM whatsapp_messages WHERE ${B("branch_id")} AND created_at > now() - (${dayParam}::int * interval '1 day')) AS total_messages,
+          (SELECT count(*)::int FROM leads WHERE ${B("branch_id")} AND (status IN ('qualified', 'interested', 'form_opened', 'approved', 'docs_pending', 'link_sent') OR score >= 70)) AS qualified_leads,
+          (SELECT COALESCE(avg(duration), 0)::int FROM voice_calls WHERE ${B("branch_id")} AND duration > 0 AND created_at > now() - (${dayParam}::int * interval '1 day')) AS avg_duration,
+          (SELECT count(*)::int FROM voice_calls WHERE ${B("branch_id")} AND (duration > 0 OR outcome IN ('completed', 'answered', 'resolved')) AND created_at > now() - (${dayParam}::int * interval '1 day')) AS connected_calls,
+          (SELECT count(*)::int FROM voice_calls WHERE ${B("branch_id")} AND (outcome IN ('resolved', 'completed', 'answered') OR status = 'completed') AND created_at > now() - (${dayParam}::int * interval '1 day')) AS resolved_calls,
+          (SELECT count(*)::int FROM voice_calls WHERE ${B("branch_id")} AND outcome = 'needs_human' AND created_at > now() - (${dayParam}::int * interval '1 day')) AS needs_human,
           (SELECT count(*)::int FROM leads WHERE ${B("branch_id")} AND callback_at IS NOT NULL AND callback_at < now() + interval '1 day') AS followups_due,
-          (SELECT count(*)::int FROM leads WHERE ${B("branch_id")} AND created_at > now() - interval '7 days')             AS new_leads_7d,
+          (SELECT count(*)::int FROM leads WHERE ${B("branch_id")} AND created_at > now() - (${dayParam}::int * interval '1 day'))             AS new_leads_7d,
           (SELECT count(*)::int FROM loan_applications WHERE ${B("branch_id")})                              AS applications
       `,
-        params
+        queryParams
       ),
     ])
 

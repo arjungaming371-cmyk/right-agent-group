@@ -28,9 +28,30 @@ export const POST = withRoute("calendar/scan", async (req: NextRequest) => {
     branchId: effectiveBranchId,
   })
 
+  const eventsCount = Array.isArray(result.discovered)
+    ? result.discovered.length
+    : (result.confirmed ?? 0) + (result.needsReview ?? 0)
+  const processedCount = result.scanned ?? 0
+  const skippedCount = result.skippedDuplicates ?? 0
+
   return NextResponse.json({
     ok: true,
     dryRun,
     ...result,
+    processedCount,
+    callsProcessed: processedCount,
+    eventsCreated: eventsCount,
+    eventsDetected: eventsCount,
+    skippedCount,
+    skipped: skippedCount,
+    needsReview: result.needsReview ?? 0,
+    details: (result.discovered || []).map((d: any) => ({
+      leadName: d.leadName || "Lead",
+      phone: d.leadPhone || "",
+      callSid: String(d.sourceId || "Call"),
+      durationMs: 0,
+      highConfidenceEvents: d.confidence === "high" ? [d] : [],
+      reviewEvents: d.confidence !== "high" ? [d] : [],
+    })),
   })
 })

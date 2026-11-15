@@ -424,7 +424,7 @@ export default function VoiceLogsView({ role }: { role: Role }) {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Smart search (name, phone, transcript, outcome)..."
-                style={{ width: "100%", padding: "7px 34px 7px 32px", height: 34, borderRadius: 8, fontSize: 12.5 }}
+                style={{ width: "100%", padding: "7px 42px 7px 32px", height: 34, borderRadius: 8, fontSize: 12.5 }}
               />
               <div style={{ position: "absolute", right: 4, top: "50%", transform: "translateY(-50%)" }}>
                 <VoiceDictation onTranscript={(t) => setSearch(t)} title="Dictate call search" />
