@@ -33,23 +33,32 @@ export function Avatar({ name, size = 40, phone }: { name: string; size?: number
  * (delivered), double blue (read). The old text "✓✓" rendered with the
  * wrong glyph proportions; these are the actual WhatsApp shapes.
  */
-export function Ticks({ status, size = 16 }: { status?: string; size?: number }) {
+export function Ticks({ status, size = 16, title, onRetry }: { status?: string; size?: number; title?: string; onRetry?: () => void }) {
   const color = status === "read" ? WA.tickRead : WA.metaOut
   if (status === "sending") {
     // small clock while the send API hasn't confirmed yet
     return (
-      <svg width={size} height={size * 0.75} viewBox="0 0 16 12" fill="none">
-        <circle cx="8" cy="6" r="4.6" stroke={WA.metaOut} strokeWidth="1.2" />
-        <path d="M8 3.4 V6 L10 7.4" stroke={WA.metaOut} strokeWidth="1.2" strokeLinecap="round" />
-      </svg>
+      <span title="Sending..." style={{ display: "inline-flex", alignItems: "center" }}>
+        <svg width={size} height={size * 0.75} viewBox="0 0 16 12" fill="none">
+          <circle cx="8" cy="6" r="4.6" stroke={WA.metaOut} strokeWidth="1.2" />
+          <path d="M8 3.4 V6 L10 7.4" stroke={WA.metaOut} strokeWidth="1.2" strokeLinecap="round" />
+        </svg>
+      </span>
     )
   }
   if (status === "failed") {
+    const tip = title || "Delivery failed (Meta token/recipient error). Tap to retry."
     return (
-      <svg width={size} height={size * 0.75} viewBox="0 0 16 12" fill="none">
-        <circle cx="8" cy="6" r="4.6" stroke={WA.danger || "#ef697a"} strokeWidth="1.2" />
-        <path d="M8 3.6 V6.8 M8 8.4 V8.5" stroke={WA.danger || "#ef697a"} strokeWidth="1.3" strokeLinecap="round" />
-      </svg>
+      <span
+        onClick={onRetry}
+        title={tip}
+        style={{ display: "inline-flex", alignItems: "center", cursor: onRetry ? "pointer" : "help" }}
+      >
+        <svg width={size} height={size * 0.75} viewBox="0 0 16 12" fill="none">
+          <circle cx="8" cy="6" r="4.6" stroke={WA.danger || "#ef697a"} strokeWidth="1.2" />
+          <path d="M8 3.6 V6.8 M8 8.4 V8.5" stroke={WA.danger || "#ef697a"} strokeWidth="1.3" strokeLinecap="round" />
+        </svg>
+      </span>
     )
   }
   if (status === "delivered" || status === "read") {

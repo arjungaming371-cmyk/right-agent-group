@@ -66,6 +66,28 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
   const [actingId, setActingId] = useState<string | null>(null)
   const [copiedToken, setCopiedToken] = useState<string | null>(null)
 
+  // Internal applications vs Bank links sub-tabs
+  const [sourceTab, setSourceTab] = useState<"internal" | "links">("internal")
+  const [internalApps, setInternalApps] = useState<any[]>([])
+  const [loadingInternal, setLoadingInternal] = useState(false)
+
+  const loadInternalApps = useCallback(async () => {
+    setLoadingInternal(true)
+    try {
+      const res = await fetch("/api/loans")
+      if (res.ok) {
+        const data = await res.json()
+        setInternalApps(Array.isArray(data) ? data : [])
+      }
+    } catch {} finally {
+      setLoadingInternal(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadInternalApps()
+  }, [loadInternalApps])
+
   // Bank library modal
   const [showLibrary, setShowLibrary] = useState(false)
   useEscapeDismiss(showLibrary, () => setShowLibrary(false))
@@ -191,6 +213,55 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
 
+      {/* Sub-tab Switcher: Customer Form Applications vs Partner Bank Links */}
+      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+        <button
+          type="button"
+          onClick={() => setSourceTab("internal")}
+          style={{
+            padding: "8px 16px",
+            borderRadius: 9,
+            fontSize: 13,
+            fontWeight: 600,
+            border: sourceTab === "internal" ? "1px solid var(--accent-violet)" : "1px solid var(--border)",
+            background: sourceTab === "internal" ? "rgba(139,124,255,0.12)" : "var(--bg-card)",
+            color: sourceTab === "internal" ? "var(--accent-violet)" : "var(--text-muted)",
+            cursor: "pointer",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 7,
+          }}
+        >
+          <span>Customer Form Applications</span>
+          <span style={{ fontSize: 11, padding: "1px 7px", borderRadius: 999, background: sourceTab === "internal" ? "var(--accent-violet)" : "var(--overlay-soft)", color: sourceTab === "internal" ? "#fff" : "var(--text-muted)" }}>
+            {internalApps.length}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setSourceTab("links")}
+          style={{
+            padding: "8px 16px",
+            borderRadius: 9,
+            fontSize: 13,
+            fontWeight: 600,
+            border: sourceTab === "links" ? "1px solid var(--accent-violet)" : "1px solid var(--border)",
+            background: sourceTab === "links" ? "rgba(139,124,255,0.12)" : "var(--bg-card)",
+            color: sourceTab === "links" ? "var(--accent-violet)" : "var(--text-muted)",
+            cursor: "pointer",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 7,
+          }}
+        >
+          <span>Partner Bank Links</span>
+          <span style={{ fontSize: 11, padding: "1px 7px", borderRadius: 999, background: sourceTab === "links" ? "var(--accent-violet)" : "var(--overlay-soft)", color: sourceTab === "links" ? "#fff" : "var(--text-muted)" }}>
+            {links.length}
+          </span>
+        </button>
+      </div>
+
       {/* Top Banner & Financial Metrics */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14 }}>
         <div className="card" style={{ padding: "16px 20px" }}>
@@ -262,13 +333,15 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
                 onClick={() => setStatusFilter(tab.id)}
                 style={{
                   height: 32,
-                  padding: "0 11px",
+                  padding: "0 12px",
                   fontSize: 12,
                   fontWeight: 600,
                   borderRadius: 7,
                   border: statusFilter === tab.id ? "1px solid rgba(139,124,255,0.4)" : "1px solid transparent",
                   background: statusFilter === tab.id ? "rgba(139,124,255,0.12)" : "transparent",
                   color: statusFilter === tab.id ? "var(--accent-violet)" : "var(--text-secondary)",
+                  whiteSpace: "nowrap",
+                  flexShrink: 0,
                 }}
               >
                 {tab.label}
@@ -299,9 +372,95 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
         </div>
       </div>
 
-      {/* Main Link Sends Table */}
+      {/* Main Table: Customer Applications or Bank Link Sends */}
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
-        {loading ? (
+        {sourceTab === "internal" ? (
+          loadingInternal ? (
+            <div style={{ padding: 24 }}><SkeletonList rows={6} /></div>
+          ) : internalApps.length === 0 ? (
+            <div style={{ padding: 48, textAlign: "center", color: "var(--text-muted)" }}>
+              <Landmark size={36} strokeWidth={1.5} style={{ margin: "0 auto 12px", opacity: 0.4 }} />
+              <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>No customer loan applications yet</div>
+              <div style={{ fontSize: 12, marginTop: 4 }}>
+                Applications submitted by leads via WhatsApp or the web application form will appear here.
+              </div>
+            </div>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", minWidth: 840, borderCollapse: "collapse", textAlign: "left", fontSize: 12.5 }}>
+                <thead>
+                  <tr style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-muted)", fontSize: 11.5, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                    <th style={{ padding: "10px 16px" }}>Applicant & Contact</th>
+                    <th style={{ padding: "10px 16px" }}>Loan Type & City</th>
+                    <th style={{ padding: "10px 16px" }}>Requested Amount</th>
+                    <th style={{ padding: "10px 16px" }}>Submitted</th>
+                    <th style={{ padding: "10px 16px" }}>Status</th>
+                    <th style={{ padding: "10px 16px", textAlign: "right" }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {internalApps
+                    .filter((app) => {
+                      if (!search.trim()) return true
+                      const s = search.toLowerCase()
+                      return (
+                        (app.customer_name || "").toLowerCase().includes(s) ||
+                        (app.phone || "").toLowerCase().includes(s) ||
+                        (app.loan_type || "").toLowerCase().includes(s) ||
+                        (app.city || "").toLowerCase().includes(s)
+                      )
+                    })
+                    .map((app) => {
+                      const isApproved = /approved|sanctioned/i.test(app.status || "")
+                      const isPending = /pending|review|new/i.test(app.status || "")
+                      const statusColor = isApproved ? "var(--accent-green)" : isPending ? "var(--accent-yellow)" : "var(--accent-blue)"
+                      const statusBg = isApproved ? "rgba(45,212,160,0.12)" : isPending ? "rgba(247,183,49,0.12)" : "rgba(59,130,246,0.12)"
+
+                      return (
+                        <tr key={app.id} style={{ borderBottom: "1px solid var(--border-light)" }}>
+                          <td style={{ padding: "12px 16px" }}>
+                            <div style={{ fontWeight: 600, color: "var(--text-primary)" }}>{app.customer_name || "Applicant"}</div>
+                            <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2 }}>{app.phone || "—"}</div>
+                          </td>
+                          <td style={{ padding: "12px 16px" }}>
+                            <div style={{ fontWeight: 600 }}>{app.loan_type || "Loan"}</div>
+                            <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2 }}>{app.city || "—"}</div>
+                          </td>
+                          <td style={{ padding: "12px 16px" }}>
+                            <span style={{ fontWeight: 700, color: "var(--accent-green)", fontSize: 13 }}>
+                              {app.loan_amount ? formatCurrency(app.loan_amount) : "—"}
+                            </span>
+                          </td>
+                          <td style={{ padding: "12px 16px", fontSize: 11.5, color: "var(--text-muted)" }}>
+                            <div>{timeAgo(app.submitted_at || app.created_at)}</div>
+                            <div style={{ fontSize: 10, opacity: 0.75 }}>{formatDateTime(app.submitted_at || app.created_at)}</div>
+                          </td>
+                          <td style={{ padding: "12px 16px" }}>
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 9px", borderRadius: 6, fontSize: 11.5, fontWeight: 600, background: statusBg, color: statusColor }}>
+                              <span style={{ width: 6, height: 6, borderRadius: "50%", background: statusColor }} />
+                              {app.status || "submitted"}
+                            </span>
+                          </td>
+                          <td style={{ padding: "12px 16px", textAlign: "right" }}>
+                            <button
+                              onClick={() => {
+                                window.dispatchEvent(new CustomEvent("rag:navigate", { detail: { view: "leads", search: app.phone || app.customer_name } }))
+                              }}
+                              className="btn-ghost"
+                              style={{ height: 28, fontSize: 11.5, padding: "0 10px" }}
+                              title="View Lead in CRM"
+                            >
+                              View in CRM
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                </tbody>
+              </table>
+            </div>
+          )
+        ) : loading ? (
           <div style={{ padding: 24 }}><SkeletonList rows={6} /></div>
         ) : links.length === 0 ? (
           <div style={{ padding: 48, textAlign: "center", color: "var(--text-muted)" }}>

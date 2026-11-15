@@ -482,12 +482,15 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
 
   function openEditModal(lead: Lead) {
     setEditModalLead(lead)
+    const rawProd = (lead.product_interest || (lead as any).loan_type || "").trim()
+    const matched = LOAN_TYPES.find((p) => p.toLowerCase() === rawProd.toLowerCase()) || rawProd
+
     setEditForm({
       name: lead.name || "",
       phone: lead.phone || "",
       address: lead.address || "",
       loan_amount: lead.loan_amount ? String(lead.loan_amount) : "",
-      product_interest: lead.product_interest || "",
+      product_interest: matched,
       notes: lead.notes || "",
     })
   }
@@ -1063,12 +1066,30 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                     )}
                   </th>
                   {["LEAD", "SCORE", "ADDRESS", "LOAN TYPE", "VALUE", "STATUS", "FORM", "CALLS", "UPDATED", "ACTIONS"].map((h) => (
-                    <th key={h} style={{ padding: "10px 12px", textAlign: h === "CALLS" ? "center" : "left", fontSize: 11, fontWeight: 600, color: "var(--text-muted)", letterSpacing: "0.05em", whiteSpace: "nowrap" }}>{h}</th>
+                    <th key={h} style={{
+                      padding: "10px 12px",
+                      textAlign: h === "CALLS" ? "center" : "left",
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: "var(--text-muted)",
+                      letterSpacing: "0.05em",
+                      whiteSpace: "nowrap",
+                      ...(h === "ACTIONS" ? { position: "sticky", right: 0, background: "var(--bg-card)", zIndex: 2, boxShadow: "-6px 0 10px rgba(0,0,0,0.12)" } : {}),
+                    }}>{h}</th>
                   ))}
                 </>
               ) : (
                 ["PROSPECT / HANDLE", "CHANNEL", "DETECTED PHONE", "PRODUCT INTEREST", "LATEST INQUIRY", "LAST ACTIVE", "ACTIONS"].map((h) => (
-                  <th key={h} style={{ padding: "10px 12px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "var(--text-muted)", letterSpacing: "0.05em", whiteSpace: "nowrap" }}>{h}</th>
+                  <th key={h} style={{
+                    padding: "10px 12px",
+                    textAlign: "left",
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: "var(--text-muted)",
+                    letterSpacing: "0.05em",
+                    whiteSpace: "nowrap",
+                    ...(h === "ACTIONS" ? { position: "sticky", right: 0, background: "var(--bg-card)", zIndex: 2, boxShadow: "-6px 0 10px rgba(0,0,0,0.12)" } : {}),
+                  }}>{h}</th>
                 ))
               )}
             </tr>
@@ -1338,7 +1359,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                       <div>{timeAgo(lead.last_interaction_at || lead.updated_at || lead.created_at)}</div>
                       <div style={{ fontSize: 9.5, opacity: 0.75, marginTop: 1 }}>{formatDateTime(lead.last_interaction_at || lead.updated_at || lead.created_at)}</div>
                     </td>
-                    <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
+                    <td style={{ padding: "8px 10px", whiteSpace: "nowrap", position: "sticky", right: 0, background: "var(--bg-card)", zIndex: 1, boxShadow: "-6px 0 10px rgba(0,0,0,0.12)" }}>
                       <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
                         {canEdit && (
                           <>
@@ -1536,7 +1557,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                     <div>{timeAgo(lead.updated_at || lead.created_at)}</div>
                     <div style={{ fontSize: 9.5, opacity: 0.75, marginTop: 1 }}>{formatDateTime(lead.updated_at || lead.created_at)}</div>
                   </td>
-                  <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
+                  <td style={{ padding: "8px 10px", whiteSpace: "nowrap", position: "sticky", right: 0, background: selectedIds.includes(lead.id) ? "var(--bg-card-hover)" : "var(--bg-card)", zIndex: 1, boxShadow: "-6px 0 10px rgba(0,0,0,0.12)" }}>
                     <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
                       {canEdit && (
                         <>
@@ -2154,6 +2175,9 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                   style={{ width: "100%", height: 38, borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)", paddingLeft: 10, fontSize: 13 }}
                 >
                   <option value="">Select product...</option>
+                  {editForm.product_interest && !LOAN_TYPES.includes(editForm.product_interest) && (
+                    <option value={editForm.product_interest}>{editForm.product_interest}</option>
+                  )}
                   {PRODUCT_GROUPS.map((g) => (
                     <optgroup key={g.label} label={g.label}>
                       {g.products.map((t) => <option key={t} value={t}>{t}</option>)}

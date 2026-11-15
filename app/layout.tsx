@@ -1,9 +1,15 @@
 import type { Metadata, Viewport } from "next"
-import { Inter } from "next/font/google"
+import { Inter, Noto_Sans_Telugu } from "next/font/google"
 import "./globals.css"
 import { THEME_INIT_SCRIPT } from "@/lib/theme"
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "swap" })
+const notoSansTelugu = Noto_Sans_Telugu({
+  subsets: ["telugu"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-telugu",
+  display: "swap",
+})
 
 // Canonical site URL. Falls back to localhost so builds never crash when the
 // env is missing — production deployments set NEXT_PUBLIC_APP_URL anyway
@@ -72,7 +78,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     //
     // This only suppresses the warning for <html>'s own attributes, one level
     // deep, so real hydration bugs anywhere inside the app still surface.
-    <html lang="en" className={inter.variable} suppressHydrationWarning>
+    <html lang="en" className={`${inter.variable} ${notoSansTelugu.variable}`} suppressHydrationWarning>
       <head>
         {/* Applies the saved theme before first paint — without this, every
             load flashes the dark theme for a frame even on Light. */}

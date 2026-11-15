@@ -70,30 +70,37 @@ export async function GET(req: NextRequest) {
       query(
         `
         SELECT
-          (SELECT count(*) FROM leads WHERE ${B("branch_id")})                                          AS total_leads,
-          (SELECT count(*) FROM voice_calls WHERE ${B("branch_id")})                                    AS total_calls,
-          (SELECT count(*) FROM whatsapp_messages WHERE ${B("branch_id")})                              AS total_messages,
-          (SELECT count(*) FROM leads WHERE ${B("branch_id")} AND status = 'qualified')                 AS qualified_leads,
+          (SELECT count(*)::int FROM leads WHERE ${B("branch_id")})                                          AS total_leads,
+          (SELECT count(*)::int FROM voice_calls WHERE ${B("branch_id")})                                    AS total_calls,
+          (SELECT count(*)::int FROM whatsapp_messages WHERE ${B("branch_id")})                              AS total_messages,
+          (SELECT count(*)::int FROM leads WHERE ${B("branch_id")} AND status = 'qualified')                 AS qualified_leads,
           (SELECT COALESCE(avg(duration), 0)::int FROM voice_calls WHERE ${B("branch_id")} AND duration > 0) AS avg_duration,
-          (SELECT count(*) FROM voice_calls WHERE ${B("branch_id")} AND duration > 0)                   AS connected_calls,
-          (SELECT count(*) FROM voice_calls WHERE ${B("branch_id")} AND (outcome = 'resolved' OR status = 'completed')) AS resolved_calls,
-          (SELECT count(*) FROM voice_calls WHERE ${B("branch_id")} AND outcome = 'needs_human')         AS needs_human,
-          (SELECT count(*) FROM leads WHERE ${B("branch_id")} AND callback_at IS NOT NULL AND callback_at < now() + interval '1 day') AS followups_due,
-          (SELECT count(*) FROM leads WHERE ${B("branch_id")} AND created_at > now() - interval '7 days')             AS new_leads_7d,
-          (SELECT count(*) FROM loan_applications WHERE ${B("branch_id")})                              AS applications
+          (SELECT count(*)::int FROM voice_calls WHERE ${B("branch_id")} AND (duration > 0 OR outcome IN ('completed', 'answered', 'resolved'))) AS connected_calls,
+          (SELECT count(*)::int FROM voice_calls WHERE ${B("branch_id")} AND (outcome IN ('resolved', 'completed', 'answered') OR status = 'completed')) AS resolved_calls,
+          (SELECT count(*)::int FROM voice_calls WHERE ${B("branch_id")} AND outcome = 'needs_human')         AS needs_human,
+          (SELECT count(*)::int FROM leads WHERE ${B("branch_id")} AND callback_at IS NOT NULL AND callback_at < now() + interval '1 day') AS followups_due,
+          (SELECT count(*)::int FROM leads WHERE ${B("branch_id")} AND created_at > now() - interval '7 days')             AS new_leads_7d,
+          (SELECT count(*)::int FROM loan_applications WHERE ${B("branch_id")})                              AS applications
       `,
         params
       ),
     ])
 
-    const t = totals.rows[0] as Record<string, number>
+    const t = totals.rows[0] as Record<string, any>
+    const totalCalls = Number(t?.total_calls || 0)
+    const connectedCalls = Number(t?.connected_calls || 0)
+    const resolvedCalls = Number(t?.resolved_calls || 0)
+    const totalLeads = Number(t?.total_leads || 0)
+    const qualifiedLeads = Number(t?.qualified_leads || 0)
+    const appliedLeads = Number(funnel.rows[0]?.applied || 0)
+
     // Derived rates are computed in code (lib/maths), never hand-divided at
     // the call site — empty databases show 0% instead of NaN/Infinity.
     const rates = {
-      connectRate: pctOf(t.connected_calls, t.total_calls),          // % of dials that actually picked up
-      resolutionRate: pctOf(t.resolved_calls, t.total_calls),        // % of calls that ended resolved/completed
-      conversionRate: pctOf(t.qualified_leads, t.total_leads),       // lead → qualified
-      qualificationToApply: pctOf(t.qualified_leads, funnel.rows[0].applied), // qualified → applied (funnel handoff)
+      connectRate: pctOf(connectedCalls, totalCalls),          // % of dials that actually picked up
+      resolutionRate: pctOf(resolvedCalls, totalCalls),        // % of calls that ended resolved/completed
+      conversionRate: pctOf(qualifiedLeads, totalLeads),       // lead → qualified
+      qualificationToApply: pctOf(qualifiedLeads, appliedLeads), // qualified → applied (funnel handoff)
     }
 
     return NextResponse.json({

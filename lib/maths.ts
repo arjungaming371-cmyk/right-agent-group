@@ -22,9 +22,11 @@ export function roundTo(n: number, dp = 0): number {
  * a/b that refuses to poison the UI: zero/NaN denominators return 0 instead
  * of Infinity/NaN. Every "rate" on the dashboard funnels through here.
  */
-export function safeDivide(a: number, b: number): number {
-  if (!Number.isFinite(a) || !Number.isFinite(b) || b === 0) return 0
-  return a / b
+export function safeDivide(a: number | string, b: number | string): number {
+  const numA = Number(a)
+  const numB = Number(b)
+  if (!Number.isFinite(numA) || !Number.isFinite(numB) || numB === 0) return 0
+  return numA / numB
 }
 
 /** part/whole as a 0-100 percentage, rounded to `dp` (default 1). */

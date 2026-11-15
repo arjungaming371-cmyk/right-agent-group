@@ -755,7 +755,7 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
                 gap: 12,
               }}
             >
-              <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0, flex: 1, overflow: "hidden" }}>
                 <button
                   className="md:hidden"
                   onClick={() => setMobileDetailOpen(false)}
@@ -777,8 +777,8 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
 
                 <Avatar name={activeConv.lead_name || activeConv.ig_username || "IG"} size={40} />
 
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
                     <span
                       style={{
                         fontWeight: 700,
@@ -787,6 +787,7 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
                         whiteSpace: "nowrap",
                         overflow: "hidden",
                         textOverflow: "ellipsis",
+                        maxWidth: showInfo ? "160px" : "340px",
                       }}
                     >
                       {activeConv.lead_name || (activeConv.ig_username ? `@${activeConv.ig_username}` : `IG User`)}
@@ -804,7 +805,7 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
                     )}
                   </div>
 
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11.5, color: IG_THEME.textSecondary }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11.5, color: IG_THEME.textSecondary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                     <span>{activeConv.last_type === "comment" ? "💬 Post Comment" : "✉️ Direct Message"}</span>
                     <span>•</span>
                     {activeConv.is_social_prospect ? (
@@ -812,7 +813,7 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
                     ) : (
                       <span style={{ color: IG_THEME.accentGreen, fontWeight: 600 }}>CRM Lead</span>
                     )}
-                    {activeConv.lead_phone && (
+                    {activeConv.lead_phone && !showInfo && (
                       <>
                         <span>•</span>
                         <span style={{ fontFamily: "monospace", color: IG_THEME.textPrimary }}>{activeConv.lead_phone}</span>

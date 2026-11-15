@@ -52,12 +52,11 @@ export async function GET(req: NextRequest) {
     }
 
     const steps = [
-      { key: "branch", label: "Create your first branch", done: (branches.rows[0]?.n ?? 0) > 0, view: "branches" },
-      { key: "employee", label: "Create an AI employee", done: (employees.rows[0]?.n ?? 0) > 0, view: "branches" },
-      { key: "phone", label: "Connect phone calling (Exotel)", done: phone, view: "branches" },
-      { key: "whatsapp", label: "Connect WhatsApp", done: whatsapp, view: "branches" },
+      { key: "employee", label: "Configure Priya AI employee", done: (employees.rows[0]?.n ?? 0) > 0, view: "script" },
+      { key: "phone", label: "Connect phone calling (Exotel)", done: phone, view: "security" },
+      { key: "whatsapp", label: "Connect WhatsApp", done: whatsapp, view: "whatsapp" },
       { key: "knowledge", label: "Add knowledge Priya can use", done: (kb.rows[0]?.n ?? 0) > 0, view: "knowledge" },
-      { key: "leads", label: "Import or capture leads", done: (leads.rows[0]?.n ?? 0) > 0, view: "upload" },
+      { key: "leads", label: "Import or capture leads", done: (leads.rows[0]?.n ?? 0) > 0, view: "leads" },
       { key: "test", label: "Make a test call with Priya", done: (calls.rows[0]?.n ?? 0) > 0, view: "queue" },
     ]
     const othersDone = steps.every(s => s.done)

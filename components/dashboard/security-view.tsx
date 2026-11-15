@@ -106,9 +106,15 @@ export default function SecurityView({ role = "admin" }: { role?: Role }) {
   async function loadDndEntries() {
     try {
       const res = await fetch("/api/compliance/dnd")
-      const data = await res.json()
-      setDndEntries(data.entries ?? [])
-    } catch {}
+      if (res.ok) {
+        const data = await res.json()
+        setDndEntries(data.entries ?? [])
+      } else {
+        toast.error(`Could not load DND suppression list (${res.status})`)
+      }
+    } catch {
+      toast.error("Failed to connect to DND endpoint")
+    }
   }
 
   useEffect(() => { load(); loadCompliance() }, [])
@@ -175,7 +181,7 @@ export default function SecurityView({ role = "admin" }: { role?: Role }) {
   async function toggleDndList() {
     const next = !showDndList
     setShowDndList(next)
-    if (next && dndEntries.length === 0) await loadDndEntries()
+    if (next) await loadDndEntries()
   }
 
   async function toggle(key: string, current: boolean) {
@@ -333,8 +339,13 @@ export default function SecurityView({ role = "admin" }: { role?: Role }) {
                 </div>
 
                 {showDndList && (
-                  <div style={{ marginTop:14, maxHeight:220, overflowY:"auto", border:"1px solid var(--border-light)", borderRadius:8 }}>
-                    {dndEntries.length === 0 && <div style={{ padding:16, textAlign:"center", color:"var(--text-muted)", fontSize:12.5 }}>Suppression list is empty.</div>}
+                  <div style={{ marginTop:14, maxHeight:220, overflowY:"auto", border:"1px solid var(--border-light)", borderRadius:8, background: "var(--bg-secondary)" }}>
+                    {dndEntries.length === 0 && (
+                      <div style={{ padding: 20, textAlign: "center", color: "var(--text-muted)", fontSize: 12.5 }}>
+                        <div style={{ fontWeight: 600, color: "var(--text-secondary)", marginBottom: 4 }}>DND suppression list is currently empty (0 numbers).</div>
+                        <div>Outbound calling is allowed for all leads within the scheduled calling window. Paste numbers above to suppress.</div>
+                      </div>
+                    )}
                     {dndEntries.map((e) => (
                       <div key={e.phone} style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 12px", borderBottom:"1px solid var(--border-light)", fontSize:12.5 }}>
                         <span style={{ fontFamily:"monospace", color:"var(--text-primary)" }}>{e.phone}</span>

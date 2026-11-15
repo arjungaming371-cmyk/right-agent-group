@@ -871,7 +871,7 @@ export default function VoiceLogsView({ role }: { role: Role }) {
                       <span style={{ fontSize: 12, fontWeight: 700, color: t.role === "ai" ? "var(--accent-blue)" : "var(--text-muted)", minWidth: 80, flexShrink: 0, textTransform: "uppercase" }}>
                         {t.role === "ai" ? "Priya" : "Customer"}
                       </span>
-                      <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>{typeof t.text === "string" ? t.text : ""}</span>
+                      <span style={{ fontSize: 13, color: "var(--text-secondary)", fontFamily: "var(--font-telugu), inherit", lineHeight: 1.6 }}>{typeof t.text === "string" ? t.text : ""}</span>
                     </div>
                   ))}
                 </div>

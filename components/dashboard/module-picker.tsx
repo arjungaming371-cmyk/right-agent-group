@@ -16,6 +16,8 @@ export const ALL_MODULES: ModuleOption[] = [
   { key: "attention", label: "Needs Human", section: "Overview", description: "Escalation queue — customers who asked for a person" },
   { key: "leads", label: "Leads", section: "Overview", description: "Prospect pipeline & lead status tracking" },
   { key: "loans", label: "Loan Applications", section: "Overview", description: "Loan applications & enquiry files" },
+  { key: "queue", label: "Call Queue", section: "Overview", description: "AI call queue, scheduled calls & bulk dialing" },
+  { key: "calendar", label: "Calendar", section: "Overview", description: "Follow-up calendar & scheduled callbacks" },
 
   // Engagement
   { key: "voice", label: "Voice Logs", section: "Engagement", description: "Voice call recordings, transcripts, & durations" },
@@ -29,7 +31,6 @@ export const ALL_MODULES: ModuleOption[] = [
   // allowlist (and the shell nav) knew them — a granted module key the picker
   // couldn't render, and vice versa (2026-09-26 audit: key drift).
   { key: "security", label: "Security", section: "System", description: "Access controls, calling window, DND & audit log" },
-  { key: "calendar", label: "Calendar", section: "Overview", description: "Follow-up calendar & scheduled callbacks" },
   // 2026-10-03: the Branches & Staff AI console was removed per owner
   // decision — no longer grantable from this picker. Legacy grants of the
   // branches key stored in existing team configs stay valid server-side.

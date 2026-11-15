@@ -357,15 +357,29 @@ export default function DashboardShell() {
   // the tab is hidden like every other poll in the console. null until the
   // first check lands, so the pill never claims health before it knows.
   const [systemOk, setSystemOk] = useState<boolean | null>(null)
+  const [voiceOk, setVoiceOk] = useState<boolean | null>(null)
+  const [whatsappOk, setWhatsappOk] = useState<boolean | null>(null)
 
   async function loadSystemStatus() {
     try {
       const res = await fetch("/api/system/status")
-      if (!res.ok) { setSystemOk(false); return }
+      if (!res.ok) {
+        setSystemOk(false)
+        setVoiceOk(false)
+        setWhatsappOk(false)
+        return
+      }
       const d = await res.json()
-      setSystemOk(!!(d?.llm?.running && d?.db?.running && d?.website?.running))
+      const waRunning = !!(d?.whatsapp?.running)
+      const voiceRunning = !!(d?.llm?.running && d?.db?.running)
+      const isOk = !!(d?.llm?.running && d?.db?.running && d?.website?.running && waRunning)
+      setSystemOk(isOk)
+      setVoiceOk(voiceRunning)
+      setWhatsappOk(waRunning)
     } catch {
       setSystemOk(false)
+      setVoiceOk(false)
+      setWhatsappOk(false)
     }
   }
 
@@ -619,8 +633,8 @@ export default function DashboardShell() {
             <div className="truncate text-[11px] text-[var(--text-muted)] md:text-[12px]">{sub}</div>
           </div>
 
-          <StatusPill icon={Mic} label="Voice Bot" ok={systemOk} />
-          <StatusPill icon={MessageCircle} label="WhatsApp" ok={systemOk} />
+          <StatusPill icon={Mic} label="Voice Bot" ok={voiceOk} />
+          <StatusPill icon={MessageCircle} label="WhatsApp" ok={whatsappOk} />
 
           {/* Global search — opens the command palette (also Ctrl+K) */}
           <button
@@ -682,8 +696,8 @@ export default function DashboardShell() {
           ))}
         </main>
       </div>
-      {/* Floating ops chatbot — back by popular demand. */}
-      <QuickChat role={role} userEmail={userEmail} />
+      {/* Floating ops chatbot — hidden on WhatsApp & Instagram chat views to avoid Send button collision */}
+      {view !== "whatsapp" && view !== "instagram" && <QuickChat role={role} userEmail={userEmail} />}
       {showProfile && <ProfileModal email={userEmail} role={role} onClose={() => setShowProfile(false)} />}
       {/* Neutralizes the mobile slide-in transform at md+ so the sidebar is
           always visible on desktop regardless of mobileNavOpen state. */}
