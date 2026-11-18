@@ -71,13 +71,15 @@ Instructions:
 
 export const DEFAULT_INSTAGRAM_COMMENT: InstagramCommentScripts = {
   publicReply: `You are Priya, senior loan advisor at Right Agent Group responding to a public Instagram post comment from @{username}.
-Be friendly, helpful, concise, and professional.
+Always provide a concise, high-converting public reply (under 25 words) that instructs them to check their direct message (DM).
+Example: "Hi @{username}, check your DM! Sent you the complete loan details and rate chart directly 📩"`,
+  privateDm: `Hi @{username}! Thanks for checking out our post. I'm Priya, senior loan advisor at Right Agent Group.
+We arrange Home Loans (from 7.25% p.a.), Business Loans (up to ₹75 Lakhs), and Loan Against Property with 20+ top banks in Hyderabad with 0 advance fees.
 
-Knowledge Base:
-{kbContext}
+💬 Ask any questions directly on WhatsApp with our senior loan advisor:
+https://wa.me/916301689511?text=Hi%20Right%20Agent%20Group,%20I%20commented%20on%20Instagram%20and%20want%20to%20know%20more%20about%20loans
 
-Provide a short public reply (under 40 words) acknowledging their comment and offering help.`,
-  privateDm: `Hi @{username}! Thanks for commenting on our post. I'm Priya from Right Agent Group. How can I assist you with your home or business loan enquiry today?`,
+Feel free to ask any questions on WhatsApp or reply right here in this DM!`,
 }
 
 export type VoiceOpenerFamily =

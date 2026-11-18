@@ -587,13 +587,18 @@ async function handleInboundComment(val: any, igBranch: BranchInstagramCtx = nul
       kbContext: kbContext || "None",
     })
 
-    const publicAiReply = await chatWithLLM(
+    let publicAiReply = await chatWithLLM(
       [{ role: "user", content: text }],
       "english",
       extraInstructions
     )
 
     if (publicAiReply) {
+      // Ensure the public comment explicitly tells the commenter to check their DM (social proof + push notification trigger)
+      if (!publicAiReply.toLowerCase().includes("dm") && !publicAiReply.toLowerCase().includes("message")) {
+        publicAiReply = `${publicAiReply.replace(/[.!]?$/, "")}. Check your DM for complete details! 📩`
+      }
+
       // 1. Send Public Comment Reply — branch credentials threaded through.
       const pubSent = await replyInstagramComment(commentId, publicAiReply, igBranch)
       if (pubSent.ok) {
@@ -604,23 +609,19 @@ async function handleInboundComment(val: any, igBranch: BranchInstagramCtx = nul
         )
       }
 
-      // 2. High-intent filter (ManyChat / Respond.io lead qualification standard):
-      // Only send automated private DMs if the user asks a question or uses loan-intent keywords.
-      // Pure emoji comments or general compliments get a warm public reply without spamming their DMs.
-      const hasLoanIntent = LOAN_INTENT_REGEX.test(text) || text.includes("?")
-      if (hasLoanIntent) {
-        // Send Private DM Reply to Commenter — branch credentials threaded
-        // through (this is the DM that actually converts a commenter into a
-        // lead conversation; it must come from the account they commented on).
-        const privateDmText = renderTemplate(igTemplates.privateDm, { username })
-        const privSent = await privateReplyInstagramComment(commentId, privateDmText, igBranch)
-        if (privSent.ok) {
-          await query(
-            `INSERT INTO instagram_messages (lead_id, ig_user_id, ig_username, direction, type, content, status, ig_message_id, branch_id)
-             VALUES ($1, $2, $3, 'outbound', 'dm', $4, 'sent', $5, $6)`,
-            [leadId, senderId, username, privateDmText, privSent.messageId || null, branchId]
-          )
-        }
+      // 2. Send Private DM Reply to Commenter with WhatsApp 1-tap link
+      let privateDmText = renderTemplate(igTemplates.privateDm, { username })
+      if (!privateDmText.includes("wa.me")) {
+        privateDmText += `\n\n💬 Ask any questions directly on WhatsApp with our senior loan advisor:\nhttps://wa.me/916301689511?text=Hi%20Right%20Agent%20Group,%20I%20commented%20on%20Instagram%20and%20have%20questions%20about%20loans\n\nFeel free to ask on WhatsApp or reply right here!`
+      }
+
+      const privSent = await privateReplyInstagramComment(commentId, privateDmText, igBranch)
+      if (privSent.ok) {
+        await query(
+          `INSERT INTO instagram_messages (lead_id, ig_user_id, ig_username, direction, type, content, status, ig_message_id, branch_id)
+           VALUES ($1, $2, $3, 'outbound', 'dm', $4, 'sent', $5, $6)`,
+          [leadId, senderId, username, privateDmText, privSent.messageId || null, branchId]
+        )
       }
     }
   } catch (e: any) {
