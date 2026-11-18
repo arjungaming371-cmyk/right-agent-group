@@ -461,8 +461,9 @@ function splitIntoSentences(text) {
 
 // ---------- Per-call session ----------
 class CallSession {
-  constructor(ws) {
+  constructor(ws, urlParams = null) {
     this.ws = ws
+    this.urlParams = urlParams
     this.streamSid = null
     this.callSid = null
     this.language = "telugu"   // Telugu-first; the turn API confirms/switches per caller
@@ -478,8 +479,8 @@ class CallSession {
     this.botTalking = false   // we're currently sending audio (mic muted)
     this.processing = false
     this.closed = false
-    const isVobizExplicit = (process.env.TELEPHONY_PROVIDER || "exotel").toLowerCase().trim() === "vobiz"
-    const isVobizHeld = process.env.VOBIZ_HOLD !== "false" // Vobiz kept on hold by default
+    const isVobizExplicit = (process.env.TELEPHONY_PROVIDER || "vobiz").toLowerCase().trim() === "vobiz"
+    const isVobizHeld = process.env.VOBIZ_HOLD === "true" || process.env.VOBIZ_HOLD === "1"
     this.isVobiz = isVobizExplicit && !isVobizHeld
     this.started = false      // guards against a duplicate Exotel "start" event replaying the greeting mid-call
     // Two-stage playback pipeline: synthChain serializes GPU synthesis (one
@@ -719,22 +720,22 @@ class CallSession {
     this.started = true
     this.streamSid = msg.stream_sid || msg.streamSid || msg.start?.streamId || msg.streamId || null
     const start = msg.start || {}
-    this.callSid = start.call_sid || start.callSid || start.CallSid || start.callId || start.call_uuid || msg.call_uuid || null
-    // Only detect Vobiz stream if Vobiz is explicitly enabled and not on hold.
-    // Exotel sends mediaFormat in start; do NOT falsely classify Exotel as Vobiz!
-    if (this.isVobiz) {
-      if (msg.start?.streamId || msg.streamId || (!start.call_sid && start.callId)) {
-        this.isVobiz = true
-      }
+    this.callSid = start.call_uuid || msg.call_uuid || start.call_sid || start.callSid || start.CallSid || start.callId || null
+    const isVobizPayload = Boolean(msg.start?.streamId || msg.streamId || msg.call_uuid || msg.start?.call_uuid || (!start.call_sid && start.callId))
+    if (this.isVobiz || isVobizPayload) {
+      this.isVobiz = true
     } else {
       this.isVobiz = false
     }
-    const from = start.from || start.From || ""
+    const from = start.from || start.From || (this.urlParams ? this.urlParams.get("from") : "") || ""
     // Multi-branch routing: the CALLED number (the branch's DLT-approved
     // ExoPhone) decides which branch serves an inbound call. Exotel's field
     // name varies by applet version — forward every plausible spelling and
     // let the app's resolver pick (it matches on last 10 digits).
-    const to = start.to || start.To || start.called_number || start.dial_to || start.callee || ""
+    const to = start.to || start.To || start.called_number || start.dial_to || start.callee || (this.urlParams ? this.urlParams.get("to") : "") || ""
+    const qLeadId = this.urlParams ? this.urlParams.get("leadId") : null
+    const qBranchId = this.urlParams ? this.urlParams.get("branchId") : null
+    const qLang = this.urlParams ? this.urlParams.get("lang") : null
     // FIX (2026-09-20): caller/callee numbers are PII — mask the middle digits
     // in stdout (pm2/journald logs are a separate retention/access domain).
     const maskPhone = (p) => (p && p.length > 6 ? `${p.slice(0, 3)}****${p.slice(-3)}` : (p || "?"))
@@ -743,7 +744,7 @@ class CallSession {
     this.startComfortNoise()
     const t0 = Date.now()
     try {
-      const apiPromise = callTurnApi({ event: "start", callSid: this.callSid || "unknown", from, to })
+      const apiPromise = callTurnApi({ event: "start", callSid: this.callSid || "unknown", from, to, leadId: qLeadId, branchId: qBranchId, language: qLang })
       // The start promise must NEVER float unhandled: when the caller speaks
       // during the pickup window we return early WITHOUT awaiting it — an
       // unhandled rejection here would take down the whole voicebot process
@@ -1321,7 +1322,9 @@ wss.on("connection", (ws, req) => {
   }
   ws.isAlive = true
   ws.on("pong", () => { ws.isAlive = true })
-  const session = new CallSession(ws)
+  let wsUrlParams = null
+  try { wsUrlParams = new URL(req.url, "http://localhost").searchParams } catch {}
+  const session = new CallSession(ws, wsUrlParams)
   ws.on("message", (raw) => {
     let msg
     try { msg = JSON.parse(raw.toString()) } catch { return }

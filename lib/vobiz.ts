@@ -77,6 +77,9 @@ export async function makeVobizCall(
     answer_method: "POST",
     status_callback_url: statusCallback,
     status_callback_method: "POST",
+    record: true,
+    record_callback_url: statusCallback,
+    record_callback_method: "POST",
   }
 
   const url = `https://api.vobiz.ai/api/v1/Account/${creds.authId}/Call/`

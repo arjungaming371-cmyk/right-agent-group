@@ -180,6 +180,88 @@ async function runInstagramCommentScan() {
   }
 }
 
+// Instagram Direct Message Scanner:
+// Fetches latest conversations and inbound messages every 15s to guarantee
+// automated replies even if Meta webhooks are blocked, delayed, or in development mode.
+let igDMScanRunning = false
+async function runInstagramDMScan() {
+  if (igDMScanRunning) return
+  igDMScanRunning = true
+  try {
+    const token = process.env.INSTAGRAM_ACCESS_TOKEN
+    const accountId = process.env.INSTAGRAM_ACCOUNT_ID || "28501470066151828"
+    if (!token) return
+
+    const appUrl = process.env.APP_INTERNAL_URL || "http://127.0.0.1:3000"
+    const isIgLogin = token.startsWith("IG")
+    const base = isIgLogin ? "https://graph.instagram.com/v21.0" : "https://graph.facebook.com/v21.0"
+    const target = isIgLogin ? "me" : accountId
+
+    const convRes = await fetch(
+      `${base}/${target}/conversations?fields=messages.limit(5){id,created_time,from,to,message}&limit=10&access_token=${token}`,
+      { signal: AbortSignal.timeout(10_000) }
+    ).catch(() => null)
+    if (!convRes || !convRes.ok) return
+    const convData = await convRes.json().catch(() => null)
+    const convList = convData?.data || []
+
+    const { query } = await import("@/lib/db")
+
+    for (const conv of convList) {
+      const messages = conv.messages?.data || []
+      for (const m of messages) {
+        if (!m.id || !m.message) continue
+        const senderId = m.from?.id || ""
+        const senderUsername = (m.from?.username || "").toLowerCase()
+
+        // Skip our own outbound messages
+        if (senderId === accountId || senderUsername === "arjungaming371") continue
+
+        // Check if message is within the last 48 hours to avoid re-triggering ancient messages
+        const msgTime = new Date(m.created_time).getTime()
+        if (isNaN(msgTime) || Date.now() - msgTime > 48 * 3600 * 1000) continue
+
+        // Check if message already exists in DB
+        const existing = await query(
+          `SELECT 1 FROM instagram_messages WHERE ig_message_id = $1 LIMIT 1`,
+          [m.id]
+        )
+        if (existing.rows.length > 0) continue
+
+        // Dispatch inbound DM to /api/instagram
+        await fetch(`${appUrl}/api/instagram`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            object: "instagram",
+            entry: [
+              {
+                id: accountId,
+                time: Date.now(),
+                messaging: [
+                  {
+                    sender: { id: senderId, username: senderUsername },
+                    recipient: { id: accountId },
+                    timestamp: msgTime,
+                    message: {
+                      mid: m.id,
+                      text: m.message,
+                    },
+                  },
+                ],
+              },
+            ],
+          }),
+        }).catch(() => null)
+      }
+    }
+  } catch (e) {
+    console.error("[scheduler] instagram DM scan failed:", e instanceof Error ? e.message : e)
+  } finally {
+    igDMScanRunning = false
+  }
+}
+
 // Calendar Agent: scans unprocessed voice calls periodically to detect appointments
 let calendarScanRunning = false
 async function runCalendarAgentScan() {
@@ -295,5 +377,10 @@ export function startScheduler() {
     runInstagramCommentScan().catch(() => {})
   }, 20_000)
 
-  console.log("[scheduler] in-app cron started — due callbacks every 30s, daily digest 08:00, weekly digest Mon 08:00, lead brain scan every 5m, prompt tuner Sun 09:00, calendar agent scan every 15m, ig comment scan every 20s")
+  // Automated Instagram DM poller: runs every 15s to catch new direct messages
+  setInterval(() => {
+    runInstagramDMScan().catch(() => {})
+  }, 15_000)
+
+  console.log("[scheduler] in-app cron started — due callbacks every 30s, daily digest 08:00, weekly digest Mon 08:00, lead brain scan every 5m, prompt tuner Sun 09:00, calendar agent scan every 15m, ig comment scan every 20s, ig DM scan every 15s")
 }

@@ -28,25 +28,30 @@ export async function POST(req: NextRequest) {
     const contentType = req.headers.get("content-type") || ""
     if (contentType.includes("application/json")) {
       const body = ((await req.json().catch(() => ({}))) ?? {}) as Record<string, unknown>
-      callSid      = String(body.CallSid ?? body.call_sid ?? body.call_uuid ?? body.callId ?? body.call_id ?? body.request_id ?? "")
+      callSid      = String(body.CallSid ?? body.call_sid ?? body.CallUUID ?? body.call_uuid ?? body.callId ?? body.call_id ?? body.request_id ?? body.RequestUUID ?? "")
       callStatus   = String(body.Status ?? body.CallStatus ?? body.status ?? body.call_status ?? "").toLowerCase()
       duration     = parseInt(String(body.ConversationDuration ?? body.CallDuration ?? body.duration ?? body.call_duration ?? "0")) || 0
-      recordingUrl = typeof body.RecordingUrl === "string" ? body.RecordingUrl : typeof body.recording_url === "string" ? body.recording_url : null
+      recordingUrl = typeof body.RecordUrl === "string" ? body.RecordUrl : typeof body.record_url === "string" ? body.record_url : typeof body.RecordingUrl === "string" ? body.RecordingUrl : typeof body.recording_url === "string" ? body.recording_url : null
     } else {
       const fd = await req.formData()
-      callSid      = (fd.get("CallSid") as string) ?? ""
-      callStatus   = ((fd.get("CallStatus") as string) ?? "").toLowerCase()
-      duration     = parseInt((fd.get("CallDuration") as string) ?? "0") || 0
-      recordingUrl = fd.get("RecordingUrl") as string | null
+      callSid      = ((fd.get("CallSid") || fd.get("CallUUID") || fd.get("call_uuid") || fd.get("callSid") || fd.get("callId") || fd.get("RequestUUID") || fd.get("request_id") || fd.get("request_uuid")) as string) ?? ""
+      callStatus   = ((fd.get("CallStatus") || fd.get("Status") || fd.get("status") || fd.get("call_status")) as string ?? "").toLowerCase()
+      duration     = parseInt(((fd.get("CallDuration") || fd.get("ConversationDuration") || fd.get("duration") || fd.get("call_duration") || "0") as string)) || 0
+      recordingUrl = ((fd.get("RecordUrl") || fd.get("record_url") || fd.get("RecordingUrl") || fd.get("recording_url")) as string) || null
     }
 
     console.log(`Call: ${callSid} | Status: ${callStatus} | Duration: ${duration}s`)
     if (!callSid) return new NextResponse("OK", { status: 200 })
 
+    const isCompleted = ["completed", "stopped", "stream-stopped", "hangup", "ended", "normal_clearing"].includes(callStatus)
+    const isMissed = ["busy", "no-answer", "canceled", "rejected", "timeout"].includes(callStatus)
+    const isFailed = ["failed", "error"].includes(callStatus)
+
+    const finalStatus = isCompleted ? "completed" : isMissed ? (callStatus === "busy" ? "busy" : "no-answer") : isFailed ? "failed" : callStatus
     const outcomeMap: Record<string, string> = {
       completed: "resolved", busy: "missed", "no-answer": "missed", failed: "failed", canceled: "missed",
     }
-    const outcome = outcomeMap[callStatus] ?? callStatus
+    const outcome = outcomeMap[finalStatus] ?? (isCompleted ? "resolved" : isMissed ? "missed" : isFailed ? "failed" : "")
 
     // GREATEST: Exotel doesn't track "conversation" time inside a custom
     // Voicebot applet, so this webhook's own duration is usually 0 — a plain
@@ -57,10 +62,24 @@ export async function POST(req: NextRequest) {
     try {
       const res = await query(
         `UPDATE voice_calls
-            SET status = $2, outcome = $3, duration = GREATEST(duration, $4), recording_url = COALESCE($5, recording_url)
+            SET status = CASE 
+                  WHEN status = 'completed' THEN 'completed'
+                  WHEN $2 != '' THEN $2 
+                  WHEN duration > 0 THEN 'completed' 
+                  ELSE status 
+                END,
+                outcome = CASE 
+                  WHEN outcome = 'resolved' THEN 'resolved'
+                  WHEN $3 != '' THEN $3 
+                  WHEN status = 'completed' OR duration > 0 THEN 'resolved' 
+                  ELSE outcome 
+                END,
+                duration = GREATEST(duration, $4),
+                recording_url = COALESCE($5, recording_url),
+                updated_at = now()
           WHERE twilio_call_sid = $1
           RETURNING *`,
-        [callSid, callStatus, outcome, duration, recordingUrl]
+        [callSid, finalStatus, outcome, duration, recordingUrl]
       )
       call = res.rows[0]
     } catch (callError) {
@@ -173,7 +192,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (callStatus === "completed" && transcript.length > 0) {
+    if ((finalStatus === "completed" || transcript.length > 0) && transcript.length > 0 && !call.ai_summary) {
       const transcriptText = transcript
         .map((t) => `${t.role === "ai" ? "Priya" : "Customer"}: ${typeof t.text === "string" ? t.text : ""}`)
         .join("\n")

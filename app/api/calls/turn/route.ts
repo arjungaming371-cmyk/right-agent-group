@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db, query } from "@/lib/db"
 import { startCall, handleTurn, handleTurnStream, correctLastSpokenReply, parseTranscriptHistory, disclosureFor } from "@/lib/voice-conversation"
-import { detectLanguage, type Language } from "@/lib/llm"
+import { detectLanguage, type Language, generateLeadSummary } from "@/lib/llm"
 import { normalizeCallLanguage, resolveSpokenLanguage } from "@/lib/call-facts"
 import { PHONE_MATCH_SQL } from "@/lib/phone"
 import { resolveBranchByCallerId, recordUsage, getBranchVoice } from "@/lib/branches"
 import { verifyServiceKey } from "@/lib/service-key"
+import { refreshLeadScore } from "@/lib/scoring"
+import { runPostCallAnalysis } from "@/lib/lead-brain"
+import { runCalendarExtractionForCall } from "@/lib/calendar-agent"
 
 export const dynamic = "force-dynamic"
 
@@ -59,6 +62,7 @@ type TurnBody = {
   instructions?: unknown
   text?: unknown
   duration?: unknown
+  leadId?: unknown
 }
 
 type TurnStreamEvent = { type: "sentence" | "done"; text?: string; language?: Language; hangup?: boolean }
@@ -84,16 +88,46 @@ export async function POST(req: NextRequest) {
     if (event === "start") {
       // 1) Outbound call? The outbound route already stored sid → lead + language
       //    (+ branch_id when the caller worked from a branch context).
-      const { data: existing } = await db
+      let existing = (await db
         .from("voice_calls")
-        .select("lead_id, language, direction, branch_id")
+        .select("id, lead_id, language, direction, branch_id")
         .eq("twilio_call_sid", callSid)
-        .single()
+        .single()).data
 
-      let leadId: string = existing?.lead_id || ""
-      let language = normalizeCallLanguage(existing?.language)
+      // Fallback matching for telephony providers like Vobiz where callSid may be assigned
+      // at stream-connect or forwarded from answer_url query params
+      if (!existing && body?.leadId) {
+        const byLead = await query(
+          `SELECT id, lead_id, language, direction, branch_id 
+             FROM voice_calls 
+            WHERE lead_id = $1 AND direction = 'outbound' AND status IN ('initiated', 'ringing')
+            ORDER BY created_at DESC LIMIT 1`,
+          [String(body.leadId)]
+        )
+        if (byLead.rows[0]) {
+          existing = byLead.rows[0]
+          await db.from("voice_calls").update({ twilio_call_sid: callSid, status: "in-progress" }).eq("id", existing.id)
+        }
+      }
+
+      if (!existing) {
+        // Check for any recently initiated outbound call (within 2 minutes)
+        const recentInit = await query(
+          `SELECT id, lead_id, language, direction, branch_id 
+             FROM voice_calls 
+            WHERE direction = 'outbound' AND status IN ('initiated', 'ringing') AND created_at > NOW() - INTERVAL '2 minutes'
+            ORDER BY created_at DESC LIMIT 1`
+        )
+        if (recentInit.rows[0]) {
+          existing = recentInit.rows[0]
+          await db.from("voice_calls").update({ twilio_call_sid: callSid, status: "in-progress" }).eq("id", existing.id)
+        }
+      }
+
+      let leadId: string = existing?.lead_id || (typeof body?.leadId === "string" ? body.leadId : "")
+      let language = normalizeCallLanguage(existing?.language || (typeof body?.language === "string" ? body.language : null))
       let direction: "inbound" | "outbound" = existing?.direction === "inbound" ? "inbound" : "outbound"
-      let branchId: string | null = existing?.branch_id || null
+      let branchId: string | null = existing?.branch_id || (typeof body?.branchId === "string" && body.branchId ? body.branchId : null)
       // WhatsApp voice calls (wacall-* sids) arrive with the branch ALREADY
       // resolved at the webhook — metadata.phone_number_id → branch — and
       // carried here. resolveBranchByCallerId below only knows ExoPhones, so
@@ -291,22 +325,75 @@ export async function POST(req: NextRequest) {
 
     if (event === "end") {
       const duration = Math.max(0, Math.min(24 * 3600, parseInt(String(body?.duration ?? "0")) || 0))
-      // GREATEST: never shrink a duration the Exotel status webhook already
-      // wrote; only fill it in when nothing else did (inbound voicebot calls).
       const ended = await query(
         `UPDATE voice_calls
             SET duration = GREATEST(duration, $2),
-                status = CASE WHEN status IN ('initiated', 'in-progress') THEN 'completed' ELSE status END,
+                status = 'completed',
+                outcome = 'resolved',
                 updated_at = now()
           WHERE twilio_call_sid = $1
-          RETURNING branch_id`,
+          RETURNING *`,
         [callSid, duration]
       )
-      // Per-branch billing meter: real talk-time + one completed call.
-      const branchId = ended.rows[0]?.branch_id
+      const call = ended.rows[0]
+      const branchId = call?.branch_id
       if (branchId) {
         recordUsage(branchId, "call_seconds", duration)
       }
+
+      // Automatically generate summary, analysis, and comm log when call ends
+      const rawTranscript = call?.transcript
+      let transcript: { text?: unknown; role?: unknown }[] = []
+      if (Array.isArray(rawTranscript)) {
+        transcript = rawTranscript
+      } else if (typeof rawTranscript === "string") {
+        try { transcript = JSON.parse(rawTranscript) } catch {}
+      }
+
+      if (transcript.length > 0 && !call?.ai_summary) {
+        const transcriptText = transcript
+          .map((t) => `${t.role === "ai" ? "Priya" : "Customer"}: ${typeof t.text === "string" ? t.text : ""}`)
+          .join("\n")
+
+        const allText = transcript.map((t) => (typeof t.text === "string" ? t.text : "")).join(" ").toLowerCase()
+        const positiveWords = /yes\b|interested|please|confirm|okay|ok\b|sure|good|great/
+        const negativeWords = /\bno\b|not interested|busy|later|cancel|dont|nope/
+        const sentiment = negativeWords.test(allText) ? "Negative" : positiveWords.test(allText) ? "Positive" : "Neutral"
+
+        try {
+          const summary = await generateLeadSummary(transcriptText)
+          await query(
+            `UPDATE voice_calls SET ai_summary = $1, sentiment = $2, status = 'completed', outcome = 'resolved' WHERE twilio_call_sid = $3`,
+            [summary, sentiment, callSid]
+          )
+        } catch (e) {
+          console.error("turn end: summary error:", e)
+        }
+
+        const leadId = call?.lead_id
+        if (leadId) {
+          await query(
+            `UPDATE leads
+                SET status = CASE WHEN $2 = 'Positive' THEN 'qualified' ELSE 'contacted' END,
+                    updated_at = now()
+              WHERE id = $1
+                AND (status = 'new' OR (status = 'contacted' AND $2 = 'Positive'))`,
+            [leadId, sentiment]
+          ).catch(() => {})
+          refreshLeadScore(leadId, sentiment).catch(() => {})
+
+          await db.from("comm_logs").insert({
+            lead_id: leadId,
+            type: "call",
+            summary: `AI call completed (${duration}s). Sentiment: ${sentiment}. ${transcript.length} exchanges.`,
+            outcome: "resolved",
+          }).catch(() => {})
+        }
+
+        runPostCallAnalysis(callSid)
+        runCalendarExtractionForCall(callSid)
+      }
+
       return NextResponse.json({ ok: true })
     }
 
