@@ -5,18 +5,8 @@ import {
   PhoneCall,
   Loader2,
   Lock,
-  CheckCircle2,
   MessageCircle,
 } from "lucide-react"
-
-const LOAN_TYPES = [
-  { id: "Home Loan", label: "🏠 Home Loan", sub: "from 7.25% p.a." },
-  { id: "Business Loan", label: "💼 Business Loan", sub: "up to ₹75 Lakhs" },
-  { id: "Loan Against Property", label: "🏢 LAP", sub: "up to ₹5 Crores" },
-  { id: "Personal Loan", label: "💳 Personal Loan", sub: "instant approval" },
-]
-
-const AMOUNT_PRESETS = ["₹15 Lakhs", "₹30 Lakhs", "₹50 Lakhs", "₹1 Crore+"]
 
 const LANGUAGES = [
   { id: "telugu", label: "తెలుగు (Telugu)" },
@@ -27,8 +17,8 @@ const LANGUAGES = [
 export default function ApplyPage() {
   const [name, setName] = useState("")
   const [phone, setPhone] = useState("")
-  const [loanType, setLoanType] = useState("Home Loan")
-  const [loanAmount, setLoanAmount] = useState("₹30 Lakhs")
+  const [loanType, setLoanType] = useState("")
+  const [loanAmount, setLoanAmount] = useState("")
   const [language, setLanguage] = useState("telugu")
   const [website, setWebsite] = useState("") // honeypot
   const [loading, setLoading] = useState(false)
@@ -50,6 +40,8 @@ export default function ApplyPage() {
 
     const cleanName = name.trim()
     const cleanPhone = sanitizeDigits(phone)
+    const cleanLoanType = loanType.trim()
+    const cleanLoanAmount = loanAmount.trim()
 
     if (!cleanName) {
       setErrorMsg("Please enter your full name.")
@@ -58,6 +50,16 @@ export default function ApplyPage() {
 
     if (!/^[6-9]\d{9}$/.test(cleanPhone)) {
       setErrorMsg("Please enter a valid 10-digit Indian mobile number.")
+      return
+    }
+
+    if (!cleanLoanType) {
+      setErrorMsg("Please enter your required loan type.")
+      return
+    }
+
+    if (!cleanLoanAmount) {
+      setErrorMsg("Please enter your estimated loan amount.")
       return
     }
 
@@ -70,8 +72,8 @@ export default function ApplyPage() {
         body: JSON.stringify({
           name: cleanName,
           phone: `+91${cleanPhone}`,
-          loanType,
-          loanAmount,
+          loanType: cleanLoanType,
+          loanAmount: cleanLoanAmount,
           language,
           website,
         }),
@@ -260,96 +262,94 @@ export default function ApplyPage() {
               </div>
             </div>
 
-            {/* Select Loan Type */}
+            {/* Loan Type Input (Free Text) */}
             <div style={{ marginBottom: 20 }}>
               <label
+                htmlFor="app-loan-type"
                 style={{
                   display: "block",
                   fontSize: 12.5,
                   fontWeight: 600,
                   color: "#cbd5e1",
-                  marginBottom: 8,
+                  marginBottom: 7,
                 }}
               >
-                Select Loan Type
+                Loan Type <span style={{ color: "#fb5670" }}>*</span>
               </label>
-              <div
+              <input
+                id="app-loan-type"
+                type="text"
+                required
+                placeholder="e.g. Home Loan, Business Loan, Personal Loan, LAP..."
+                value={loanType}
+                onChange={(e) => setLoanType(e.target.value)}
                 style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr",
-                  gap: 10,
+                  width: "100%",
+                  height: 44,
+                  borderRadius: 10,
+                  border: "1px solid #1c2437",
+                  background: "rgba(5, 7, 12, 0.75)",
+                  color: "#ffffff",
+                  padding: "0 14px",
+                  fontSize: 13.5,
+                  outline: "none",
+                  boxSizing: "border-box",
                 }}
-              >
-                {LOAN_TYPES.map((t) => {
-                  const isSelected = loanType === t.id
-                  return (
-                    <button
-                      key={t.id}
-                      type="button"
-                      onClick={() => setLoanType(t.id)}
-                      style={{
-                        padding: "12px 14px",
-                        borderRadius: 11,
-                        border: isSelected ? "1.5px solid #5b7cfa" : "1px solid #1c2437",
-                        background: isSelected ? "rgba(91, 124, 250, 0.16)" : "rgba(5, 7, 12, 0.6)",
-                        color: isSelected ? "#ffffff" : "#9aa5bd",
-                        cursor: "pointer",
-                        textAlign: "left",
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 3,
-                        transition: "all 0.15s ease",
-                      }}
-                    >
-                      <span style={{ fontWeight: 700, fontSize: 13.5, color: isSelected ? "#fff" : "#e2e8f0" }}>
-                        {t.label}
-                      </span>
-                      <span style={{ fontSize: 11.5, color: isSelected ? "#a5b0ff" : "#64708c" }}>
-                        {t.sub}
-                      </span>
-                    </button>
-                  )
-                })}
-              </div>
+              />
             </div>
 
-            {/* Estimated Loan Amount */}
+            {/* Estimated Loan Amount Input (Free Text / Value) */}
             <div style={{ marginBottom: 20 }}>
               <label
+                htmlFor="app-loan-amount"
                 style={{
                   display: "block",
                   fontSize: 12.5,
                   fontWeight: 600,
                   color: "#cbd5e1",
-                  marginBottom: 8,
+                  marginBottom: 7,
                 }}
               >
-                Estimated Loan Amount
+                Estimated Loan Amount <span style={{ color: "#fb5670" }}>*</span>
               </label>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {AMOUNT_PRESETS.map((amt) => {
-                  const isSelected = loanAmount === amt
-                  return (
-                    <button
-                      key={amt}
-                      type="button"
-                      onClick={() => setLoanAmount(amt)}
-                      style={{
-                        padding: "7px 16px",
-                        borderRadius: 999,
-                        border: isSelected ? "1.5px solid #2dd4a0" : "1px solid #1c2437",
-                        background: isSelected ? "rgba(45, 212, 160, 0.15)" : "rgba(5, 7, 12, 0.6)",
-                        color: isSelected ? "#2dd4a0" : "#9aa5bd",
-                        fontSize: 12.5,
-                        fontWeight: 600,
-                        cursor: "pointer",
-                        transition: "all 0.15s ease",
-                      }}
-                    >
-                      {amt}
-                    </button>
-                  )
-                })}
+              <div style={{ display: "flex", gap: 8 }}>
+                <div
+                  style={{
+                    height: 44,
+                    padding: "0 14px",
+                    borderRadius: 10,
+                    border: "1px solid #1c2437",
+                    background: "rgba(5, 7, 12, 0.75)",
+                    color: "#2dd4a0",
+                    fontSize: 14,
+                    fontWeight: 700,
+                    display: "flex",
+                    alignItems: "center",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  ₹
+                </div>
+                <input
+                  id="app-loan-amount"
+                  type="text"
+                  required
+                  placeholder="e.g. 25,00,000 or 25 Lakhs"
+                  value={loanAmount}
+                  onChange={(e) => setLoanAmount(e.target.value)}
+                  style={{
+                    flex: 1,
+                    height: 44,
+                    borderRadius: 10,
+                    border: "1px solid #1c2437",
+                    background: "rgba(5, 7, 12, 0.75)",
+                    color: "#ffffff",
+                    padding: "0 14px",
+                    fontSize: 13.5,
+                    outline: "none",
+                    boxSizing: "border-box",
+                  }}
+                />
               </div>
             </div>
 
