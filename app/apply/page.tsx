@@ -13,23 +13,29 @@ import {
   ArrowRight,
   MessageCircle,
   Zap,
+  Check,
+  Phone,
+  Loader2,
+  Send,
+  HelpCircle,
 } from "lucide-react"
+import SiteShell from "@/components/site/site-shell"
 
 const LOAN_TYPES = [
-  { id: "Home Loan", label: "🏠 Home Loan", rate: "from 7.25% p.a." },
-  { id: "Business Loan", label: "💼 Business Loan", rate: "up to ₹75 Lakhs" },
-  { id: "Loan Against Property", label: "🏢 LAP", rate: "up to ₹5 Crores" },
-  { id: "Personal Loan", label: "💳 Personal Loan", rate: "instant approval" },
+  { id: "Home Loan", label: "🏠 Home Loan", sub: "from 7.25% p.a." },
+  { id: "Business Loan", label: "💼 Business Loan", sub: "up to ₹75 Lakhs" },
+  { id: "Loan Against Property", label: "🏢 LAP", sub: "up to ₹5 Crores" },
+  { id: "Personal Loan", label: "💳 Personal Loan", sub: "instant approval" },
 ]
 
 const AMOUNT_PRESETS = ["₹15 Lakhs", "₹30 Lakhs", "₹50 Lakhs", "₹1 Crore+"]
 
-const BANKS = [
-  "State Bank of India",
+const PARTNER_BANKS = [
+  "State Bank of India (SBI)",
   "HDFC Bank",
   "ICICI Bank",
   "Axis Bank",
-  "Kotak Mahindra",
+  "Kotak Mahindra Bank",
   "Bank of Baroda",
   "Punjab National Bank",
   "Tata Capital",
@@ -105,520 +111,345 @@ export default function ApplyPage() {
   }
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        background: "linear-gradient(180deg, #090b10 0%, #0d111a 100%)",
-        color: "#f8fafc",
-        fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        padding: "24px 16px 48px",
-      }}
-    >
-      {/* Brand Header */}
-      <header
-        style={{
-          width: "100%",
-          maxWidth: 480,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          paddingBottom: 20,
-          borderBottom: "1px solid rgba(255,255,255,0.08)",
-          marginBottom: 24,
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div
-            style={{
-              width: 38,
-              height: 38,
-              borderRadius: 10,
-              background: "linear-gradient(135deg, #10b981, #059669)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontWeight: 800,
-              fontSize: 16,
-              color: "#fff",
-              boxShadow: "0 2px 10px rgba(16,185,129,0.3)",
-            }}
-          >
-            RAG
-          </div>
-          <div>
-            <div style={{ fontWeight: 800, fontSize: 15, letterSpacing: "-0.01em" }}>Right Agent Group</div>
-            <div style={{ fontSize: 11, color: "#94a3b8" }}>Loan Advisory • Hyderabad</div>
-          </div>
-        </div>
+    <SiteShell>
+      {/* Subpage Hero with website styling */}
+      <div className="rgpage">
+        <span className="rg-eyebrow">
+          <Zap size={13} strokeWidth={2.4} /> Instant Speed-to-Lead Pre-Qualification
+        </span>
+        <h1>
+          Check Loan Offers Across <span className="rg-grad">20+ Top Banks</span>
+        </h1>
+        <p className="rg-lead">
+          Compare the lowest interest rates in Hyderabad, verify your eligibility with 0 advance fees, and receive an instant AI qualification callback from Priya in 30 seconds.
+        </p>
+      </div>
 
-        <a
-          href="https://wa.me/916301689511?text=Hi%20Right%20Agent%20Group,%20I%20have%20questions%20about%20loans"
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 5,
-            padding: "5px 12px",
-            borderRadius: 20,
-            background: "rgba(37,211,102,0.12)",
-            border: "1px solid rgba(37,211,102,0.3)",
-            color: "#25D366",
-            fontSize: 12,
-            fontWeight: 700,
-            textDecoration: "none",
-          }}
-        >
-          <MessageCircle size={13} />
-          <span>WhatsApp</span>
-        </a>
-      </header>
+      <section className="rg-section" style={{ paddingTop: 36 }}>
+        <div className="rg-demo-grid">
+          {/* Main Card: Form or Success */}
+          <div className="rg-glass rgf-card">
+            {!submitted ? (
+              <form onSubmit={handleSubmit}>
+                <div style={{ marginBottom: 20 }}>
+                  <h2 style={{ fontSize: 18, fontWeight: 700, color: "#fff", margin: "0 0 6px" }}>
+                    Quick Pre-Qualification Form
+                  </h2>
+                  <p style={{ fontSize: 13, color: "#8b96ad", margin: 0 }}>
+                    Enter your details below — Priya will dial your phone right away.
+                  </p>
+                </div>
 
-      {/* Main Container */}
-      <main style={{ width: "100%", maxWidth: 480 }}>
-        {!submitted ? (
-          <div>
-            {/* Top Hook Banner */}
-            <div style={{ textAlign: "center", marginBottom: 24 }}>
-              <div
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  background: "rgba(139,124,255,0.12)",
-                  border: "1px solid rgba(139,124,255,0.3)",
-                  color: "#a78bfa",
-                  borderRadius: 20,
-                  padding: "4px 12px",
-                  fontSize: 12,
-                  fontWeight: 700,
-                  marginBottom: 12,
-                }}
-              >
-                <Zap size={13} />
-                <span>Instant Speed-to-Lead Callback in 30 Seconds</span>
-              </div>
-
-              <h1
-                style={{
-                  fontSize: 26,
-                  fontWeight: 800,
-                  lineHeight: 1.25,
-                  margin: "0 0 10px",
-                  letterSpacing: "-0.02em",
-                }}
-              >
-                Check Loan Offers Across <span style={{ color: "#10b981" }}>20+ Banks</span>
-              </h1>
-
-              <p style={{ fontSize: 13.5, color: "#94a3b8", margin: 0, lineHeight: 1.5 }}>
-                Fill out this quick form. Our Senior AI Loan Advisor <strong style={{ color: "#f1f5f9" }}>Priya</strong> will call your phone in seconds with exact interest rates and eligibility.
-              </p>
-            </div>
-
-            {/* Form Card */}
-            <form
-              onSubmit={handleSubmit}
-              style={{
-                background: "rgba(255,255,255,0.03)",
-                border: "1px solid rgba(255,255,255,0.1)",
-                borderRadius: 18,
-                padding: "24px 20px",
-                display: "flex",
-                flexDirection: "column",
-                gap: 18,
-                boxShadow: "0 10px 30px rgba(0,0,0,0.4)",
-              }}
-            >
-              {/* Honeypot field for bot suppression */}
-              <div style={{ display: "none" }}>
-                <input
-                  type="text"
-                  name="website"
-                  value={website}
-                  onChange={(e) => setWebsite(e.target.value)}
-                  tabIndex={-1}
-                  autoComplete="off"
-                />
-              </div>
-
-              {/* 1. Full Name */}
-              <div>
-                <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#cbd5e1", marginBottom: 6 }}>
-                  Your Full Name
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Rahul Sharma"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  style={{
-                    width: "100%",
-                    height: 44,
-                    borderRadius: 10,
-                    border: "1px solid rgba(255,255,255,0.15)",
-                    background: "rgba(255,255,255,0.06)",
-                    color: "#fff",
-                    padding: "0 14px",
-                    fontSize: 14,
-                    outline: "none",
-                  }}
-                />
-              </div>
-
-              {/* 2. Mobile Number */}
-              <div>
-                <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#cbd5e1", marginBottom: 6 }}>
-                  10-Digit Mobile Number (for Instant Call & WhatsApp)
-                </label>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <div
-                    style={{
-                      height: 44,
-                      padding: "0 12px",
-                      borderRadius: 10,
-                      border: "1px solid rgba(255,255,255,0.15)",
-                      background: "rgba(255,255,255,0.08)",
-                      color: "#94a3b8",
-                      fontSize: 14,
-                      fontWeight: 700,
-                      display: "flex",
-                      alignItems: "center",
-                    }}
-                  >
-                    🇮🇳 +91
+                <div className="rgf-grid">
+                  {/* Full Name */}
+                  <div className="rgf-field">
+                    <label className="rgf-label" htmlFor="app-name">
+                      Full Name <span className="rgf-req">*</span>
+                    </label>
+                    <input
+                      id="app-name"
+                      className="rgf-input"
+                      type="text"
+                      required
+                      placeholder="e.g. Rahul Sharma"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                    />
                   </div>
+
+                  {/* 10-Digit Mobile */}
+                  <div className="rgf-field">
+                    <label className="rgf-label" htmlFor="app-phone">
+                      Mobile Number (WhatsApp) <span className="rgf-req">*</span>
+                    </label>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <div
+                        style={{
+                          height: 44,
+                          padding: "0 12px",
+                          borderRadius: 10,
+                          border: "1px solid #1c2437",
+                          background: "rgba(5,7,12,0.7)",
+                          color: "#9aa5bd",
+                          fontSize: 13.5,
+                          fontWeight: 700,
+                          display: "flex",
+                          alignItems: "center",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        🇮🇳 +91
+                      </div>
+                      <input
+                        id="app-phone"
+                        className="rgf-input"
+                        type="tel"
+                        required
+                        maxLength={10}
+                        placeholder="98765 43210"
+                        value={phone}
+                        onChange={(e) => setPhone(e.target.value.replace(/\D/g, ""))}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Loan Type */}
+                  <div className="rgf-field rgf-full">
+                    <label className="rgf-label">Select Loan Type</label>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+                      {LOAN_TYPES.map((t) => (
+                        <button
+                          key={t.id}
+                          type="button"
+                          onClick={() => setLoanType(t.id)}
+                          style={{
+                            padding: "10px 14px",
+                            borderRadius: 10,
+                            border: loanType === t.id ? "1px solid #5b7cfa" : "1px solid #1c2437",
+                            background: loanType === t.id ? "rgba(91,124,250,0.15)" : "rgba(5,7,12,0.6)",
+                            color: loanType === t.id ? "#fff" : "#9aa5bd",
+                            cursor: "pointer",
+                            textAlign: "left",
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 3,
+                            transition: "all 0.15s ease",
+                          }}
+                        >
+                          <span style={{ fontWeight: 700, fontSize: 13 }}>{t.label}</span>
+                          <span style={{ fontSize: 11, color: loanType === t.id ? "#a5b0ff" : "#64708c" }}>{t.sub}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Loan Amount */}
+                  <div className="rgf-field rgf-full">
+                    <label className="rgf-label">Estimated Loan Amount</label>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      {AMOUNT_PRESETS.map((amt) => (
+                        <button
+                          key={amt}
+                          type="button"
+                          onClick={() => setLoanAmount(amt)}
+                          style={{
+                            padding: "8px 16px",
+                            borderRadius: 999,
+                            border: loanAmount === amt ? "1px solid #2dd4a0" : "1px solid #1c2437",
+                            background: loanAmount === amt ? "rgba(45,212,160,0.15)" : "rgba(5,7,12,0.6)",
+                            color: loanAmount === amt ? "#2dd4a0" : "#9aa5bd",
+                            fontSize: 12.5,
+                            fontWeight: 600,
+                            cursor: "pointer",
+                            transition: "all 0.15s ease",
+                          }}
+                        >
+                          {amt}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Language */}
+                  <div className="rgf-field rgf-full">
+                    <label className="rgf-label">Language for Priya's Call</label>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      {[
+                        { id: "telugu", label: "తెలుగు (Telugu)" },
+                        { id: "english", label: "English" },
+                        { id: "hindi", label: "हिंदी (Hindi)" },
+                      ].map((l) => (
+                        <button
+                          key={l.id}
+                          type="button"
+                          onClick={() => setLanguage(l.id)}
+                          style={{
+                            flex: 1,
+                            padding: "9px 8px",
+                            borderRadius: 10,
+                            border: language === l.id ? "1px solid #a5b0ff" : "1px solid #1c2437",
+                            background: language === l.id ? "rgba(165,176,255,0.12)" : "rgba(5,7,12,0.6)",
+                            color: language === l.id ? "#fff" : "#9aa5bd",
+                            fontSize: 12.5,
+                            fontWeight: 600,
+                            cursor: "pointer",
+                            textAlign: "center",
+                          }}
+                        >
+                          {l.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Honeypot field for bot spam suppression */}
+                <div className="rgf-hp" aria-hidden="true">
                   <input
-                    type="tel"
-                    required
-                    maxLength={10}
-                    placeholder="98765 43210"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value.replace(/\D/g, ""))}
-                    style={{
-                      flex: 1,
-                      height: 44,
-                      borderRadius: 10,
-                      border: "1px solid rgba(255,255,255,0.15)",
-                      background: "rgba(255,255,255,0.06)",
-                      color: "#fff",
-                      padding: "0 14px",
-                      fontSize: 15,
-                      fontWeight: 600,
-                      letterSpacing: "0.04em",
-                      outline: "none",
-                    }}
+                    type="text"
+                    tabIndex={-1}
+                    autoComplete="off"
+                    value={website}
+                    onChange={(e) => setWebsite(e.target.value)}
                   />
                 </div>
-              </div>
 
-              {/* 3. Loan Type Selection */}
-              <div>
-                <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#cbd5e1", marginBottom: 8 }}>
-                  Loan Type
-                </label>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                  {LOAN_TYPES.map((t) => (
-                    <button
-                      key={t.id}
-                      type="button"
-                      onClick={() => setLoanType(t.id)}
-                      style={{
-                        padding: "10px 12px",
-                        borderRadius: 10,
-                        border: loanType === t.id ? "1px solid #10b981" : "1px solid rgba(255,255,255,0.1)",
-                        background: loanType === t.id ? "rgba(16,185,129,0.12)" : "rgba(255,255,255,0.04)",
-                        color: loanType === t.id ? "#10b981" : "#cbd5e1",
-                        fontSize: 12.5,
-                        fontWeight: 700,
-                        textAlign: "left",
-                        cursor: "pointer",
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 2,
-                      }}
-                    >
-                      <span>{t.label}</span>
-                      <span style={{ fontSize: 10.5, color: loanType === t.id ? "#34d399" : "#64748b", fontWeight: 500 }}>
-                        {t.rate}
-                      </span>
-                    </button>
-                  ))}
+                {errorMsg && (
+                  <p className="rgf-error" style={{ marginTop: 14 }}>
+                    {errorMsg}
+                  </p>
+                )}
+
+                <div className="rgf-actions" style={{ marginTop: 24 }}>
+                  <button
+                    type="submit"
+                    className="rg-btn rg-btn-primary rg-btn-lg"
+                    style={{ width: "100%" }}
+                    disabled={loading}
+                  >
+                    {loading ? (
+                      <>
+                        <Loader2 size={16} className="spin" strokeWidth={2.2} /> Connecting to Priya…
+                      </>
+                    ) : (
+                      <>
+                        <PhoneCall size={16} strokeWidth={2.2} /> Call Me Now with Priya (Free)
+                      </>
+                    )}
+                  </button>
                 </div>
-              </div>
 
-              {/* 4. Loan Amount Selection */}
-              <div>
-                <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#cbd5e1", marginBottom: 6 }}>
-                  Estimated Loan Amount
-                </label>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
-                  {AMOUNT_PRESETS.map((amt) => (
-                    <button
-                      key={amt}
-                      type="button"
-                      onClick={() => setLoanAmount(amt)}
-                      style={{
-                        padding: "6px 12px",
-                        borderRadius: 8,
-                        border: loanAmount === amt ? "1px solid #a78bfa" : "1px solid rgba(255,255,255,0.1)",
-                        background: loanAmount === amt ? "rgba(167,139,250,0.15)" : "rgba(255,255,255,0.04)",
-                        color: loanAmount === amt ? "#c4b5fd" : "#94a3b8",
-                        fontSize: 12,
-                        fontWeight: 600,
-                        cursor: "pointer",
-                      }}
-                    >
-                      {amt}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* 5. Language Preference for Call */}
-              <div>
-                <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#cbd5e1", marginBottom: 6 }}>
-                  Language for Priya's Call
-                </label>
-                <div style={{ display: "flex", gap: 8 }}>
-                  {[
-                    { id: "telugu", label: "తెలుగు (Telugu)" },
-                    { id: "english", label: "English" },
-                    { id: "hindi", label: "हिंदी (Hindi)" },
-                  ].map((l) => (
-                    <button
-                      key={l.id}
-                      type="button"
-                      onClick={() => setLanguage(l.id)}
-                      style={{
-                        flex: 1,
-                        padding: "8px 6px",
-                        borderRadius: 8,
-                        border: language === l.id ? "1px solid #10b981" : "1px solid rgba(255,255,255,0.1)",
-                        background: language === l.id ? "rgba(16,185,129,0.15)" : "rgba(255,255,255,0.04)",
-                        color: language === l.id ? "#34d399" : "#94a3b8",
-                        fontSize: 12,
-                        fontWeight: 700,
-                        cursor: "pointer",
-                      }}
-                    >
-                      {l.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {errorMsg && (
+                <p className="rgf-hint" style={{ textAlign: "center", marginTop: 14 }}>
+                  <Lock size={11} style={{ display: "inline", verticalAlign: "middle", marginRight: 4 }} />
+                  We never charge any upfront fees or ask for OTPs/PINs. 100% confidential.
+                </p>
+              </form>
+            ) : (
+              /* Success / Active Dialing State */
+              <div className="rgf-success">
                 <div
+                  className="rgf-success-icon"
                   style={{
-                    padding: "10px 12px",
-                    borderRadius: 8,
-                    background: "rgba(239,68,68,0.12)",
-                    border: "1px solid rgba(239,68,68,0.3)",
-                    color: "#fca5a5",
-                    fontSize: 12,
-                    textAlign: "center",
+                    width: 64,
+                    height: 64,
+                    background: "rgba(45,212,160,0.14)",
+                    border: "2px solid #2dd4a0",
+                    boxShadow: "0 0 30px rgba(45,212,160,0.35)",
                   }}
                 >
-                  {errorMsg}
+                  <PhoneCall size={28} />
                 </div>
-              )}
+                <h3>Priya is Calling You Now!</h3>
+                <p>
+                  Please keep your phone handy. Our AI Loan Advisor Priya is placing an outbound call to{" "}
+                  <strong style={{ color: "#2dd4a0", fontFamily: "monospace" }}>{submittedPhone}</strong> right now to explain your {loanType} options.
+                </p>
 
-              {/* Submit CTA */}
-              <button
-                type="submit"
-                disabled={loading}
-                style={{
-                  height: 48,
-                  borderRadius: 12,
-                  background: "linear-gradient(135deg, #10b981, #059669)",
-                  border: "none",
-                  color: "#fff",
-                  fontSize: 15,
-                  fontWeight: 800,
-                  cursor: loading ? "wait" : "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 8,
-                  boxShadow: "0 4px 16px rgba(16,185,129,0.35)",
-                  transition: "transform 0.1s ease",
-                }}
-              >
-                <PhoneCall size={18} />
-                <span>{loading ? "Connecting to Priya..." : "Call Me Now with Priya (Free)"}</span>
-              </button>
+                <div
+                  style={{
+                    background: "rgba(255,255,255,0.03)",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    borderRadius: 12,
+                    padding: "16px 20px",
+                    textAlign: "left",
+                    marginBottom: 24,
+                    fontSize: 13,
+                    color: "#9aa5bd",
+                    lineHeight: 1.6,
+                  }}
+                >
+                  <div style={{ color: "#fff", fontWeight: 700, marginBottom: 6 }}>Next Steps:</div>
+                  <div>• Answer Priya&apos;s call to discuss your {loanType} requirements ({loanAmount})</div>
+                  <div>• Receive your official loan quote and rate chart directly on WhatsApp</div>
+                  <div>• No physical bank visits — digital pre-approval through our DSA desk</div>
+                </div>
 
-              <div
-                style={{
-                  fontSize: 11,
-                  color: "#64748b",
-                  textAlign: "center",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 5,
-                }}
-              >
-                <Lock size={11} />
-                <span>Zero advance fees • 100% confidential • RBI verified</span>
+                <a
+                  href="https://wa.me/916301689511?text=Hi%20Right%20Agent%20Group,%20I%20just%20submitted%20my%20loan%20enquiry"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rg-btn rg-btn-ghost rg-btn-lg"
+                  style={{ width: "100%", color: "#25D366", borderColor: "rgba(37,211,102,0.3)", background: "rgba(37,211,102,0.08)" }}
+                >
+                  <MessageCircle size={16} /> Open WhatsApp Chat Instead
+                </a>
               </div>
-            </form>
+            )}
           </div>
-        ) : (
-          /* Success Screen: Instant Dialing State */
-          <div
-            style={{
-              background: "rgba(255,255,255,0.03)",
-              border: "1px solid rgba(16,185,129,0.3)",
-              borderRadius: 20,
-              padding: "36px 20px",
-              textAlign: "center",
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              boxShadow: "0 10px 40px rgba(16,185,129,0.15)",
-            }}
-          >
-            {/* Animated Dialing Radar */}
-            <div
-              style={{
-                width: 72,
-                height: 72,
-                borderRadius: "50%",
-                background: "rgba(16,185,129,0.15)",
-                border: "2px solid #10b981",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "#10b981",
-                marginBottom: 20,
-                boxShadow: "0 0 24px rgba(16,185,129,0.4)",
-              }}
-            >
-              <PhoneCall size={32} />
+
+          {/* Right Column: Trust & Banking Partners Sidebar */}
+          <aside className="rg-glass rg-side-card" aria-label="Why Right Agent Group">
+            <h2>Why Choose Right Agent Group?</h2>
+            <ul className="rg-side-list">
+              <li>
+                <Clock size={16} strokeWidth={2} />
+                <span>
+                  <strong style={{ color: "#fff" }}>30-Second Speed-to-Lead:</strong> Our AI advisor Priya dials your number immediately to confirm your requirement without holding on lines.
+                </span>
+              </li>
+              <li>
+                <Building2 size={16} strokeWidth={2} />
+                <span>
+                  <strong style={{ color: "#fff" }}>20+ Banking Partners:</strong> We compare State Bank of India, HDFC, ICICI, Axis, Kotak, and more to guarantee you the lowest interest rate.
+                </span>
+              </li>
+              <li>
+                <ShieldCheck size={16} strokeWidth={2} />
+                <span>
+                  <strong style={{ color: "#fff" }}>Zero Advance Fees:</strong> We never charge processing fees or consultancy charges upfront. Our DSA services are 100% free for applicants.
+                </span>
+              </li>
+              <li>
+                <MessageCircle size={16} strokeWidth={2} />
+                <span>
+                  <strong style={{ color: "#fff" }}>Instant WhatsApp Follow-up:</strong> Rate comparison sheets, EMI charts, and document checklists are sent straight to your WhatsApp.
+                </span>
+              </li>
+            </ul>
+
+            <div style={{ marginTop: 24, paddingTop: 18, borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+              <div style={{ fontSize: 11.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#64708c", marginBottom: 12 }}>
+                Partner Lending Institutions
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {PARTNER_BANKS.map((b) => (
+                  <span
+                    key={b}
+                    style={{
+                      fontSize: 11,
+                      background: "rgba(255,255,255,0.03)",
+                      border: "1px solid rgba(255,255,255,0.06)",
+                      borderRadius: 6,
+                      padding: "3px 8px",
+                      color: "#9aa5bd",
+                    }}
+                  >
+                    {b}
+                  </span>
+                ))}
+              </div>
             </div>
 
-            <div
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 5,
-                background: "rgba(16,185,129,0.15)",
-                color: "#34d399",
-                borderRadius: 20,
-                padding: "3px 10px",
-                fontSize: 11.5,
-                fontWeight: 700,
-                marginBottom: 10,
-              }}
-            >
-              <CheckCircle2 size={13} />
-              <span>Priya is Dialing You Now!</span>
-            </div>
-
-            <h2 style={{ fontSize: 22, fontWeight: 800, margin: "0 0 8px" }}>
-              Please Answer Your Phone
-            </h2>
-
-            <p style={{ fontSize: 13, color: "#94a3b8", lineHeight: 1.5, maxWidth: 360, margin: "0 0 20px" }}>
-              Our Senior AI Loan Advisor <strong style={{ color: "#fff" }}>Priya</strong> is placing a call to{" "}
-              <strong style={{ color: "#34d399", fontFamily: "monospace" }}>{submittedPhone}</strong> right now to explain your {loanType} options.
+            <p className="rg-side-note">
+              Head Office: Gandimaisamma, Hyderabad. Licensed Direct Selling Agent (DSA). All loans subject to bank credit approval and documentation.
             </p>
-
-            <div
-              style={{
-                width: "100%",
-                padding: "14px 16px",
-                borderRadius: 12,
-                background: "rgba(255,255,255,0.04)",
-                border: "1px solid rgba(255,255,255,0.08)",
-                marginBottom: 20,
-                textAlign: "left",
-                fontSize: 12.5,
-                color: "#cbd5e1",
-                lineHeight: 1.6,
-              }}
-            >
-              <div style={{ fontWeight: 700, color: "#f8fafc", marginBottom: 4 }}>What Priya will help you with:</div>
-              <div>• Comparing interest rates across 20+ partner banks</div>
-              <div>• Checking exact EMI calculation for {loanAmount}</div>
-              <div>• Verifying your documents readiness (Zero fees)</div>
-            </div>
-
-            <a
-              href="https://wa.me/916301689511?text=Hi%20Right%20Agent%20Group,%20I%20just%20submitted%20my%20loan%20enquiry"
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{
-                width: "100%",
-                height: 44,
-                borderRadius: 10,
-                background: "#25D366",
-                color: "#fff",
-                fontWeight: 700,
-                fontSize: 14,
-                textDecoration: "none",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 8,
-                boxShadow: "0 2px 10px rgba(37,211,102,0.3)",
-              }}
-            >
-              <MessageCircle size={16} />
-              <span>Or Chat on WhatsApp Instead</span>
-            </a>
-          </div>
-        )}
-
-        {/* Banking Partner Trust Strip */}
-        <div style={{ marginTop: 32, textAlign: "center" }}>
-          <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#64748b", marginBottom: 12 }}>
-            Official Loan Partners with 20+ Financial Institutions
-          </div>
-          <div
-            style={{
-              display: "flex",
-              flexWrap: "wrap",
-              gap: 8,
-              justifyContent: "center",
-            }}
-          >
-            {BANKS.map((b) => (
-              <span
-                key={b}
-                style={{
-                  fontSize: 11,
-                  background: "rgba(255,255,255,0.04)",
-                  border: "1px solid rgba(255,255,255,0.08)",
-                  borderRadius: 6,
-                  padding: "3px 8px",
-                  color: "#94a3b8",
-                }}
-              >
-                {b}
-              </span>
-            ))}
-          </div>
-
-          <div
-            style={{
-              marginTop: 20,
-              fontSize: 11,
-              color: "#475569",
-              lineHeight: 1.5,
-            }}
-          >
-            Right Agent Group • Head Office: Gandimaisamma, Hyderabad<br />
-            We never charge any upfront fees or ask for OTPs / banking PINs.
-          </div>
+          </aside>
         </div>
-      </main>
-    </div>
+
+        {/* Back Link */}
+        <p className="rg-flowline" style={{ marginTop: 44, textAlign: "center" }}>
+          Need assistance right now?{" "}
+          <a
+            href="https://wa.me/916301689511?text=Hi%20Right%20Agent%20Group,%20I%20need%20immediate%20loan%20help"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rg-grad"
+            style={{ textDecoration: "none", fontWeight: 700 }}
+          >
+            Chat with our senior loan desk on WhatsApp ↗
+          </a>
+        </p>
+      </section>
+    </SiteShell>
   )
 }
