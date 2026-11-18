@@ -171,8 +171,8 @@ export function RoleManagerModal({
                 >
                   <option value="agent">Loan Officer (Operative)</option>
                   <option value="viewer">Viewer (Read-Only)</option>
-                  {!isBranchManager && <option value="branch_manager">Branch Manager (Branch)</option>}
-                  {!isBranchManager && <option value="admin">Admin (Full System)</option>}
+                  <option value="branch_manager">Team Manager (Supervisor)</option>
+                  <option value="admin">Admin (Full System)</option>
                 </select>
               </div>
             </div>

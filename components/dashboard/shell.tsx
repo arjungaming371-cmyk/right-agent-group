@@ -106,7 +106,7 @@ function ViewFallback({ label }: { label: string }) {
 export type ViewKey = "leads" | "loans" | "queue" | "voice" | "whatsapp" | "instagram" | "calendar" | "security" | "script" | "knowledge" | "analytics" | "dev-logs" | "attention"
 export type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
 
-const ROLE_LABEL: Record<Role, string> = { admin: "Administrator", agent: "Loan Officer", viewer: "Viewer", developer: "Administrator", branch_manager: "Branch Manager" }
+const ROLE_LABEL: Record<Role, string> = { admin: "Administrator", agent: "Loan Officer", viewer: "Viewer", developer: "Administrator", branch_manager: "Operations Manager" }
 
 type NavItem = { key: ViewKey; label: string; icon: LucideIcon; roles: Role[] }
 type NavSection = { title: string; items: NavItem[] }
@@ -559,7 +559,7 @@ export default function DashboardShell() {
                 style={{ border: "1px solid transparent", fontWeight: 480 }}
               >
                 <UserCog size={16} strokeWidth={1.8} className="text-[var(--text-muted)] group-hover:text-[var(--text-secondary)]" />
-                <span className="flex-1 truncate">{role === "branch_manager" ? "Branch Team" : "Team Access"}</span>
+                <span className="flex-1 truncate">Team Access</span>
               </a>
             </div>
           )}

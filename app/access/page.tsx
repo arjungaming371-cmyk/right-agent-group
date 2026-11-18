@@ -34,7 +34,7 @@ const DEFAULT_ROLE_META: Record<string, { label: string; desc: string; color: st
   admin:  { label: "Admin",        desc: "Full access, including this page. Max 2 admins total.",     color: "var(--accent-violet)", icon: Shield },
   agent:  { label: "Loan Officer", desc: "Leads, loans, calls, WhatsApp, analytics — no settings",    color: "var(--accent-cyan)", icon: UserCog },
   viewer: { label: "Viewer",       desc: "Same views as Loan Officer, strictly read-only",            color: "var(--text-muted)", icon: Eye },
-  branch_manager: { label: "Branch Manager", desc: "Runs ONE branch — sees only that branch's data",   color: "var(--accent-green)", icon: Building2 },
+  branch_manager: { label: "Operations Manager", desc: "Operations & team supervisor",   color: "var(--accent-green)", icon: Building2 },
 }
 
 function RoleBadge({ role, customRole }: { role: string; customRole?: RoleDefinition }) {
@@ -472,27 +472,6 @@ function AccessPageInner() {
                 </div>
               </div>
 
-              {/* Allotted Branch (if branches exist) */}
-              {branches.length > 0 && !isBranchManager && (
-                <div>
-                  <label style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", display: "block", marginBottom: 6 }}>
-                    Allotted Branch
-                  </label>
-                  <select
-                    value={newBranch}
-                    onChange={(e) => setNewBranch(e.target.value)}
-                    style={{ width: "100%", height: 42 }}
-                  >
-                    <option value="">All Branches (HQ)</option>
-                    {branches.map((b) => (
-                      <option key={b.id} value={b.id}>
-                        {b.name} ({b.code})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
               {/* Submit Button */}
               <div>
                 <button
@@ -596,11 +575,6 @@ function AccessPageInner() {
                 </div>
                 <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                   <span>{e.email}</span>
-                  {e.branch_name && (
-                    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, color: "var(--accent-green)", fontWeight: 500 }}>
-                      <Building2 size={11} /> {e.branch_name} ({e.branch_code})
-                    </span>
-                  )}
                   <span style={{ color: "var(--text-muted)" }}>
                     {moduleCount} / {ALL_MODULES.length} modules allotted
                   </span>
@@ -724,27 +698,6 @@ function AccessPageInner() {
                 </div>
               </div>
 
-              {/* Allotted Branch in Edit Modal */}
-              {branches.length > 0 && !isBranchManager && (
-                <div>
-                  <label style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", display: "block", marginBottom: 6 }}>
-                    Allotted Branch
-                  </label>
-                  <select
-                    value={editBranch}
-                    onChange={(e) => setEditBranch(e.target.value)}
-                    style={{ width: "100%", height: 38 }}
-                  >
-                    <option value="">All Branches (HQ)</option>
-                    {branches.map((b) => (
-                      <option key={b.id} value={b.id}>
-                        {b.name} ({b.code})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
               {/* Module Allotment Selector inside Edit Modal */}
               <div>
                 <label style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", display: "block", marginBottom: 6 }}>
@@ -817,7 +770,7 @@ function AccessPageInner() {
                     Add Administrator
                   </h3>
                   <p style={{ fontSize: 12, color: "var(--text-muted)", margin: "2px 0 0" }}>
-                    Full access across all branches, settings, and staff permissions
+                    Full access across all leads, settings, and staff permissions
                   </p>
                 </div>
               </div>

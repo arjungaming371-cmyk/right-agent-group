@@ -14,7 +14,7 @@ type TeamMember = {
 }
 type ActivityLog = { id: string; action: string; created_at: string }
 
-const ROLE_LABEL: Record<Role, string> = { admin: "Administrator", agent: "Loan Officer", viewer: "Viewer", developer: "Administrator", branch_manager: "Branch Manager" }
+const ROLE_LABEL: Record<Role, string> = { admin: "Administrator", agent: "Loan Officer", viewer: "Viewer", developer: "Administrator", branch_manager: "Operations Manager" }
 const ROLE_COLOR: Record<Role, string> = { admin: "var(--accent-violet)", agent: "var(--accent-cyan)", viewer: "var(--text-muted)", developer: "var(--accent-violet)", branch_manager: "var(--accent-green)" }
 
 // Keeps an uploaded photo small — a profile picture doesn't need to be

@@ -135,7 +135,7 @@ export function toLocalDatetimeInput(dateStrOrObj: string | Date): string {
 
 const TYPE_CONFIG: Record<CalendarEventType, { label: string; icon: any; color: string; bg: string; border: string }> = {
   branch_visit: {
-    label: "Branch Visit",
+    label: "Office Visit",
     icon: Building2,
     color: "#10b981",
     bg: "rgba(16, 185, 129, 0.14)",
@@ -689,7 +689,7 @@ export default function CalendarView({ role }: { role: Role }) {
               <span style={{ fontSize: 11.5, color: "var(--text-muted)", marginRight: 2 }}>Filter:</span>
               {[
                 { id: "all", label: "All" },
-                { id: "branch_visit", label: "🏢 Branch Visits" },
+                { id: "branch_visit", label: "🏢 Office Visits" },
                 { id: "callback", label: "📞 Callbacks" },
                 { id: "document_deadline", label: "📄 Deadlines" },
                 { id: "reminder", label: "⏰ Reminders" },
@@ -724,7 +724,7 @@ export default function CalendarView({ role }: { role: Role }) {
               {visibleEvents.length} Total in {monthCursor.toLocaleDateString([], { month: "short" })}
             </span>
             <span style={{ fontSize: 12, fontWeight: 600, padding: "4px 10px", borderRadius: 999, background: "rgba(16, 185, 129, 0.12)", color: "#10b981", border: "1px solid rgba(16, 185, 129, 0.28)" }}>
-              🏢 {branchVisitsCount} Branch Visits
+              🏢 {branchVisitsCount} Office Visits
             </span>
             <span style={{ fontSize: 12, fontWeight: 600, padding: "4px 10px", borderRadius: 999, background: "rgba(59, 130, 246, 0.12)", color: "#3b82f6", border: "1px solid rgba(59, 130, 246, 0.28)" }}>
               📞 {callbacksCount} Callbacks
@@ -1064,7 +1064,7 @@ export default function CalendarView({ role }: { role: Role }) {
                       </div>
                       {item.location && (
                         <div>
-                          <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 2 }}>Location / Branch</div>
+                          <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 2 }}>Office / Location</div>
                           <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text-secondary)" }}>
                             {item.location}
                           </div>
@@ -1193,7 +1193,7 @@ export default function CalendarView({ role }: { role: Role }) {
                   2. Strict Purpose Separation
                 </div>
                 <div style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5 }}>
-                  Branch visits are recorded as in-person appointments and <strong>never dialed</strong>. Callbacks are synchronized with the Call Queue.
+                  Office visits are recorded as in-person appointments and <strong>never dialed</strong>. Callbacks are synchronized with the Call Queue.
                 </div>
               </div>
 
@@ -1501,7 +1501,7 @@ export default function CalendarView({ role }: { role: Role }) {
                     <Building2 size={14} /> In-Person Appointment
                   </div>
                   <div style={{ fontSize: 11.5, color: "var(--text-secondary)", marginTop: 2 }}>
-                    This appointment represents a visit to the branch and is protected from automated outbound phone calls.
+                    This appointment represents an in-person office visit and is protected from automated outbound phone calls.
                   </div>
                 </div>
               )}
@@ -1713,7 +1713,7 @@ export default function CalendarView({ role }: { role: Role }) {
             <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Event Type</label>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
               {[
-                { type: "branch_visit", label: "🏢 Branch Visit", desc: "In-person meeting" },
+                { type: "branch_visit", label: "🏢 Office Visit", desc: "In-person meeting" },
                 { type: "callback", label: "📞 Callback", desc: "Queues phone call" },
                 { type: "document_deadline", label: "📄 Doc Deadline", desc: "ITR / KYC tracking" },
                 { type: "reminder", label: "⏰ Reminder", desc: "General follow-up" },
@@ -1765,10 +1765,10 @@ export default function CalendarView({ role }: { role: Role }) {
 
             {scheduleType === "branch_visit" && (
               <>
-                <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Branch / Meeting Location</label>
+                <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Meeting Location / Address</label>
                 <input
                   type="text"
-                  placeholder="e.g. Hyderabad Main Branch / Banjara Hills"
+                  placeholder="e.g. Head Office, Gandimaisamma, Hyderabad"
                   value={scheduleLocation}
                   onChange={(e) => setScheduleLocation(e.target.value)}
                   style={{ width: "100%", marginBottom: 14 }}

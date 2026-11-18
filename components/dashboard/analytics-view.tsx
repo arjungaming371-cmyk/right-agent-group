@@ -47,22 +47,12 @@ export default function AnalyticsView({ role = "admin" }: { role?: "admin" | "ag
   const [loadError, setLoadError] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
   const [sentMsg, setSentMsg] = useState<string | null>(null)
-  // Owner filters: date range + branch (branch select only for parents).
   const [days, setDays] = useState<7 | 14 | 30>(14)
-  const [branchId, setBranchId] = useState<string>("all")
-  const [branches, setBranches] = useState<{ id: string; name: string }[]>([])
-
-  useEffect(() => {
-    fetch("/api/branches").then(r => (r.ok ? r.json() : null)).then(list => {
-      if (Array.isArray(list)) setBranches(list.map((b: any) => ({ id: b.id, name: b.name })))
-    }).catch(() => {})
-  }, [])
 
   async function load() {
     setLoading(true)
     try {
       const qs = new URLSearchParams({ days: String(days) })
-      if (role === "admin" || role === "developer") qs.set("branch", branchId)
       const res = await fetch(`/api/analytics?${qs.toString()}`)
       if (res.ok) {
         setData(await res.json())
@@ -76,7 +66,7 @@ export default function AnalyticsView({ role = "admin" }: { role?: "admin" | "ag
       setLoading(false)
     }
   }
-  useEffect(() => { load() }, [days, branchId])
+  useEffect(() => { load() }, [days])
 
   async function emailReport() {
     setSending(true)
@@ -171,17 +161,6 @@ export default function AnalyticsView({ role = "admin" }: { role?: "admin" | "ag
           <option value={14}>Last 14 days</option>
           <option value={30}>Last 30 days</option>
         </select>
-        {(role === "admin" || role === "developer") && branches.length > 1 && (
-          <select
-            value={branchId}
-            onChange={e => setBranchId(e.target.value)}
-            aria-label="Branch filter"
-            style={{ height: 34, borderRadius: 10, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", fontSize: 12.5, padding: "0 10px", maxWidth: 190 }}
-          >
-            <option value="all">All branches</option>
-            {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-          </select>
-        )}
         <button onClick={emailReport} disabled={sending} className="btn-ghost" style={{ height: 34 }}>
           {sending ? <CheckCircle2 size={13} strokeWidth={2} /> : <Mail size={13} strokeWidth={1.9} />}
           {sending ? "Sending…" : "Email me this report"}
