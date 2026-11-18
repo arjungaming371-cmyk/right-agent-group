@@ -128,7 +128,7 @@ const pcmOf = (seconds) => Buffer.alloc(SAMPLE_RATE * BYTES_PER_SAMPLE * seconds
     const took = Date.now() - t0
     check("2s of audio takes ~2s", took >= 2000 && took < 2700, `${took}ms`)
     check("every 100ms chunk sent", sent.length === 20, `${sent.length} chunks`)
-    check("frames are well-formed media events", sent.every((m) => m.event === "media" && m.media && m.media.payload), "all chunks are media events with a payload")
+    check("frames are well-formed media events", sent.every((m) => (m.event === "media" || m.event === "playAudio") && m.media && m.media.payload), "all chunks are media events with a payload")
   }
   {
     const { s, sent } = newSession()

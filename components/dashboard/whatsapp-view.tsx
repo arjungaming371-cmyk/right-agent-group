@@ -578,7 +578,7 @@ export default function WhatsAppView({ role }: { role: Role }) {
             content-width on md+; hidden entirely while a chat is open so
             the conversation fills the screen like the real app. */}
         <div
-          className={`${selected ? "hidden md:flex" : "flex"} w-full md:w-auto`}
+          className={`${selected ? "hidden lg:flex" : "flex"} w-full lg:w-auto`}
           style={{ flexDirection: "column", minWidth: 0, flexShrink: 0 }}
         >
           <div style={{ flex: 1, display: "flex", minHeight: 0 }}>

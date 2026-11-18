@@ -335,11 +335,21 @@ async function runMasterAudit() {
   await test("Calendar", "CAL-03", "Callback appointment synchronizes to outbound_queue atomically", async () => {
     const callbackSid = `call-audit-${crypto.randomUUID()}`
     createdCallSids.push(callbackSid)
-    const cbTime = new Date("2026-10-16T11:00:00Z").toISOString()
+    const calLeadId2 = crypto.randomUUID()
+    createdLeadIds.push(calLeadId2)
+    const calPhone2 = "+919876543212"
+    createdQueuePhones.push(calPhone2)
+    await query(`
+      INSERT INTO leads (id, name, phone, branch_id, status)
+      VALUES ($1, 'Audit Customer Cal2', $2, $3, 'new')
+      ON CONFLICT (id) DO NOTHING
+    `, [calLeadId2, calPhone2, BRANCH_A_ID])
+
+    const cbTime = new Date(Date.now() + 86400000).toISOString()
 
     const res = await persistCalendarEvent({
       branchId: BRANCH_A_ID,
-      leadId: syntheticLeadIdA,
+      leadId: calLeadId2,
       sourceType: "voice_call",
       sourceId: callbackSid,
       eventType: "callback",
@@ -352,15 +362,14 @@ async function runMasterAudit() {
       sourceAt: new Date().toISOString(),
       evidenceQuote: "Please call me back tomorrow at 11 AM",
       status: "confirmed",
-      phone: "+919876543210",
-      leadPhone: "+919876543210",
-      customerName: "Audit Customer A",
+      phone: calPhone2,
+      leadPhone: calPhone2,
+      customerName: "Audit Customer Cal2",
     } as any)
 
     assert(res.action === "created", "Callback created")
-    const checkQueue = await query(`SELECT id, status FROM outbound_queue WHERE phone = '+919876543210'`)
+    const checkQueue = await query(`SELECT id, status FROM outbound_queue WHERE phone = $1`, [calPhone2])
     assert(checkQueue.rows.length === 1, "Callback creates exactly 1 outbound queue item")
-    createdQueuePhones.push("+919876543210")
   })
 
   await test("Calendar", "CAL-04", "Cross-branch calendar event modification rejected (403)", async () => {
@@ -465,12 +474,22 @@ async function runMasterAudit() {
   await test("Workflows", "WF-D", "Workflow D: Callback Reschedule & Cancellation", async () => {
     const wfCbSid = `call-cb-${crypto.randomUUID()}`
     createdCallSids.push(wfCbSid)
-    const initialTime = new Date("2026-10-18T10:00:00Z").toISOString()
-    const rescheduledTime = new Date("2026-10-18T15:00:00Z").toISOString()
+    const wfLeadIdD = crypto.randomUUID()
+    createdLeadIds.push(wfLeadIdD)
+    const wfPhoneD = "+919876543299"
+    createdQueuePhones.push(wfPhoneD)
+    await query(`
+      INSERT INTO leads (id, name, phone, branch_id, status)
+      VALUES ($1, 'WF Customer D', $2, $3, 'new')
+      ON CONFLICT (id) DO NOTHING
+    `, [wfLeadIdD, wfPhoneD, BRANCH_A_ID])
+
+    const initialTime = new Date(Date.now() + 86400000).toISOString()
+    const rescheduledTime = new Date(Date.now() + 172800000).toISOString()
 
     const created = await persistCalendarEvent({
       branchId: BRANCH_A_ID,
-      leadId: syntheticLeadIdA,
+      leadId: wfLeadIdD,
       sourceType: "voice_call",
       sourceId: wfCbSid,
       eventType: "callback",
@@ -482,23 +501,22 @@ async function runMasterAudit() {
       confidenceScore: 0.95,
       sourceAt: new Date().toISOString(),
       status: "confirmed",
-      phone: "+919876543299",
-      leadPhone: "+919876543299",
-      customerName: "Audit Customer A",
+      phone: wfPhoneD,
+      leadPhone: wfPhoneD,
+      customerName: "Audit Customer D",
     } as any)
-    createdQueuePhones.push("+919876543299")
 
     const eventId = created.eventId!
     assert(eventId !== undefined, "Callback event ID exists")
 
     // Reschedule
-    await updateCalendarEvent(eventId, { eventAt: rescheduledTime }, BRANCH_A_ID)
+    await updateCalendarEvent(eventId, { eventAt: rescheduledTime }, "test@example.com", BRANCH_A_ID)
     const checkReschedule = await query(`SELECT event_at, original_event_at, status FROM calendar_events WHERE id = $1`, [eventId])
     assert(new Date(checkReschedule.rows[0].event_at).toISOString() === new Date(rescheduledTime).toISOString(), "event_at updated")
     assert(new Date(checkReschedule.rows[0].original_event_at).toISOString() === new Date(initialTime).toISOString(), "original_event_at maintained")
 
     // Cancel
-    await updateCalendarEvent(eventId, { status: "cancelled" }, BRANCH_A_ID)
+    await updateCalendarEvent(eventId, { status: "cancelled" }, "test@example.com", BRANCH_A_ID)
     const checkCancel = await query(`SELECT status FROM calendar_events WHERE id = $1`, [eventId])
     assert(checkCancel.rows[0].status === "cancelled", "Event cancelled")
   })
@@ -587,23 +605,23 @@ async function runMasterAudit() {
   })
 
   await test("Workflows", "WF-H", "Workflow H: Messaging & Webhook Idempotency", async () => {
-    const msgId = crypto.randomUUID()
+    const msgId = `wamid-${crypto.randomUUID()}`
     createdMsgIds.push(msgId)
 
     await query(`
-      INSERT INTO whatsapp_messages (id, lead_id, direction, content, created_at)
-      VALUES ($1, $2, 'inbound', 'Hi, I need loan details', now())
-      ON CONFLICT (id) DO NOTHING
+      INSERT INTO whatsapp_messages (wa_message_id, lead_id, direction, content, status, created_at)
+      VALUES ($1, $2, 'inbound', 'Hi, I need loan details', 'received', now())
+      ON CONFLICT (wa_message_id) WHERE wa_message_id IS NOT NULL DO NOTHING
     `, [msgId, syntheticLeadIdA])
 
     // Replay duplicate webhook
     await query(`
-      INSERT INTO whatsapp_messages (id, lead_id, direction, content, created_at)
-      VALUES ($1, $2, 'inbound', 'Hi, I need loan details', now())
-      ON CONFLICT (id) DO NOTHING
+      INSERT INTO whatsapp_messages (wa_message_id, lead_id, direction, content, status, created_at)
+      VALUES ($1, $2, 'inbound', 'Hi, I need loan details', 'received', now())
+      ON CONFLICT (wa_message_id) WHERE wa_message_id IS NOT NULL DO NOTHING
     `, [msgId, syntheticLeadIdA])
 
-    const count = await query(`SELECT count(*) as c FROM whatsapp_messages WHERE id = $1`, [msgId])
+    const count = await query(`SELECT count(*) as c FROM whatsapp_messages WHERE wa_message_id = $1`, [msgId])
     assert(Number(count.rows[0].c) === 1, "Duplicate message webhook was deduplicated cleanly")
   })
 
@@ -644,7 +662,7 @@ async function runMasterAudit() {
     await query(`DELETE FROM outbound_queue WHERE phone = ANY($1)`, [createdQueuePhones])
   }
   if (createdMsgIds.length > 0) {
-    await query(`DELETE FROM whatsapp_messages WHERE id = ANY($1)`, [createdMsgIds])
+    await query(`DELETE FROM whatsapp_messages WHERE wa_message_id = ANY($1)`, [createdMsgIds])
   }
   if (createdLoanAppIds.length > 0) {
     await query(`DELETE FROM loan_applications WHERE id = ANY($1)`, [createdLoanAppIds])

@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
         l.name AS lead_name,
         l.phone AS lead_phone,
         l.loan_amount AS lead_loan_amount,
-        l.city AS lead_city,
+        l.address AS lead_city,
         lib.url AS target_bank_url
       FROM link_sends s
       LEFT JOIN leads l ON s.lead_id = l.id

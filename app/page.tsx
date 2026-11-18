@@ -8,6 +8,8 @@ import {
 import EmiCalculator from "@/components/emi-calculator"
 import DemoChat from "@/components/site/demo-chat"
 import SiteShell from "@/components/site/site-shell"
+import VoiceSamplePlayer from "@/components/site/voice-sample-player"
+import RoiCalculator from "@/components/site/roi-calculator"
 
 // PUBLIC HOMEPAGE — the website's front door.
 //
@@ -194,12 +196,12 @@ export default function HomePage() {
             AI employees automatically call, qualify, follow up and manage loan leads across Phone, WhatsApp and Instagram — from one powerful operations console.
           </p>
           <div className="rg-hero-cta">
-            <Link href="/demo" className="rg-btn rg-btn-primary">
+            <a href="#hear" className="rg-btn rg-btn-primary">
+              <PhoneCall size={16} strokeWidth={2.2} /> Hear Priya Call Now
+            </a>
+            <Link href="/demo" className="rg-btn rg-btn-ghost">
               Book a Demo <ArrowRight size={15} strokeWidth={2.2} />
             </Link>
-            <a href="#demo" className="rg-btn rg-btn-ghost">
-              <Bot size={16} strokeWidth={2.1} /> Test Priya
-            </a>
           </div>
           <p className="rg-trust">
             <ShieldCheck size={14} strokeWidth={2} />
@@ -253,6 +255,11 @@ export default function HomePage() {
           </div>
         </div>
       </header>
+
+      {/* ================= HEAR PRIYA (VOICE SHOWCASE) ================= */}
+      <section className="rg-section" id="hear" style={{ paddingTop: 0, paddingBottom: 40 }} aria-label="Hear Priya Voice Showcase">
+        <VoiceSamplePlayer />
+      </section>
 
       {/* ================= PROBLEM ================= */}
       <section className="rg-section" id="why" aria-labelledby="why-h">
@@ -452,6 +459,11 @@ export default function HomePage() {
         <div style={{ marginTop: 40 }}>
           <EmiCalculator />
         </div>
+      </section>
+
+      {/* ================= ROI & SAVINGS CALCULATOR ================= */}
+      <section className="rg-section" id="roi" style={{ paddingTop: 0, paddingBottom: 40 }} aria-label="Telecalling ROI Calculator">
+        <RoiCalculator />
       </section>
 
       {/* ================= FAQ ================= */}

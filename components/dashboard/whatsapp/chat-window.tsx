@@ -176,7 +176,7 @@ export default function ChatWindow({
     <div style={{ flex: 1, display: "flex", flexDirection: "column", background: WA.chatBg, minWidth: 0, fontFamily: WA_FONT, position: "relative" }}>
       {/* ---- header ---- */}
       <div style={{ padding: "9px 12px 9px 8px", background: WA.headerBg, display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-        <span className="md:hidden" style={{ display: "flex" }}>
+        <span className="lg:hidden" style={{ display: "flex" }}>
           <IconBtn title="Back" onClick={onBack}><ChevronLeft size={24} /></IconBtn>
         </span>
         <button

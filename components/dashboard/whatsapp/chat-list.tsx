@@ -122,7 +122,7 @@ export default function ChatList({
   // wrapper's mobile/full ↔ desktop/380px split actually applies.
   return (
     <div
-      className="flex w-full md:w-[380px]"
+      className="flex w-full lg:w-[320px] xl:w-[360px]"
       style={{ borderRight: `1px solid ${WA.hairline}`, flexDirection: "column", background: WA.panelBg, flexShrink: 0 }}
       onClick={() => setRowMenu(null)}
     >

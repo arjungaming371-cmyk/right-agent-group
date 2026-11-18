@@ -20,7 +20,7 @@ function getAdminSessionToken() {
   const secret = process.env.AUTH_SECRET
   if (!secret) throw new Error("AUTH_SECRET missing")
   const payload = {
-    email: "arjungaming371@gmail.com",
+    email: process.env.ADMIN_EMAIL || "arjun996625@gmail.com",
     role: "admin",
     orgId: null,
     branchId: null,
