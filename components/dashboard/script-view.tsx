@@ -33,13 +33,11 @@ const LANG_LABELS: Record<string, { label: string; short: string; desc: string }
 }
 
 // Script Manager tabs — Base + the per-channel editable scripts
-// (ai_scripts keys handled by lib/channel-scripts.ts) + the Outpero-style
-// Campaign Studio (per-lead {merge_field} campaign briefs).
-type Tab = "base" | "voice" | "whatsapp" | "instagram" | "studio"
+// (ai_scripts keys handled by lib/channel-scripts.ts).
+type Tab = "base" | "voice" | "whatsapp" | "instagram"
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode; desc: string }[] = [
   { id: "base", label: "Base Script", icon: <Languages size={14} strokeWidth={2} />, desc: "Priya's core persona, rules & qualification flow (all channels)" },
-  { id: "studio", label: "Campaign Studio", icon: <Wand2 size={14} strokeWidth={2} />, desc: "Outpero-style per-lead campaign scripts — write ONE brief with {name}-style merge fields, Priya personalizes it for every call" },
   { id: "voice", label: "Voice Calls", icon: <Phone size={14} strokeWidth={2} />, desc: "Spoken openers & closings for Phone + WhatsApp calls (English, Hindi, Telugu)" },
   { id: "whatsapp", label: "WhatsApp Fallbacks", icon: <MessageSquare size={14} strokeWidth={2} />, desc: "Free-form texts sent when a Meta template isn't approved yet (24h window)" },
   { id: "instagram", label: "Instagram", icon: <Instagram size={14} strokeWidth={2} />, desc: "DM persona & public comment reply prompts" },
@@ -54,7 +52,6 @@ const VOICE_LANGS: { id: "english" | "hindi" | "telugu"; label: string }[] = [
 // ai_scripts keys edited by each tab (a tab may edit more than one row).
 const TAB_KEYS: Record<Tab, string[]> = {
   base: ["base"],
-  studio: ["campaign_template"],
   voice: ["voice_openers", "voice_closings"],
   whatsapp: ["whatsapp_fallbacks"],
   instagram: ["instagram_dm", "instagram_comment"],
@@ -279,11 +276,6 @@ export default function ScriptView() {
       }
     } catch { /* the tab still renders with empty template */ }
   }
-
-  useEffect(() => {
-    if (tab === "studio" && studioOriginal === "" && studioTemplate === "") loadStudio()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab])
 
   async function generateBrief() {
     setGeneratingBrief(true)
@@ -558,12 +550,11 @@ export default function ScriptView() {
 
   const isDirtyBase = content !== original
   const isDirtyTab = useMemo(() => {
-    if (tab === "studio") return studioTemplate !== studioOriginal
     const payload = tabPayload(tab)
     if (tab === "base") return isDirtyBase
     return payload.some((p) => p.content !== pristine[p.language])
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, content, original, voiceOpeners, voiceClosings, waFallbacks, igDm, igComment, pristine, studioTemplate, studioOriginal])
+  }, [tab, content, original, voiceOpeners, voiceClosings, waFallbacks, igDm, igComment, pristine])
 
   const currentScript = scripts.find(s => s.language === selected)
 
@@ -916,9 +907,6 @@ export default function ScriptView() {
         {TABS.find((t) => t.id === tab)?.desc}
       </div>
 
-      {/* Campaign Studio (Outpero-style per-lead campaign briefs) */}
-      {tab === "studio" && renderStudioTab()}
-
       {/* Header cards (base tab only) */}
       {tab === "base" && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 16 }}>
@@ -1142,7 +1130,7 @@ export default function ScriptView() {
       )}
 
       {/* Channel-tab editor (voice / whatsapp / instagram) */}
-      {tab !== "base" && tab !== "studio" && (
+      {tab !== "base" && (
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
         <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", background: "var(--bg-secondary)", flexWrap: "wrap", gap: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -1209,7 +1197,6 @@ export default function ScriptView() {
   )
 
   function isDirtyTabFor(t: Tab): boolean {
-    if (t === "studio") return studioTemplate !== studioOriginal
     if (t === "base") return content !== original
     const payload = tabPayload(t)
     return payload.some((p) => p.content !== pristine[p.language])
