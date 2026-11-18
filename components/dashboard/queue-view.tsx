@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useMemo } from "react"
 import {
   PhoneCall, Phone, MessageCircle, Zap, XCircle, RotateCcw, Download, Play,
-  Pause, ListChecks, Clock, ShieldAlert, RefreshCw, Plus,
+  Pause, ListChecks, Clock, ShieldAlert, RefreshCw, Plus, Upload, CheckCircle2, X,
 } from "lucide-react"
 import { formatDateTime } from "@/lib/utils"
 import { usePolling } from "@/lib/use-poll"
@@ -64,6 +64,23 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "failed", label: "Failed" },
   { id: "skipped", label: "Skipped" },
   { id: "cancelled", label: "Cancelled" },
+]
+
+interface AgendaPreset {
+  id: string
+  label: string
+  text: string
+  product?: string | null
+  language?: string | null
+}
+
+const DEFAULT_PRESETS: AgendaPreset[] = [
+  { id: "p1", label: "Standard intro", text: "" },
+  { id: "p2", label: "New enquiry — send link", text: "Reference what they enquired about, offer to send the official bank link, and book a callback." },
+  { id: "p3", label: "Balance transfer offer", text: "Introduce our balance-transfer offer and ask if their current EMI feels heavy. Don't pitch personal loans." },
+  { id: "p4", label: "Low rate home loan pitch", text: "Highlight currently reduced home-loan rates and pre-approved processing. Ask if they have an active property identified." },
+  { id: "p5", label: "Instant personal loan", text: "Pitch pre-qualified personal loan with same-day disbursal and zero paperwork. Check immediate funding requirement." },
+  { id: "p6", label: "Old lead — still looking?", text: "Re-engage regarding their earlier loan enquiry with today's current competitive bank interest rates." },
 ]
 
 const CHANNEL_META: Record<string, { label: string; icon: any; color: string }> = {
@@ -145,6 +162,68 @@ export default function QueueView({ role }: { role: Role }) {
   const [queueForm, setQueueForm] = useState({ name: "", phone: "", language: "telugu", product_interest: "Home Loan", notes: "" })
   const [queueTalkPoints, setQueueTalkPoints] = useState("")
   const [addingSingle, setAddingSingle] = useState(false)
+
+  // Upload / Import CSV modal state
+  const [showUpload, setShowUpload] = useState(false)
+  const [uploadFile, setUploadFile] = useState<File | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const [uploadAgendaPreset, setUploadAgendaPreset] = useState("Standard intro")
+  const [uploadTalkingPoints, setUploadTalkingPoints] = useState("")
+  const [presets, setPresets] = useState<AgendaPreset[]>(DEFAULT_PRESETS)
+  const [uploadResult, setUploadResult] = useState<{
+    created: number
+    duplicates?: number
+    invalid?: number
+    queued?: number
+    destination?: string
+  } | null>(null)
+
+  useEffect(() => {
+    async function loadPresets() {
+      try {
+        const res = await fetch("/api/agenda-presets")
+        const d = await res.json()
+        if (res.ok && Array.isArray(d.presets) && d.presets.length > 0) {
+          setPresets(d.presets)
+        }
+      } catch {}
+    }
+    loadPresets()
+  }, [])
+
+  function onSelectUploadPreset(lbl: string) {
+    setUploadAgendaPreset(lbl)
+    const match = presets.find((p) => p.label === lbl)
+    if (match) {
+      setUploadTalkingPoints(match.text)
+    }
+  }
+
+  async function handleUploadCsv() {
+    if (!uploadFile) return
+    setUploading(true)
+    try {
+      const fd = new FormData()
+      fd.append("file", uploadFile)
+      fd.append("type", "contacts")
+      fd.append("destination", "queue")
+      fd.append("talking_points", uploadTalkingPoints.trim())
+      fd.append("agenda_label", uploadAgendaPreset.trim())
+      const res = await fetch("/api/upload", { method: "POST", body: fd })
+      const data = await res.json()
+      if (!res.ok) {
+        toast.error(data.error || "Upload failed")
+        return
+      }
+      setUploadResult(data)
+      toast.success(`${data.queued ?? data.created} contacts added to Call Queue`)
+      await load(true)
+    } catch {
+      toast.error("Upload failed")
+    } finally {
+      setUploading(false)
+    }
+  }
 
   async function addToQueue() {
     if (!queueForm.name || !queueForm.phone) return
@@ -604,7 +683,18 @@ export default function QueueView({ role }: { role: Role }) {
               </button>
             )}
             <div style={{ flex: 1 }} />
-            <a href="/api/outbound/export" className="btn-ghost" style={{ height: 38, textDecoration: "none" }}>
+            {canOperate && (
+              <button
+                type="button"
+                onClick={() => { setShowUpload(true); setUploadResult(null); setUploadFile(null); }}
+                className="btn-ghost"
+                style={{ height: 38, display: "inline-flex", alignItems: "center", gap: 6 }}
+                title="Upload CSV to add contacts directly to Call Queue"
+              >
+                <Upload size={14} strokeWidth={2} /> Import CSV
+              </button>
+            )}
+            <a href="/api/outbound/export" className="btn-ghost" style={{ height: 38, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 6 }}>
               <Download size={14} strokeWidth={2} /> Export CSV
             </a>
           </div>
@@ -935,6 +1025,142 @@ export default function QueueView({ role }: { role: Role }) {
           >
             {addingSingle ? "Adding…" : "Add to Queue"}
           </button>
+        </div>
+      )}
+
+      {/* Upload / Import CSV to Call Queue Dialog */}
+      {showUpload && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}>
+          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, padding: 28, width: "100%", maxWidth: 540 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+              <div style={{ fontWeight: 700, fontSize: 16 }}>Import CSV to Call Queue</div>
+              <button
+                type="button"
+                onClick={() => { setShowUpload(false); setUploadResult(null); setUploadFile(null); }}
+                className="icon-btn"
+                style={{ width: 28, height: 28 }}
+              >
+                <X size={15} />
+              </button>
+            </div>
+
+            {uploadResult ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                <div style={{ padding: "14px 16px", borderRadius: 10, background: "rgba(45,212,160,0.1)", border: "1px solid rgba(45,212,160,0.25)", color: "var(--accent-green)", fontSize: 13, lineHeight: 1.5 }}>
+                  <div style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                    <CheckCircle2 size={16} />
+                    <span>{uploadResult.queued ?? uploadResult.created} contacts added to Call Queue</span>
+                  </div>
+                  <div style={{ color: "var(--text-secondary)", fontSize: 12 }}>
+                    ✓ {uploadResult.created} leads processed · {uploadResult.duplicates ?? 0} duplicates skipped · {uploadResult.invalid ?? 0} invalid numbers
+                  </div>
+                  <div style={{ marginTop: 8, fontWeight: 500, color: "var(--text-primary)", fontSize: 12.5 }}>
+                    → Ready to dial! Press &quot;Start Campaign&quot; on the Campaign Radar to begin.
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 6 }}>
+                  <button
+                    type="button"
+                    onClick={() => { setShowUpload(false); setUploadResult(null); setUploadFile(null); load(true); }}
+                    className="btn-primary"
+                    style={{ height: 36, padding: "0 18px" }}
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+                <div>
+                  <label style={{ display: "block", fontSize: 12, color: "var(--text-secondary)", marginBottom: 6 }}>
+                    Choose file (CSV or TXT, max 2000 rows)
+                  </label>
+                  <input
+                    type="file"
+                    accept=".csv,.txt"
+                    onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
+                    style={{
+                      width: "100%",
+                      fontSize: 12.5,
+                      padding: "8px 10px",
+                      borderRadius: 8,
+                      border: "1px solid var(--border)",
+                      background: "var(--bg-secondary)",
+                      color: "var(--text-primary)",
+                    }}
+                  />
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+                    Columns expected: name, phone (10 digits). Optional: language, product, notes.
+                  </div>
+                </div>
+
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>
+                      What should Priya talk about?
+                    </label>
+                    <select
+                      value={uploadAgendaPreset}
+                      onChange={(e) => onSelectUploadPreset(e.target.value)}
+                      style={{ fontSize: 11.5, padding: "3px 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)" }}
+                    >
+                      {presets.map((p) => (
+                        <option key={p.id} value={p.label}>{p.label}</option>
+                      ))}
+                      <option value="Custom brief">Custom brief</option>
+                    </select>
+                  </div>
+
+                  <textarea
+                    value={uploadTalkingPoints}
+                    onChange={(e) => setUploadTalkingPoints(e.target.value.slice(0, 1000))}
+                    rows={3}
+                    maxLength={1000}
+                    placeholder="e.g. Introduce our balance-transfer offer and ask if their current EMI feels heavy. Don't pitch personal loans."
+                    style={{
+                      width: "100%",
+                      fontSize: 12.5,
+                      lineHeight: 1.45,
+                      padding: "8px 10px",
+                      borderRadius: 8,
+                      border: "1px solid var(--border)",
+                      background: "var(--bg-card)",
+                      color: "var(--text-primary)",
+                      resize: "vertical",
+                    }}
+                  />
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", fontStyle: "italic", marginTop: 4 }}>
+                    Priya opens with this in mind — she&apos;ll say it naturally, in the customer&apos;s language, not word for word.
+                  </div>
+                </div>
+
+                <div style={{ padding: "10px 14px", borderRadius: 8, background: "rgba(56,189,248,0.06)", border: "1px solid rgba(56,189,248,0.2)", fontSize: 12, color: "var(--text-secondary)" }}>
+                  <span style={{ fontWeight: 600, color: "var(--accent-blue)" }}>Direct to Call Queue:</span> Contacts from this CSV will be queued as pending and will be dialed when you start the campaign.
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 4 }}>
+                  <button
+                    type="button"
+                    onClick={() => { setShowUpload(false); setUploadResult(null); setUploadFile(null); }}
+                    className="btn-ghost"
+                    style={{ height: 38, padding: "0 16px" }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleUploadCsv}
+                    disabled={!uploadFile || uploading}
+                    className="btn-primary"
+                    style={{ height: 38, padding: "0 20px" }}
+                  >
+                    {uploading ? "Importing…" : "Import to Queue"}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
