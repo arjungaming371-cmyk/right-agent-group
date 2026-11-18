@@ -20,6 +20,7 @@ type Call = {
   id: string; phone: string; direction: string; duration: number
   status: string; sentiment: string; outcome: string; transcript: TranscriptTurn[]
   recording_url: string; language: string; created_at: string
+  twilio_call_sid?: string | null
   leads?: { name: string; phone: string; source?: string | null }
 }
 type Lead = { id: string; name: string; phone: string }
@@ -77,6 +78,7 @@ export default function VoiceLogsView({ role }: { role: Role }) {
   const [language, setLanguage]       = useState("telugu")
   const [instructions, setInstructions] = useState("")
   const [calling, setCalling]         = useState(false)
+  const [showDialer, setShowDialer]   = useState(false)
 
   // Full-featured shared Audio Player state
   const audioRef = useRef<HTMLAudioElement>(null)
@@ -343,14 +345,23 @@ export default function VoiceLogsView({ role }: { role: Role }) {
         ))}
       </div>
 
-      {/* Trigger call — hidden for read-only viewers */}
-      {canEdit && (
+      {/* Trigger call — expandable on demand to prevent pushing call logs below fold */}
+      {canEdit && showDialer && (
         <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: 20 }}>
-          <div style={{ fontWeight: 600, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ width: 26, height: 26, borderRadius: 8, background: "rgba(139,124,255,0.15)", border: "1px solid rgba(139,124,255,0.3)", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-              <Bot size={14} style={{ color: "var(--accent-violet)" }} />
-            </span>
-            Trigger AI Outbound Call
+          <div style={{ fontWeight: 600, marginBottom: 12, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ width: 26, height: 26, borderRadius: 8, background: "rgba(139,124,255,0.15)", border: "1px solid rgba(139,124,255,0.3)", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                <Bot size={14} style={{ color: "var(--accent-violet)" }} />
+              </span>
+              Trigger AI Outbound Call
+            </div>
+            <button
+              onClick={() => setShowDialer(false)}
+              className="btn-ghost"
+              style={{ height: 28, padding: "0 8px", fontSize: 11 }}
+            >
+              <X size={13} /> Close
+            </button>
           </div>
 
           <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
@@ -432,9 +443,20 @@ export default function VoiceLogsView({ role }: { role: Role }) {
             </div>
           </div>
 
-          <button onClick={() => load()} className="btn-ghost" style={{ height: 32, padding: "0 12px", fontSize: 12 }}>
-            <RotateCcw size={12.5} strokeWidth={1.9} /> Refresh
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {canEdit && (
+              <button
+                onClick={() => setShowDialer(v => !v)}
+                className={showDialer ? "btn-secondary" : "btn-primary"}
+                style={{ height: 32, padding: "0 12px", fontSize: 12 }}
+              >
+                <Phone size={12.5} strokeWidth={2} /> {showDialer ? "Close Dialer" : "+ New Call"}
+              </button>
+            )}
+            <button onClick={() => load()} className="btn-ghost" style={{ height: 32, padding: "0 12px", fontSize: 12 }}>
+              <RotateCcw size={12.5} strokeWidth={1.9} /> Refresh
+            </button>
+          </div>
         </div>
 
         {loading && <SkeletonList rows={4} />}
@@ -478,9 +500,11 @@ export default function VoiceLogsView({ role }: { role: Role }) {
               <div style={{ flex: 1 }}>
                 <div style={{ fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", gap: 8 }}>
                   {name}
-                  {/* WhatsApp voice calls land in the same funnel — tag them */}
-                  {call.leads?.source === "whatsapp_call" && (
+                  {/* WhatsApp voice calls vs Phone calls badge */}
+                  {call.twilio_call_sid?.startsWith("wacall-") ? (
                     <span style={{ fontSize: 10, fontWeight: 600, padding: "1px 7px", borderRadius: 5, background: "rgba(0,168,132,0.14)", color: "var(--accent-green, #22c55e)" }}>WhatsApp</span>
+                  ) : (
+                    <span style={{ fontSize: 10, fontWeight: 600, padding: "1px 7px", borderRadius: 5, background: "rgba(99,102,241,0.14)", color: "var(--accent-violet, #818cf8)" }}>Phone</span>
                   )}
                 </div>
                 <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{num} · {dateStr}, {time}</div>

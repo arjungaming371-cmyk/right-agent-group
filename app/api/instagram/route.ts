@@ -229,8 +229,8 @@ async function handleInboundDM(messaging: any, igBranch: BranchInstagramCtx = nu
     // inserts) and polluted analytics. Phone stays NULL for IG-only leads;
     // the IG identity lives in ig_user_id / notes.
     const newLead = await query(
-      `INSERT INTO leads (name, phone, source, status, notes, ig_user_id)
-       VALUES ($1, NULL, 'Instagram DM', 'new', $2, $3) RETURNING id`,
+      `INSERT INTO leads (name, phone, source, status, notes, ig_user_id, is_social_prospect)
+       VALUES ($1, NULL, 'Instagram DM', 'new', $2, $3, true) RETURNING id`,
       [`IG User (${senderId.slice(-4)})`, `Instagram User ID: ${senderId}`, senderId]
     ).catch(async (e: any) => {
       if (e?.code !== "42703") throw e
@@ -489,6 +489,8 @@ async function handleInboundDM(messaging: any, igBranch: BranchInstagramCtx = nu
   }
 }
 
+const LOAN_INTENT_REGEX = /\b(loan|loans|rate|rates|interest|emi|apply|home|house|business|personal|mortgage|lap|plot|property|gold|vehicle|car|education|student|bank|credit|documents|eligibility|process|tenure|lakh|crore|finance|offer|dm|details|contact|call|number|whatsapp|info|cost)\b/i
+
 /**
  * Process Inbound Instagram Post Comment.
  * `igBranch` carries the branch's own IG credentials when the comment arrived
@@ -549,8 +551,8 @@ async function handleInboundComment(val: any, igBranch: BranchInstagramCtx = nul
   let leadId: string | null = existing?.id || null
   if (!leadId) {
     const newLead = await query(
-      `INSERT INTO leads (name, phone, source, status, notes, instagram_handle, ig_user_id)
-       VALUES ($1, NULL, 'Instagram Comment', 'new', $2, $3, $4) RETURNING id`,
+      `INSERT INTO leads (name, phone, source, status, notes, instagram_handle, ig_user_id, is_social_prospect)
+       VALUES ($1, NULL, 'Instagram Comment', 'new', $2, $3, $4, true) RETURNING id`,
       [`@${username}`, `Instagram User ID: ${senderId}`, username, senderId]
     ).catch(async (e: any) => {
       if (e?.code !== "42703") throw e
@@ -602,17 +604,23 @@ async function handleInboundComment(val: any, igBranch: BranchInstagramCtx = nul
         )
       }
 
-      // 2. Send Private DM Reply to Commenter — branch credentials threaded
-      // through (this is the DM that actually converts a commenter into a
-      // lead conversation; it must come from the account they commented on).
-      const privateDmText = renderTemplate(igTemplates.privateDm, { username })
-      const privSent = await privateReplyInstagramComment(commentId, privateDmText, igBranch)
-      if (privSent.ok) {
-        await query(
-          `INSERT INTO instagram_messages (lead_id, ig_user_id, ig_username, direction, type, content, status, ig_message_id, branch_id)
-           VALUES ($1, $2, $3, 'outbound', 'dm', $4, 'sent', $5, $6)`,
-          [leadId, senderId, username, privateDmText, privSent.messageId || null, branchId]
-        )
+      // 2. High-intent filter (ManyChat / Respond.io lead qualification standard):
+      // Only send automated private DMs if the user asks a question or uses loan-intent keywords.
+      // Pure emoji comments or general compliments get a warm public reply without spamming their DMs.
+      const hasLoanIntent = LOAN_INTENT_REGEX.test(text) || text.includes("?")
+      if (hasLoanIntent) {
+        // Send Private DM Reply to Commenter — branch credentials threaded
+        // through (this is the DM that actually converts a commenter into a
+        // lead conversation; it must come from the account they commented on).
+        const privateDmText = renderTemplate(igTemplates.privateDm, { username })
+        const privSent = await privateReplyInstagramComment(commentId, privateDmText, igBranch)
+        if (privSent.ok) {
+          await query(
+            `INSERT INTO instagram_messages (lead_id, ig_user_id, ig_username, direction, type, content, status, ig_message_id, branch_id)
+             VALUES ($1, $2, $3, 'outbound', 'dm', $4, 'sent', $5, $6)`,
+            [leadId, senderId, username, privateDmText, privSent.messageId || null, branchId]
+          )
+        }
       }
     }
   } catch (e: any) {

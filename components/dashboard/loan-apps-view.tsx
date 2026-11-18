@@ -365,7 +365,7 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
             />
           </div>
 
-          <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
+          <div style={{ display: "flex", gap: 4, overflowX: "auto", flexWrap: "nowrap", alignItems: "center", paddingBottom: 2 }}>
             {[
               { id: "all", label: "All" },
               { id: "sent", label: "Sent" },
@@ -434,7 +434,7 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
             </div>
           ) : (
             <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", minWidth: 840, borderCollapse: "collapse", textAlign: "left", fontSize: 12.5 }}>
+              <table style={{ width: "100%", minWidth: 1040, borderCollapse: "collapse", textAlign: "left", fontSize: 12.5 }}>
                 <thead>
                   <tr style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-muted)", fontSize: 11.5, textTransform: "uppercase", letterSpacing: "0.04em" }}>
                     <th style={{ padding: "10px 16px" }}>Applicant & Contact</th>
@@ -519,7 +519,7 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
           </div>
         ) : (
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", minWidth: 840, borderCollapse: "collapse", textAlign: "left", fontSize: 12.5 }}>
+            <table style={{ width: "100%", minWidth: 1040, borderCollapse: "collapse", textAlign: "left", fontSize: 12.5 }}>
               <thead>
                 <tr style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-muted)", fontSize: 11.5, textTransform: "uppercase", letterSpacing: "0.04em" }}>
                   <th style={{ padding: "10px 16px" }}>Lead & Contact</th>

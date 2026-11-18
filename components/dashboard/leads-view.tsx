@@ -1068,7 +1068,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
             <a href="/api/leads/export" className="btn-ghost" style={{ height: 34, fontSize: 12, padding: "0 12px", textDecoration: "none" }} title="Export all leads as CSV">
               <Download size={13} strokeWidth={2} /> Export
             </a>
-            {canEdit && (
+            {canEdit && scopeTab === "crm" && (
               <button
                 type="button"
                 onClick={() => { setShowUpload(true); setUploadResult(null); setUploadFile(null); }}
@@ -1088,7 +1088,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
 
         {/* Horizontal scroll container */}
         <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", minWidth: 820, borderCollapse: "collapse" }}>
+        <table style={{ width: "100%", minWidth: scopeTab === "crm" ? 1100 : 960, borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ borderBottom: "1px solid var(--border)" }}>
               {scopeTab === "crm" ? (

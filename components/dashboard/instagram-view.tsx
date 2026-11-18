@@ -99,6 +99,14 @@ const QUICK_REPLIES = [
     text: "Could you please share your WhatsApp number so our loan advisor can send you the exact loan details and rate chart?",
   },
   {
+    label: "💬 WhatsApp 1-Tap",
+    text: "You can also chat directly with our loan desk on WhatsApp here: https://wa.me/916301689511?text=Hi%20Right%20Agent%20Group,%20I%20am%20interested%20in%20a%20loan",
+  },
+  {
+    label: "⚡ Instant Check",
+    text: "Check your instant eligibility & loan offers in 2 minutes: https://13.201.0.111.sslip.io/apply",
+  },
+  {
     label: "🏠 Home Loan",
     text: "Home loan interest rates start from 7.25% p.a. through 20+ banking partners in Hyderabad. Are you looking for purchase or construction?",
   },
@@ -186,6 +194,7 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
   const [promoteWa, setPromoteWa] = useState(true)
   const [promoteQueue, setPromoteQueue] = useState(false)
   const [promoting, setPromoting] = useState(false)
+  const [callingAi, setCallingAi] = useState(false)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const toast = useToast()
@@ -336,6 +345,33 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
       toast.error("Network error sending message")
     } finally {
       setSending(false)
+    }
+  }
+
+  async function triggerAiCall(leadId: string | null | undefined, phone: string) {
+    if (!phone) return
+    setCallingAi(true)
+    try {
+      const res = await fetch("/api/calls", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          leadId: leadId || undefined,
+          phone,
+          language: "english",
+          instructions: "Lead contacted via Instagram DM/comment. Qualify loan requirement, interest rate expectation, and document readiness.",
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok) {
+        toast.success("AI Speed-to-Lead call initiated — Priya is dialing now")
+      } else {
+        toast.error(data.error || "Failed to start AI call")
+      }
+    } catch {
+      toast.error("Call failed — check network connection")
+    } finally {
+      setCallingAi(false)
     }
   }
 
@@ -937,6 +973,7 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
                             background: "rgba(0,0,0,0.2)",
                             padding: "2px 7px",
                             borderRadius: 4,
+                            whiteSpace: "nowrap",
                           }}
                         >
                           <span>💬</span> Public Post Comment
@@ -996,6 +1033,7 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
                     fontSize: 11.5,
                     cursor: "pointer",
                     whiteSpace: "nowrap",
+                    flexShrink: 0,
                     display: "flex",
                     alignItems: "center",
                     gap: 4,
@@ -1243,11 +1281,59 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
               </a>
             )}
 
-            <div style={{ fontSize: 12, color: IG_THEME.textSecondary, marginTop: 2 }}>
+            <div style={{ fontSize: 12, color: IG_THEME.textSecondary, marginTop: 4 }}>
               {activeConv.lead_phone ? (
-                <span style={{ color: IG_THEME.accentGreen, fontWeight: 600, fontFamily: "monospace" }}>
-                  📞 {activeConv.lead_phone}
-                </span>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                    <span style={{ color: IG_THEME.accentGreen, fontWeight: 600, fontFamily: "monospace" }}>
+                      📞 {activeConv.lead_phone}
+                    </span>
+                    <a
+                      href={`https://wa.me/${activeConv.lead_phone.replace(/\D/g, "")}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 3,
+                        color: "#25D366",
+                        fontSize: 11,
+                        textDecoration: "none",
+                        background: "rgba(37,211,102,0.12)",
+                        padding: "2px 7px",
+                        borderRadius: 4,
+                        fontWeight: 600,
+                      }}
+                    >
+                      WhatsApp ↗
+                    </a>
+                  </div>
+                  {userRole !== "viewer" && (
+                    <button
+                      type="button"
+                      disabled={callingAi}
+                      onClick={() => triggerAiCall(activeConv.lead_id, activeConv.lead_phone!)}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: 6,
+                        height: 32,
+                        borderRadius: 7,
+                        fontSize: 11.5,
+                        fontWeight: 700,
+                        cursor: callingAi ? "not-allowed" : "pointer",
+                        background: "linear-gradient(135deg, #10b981, #059669)",
+                        border: "none",
+                        color: "#fff",
+                        boxShadow: "0 2px 6px rgba(16,185,129,0.25)",
+                      }}
+                    >
+                      <Phone size={12} strokeWidth={2.4} />
+                      <span>{callingAi ? "Dialing Priya..." : "Speed-to-Lead: Call with Priya"}</span>
+                    </button>
+                  )}
+                </div>
               ) : (
                 <span style={{ color: IG_THEME.textMuted }}>No telephone number listed</span>
               )}
