@@ -1,7 +1,7 @@
 // Verified login page — Google Sign-In only, restricted to allowlisted emails.
 // Server component: reads ?error= and ?next= from the URL (Next 15 async searchParams).
 import Image from "next/image"
-import { Phone, MessageCircle, ShieldCheck, Sparkles, ArrowLeft } from "lucide-react"
+import { Phone, MessageCircle, ShieldCheck, Sparkles } from "lucide-react"
 import OtpForm from "./otp-form"
 
 export const dynamic = "force-dynamic"
@@ -47,7 +47,7 @@ export default async function LoginPage({
         />
 
         {/* Brand */}
-        <a href="/" className="relative flex items-center gap-3 transition opacity-90 hover:opacity-100">
+        <div className="relative flex items-center gap-3">
           <Image
             src="/logo.png"
             width={180}
@@ -55,7 +55,7 @@ export default async function LoginPage({
             alt="Right Agent Group"
             className="h-12 w-auto object-contain drop-shadow-[0_4px_16px_rgba(56,189,248,0.2)]"
           />
-        </a>
+        </div>
 
         {/* Headline */}
         <div className="relative">
@@ -110,33 +110,15 @@ export default async function LoginPage({
       {/* ===== Right — sign-in card ===== */}
       <section className="flex flex-1 items-center justify-center px-6 py-12">
         <div className="w-full max-w-[400px]">
-          {/* Top navigation helper */}
-          <div className="mb-5 flex items-center justify-between">
-            <a
-              href="/"
-              className="inline-flex items-center gap-1.5 text-[12.5px] font-medium text-[#9aa5bd] transition hover:text-white"
-            >
-              <ArrowLeft size={14} /> Back to website
-            </a>
-            <a
-              href="/demo"
-              className="text-[12px] font-medium text-[#8b7cff] transition hover:underline"
-            >
-              Request Access
-            </a>
-          </div>
-
           {/* Mobile-only brand (left panel hidden) */}
           <div className="mb-8 flex items-center justify-center gap-3 lg:hidden">
-            <a href="/">
-              <Image
-                src="/logo.png"
-                width={180}
-                height={48}
-                alt="Right Agent Group"
-                className="h-10 w-auto object-contain"
-              />
-            </a>
+            <Image
+              src="/logo.png"
+              width={180}
+              height={48}
+              alt="Right Agent Group"
+              className="h-10 w-auto object-contain"
+            />
           </div>
 
           <div
@@ -181,12 +163,7 @@ export default async function LoginPage({
             </div>
 
             <p className="mt-5 text-center text-[12px] leading-relaxed text-[#64708c]">
-              Only approved accounts can sign in.
-              <br />
-              Need console access?{" "}
-              <a href="/demo" className="text-[#8b7cff] font-medium hover:underline">
-                Book a demo & request access
-              </a>
+              Only approved accounts can sign in. Contact administrator for access.
             </p>
           </div>
 
