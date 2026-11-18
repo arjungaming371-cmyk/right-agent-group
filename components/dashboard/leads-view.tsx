@@ -2005,31 +2005,56 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                     What should happen to these contacts?
                   </label>
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer", fontSize: 13 }}>
+                    <label style={{
+                      display: "flex",
+                      alignItems: "flex-start",
+                      gap: 12,
+                      cursor: "pointer",
+                      fontSize: 13,
+                      padding: "12px 14px",
+                      borderRadius: 10,
+                      border: uploadDestination === "leads" ? "1.5px solid var(--accent-blue)" : "1px solid var(--border)",
+                      background: uploadDestination === "leads" ? "rgba(99, 102, 241, 0.08)" : "var(--bg-secondary)",
+                      transition: "all 0.15s ease",
+                    }}>
                       <input
                         type="radio"
                         name="uploadDestination"
                         value="leads"
                         checked={uploadDestination === "leads"}
                         onChange={() => setUploadDestination("leads")}
-                        style={{ marginTop: 3 }}
+                        style={{ width: 16, height: 16, flexShrink: 0, marginTop: 2, cursor: "pointer" }}
                       />
-                      <div>
-                        <div style={{ fontWeight: 500, color: "var(--text-primary)" }}>Just add to Leads — no calls. Call them later.</div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 600, color: "var(--text-primary)" }}>Just add to Leads — no calls. Call them later.</div>
+                        <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2 }}>
+                          Contacts will only be saved in your leads list without scheduling outbound calls.
+                        </div>
                       </div>
                     </label>
 
-                    <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer", fontSize: 13 }}>
+                    <label style={{
+                      display: "flex",
+                      alignItems: "flex-start",
+                      gap: 12,
+                      cursor: "pointer",
+                      fontSize: 13,
+                      padding: "12px 14px",
+                      borderRadius: 10,
+                      border: uploadDestination === "queue" ? "1.5px solid var(--accent-blue)" : "1px solid var(--border)",
+                      background: uploadDestination === "queue" ? "rgba(99, 102, 241, 0.08)" : "var(--bg-secondary)",
+                      transition: "all 0.15s ease",
+                    }}>
                       <input
                         type="radio"
                         name="uploadDestination"
                         value="queue"
                         checked={uploadDestination === "queue"}
                         onChange={() => setUploadDestination("queue")}
-                        style={{ marginTop: 3 }}
+                        style={{ width: 16, height: 16, flexShrink: 0, marginTop: 2, cursor: "pointer" }}
                       />
-                      <div>
-                        <div style={{ fontWeight: 500, color: "var(--text-primary)" }}>Add to Leads and Call Queue — they wait until you press Start.</div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 600, color: "var(--text-primary)" }}>Add to Leads and Call Queue — they wait until you press Start.</div>
                         <div style={{ fontSize: 11, color: "var(--accent-yellow)", marginTop: 4 }}>
                           Calls only go out 8:00 AM–7:00 PM, Mon–Sat. Uploaded outside those hours? They&apos;ll wait for the next window.
                         </div>
