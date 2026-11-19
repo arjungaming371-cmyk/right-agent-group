@@ -36,7 +36,24 @@ export async function POST(req: NextRequest) {
   }
 
   if (!result.ok) {
-    return NextResponse.json({ error: result.error || "Failed to send Instagram message" }, { status: 500 })
+    const errText = result.error || "Failed to send Instagram message"
+    const isWindowExpired =
+      errText.toLowerCase().includes("outside of allowed window") ||
+      errText.toLowerCase().includes("24 hour") ||
+      errText.toLowerCase().includes("messaging window")
+
+    if (isWindowExpired) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "The 24-hour Meta messaging window has closed. You can reply to their public comment or contact them via WhatsApp.",
+          code: "WINDOW_EXPIRED",
+        },
+        { status: 422 }
+      )
+    }
+
+    return NextResponse.json({ error: errText }, { status: 500 })
   }
 
   // Insert Outbound DM / Comment Record

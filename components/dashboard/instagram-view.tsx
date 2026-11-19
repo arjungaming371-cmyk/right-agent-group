@@ -30,6 +30,11 @@ import {
   Mail,
   ShieldCheck,
   SendHorizontal,
+  Plus,
+  Trash2,
+  Edit3,
+  Bookmark,
+  Layers,
 } from "lucide-react"
 import { useToast } from "../ui/toast"
 import { ClickableRow } from "../ui/interactive"
@@ -93,32 +98,71 @@ const IG_THEME = {
   accentYellow: "#f59e0b",
 }
 
-const QUICK_REPLIES = [
+export type InstagramTemplate = {
+  id: string
+  label: string
+  text: string
+  category: string
+  branch_id?: string | null
+  created_by?: string | null
+  created_at?: string
+  updated_at?: string
+}
+
+export const DEFAULT_INSTAGRAM_TEMPLATES: InstagramTemplate[] = [
   {
+    id: "default-1",
     label: "📱 Ask WhatsApp",
     text: "Could you please share your WhatsApp number so our loan advisor can send you the exact loan details and rate chart?",
+    category: "WhatsApp",
   },
   {
+    id: "default-2",
     label: "💬 WhatsApp 1-Tap",
-    text: "You can also chat directly with our loan desk on WhatsApp here: https://wa.me/916301689511?text=Hi%20Right%20Agent%20Group,%20I%20am%20interested%20in%20a%20loan",
+    text: "You can also chat directly with our loan desk on WhatsApp here: https://wa.me/918333993223?text=Hi%20Right%20Agent%20Group,%20I%20am%20interested%20in%20a%20loan",
+    category: "WhatsApp",
   },
   {
+    id: "default-3",
     label: "⚡ Instant Check",
     text: "Check your instant eligibility & loan offers in 2 minutes: https://13.201.0.111.sslip.io/apply",
+    category: "Offers",
   },
   {
+    id: "default-4",
     label: "🏠 Home Loan",
     text: "Home loan interest rates start from 7.25% p.a. through 20+ banking partners in Hyderabad. Are you looking for purchase or construction?",
+    category: "Loans",
   },
   {
+    id: "default-5",
     label: "💼 Business Loan",
     text: "Business loans up to ₹75 Lakhs available with fast approval and minimal documentation. What loan amount do you require?",
+    category: "Loans",
   },
   {
+    id: "default-6",
     label: "📍 Office Address",
     text: "Our head office is at Gandimaisamma, Hyderabad. We never charge any advance fees or ask for OTP/PIN.",
+    category: "General",
+  },
+  {
+    id: "default-7",
+    label: "🇮🇳 Telugu Offer",
+    text: "Namaskaram {username} garu! Right Agent Group nundi... Hyderabad lo 7.25% starting rate tho Home Loan available. Meeku details kavala?",
+    category: "Telugu",
   },
 ]
+
+export function applyInstagramTemplateVars(text: string, conv?: Conversation | null) {
+  let res = text
+  const username = conv?.ig_username ? `@${conv.ig_username}` : "there"
+  const phone = conv?.lead_phone || conv?.ig_phone_extracted || ""
+  res = res.replace(/\{username\}/gi, username)
+  res = res.replace(/\{phone\}/gi, phone)
+  res = res.replace(/\{apply_link\}/gi, "https://13.201.0.111.sslip.io/apply")
+  return res
+}
 
 function Avatar({ name, size = 40 }: { name: string; size?: number }) {
   const source = (name || "").trim()
@@ -179,7 +223,21 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
   const [loadingMsgs, setLoadingMsgs] = useState(false)
   const [search, setSearch] = useState(initialSearch)
   const [tabFilter, setTabFilter] = useState<FilterTab>("all")
-  const [inputMsg, setInputMsg] = useState("")
+  const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const [windowExpiredError, setWindowExpiredError] = useState<string | null>(null)
+
+  const inputMsg = (activeIgUserId ? drafts[activeIgUserId] : "") || ""
+  const setInputMsg = useCallback(
+    (updater: string | ((prev: string) => string)) => {
+      if (!activeIgUserId) return
+      setDrafts((prev) => {
+        const cur = prev[activeIgUserId] || ""
+        const nextVal = typeof updater === "function" ? updater(cur) : updater
+        return { ...prev, [activeIgUserId]: nextVal }
+      })
+    },
+    [activeIgUserId]
+  )
   const [replyType, setReplyType] = useState<"dm" | "comment">("dm")
   const [sending, setSending] = useState(false)
   const [showInfo, setShowInfo] = useState(false)
@@ -195,6 +253,17 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
   const [promoteQueue, setPromoteQueue] = useState(false)
   const [promoting, setPromoting] = useState(false)
   const [callingAi, setCallingAi] = useState(false)
+
+  // Instagram Templates State:
+  const [templates, setTemplates] = useState<InstagramTemplate[]>(DEFAULT_INSTAGRAM_TEMPLATES)
+  const [loadingTemplates, setLoadingTemplates] = useState(false)
+  const [showTemplateModal, setShowTemplateModal] = useState(false)
+  const [editingTemplate, setEditingTemplate] = useState<InstagramTemplate | null>(null)
+  const [templateForm, setTemplateForm] = useState({ label: "", text: "", category: "General" })
+  const [templateSearch, setTemplateSearch] = useState("")
+  const [selectedTemplateCat, setSelectedTemplateCat] = useState("All")
+  const [savingTemplate, setSavingTemplate] = useState(false)
+  const [deletingTemplateId, setDeletingTemplateId] = useState<string | null>(null)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const toast = useToast()
@@ -256,6 +325,111 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
   }, [initialSearch, conversations])
 
   usePolling(loadConversations, 5000)
+
+  // Load customizable Instagram templates
+  const loadTemplates = useCallback(async () => {
+    try {
+      setLoadingTemplates(true)
+      const res = await fetch("/api/instagram/templates")
+      if (res.ok) {
+        const data = await res.json()
+        if (data?.templates && Array.isArray(data.templates) && data.templates.length > 0) {
+          setTemplates(data.templates)
+        }
+      }
+    } catch {
+      // Keep defaults
+    } finally {
+      setLoadingTemplates(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadTemplates()
+  }, [loadTemplates])
+
+  async function handleSaveTemplate(e?: React.FormEvent) {
+    if (e) e.preventDefault()
+    if (!templateForm.label.trim()) {
+      toast.error("Template label is required")
+      return
+    }
+    if (!templateForm.text.trim()) {
+      toast.error("Template text is required")
+      return
+    }
+
+    try {
+      setSavingTemplate(true)
+      const res = await fetch("/api/instagram/templates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: editingTemplate?.id && !editingTemplate.id.startsWith("default-") ? editingTemplate.id : undefined,
+          label: templateForm.label.trim(),
+          text: templateForm.text.trim(),
+          category: templateForm.category.trim() || "General",
+        }),
+      })
+
+      if (res.ok) {
+        toast.success(editingTemplate ? "Template updated" : "Template saved")
+        setEditingTemplate(null)
+        setTemplateForm({ label: "", text: "", category: "General" })
+        loadTemplates()
+      } else {
+        const err = await res.json()
+        toast.error(err.error || "Failed to save template")
+      }
+    } catch {
+      toast.error("Failed to save template")
+    } finally {
+      setSavingTemplate(false)
+    }
+  }
+
+  async function handleDeleteTemplate(id: string) {
+    if (!confirm("Are you sure you want to delete this template?")) return
+    try {
+      setDeletingTemplateId(id)
+      const res = await fetch(`/api/instagram/templates?id=${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      })
+      if (res.ok) {
+        toast.success("Template deleted")
+        setTemplates((prev) => prev.filter((t) => t.id !== id))
+        if (editingTemplate?.id === id) {
+          setEditingTemplate(null)
+          setTemplateForm({ label: "", text: "", category: "General" })
+        }
+      } else {
+        toast.error("Failed to delete template")
+      }
+    } catch {
+      toast.error("Failed to delete template")
+    } finally {
+      setDeletingTemplateId(null)
+    }
+  }
+
+  const templateCategories = useMemo(() => {
+    const cats = new Set<string>()
+    templates.forEach((t) => {
+      if (t.category) cats.add(t.category)
+    })
+    return ["All", ...Array.from(cats)]
+  }, [templates])
+
+  const filteredTemplates = useMemo(() => {
+    return templates.filter((t) => {
+      const matchCat = selectedTemplateCat === "All" || t.category === selectedTemplateCat
+      const matchSearch =
+        !templateSearch.trim() ||
+        t.label.toLowerCase().includes(templateSearch.toLowerCase()) ||
+        t.text.toLowerCase().includes(templateSearch.toLowerCase())
+      return matchCat && matchSearch
+    })
+  }, [templates, selectedTemplateCat, templateSearch])
 
   // Load message history for selected user
   const loadMessages = useCallback(
@@ -335,11 +509,17 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
 
       if (res.ok) {
         setInputMsg("")
+        setWindowExpiredError(null)
         loadMessages(activeIgUserId)
         loadConversations()
       } else {
-        const err = await res.json()
-        toast.error(err.error || "Failed to send Instagram message")
+        const err = await res.json().catch(() => ({}))
+        if (res.status === 422 || err.code === "WINDOW_EXPIRED") {
+          setWindowExpiredError(err.error || "The 24-hour Meta messaging window has closed.")
+          toast.error("24h window closed — reply to comment or use WhatsApp")
+        } else {
+          toast.error(err.error || "Failed to send Instagram message")
+        }
       }
     } catch {
       toast.error("Network error sending message")
@@ -449,8 +629,11 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
 
   return (
     <div
+      className="w-full flex-1 min-w-0"
       style={{
         display: "flex",
+        width: "100%",
+        maxWidth: "100%",
         height: "calc(100vh - 90px)",
         minHeight: 580,
         background: IG_THEME.panelBg,
@@ -467,7 +650,9 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
         className={mobileDetailOpen ? "hidden md:flex" : "flex"}
         style={{
           width: 340,
-          minWidth: 300,
+          minWidth: 280,
+          maxWidth: 360,
+          flexShrink: 0,
           borderRight: `1px solid ${IG_THEME.hairline}`,
           flexDirection: "column",
           background: IG_THEME.sidebarBg,
@@ -597,6 +782,7 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
                   border: `1px solid ${isActive ? "transparent" : IG_THEME.hairline}`,
                   cursor: "pointer",
                   whiteSpace: "nowrap",
+                  flexShrink: 0,
                   transition: "all 0.15s ease",
                 }}
               >
@@ -648,6 +834,7 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
                   onActivate={() => {
                     setActiveIgUserId(conv.ig_user_id)
                     setMobileDetailOpen(true)
+                    setWindowExpiredError(null)
                   }}
                   label={`Open conversation with ${title}`}
                   style={{
@@ -776,6 +963,8 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
           flexDirection: "column",
           background: IG_THEME.chatBg,
           minWidth: 0,
+          width: "100%",
+          position: "relative",
         }}
       >
         {activeConv ? (
@@ -885,6 +1074,33 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
                 >
                   <Zap size={13} style={{ fill: aiEnabled ? IG_THEME.accentGreen : "none" }} />
                   <span>Priya AI: {aiEnabled ? "ON" : "OFF"}</span>
+                </button>
+
+                {/* Templates Modal Trigger Button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingTemplate(null)
+                    setShowTemplateModal(true)
+                  }}
+                  style={{
+                    background: "rgba(255,255,255,0.06)",
+                    border: `1px solid ${IG_THEME.hairline}`,
+                    borderRadius: 8,
+                    color: IG_THEME.textSecondary,
+                    cursor: "pointer",
+                    padding: "6px 10px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 5,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    transition: "all 0.15s ease",
+                  }}
+                  title="Manage Instagram Message Templates"
+                >
+                  <Sparkles size={14} style={{ color: IG_THEME.accentPink }} />
+                  <span className="hidden sm:inline">Templates</span>
                 </button>
 
                 {/* Info Drawer Toggle */}
@@ -1015,42 +1231,91 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
                 background: "rgba(255,255,255,0.02)",
                 borderTop: `1px solid ${IG_THEME.hairline}`,
                 display: "flex",
+                alignItems: "center",
                 gap: 8,
                 overflowX: "auto",
+                maxWidth: "100%",
+                minWidth: 0,
+                scrollbarWidth: "none",
               }}
             >
-              {QUICK_REPLIES.map((qr, i) => (
-                <button
-                  key={i}
-                  type="button"
-                  onClick={() => setInputMsg(qr.text)}
-                  style={{
-                    background: "rgba(255,255,255,0.06)",
-                    border: `1px solid ${IG_THEME.hairline}`,
-                    borderRadius: 14,
-                    padding: "3px 10px",
-                    color: IG_THEME.textSecondary,
-                    fontSize: 11.5,
-                    cursor: "pointer",
-                    whiteSpace: "nowrap",
-                    flexShrink: 0,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 4,
-                    transition: "all 0.15s ease",
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.color = IG_THEME.textPrimary
-                    e.currentTarget.style.background = "rgba(255,255,255,0.1)"
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.color = IG_THEME.textSecondary
-                    e.currentTarget.style.background = "rgba(255,255,255,0.06)"
-                  }}
-                >
-                  <span>{qr.label}</span>
-                </button>
-              ))}
+              {/* Manage Templates Trigger Pill */}
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingTemplate(null)
+                  setShowTemplateModal(true)
+                }}
+                title="Manage quick-reply templates & create custom responses"
+                style={{
+                  background: "linear-gradient(135deg, rgba(225,48,108,0.18), rgba(131,58,180,0.18))",
+                  border: "1px solid rgba(225,48,108,0.45)",
+                  borderRadius: 14,
+                  padding: "3px 11px",
+                  color: "#ff7aa8",
+                  fontSize: 11.5,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                  flexShrink: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 5,
+                  boxShadow: "0 2px 6px rgba(225,48,108,0.15)",
+                  transition: "all 0.15s ease",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "linear-gradient(135deg, rgba(225,48,108,0.3), rgba(131,58,180,0.3))"
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "linear-gradient(135deg, rgba(225,48,108,0.18), rgba(131,58,180,0.18))"
+                }}
+              >
+                <Sparkles size={12} style={{ color: "#ff7aa8" }} />
+                <span>Templates</span>
+              </button>
+
+              <div style={{ width: 1, height: 16, background: IG_THEME.hairlineStrong, flexShrink: 0, margin: "0 2px" }} />
+
+              {/* Dynamic Template Chips */}
+              {templates.map((tpl) => {
+                const rendered = applyInstagramTemplateVars(tpl.text, activeConv)
+                return (
+                  <button
+                    key={tpl.id}
+                    type="button"
+                    onClick={() => setInputMsg(rendered)}
+                    title={rendered}
+                    style={{
+                      background: "rgba(255,255,255,0.06)",
+                      border: `1px solid ${IG_THEME.hairline}`,
+                      borderRadius: 14,
+                      padding: "3px 10px",
+                      color: IG_THEME.textSecondary,
+                      fontSize: 11.5,
+                      cursor: "pointer",
+                      whiteSpace: "nowrap",
+                      flexShrink: 0,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 4,
+                      transition: "all 0.15s ease",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.color = IG_THEME.textPrimary
+                      e.currentTarget.style.background = "rgba(255,255,255,0.1)"
+                      e.currentTarget.style.borderColor = IG_THEME.hairlineStrong
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.color = IG_THEME.textSecondary
+                      e.currentTarget.style.background = "rgba(255,255,255,0.06)"
+                      e.currentTarget.style.borderColor = IG_THEME.hairline
+                    }}
+                  >
+                    <span>{tpl.label}</span>
+                  </button>
+                )
+              })}
             </div>
 
             {/* Message Composer Area */}
@@ -1064,8 +1329,78 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
                 gap: 10,
               }}
             >
+              {/* 24-Hour Window Warning Banner */}
+              {windowExpiredError && (
+                <div
+                  style={{
+                    background: "rgba(245,158,11,0.12)",
+                    border: "1px solid rgba(245,158,11,0.35)",
+                    borderRadius: 8,
+                    padding: "8px 12px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 10,
+                    fontSize: 12,
+                    color: "#fbbf24",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <AlertCircle size={15} style={{ flexShrink: 0 }} />
+                    <span>{windowExpiredError}</span>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setReplyType("comment")
+                        setWindowExpiredError(null)
+                      }}
+                      style={{
+                        background: "rgba(225,48,108,0.2)",
+                        border: "1px solid rgba(225,48,108,0.4)",
+                        color: "#fff",
+                        fontSize: 11,
+                        fontWeight: 600,
+                        padding: "3px 8px",
+                        borderRadius: 6,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Reply to Comment 💬
+                    </button>
+                    {activeConv?.lead_phone && (
+                      <a
+                        href={`https://wa.me/${activeConv.lead_phone.replace(/\D/g, "")}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          background: "rgba(37,211,102,0.2)",
+                          border: "1px solid rgba(37,211,102,0.4)",
+                          color: "#25D366",
+                          fontSize: 11,
+                          fontWeight: 600,
+                          padding: "3px 8px",
+                          borderRadius: 6,
+                          textDecoration: "none",
+                        }}
+                      >
+                        WhatsApp ↗
+                      </a>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setWindowExpiredError(null)}
+                      style={{ background: "none", border: "none", color: "#9ca3af", cursor: "pointer", padding: 2 }}
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Type Switcher: DM vs Comment */}
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
                 <div
                   style={{
                     display: "inline-flex",
@@ -1117,11 +1452,11 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
                   </button>
                 </div>
 
-                <span style={{ fontSize: 11, color: IG_THEME.textMuted }}>Press Enter to send</span>
+                <span style={{ fontSize: 11, color: IG_THEME.textMuted, whiteSpace: "nowrap" }}>Press Enter to send</span>
               </div>
 
               {/* Input Row */}
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", minWidth: 0 }}>
                 <VoiceDictation onTranscript={(t) => setInputMsg((prev) => (prev ? prev + " " + t : t))} />
 
                 <input
@@ -1141,6 +1476,8 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
                   }}
                   style={{
                     flex: 1,
+                    minWidth: 0,
+                    width: "100%",
                     background: "rgba(0,0,0,0.35)",
                     border: `1px solid ${IG_THEME.hairlineStrong}`,
                     borderRadius: 22,
@@ -1221,8 +1558,8 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
       {/* RIGHT PANEL: Contact & Lead Details (Collapsible) */}
       {showInfo && activeConv && (
         <div
+          className="absolute inset-y-0 right-0 z-30 w-full sm:w-[320px] shadow-2xl xl:relative xl:shadow-none"
           style={{
-            width: 310,
             borderLeft: `1px solid ${IG_THEME.hairline}`,
             background: IG_THEME.sidebarBg,
             padding: 20,
@@ -1230,7 +1567,7 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
             flexDirection: "column",
             gap: 18,
             overflowY: "auto",
-            zIndex: 10,
+            flexShrink: 0,
           }}
         >
           {/* Header */}
@@ -1258,7 +1595,7 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
           >
             <Avatar name={activeConv.lead_name || activeConv.ig_username || "IG"} size={60} />
             <div style={{ fontWeight: 700, fontSize: 15, textAlign: "center", marginTop: 4 }}>
-              {activeConv.lead_name || `@${activeConv.ig_username}`}
+              {activeConv.lead_name || (activeConv.ig_username ? `@${activeConv.ig_username}` : "Instagram User")}
             </div>
 
             {activeConv.ig_username && (
@@ -1564,6 +1901,611 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Template Manager Modal */}
+      {showTemplateModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 9999,
+            background: "rgba(0,0,0,0.8)",
+            backdropFilter: "blur(6px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowTemplateModal(false)
+            }
+          }}
+        >
+          <div
+            style={{
+              width: "100%",
+              maxWidth: 960,
+              maxHeight: "90vh",
+              background: "#16161c",
+              border: "1px solid rgba(255,255,255,0.12)",
+              borderRadius: 16,
+              boxShadow: "0 20px 50px rgba(0,0,0,0.6)",
+              display: "flex",
+              flexDirection: "column",
+              overflow: "hidden",
+            }}
+          >
+            {/* Modal Header */}
+            <div
+              style={{
+                padding: "16px 20px",
+                background: "#1c1c24",
+                borderBottom: "1px solid rgba(255,255,255,0.08)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 10,
+                    background: "linear-gradient(135deg, #e1306c, #833ab4)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "#fff",
+                  }}
+                >
+                  <Sparkles size={18} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#f5f5f7" }}>
+                    Instagram Message Templates
+                  </h3>
+                  <p style={{ margin: "2px 0 0", fontSize: 12, color: "#9ca3af" }}>
+                    Manage customizable quick-replies for Instagram DMs and comments. Supports dynamic tags like{" "}
+                    <code style={{ background: "rgba(255,255,255,0.08)", padding: "1px 4px", borderRadius: 4, color: "#e1306c" }}>
+                      {"{username}"}
+                    </code>
+                    ,{" "}
+                    <code style={{ background: "rgba(255,255,255,0.08)", padding: "1px 4px", borderRadius: 4, color: "#10b981" }}>
+                      {"{phone}"}
+                    </code>
+                    , and{" "}
+                    <code style={{ background: "rgba(255,255,255,0.08)", padding: "1px 4px", borderRadius: 4, color: "#0095f6" }}>
+                      {"{apply_link}"}
+                    </code>
+                    .
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowTemplateModal(false)}
+                style={{
+                  background: "rgba(255,255,255,0.06)",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  borderRadius: 8,
+                  width: 32,
+                  height: 32,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "#9ca3af",
+                  cursor: "pointer",
+                }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Modal Body: Split view */}
+            <div
+              style={{
+                flex: 1,
+                overflowY: "auto",
+                padding: 20,
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))",
+                gap: 20,
+              }}
+            >
+              {/* Left Pane: Templates List */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#f5f5f7", display: "flex", alignItems: "center", gap: 6 }}>
+                    <Layers size={14} style={{ color: "#e1306c" }} />
+                    <span>Saved Templates ({filteredTemplates.length})</span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingTemplate(null)
+                      setTemplateForm({ label: "", text: "", category: "General" })
+                    }}
+                    style={{
+                      background: "rgba(255,255,255,0.06)",
+                      border: "1px solid rgba(255,255,255,0.12)",
+                      borderRadius: 6,
+                      padding: "4px 8px",
+                      fontSize: 11.5,
+                      color: "#f5f5f7",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 4,
+                    }}
+                  >
+                    <Plus size={13} />
+                    <span>New Template</span>
+                  </button>
+                </div>
+
+                {/* Search & Category Filter */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      background: "rgba(0,0,0,0.3)",
+                      border: "1px solid rgba(255,255,255,0.1)",
+                      borderRadius: 8,
+                      padding: "0 10px",
+                      gap: 6,
+                    }}
+                  >
+                    <Search size={14} style={{ color: "#6b7280" }} />
+                    <input
+                      type="text"
+                      placeholder="Search templates..."
+                      value={templateSearch}
+                      onChange={(e) => setTemplateSearch(e.target.value)}
+                      style={{
+                        background: "transparent",
+                        border: "none",
+                        color: "#f5f5f7",
+                        fontSize: 12,
+                        padding: "8px 0",
+                        width: "100%",
+                        outline: "none",
+                      }}
+                    />
+                    {templateSearch && (
+                      <button
+                        onClick={() => setTemplateSearch("")}
+                        style={{ background: "none", border: "none", color: "#6b7280", cursor: "pointer" }}
+                      >
+                        <X size={13} />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Categories Row */}
+                  <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 2 }}>
+                    {templateCategories.map((cat) => (
+                      <button
+                        key={cat}
+                        type="button"
+                        onClick={() => setSelectedTemplateCat(cat)}
+                        style={{
+                          background: selectedTemplateCat === cat ? "rgba(225,48,108,0.2)" : "rgba(255,255,255,0.05)",
+                          border: `1px solid ${selectedTemplateCat === cat ? "#e1306c" : "rgba(255,255,255,0.08)"}`,
+                          borderRadius: 12,
+                          padding: "2px 9px",
+                          fontSize: 11,
+                          color: selectedTemplateCat === cat ? "#fff" : "#9ca3af",
+                          cursor: "pointer",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {cat}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Templates Scrollable List */}
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 10,
+                    maxHeight: 430,
+                    overflowY: "auto",
+                    paddingRight: 4,
+                    paddingBottom: 24,
+                  }}
+                >
+                  {filteredTemplates.length === 0 ? (
+                    <div style={{ textAlign: "center", padding: "30px 10px", color: "#6b7280", fontSize: 12 }}>
+                      No templates found matching your search.
+                    </div>
+                  ) : (
+                    filteredTemplates.map((tpl) => {
+                      const isEditing = editingTemplate?.id === tpl.id
+                      const rendered = applyInstagramTemplateVars(tpl.text, activeConv)
+                      return (
+                        <div
+                          key={tpl.id}
+                          style={{
+                            background: isEditing ? "rgba(225,48,108,0.12)" : "rgba(255,255,255,0.03)",
+                            border: `1px solid ${isEditing ? "#e1306c" : "rgba(255,255,255,0.08)"}`,
+                            borderRadius: 10,
+                            padding: 12,
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 8,
+                            transition: "all 0.15s ease",
+                          }}
+                        >
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <span style={{ fontWeight: 700, fontSize: 13, color: "#f5f5f7" }}>{tpl.label}</span>
+                              <span
+                                style={{
+                                  fontSize: 10,
+                                  background: "rgba(255,255,255,0.07)",
+                                  color: "#9ca3af",
+                                  padding: "1px 6px",
+                                  borderRadius: 4,
+                                }}
+                              >
+                                {tpl.category || "General"}
+                              </span>
+                            </div>
+
+                            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setInputMsg(rendered)
+                                  setShowTemplateModal(false)
+                                  toast.success(`Inserted "${tpl.label}"`)
+                                }}
+                                title="Insert directly into chat box"
+                                style={{
+                                  background: "rgba(0,149,246,0.15)",
+                                  border: "1px solid rgba(0,149,246,0.3)",
+                                  color: "#0095f6",
+                                  borderRadius: 6,
+                                  padding: "3px 8px",
+                                  fontSize: 11,
+                                  fontWeight: 600,
+                                  cursor: "pointer",
+                                }}
+                              >
+                                Insert
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingTemplate(tpl)
+                                  setTemplateForm({
+                                    label: tpl.label,
+                                    text: tpl.text,
+                                    category: tpl.category || "General",
+                                  })
+                                }}
+                                title="Edit this template"
+                                style={{
+                                  background: "transparent",
+                                  border: "none",
+                                  color: "#9ca3af",
+                                  cursor: "pointer",
+                                  padding: 4,
+                                }}
+                              >
+                                <Edit3 size={13} />
+                              </button>
+
+                              {userRole !== "viewer" && (
+                                <button
+                                  type="button"
+                                  disabled={deletingTemplateId === tpl.id}
+                                  onClick={() => handleDeleteTemplate(tpl.id)}
+                                  title="Delete this template"
+                                  style={{
+                                    background: "transparent",
+                                    border: "none",
+                                    color: "#ef4444",
+                                    cursor: "pointer",
+                                    padding: 4,
+                                    opacity: deletingTemplateId === tpl.id ? 0.4 : 0.8,
+                                  }}
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          <div
+                            style={{
+                              fontSize: 12,
+                              color: "#d1d5db",
+                              lineHeight: 1.45,
+                              whiteSpace: "pre-wrap",
+                              background: "rgba(0,0,0,0.25)",
+                              padding: "8px 10px",
+                              borderRadius: 6,
+                            }}
+                          >
+                            {tpl.text}
+                          </div>
+                        </div>
+                      )
+                    })
+                  )}
+                </div>
+              </div>
+
+              {/* Right Pane: Create / Edit Form */}
+              <div
+                style={{
+                  background: "rgba(255,255,255,0.02)",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  borderRadius: 12,
+                  padding: 16,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 14,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: "#f5f5f7", display: "flex", alignItems: "center", gap: 6 }}>
+                    <Bookmark size={15} style={{ color: "#e1306c" }} />
+                    <span>{editingTemplate ? "Edit Template" : "Create New Template"}</span>
+                  </div>
+
+                  {editingTemplate && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingTemplate(null)
+                        setTemplateForm({ label: "", text: "", category: "General" })
+                      }}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: "#9ca3af",
+                        fontSize: 11,
+                        cursor: "pointer",
+                        textDecoration: "underline",
+                      }}
+                    >
+                      Cancel editing
+                    </button>
+                  )}
+                </div>
+
+                <form onSubmit={handleSaveTemplate} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  {/* Label / Title */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <label style={{ fontSize: 11.5, fontWeight: 600, color: "#9ca3af" }}>
+                      Template Label / Button Title *
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 🏠 Home Loan 7.25% Offer"
+                      value={templateForm.label}
+                      onChange={(e) => setTemplateForm({ ...templateForm, label: e.target.value })}
+                      style={{
+                        background: "rgba(0,0,0,0.35)",
+                        border: "1px solid rgba(255,255,255,0.12)",
+                        borderRadius: 7,
+                        padding: "8px 10px",
+                        fontSize: 12.5,
+                        color: "#f5f5f7",
+                        outline: "none",
+                      }}
+                    />
+                  </div>
+
+                  {/* Category */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <label style={{ fontSize: 11.5, fontWeight: 600, color: "#9ca3af" }}>
+                      Category
+                    </label>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 4 }}>
+                      {["General", "Loans", "WhatsApp", "Offers", "Telugu", "Hindi"].map((c) => (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => setTemplateForm({ ...templateForm, category: c })}
+                          style={{
+                            background: templateForm.category === c ? "rgba(225,48,108,0.2)" : "rgba(255,255,255,0.05)",
+                            border: `1px solid ${templateForm.category === c ? "#e1306c" : "rgba(255,255,255,0.08)"}`,
+                            borderRadius: 6,
+                            padding: "2px 7px",
+                            fontSize: 11,
+                            color: templateForm.category === c ? "#fff" : "#9ca3af",
+                            cursor: "pointer",
+                          }}
+                        >
+                          {c}
+                        </button>
+                      ))}
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="Or enter custom category..."
+                      value={templateForm.category}
+                      onChange={(e) => setTemplateForm({ ...templateForm, category: e.target.value })}
+                      style={{
+                        background: "rgba(0,0,0,0.35)",
+                        border: "1px solid rgba(255,255,255,0.12)",
+                        borderRadius: 7,
+                        padding: "6px 10px",
+                        fontSize: 12,
+                        color: "#f5f5f7",
+                        outline: "none",
+                      }}
+                    />
+                  </div>
+
+                  {/* Variable helper tags */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <label style={{ fontSize: 11.5, fontWeight: 600, color: "#9ca3af" }}>
+                        Message Text *
+                      </label>
+                      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                        <span style={{ fontSize: 10.5, color: "#6b7280" }}>Click to insert:</span>
+                        <button
+                          type="button"
+                          onClick={() => setTemplateForm({ ...templateForm, text: templateForm.text + "{username}" })}
+                          style={{
+                            background: "rgba(225,48,108,0.15)",
+                            border: "1px solid rgba(225,48,108,0.3)",
+                            borderRadius: 4,
+                            padding: "1px 5px",
+                            fontSize: 10,
+                            color: "#e1306c",
+                            cursor: "pointer",
+                          }}
+                        >
+                          +{"{username}"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setTemplateForm({ ...templateForm, text: templateForm.text + "{phone}" })}
+                          style={{
+                            background: "rgba(16,185,129,0.15)",
+                            border: "1px solid rgba(16,185,129,0.3)",
+                            borderRadius: 4,
+                            padding: "1px 5px",
+                            fontSize: 10,
+                            color: "#10b981",
+                            cursor: "pointer",
+                          }}
+                        >
+                          +{"{phone}"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setTemplateForm({ ...templateForm, text: templateForm.text + "{apply_link}" })}
+                          style={{
+                            background: "rgba(0,149,246,0.15)",
+                            border: "1px solid rgba(0,149,246,0.3)",
+                            borderRadius: 4,
+                            padding: "1px 5px",
+                            fontSize: 10,
+                            color: "#0095f6",
+                            cursor: "pointer",
+                          }}
+                        >
+                          +{"{apply_link}"}
+                        </button>
+                      </div>
+                    </div>
+
+                    <textarea
+                      rows={4}
+                      placeholder="Write your Instagram response template here..."
+                      value={templateForm.text}
+                      onChange={(e) => setTemplateForm({ ...templateForm, text: e.target.value })}
+                      style={{
+                        background: "rgba(0,0,0,0.35)",
+                        border: "1px solid rgba(255,255,255,0.12)",
+                        borderRadius: 7,
+                        padding: "8px 10px",
+                        fontSize: 12.5,
+                        color: "#f5f5f7",
+                        outline: "none",
+                        resize: "vertical",
+                        lineHeight: 1.45,
+                      }}
+                    />
+                  </div>
+
+                  {/* Realtime Live Preview */}
+                  <div
+                    style={{
+                      background: "rgba(0,0,0,0.35)",
+                      border: "1px dashed rgba(255,255,255,0.15)",
+                      borderRadius: 8,
+                      padding: "8px 10px",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 4,
+                    }}
+                  >
+                    <div style={{ fontSize: 10.5, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase" }}>
+                      Live Preview for {activeConv?.ig_username ? `@${activeConv.ig_username}` : "Customer"}
+                    </div>
+                    <div style={{ fontSize: 12, color: templateForm.text ? "#e5e7eb" : "#6b7280", fontStyle: templateForm.text ? "normal" : "italic" }}>
+                      {templateForm.text
+                        ? applyInstagramTemplateVars(templateForm.text, activeConv)
+                        : "Preview will appear here as you type..."}
+                    </div>
+                  </div>
+
+                  {/* Form Actions */}
+                  <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                    <button
+                      type="submit"
+                      disabled={savingTemplate}
+                      style={{
+                        flex: 1,
+                        height: 36,
+                        borderRadius: 8,
+                        fontSize: 12.5,
+                        fontWeight: 700,
+                        background: savingTemplate
+                          ? "rgba(225,48,108,0.4)"
+                          : "linear-gradient(135deg, #e1306c, #c13584)",
+                        border: "none",
+                        color: "#fff",
+                        cursor: savingTemplate ? "not-allowed" : "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: 6,
+                        boxShadow: "0 2px 8px rgba(225,48,108,0.3)",
+                      }}
+                    >
+                      <Check size={14} />
+                      <span>{savingTemplate ? "Saving..." : editingTemplate ? "Update Template" : "Save Template"}</span>
+                    </button>
+
+                    {editingTemplate && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingTemplate(null)
+                          setTemplateForm({ label: "", text: "", category: "General" })
+                        }}
+                        style={{
+                          height: 36,
+                          padding: "0 12px",
+                          borderRadius: 8,
+                          fontSize: 12,
+                          background: "transparent",
+                          border: "1px solid rgba(255,255,255,0.12)",
+                          color: "#9ca3af",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </div>
+                </form>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

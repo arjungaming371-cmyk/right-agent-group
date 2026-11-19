@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react"
 import { Mic, Loader2 } from "lucide-react"
+import { useToast } from "./toast"
 import {
   type SpeechRecognitionLike,
   type SpeechRecognitionEventLike,
@@ -29,6 +30,7 @@ export function VoiceDictation({
   append = true,
   lang = "en-IN",
 }: VoiceDictationProps) {
+  const toast = useToast()
   const [listening, setListening] = useState(false)
   const [initializing, setInitializing] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -55,7 +57,7 @@ export function VoiceDictation({
     const SpeechRecognition = getSpeechRecognitionCtor()
 
     if (!SpeechRecognition) {
-      alert("Voice speech recognition is not supported in this browser. Please use Google Chrome or Microsoft Edge.")
+      toast.error("Voice speech recognition is not supported in this browser. Please use Google Chrome or Microsoft Edge.")
       return
     }
 
@@ -72,7 +74,7 @@ export function VoiceDictation({
     } catch (permErr) {
       console.warn("Microphone permission error:", permErr)
       setInitializing(false)
-      alert("Microphone permission was denied. Please allow microphone access in your browser address bar and try again.")
+      toast.error("Microphone permission was denied. Please allow microphone access in your browser address bar and try again.")
       return
     }
 
