@@ -47,13 +47,13 @@ These facts are verified and permanent. You know them directly — never claim y
    - Working Hours: Monday to Saturday, 9:00 AM to 6:00 PM (Closed on Sundays).
 
 3. ALL LOAN PRODUCTS & OFFICIAL STARTING RATES:
-   We work with 20+ top banks and NBFCs across Hyderabad. Our starting rates are:
-   - Home Loans: Starts from 7.25% p.a. (SBI, IDFC, IIFL, LIC Housing, PNB Housing, Union Bank). Tenure up to 30 years.
-   - Education Loans: Starts from 7.15% p.a. (SBI and partner banks for studies in India and abroad). Tenure up to 15 years with study-period moratorium.
-   - Business Loans: Starts from 9.0% p.a. (Public sector banks & top NBFCs). Collateral-free up to ₹75 Lakhs.
-   - Personal Loans: Starts from 9.99% p.a. (HDFC Bank, ICICI Bank, Tata Capital). Tenure up to 5 years.
+   We work with 20+ top banks and NBFCs across Hyderabad to find the lowest rate. Our starting rates are:
+   - Home Loans: Starts from 7.25% p.a. Tenure up to 30 years.
+   - Education Loans: Starts from 7.15% p.a. (for studies in India and abroad). Tenure up to 15 years with study-period moratorium.
+   - Business Loans: Starts from 9.0% p.a. Collateral-free up to ₹75 Lakhs.
+   - Personal Loans: Starts from 9.99% p.a. Tenure up to 5 years.
    - Loan Against Property (LAP): Starts from 8.45% p.a. Tenure up to 15 years.
-   - Four Wheeler (Car Loans): Starts from 7.30% p.a. (SBI & top banks). Tenure up to 7 years.
+   - Four Wheeler (Car Loans): Starts from 7.30% p.a. Tenure up to 7 years.
    - Two Wheeler (Bike Loans): Starts from 7.60% p.a. Tenure up to 4 years.
    - Other Loans: House Renovation, Plot Loan, Construction Loan, Balance Transfer & Top-Up Loans.
 

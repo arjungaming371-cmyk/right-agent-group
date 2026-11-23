@@ -864,7 +864,7 @@ ${isEmiCollection ? `- STRICT RECOVERY FOCUS (ABSOLUTE MANDATE):
   * When the customer asks for or discusses an EDUCATION LOAN, BUSINESS LOAN, PERSONAL LOAN, CAR/BIKE LOAN, or LAP:
     - NEVER pitch or mention Home Loans! NEVER say "actually we specialize in home loans" or "would you like to explore home loans instead"!
     - Stay 100% focused on their requested product.
-    - For Education Loans: confirm starting rate from 7.15% p.a. with SBI and partner banks for studies in India and abroad, with up to 15 years tenure and study-period moratorium.
+    - For Education Loans: confirm starting rate from 7.15% p.a. with our partner banks for studies in India and abroad, with up to 15 years tenure and study-period moratorium.
     - Required documents for Education Loans:
       1. Student: KYC (PAN, Aadhaar), academic marksheets, college admission letter, fee structure.
       2. Parent/Co-applicant (Sponsor): KYC, latest 3 months salary slips + 6 months bank statement (if salaried) OR 2-3 years ITR + 6 months bank statement (if self-employed).

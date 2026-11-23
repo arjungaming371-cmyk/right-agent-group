@@ -73,13 +73,13 @@ export const LOAN_TYPE_ALIASES: Record<string, string> = {
 //  - Two Wheeler Loan 7.60% best-case market low (bankbazaar.com two-wheeler survey)
 //  - Education Loan 7.15% SBI (policybazaar.com) / Bank of Baroda from 6.9%
 export const BEST_RATES: Record<string, { ratePct: number; maxTenureYears: number; lender: string }> = {
-  "Home Loan":            { ratePct: 7.25, maxTenureYears: 30, lender: "SBI" },
-  "Personal Loan":        { ratePct: 9.99, maxTenureYears: 5,  lender: "HDFC Bank / ICICI Bank" },
-  "Business Loan":        { ratePct: 9.0,  maxTenureYears: 7,  lender: "public sector bank partners" },
-  "Loan Against Property":{ ratePct: 8.45, maxTenureYears: 15, lender: "leading bank partners" },
-  "Four Wheeler Loan":    { ratePct: 7.30, maxTenureYears: 7,  lender: "SBI" },
-  "Two Wheeler Loan":     { ratePct: 7.60, maxTenureYears: 4,  lender: "leading bank partners" },
-  "Education Loan":       { ratePct: 7.15, maxTenureYears: 15, lender: "SBI" },
+  "Home Loan":            { ratePct: 7.25, maxTenureYears: 30, lender: "our leading lending partners" },
+  "Personal Loan":        { ratePct: 9.99, maxTenureYears: 5,  lender: "our leading lending partners" },
+  "Business Loan":        { ratePct: 9.0,  maxTenureYears: 7,  lender: "our public and private lending partners" },
+  "Loan Against Property":{ ratePct: 8.45, maxTenureYears: 15, lender: "our leading lending partners" },
+  "Four Wheeler Loan":    { ratePct: 7.30, maxTenureYears: 7,  lender: "our leading lending partners" },
+  "Two Wheeler Loan":     { ratePct: 7.60, maxTenureYears: 4,  lender: "our leading lending partners" },
+  "Education Loan":       { ratePct: 7.15, maxTenureYears: 15, lender: "our leading partner banks" },
 }
 
 /**

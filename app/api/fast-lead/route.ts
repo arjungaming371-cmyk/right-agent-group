@@ -118,7 +118,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 3. Send Instant WhatsApp Welcome & Rate Card (non-blocking)
-    const waText = `Namaste ${name}! 🙏\n\nThank you for submitting your loan enquiry via our Instagram Ad with *Right Agent Group*.\n\n📞 Our Senior AI Loan Advisor *Priya* is dialing your number right now to discuss your *${loanType}* options.\n\nWe compare 20+ top banking partners in Hyderabad (SBI, HDFC, ICICI, Axis, Kotak) with *0 advance fees* and guaranteed lowest interest rates.\n\n💬 If you have any questions or prefer chatting on WhatsApp, simply reply directly to this message!\n\nHead Office: Gandimaisamma, Hyderabad\nHelpline: +91 63016 89511`
+    const waText = `Namaste ${name}! 🙏\n\nThank you for submitting your loan enquiry via our Instagram Ad with *Right Agent Group*.\n\n📞 Our Senior AI Loan Advisor *Priya* is reaching out to discuss your *${loanType}* options.\n\nWe work with 20+ top banks and NBFCs across Hyderabad with *0 advance fees* to get you the lowest interest rates.\n\n💬 If you have any questions or prefer chatting on WhatsApp, simply reply directly to this message!\n\nHead Office: Gandimaisamma, Hyderabad\nHelpline: +91 8333997227 | WhatsApp: +91 8333993223`
 
     sendWhatsAppText(normalizedPhone, waText).catch((e) => {
       console.warn("Fast lead WhatsApp welcome error (non-fatal):", e?.message || e)

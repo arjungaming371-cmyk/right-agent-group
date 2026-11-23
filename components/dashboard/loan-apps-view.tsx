@@ -909,7 +909,7 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
                   type="text"
                   value={linkFormBank}
                   onChange={(e) => setLinkFormBank(e.target.value)}
-                  placeholder="e.g. Right Agent Group, SBI Portal, Internal Form"
+                  placeholder="e.g. Right Agent Group, Google Form, Internal Portal"
                   style={{ width: "100%", height: 36, fontSize: 12.5, padding: "0 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)" }}
                 />
               </div>

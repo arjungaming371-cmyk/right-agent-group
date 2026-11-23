@@ -17,9 +17,10 @@ export async function POST(req: NextRequest) {
 
   try {
     const { leadId, bank, product, phone: customPhone } = await req.json()
-    if (!leadId || !bank) {
-      return NextResponse.json({ error: "leadId and bank required" }, { status: 400 })
+    if (!leadId) {
+      return NextResponse.json({ error: "leadId required" }, { status: 400 })
     }
+    const requestedBank = (bank || "Right Agent Group").trim()
 
     const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "").trim().replace(/\/+$/, "")
     if (!appUrl) {
@@ -52,7 +53,7 @@ export async function POST(req: NextRequest) {
       [prod]
     )
     const libraryId = libRes.rows?.[0]?.id || null
-    const effectiveBank = libRes.rows?.[0]?.bank || bank || "Right Agent Group"
+    const effectiveBank = libRes.rows?.[0]?.bank || requestedBank || "Right Agent Group"
 
     // Record in link_sends
     const insertRes = await query(

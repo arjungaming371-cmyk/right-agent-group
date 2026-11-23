@@ -135,7 +135,7 @@ function FormLinkCell({ lead }: { lead: Lead }) {
   return (
     <button
       onClick={copy}
-      title={copied ? "Link copied!" : `Copy bank link (${lead.form_token}) — sent ${timeAgo(lead.form_sent_at || "")}`}
+      title={copied ? "Link copied!" : `Copy application link (${lead.form_token}) — sent ${timeAgo(lead.form_sent_at || "")}`}
       style={{
         display: "inline-flex", alignItems: "center", gap: 4,
         background: `${tone}14`, border: `1px solid ${tone}3d`, color: tone,
@@ -242,7 +242,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
 
   const DEFAULT_PRESETS: AgendaPreset[] = [
     { id: "p1", label: "Standard intro", text: "" },
-    { id: "p2", label: "New enquiry — send link", text: "Reference what they enquired about, offer to send the official bank link, and book a callback." },
+    { id: "p2", label: "New enquiry — send link", text: "Reference what they enquired about, offer to send the official application link, and book a callback." },
     { id: "p3", label: "Balance transfer offer", text: "Introduce our balance-transfer offer and ask if their current EMI feels heavy. Don't pitch personal loans." },
     { id: "p4", label: "Top-up on existing loan", text: "Ask if they need extra liquidity or renovation funds with an instant pre-approved top-up on their existing loan." },
     { id: "p5", label: "Documents pending", text: "Politely follow up regarding pending documents needed to proceed with their loan submission." },
@@ -367,7 +367,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
 
   // Send Bank Link modal state
   const [bankLinkTarget, setBankLinkTarget] = useState<Lead | null>(null)
-  const [selectedBank, setSelectedBank] = useState("SBI")
+  const [selectedBank, setSelectedBank] = useState("Right Agent Group")
   const [bankProduct, setBankProduct] = useState("Home Loan")
   const [sendingBankLink, setSendingBankLink] = useState(false)
   const [availableBanks, setAvailableBanks] = useState<{ id: string; bank: string; product: string }[]>([])
