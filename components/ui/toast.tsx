@@ -2,7 +2,7 @@
 // Toast notifications — replaces browser alert() popups everywhere.
 // Usage: const toast = useToast(); toast.success("Lead added")
 
-import { createContext, useCallback, useContext, useRef, useState } from "react"
+import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react"
 import { CheckCircle2, XCircle, Info, X } from "lucide-react"
 
 type Kind = "success" | "error" | "info"
@@ -45,11 +45,11 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     setTimeout(() => dismiss(id), kind === "error" ? 6000 : 3800)
   }, [dismiss])
 
-  const api: ToastApi = {
+  const api: ToastApi = useMemo(() => ({
     success: (t) => push("success", t),
     error: (t) => push("error", t),
     info: (t) => push("info", t),
-  }
+  }), [push])
 
   return (
     <ToastContext.Provider value={api}>

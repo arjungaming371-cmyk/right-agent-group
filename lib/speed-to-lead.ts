@@ -44,7 +44,7 @@ export type SpeedToLeadLead = {
 async function triggerEnabled(): Promise<boolean> {
   try {
     const settings = await getDialerSettings()
-    return settings.speedToLead !== false
+    return settings.speedToLead === true // strictly require opt-in to auto-dial
   } catch {
     return false // settings unavailable → never auto-dial on a guess
   }

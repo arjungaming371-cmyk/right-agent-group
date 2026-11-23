@@ -1,0 +1,34 @@
+const fs = require('fs');
+
+const content = fs.readFileSync('lib/default-scripts.ts', 'utf8');
+const start = content.indexOf('const BASE_SCRIPT = `') + 'const BASE_SCRIPT = `'.length;
+const end = content.indexOf('`\n\n// Appended per language');
+const baseScript = content.slice(start, end).trim();
+
+// In SQL, single quotes are escaped by doubling them
+const sqlEscaped = baseScript.replace(/'/g, "''");
+
+const sql = `-- 1. Update ai_scripts base row
+UPDATE ai_scripts 
+SET content = '${sqlEscaped}', updated_at = now(), updated_by = 'system_upgrade' 
+WHERE language = 'base';
+
+-- 2. Upsert Layer 2 KB articles
+INSERT INTO knowledge_base (title, category, content, is_active, source_type)
+VALUES 
+('Education loan interest rates and banking partners', 'Loans', 'Education loan interest rates start from 7.15% per annum with State Bank of India (SBI) and top partner banks. We arrange education loans for higher studies in India and abroad (USA, UK, Canada, Australia, Europe). Loan tenure is up to 15 years with flexible repayment and moratorium during course period plus 6 to 12 months. Covers tuition fees, living expenses, travel, and books. Collateral-free options available based on student academic merit and co-applicant profile. Quick approvals with partner banks.', true, 'manual'),
+('Business loan interest rates and banking partners', 'Loans', 'Business loan interest rates start from 9.0% per annum with public sector banks and leading NBFC partners in Hyderabad. Unsecured collateral-free business loans available up to ₹75 Lakhs for business expansion, working capital, inventory purchase, and machinery. Fast approval with minimal documentation: last 2-3 years ITR, 6 months bank statement, and business registration proof. Repayment tenures up to 7 years with affordable EMIs.', true, 'manual'),
+('Personal loan interest rates and banking partners', 'Loans', 'Personal loan interest rates start from 9.99% per annum with HDFC Bank, ICICI Bank, and leading lending partners. Available for salaried and self-employed individuals for medical emergencies, weddings, debt consolidation, and home renovation. Fast digital approval within 24 to 48 hours with minimal documents (PAN, Aadhaar, 3 months payslips, 6 months bank statement). Tenures from 1 to 5 years.', true, 'manual'),
+('Vehicle loan interest rates for four wheeler and two wheeler', 'Loans', 'Vehicle loan interest rates start from 7.30% per annum for Four Wheeler (Car Loans) with SBI and leading banks with tenure up to 7 years. Two Wheeler (Bike Loans) start from 7.60% per annum with tenure up to 4 years. Quick processing, up to 90-100% on-road funding on eligible profiles, and instant pre-approvals for new and pre-owned vehicles.', true, 'manual')
+ON CONFLICT (title) DO UPDATE 
+SET content = EXCLUDED.content, category = EXCLUDED.category, is_active = true, updated_at = now();
+
+-- 3. Reset test lead +916301689511
+DELETE FROM ai_conversations WHERE lead_id IN (SELECT id FROM leads WHERE phone LIKE '%6301689511%');
+DELETE FROM lead_memory WHERE lead_id IN (SELECT id FROM leads WHERE phone LIKE '%6301689511%');
+UPDATE leads SET name = 'Customer', product_interest = NULL, loan_amount = NULL, notes = NULL, status = 'new', call_count = 0 
+WHERE phone LIKE '%6301689511%';
+`;
+
+fs.writeFileSync('scripts/upgrade.sql', sql, 'utf8');
+console.log('scripts/upgrade.sql created successfully!');

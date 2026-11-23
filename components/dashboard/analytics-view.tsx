@@ -142,7 +142,7 @@ export default function AnalyticsView({ role = "admin" }: { role?: "admin" | "ag
   const hourData = data.callsByHour.map((h) => ({ hour: `${h.hour}:00`, count: h.count }))
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 16, paddingBottom: 80 }}>
       {/* Onboarding checklist — "Complete your setup" (auto-hides when done) */}
       <OnboardingCard />
 
@@ -155,7 +155,7 @@ export default function AnalyticsView({ role = "admin" }: { role?: "admin" | "ag
           value={days}
           onChange={e => setDays(Number(e.target.value) as 7 | 14 | 30)}
           aria-label="Date range"
-          style={{ height: 34, borderRadius: 10, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", fontSize: 12.5, padding: "0 10px" }}
+          style={{ height: 34, borderRadius: 10, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", fontSize: 12.5, padding: "0 10px", width: "auto", minWidth: 120 }}
         >
           <option value={7}>Last 7 days</option>
           <option value={14}>Last 14 days</option>
@@ -195,7 +195,7 @@ export default function AnalyticsView({ role = "admin" }: { role?: "admin" | "ag
           <div style={{ fontSize: 13.5, fontWeight: 700, marginBottom: 4 }}>Calls per day</div>
           <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginBottom: 14 }}>Last {days} days</div>
           <ResponsiveContainer width="100%" height={220}>
-            <AreaChart data={data.callsByDay} margin={{ left: -20, right: 8 }}>
+            <AreaChart data={data.callsByDay} margin={{ left: 4, right: 8 }}>
               <defs>
                 <linearGradient id="callsFill" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor={CAT.blue} stopOpacity={0.28} />
@@ -213,8 +213,8 @@ export default function AnalyticsView({ role = "admin" }: { role?: "admin" | "ag
 
         {/* Funnel */}
         <div style={CARD}>
-          <div style={{ fontSize: 13.5, fontWeight: 700, marginBottom: 4 }}>Lead funnel</div>
-          <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginBottom: 18 }}>New → contacted → qualified → applied</div>
+          <div style={{ fontSize: 13.5, fontWeight: 700, marginBottom: 4 }}>Lead Funnel</div>
+          <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginBottom: 18 }}>New → Contacted → Qualified → Applied</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             {funnelSteps.map((s) => (
               <div key={s.label}>

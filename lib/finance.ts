@@ -45,15 +45,16 @@ export function formatINR(n: number): string {
 // for a rate mid-conversation is exactly the kind of "AI guesses a number"
 // risk this file exists to avoid. Update this table when rates change.
 export const LOAN_TYPE_ALIASES: Record<string, string> = {
-  home: "Home Loan", "home loan": "Home Loan", housing: "Home Loan",
-  personal: "Personal Loan", "personal loan": "Personal Loan",
-  business: "Business Loan", "business loan": "Business Loan",
-  shop: "Business Loan", kirana: "Business Loan", vyapar: "Business Loan", vyaparam: "Business Loan",
-  vyapaaram: "Business Loan", "expand my shop": "Business Loan", dukaanam: "Business Loan",
-  "loan against property": "Loan Against Property", lap: "Loan Against Property",
-  "four wheeler": "Four Wheeler Loan", car: "Four Wheeler Loan", "car loan": "Four Wheeler Loan",
-  "two wheeler": "Two Wheeler Loan", bike: "Two Wheeler Loan",
-  education: "Education Loan", "education loan": "Education Loan",
+  "home loan": "Home Loan", "housing loan": "Home Loan", "house loan": "Home Loan", housing: "Home Loan",
+  "illu loan": "Home Loan", "inti loan": "Home Loan", "home purchase": "Home Loan", "home construction": "Home Loan",
+  "personal loan": "Personal Loan", "personal loans": "Personal Loan",
+  "business loan": "Business Loan", "business loans": "Business Loan",
+  "shop loan": "Business Loan", "kirana loan": "Business Loan", vyapar: "Business Loan", vyaparam: "Business Loan",
+  vyapaaram: "Business Loan", "expand my shop": "Business Loan", "dukaanam loan": "Business Loan",
+  "loan against property": "Loan Against Property", lap: "Loan Against Property", "property loan": "Loan Against Property",
+  "four wheeler loan": "Four Wheeler Loan", "four wheeler": "Four Wheeler Loan", "car loan": "Four Wheeler Loan", "vehicle loan": "Four Wheeler Loan",
+  "two wheeler loan": "Two Wheeler Loan", "two wheeler": "Two Wheeler Loan", "bike loan": "Two Wheeler Loan",
+  "education loan": "Education Loan", "education loans": "Education Loan", "study loan": "Education Loan", "student loan": "Education Loan",
 }
 
 // Real market-starting rates (India, sourced July 2026 — see below), NOT
@@ -127,9 +128,10 @@ export function parseTenureMonths(text: string): number | null {
 }
 
 export function detectLoanType(text: string): string | null {
-  const lc = text.toLowerCase()
   for (const [alias, canonical] of Object.entries(LOAN_TYPE_ALIASES)) {
-    if (lc.includes(alias)) return canonical
+    const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    const regex = new RegExp(`(^|\\b)${escaped}(\\b|$)`, "i")
+    if (regex.test(text)) return canonical
   }
   return null
 }
@@ -200,11 +202,18 @@ export function buildEligibilityInstruction(
 // different rate on different calls for the SAME loan type (18% then 13%
 // for Business Loan). BEST_RATES is the single source of truth for every
 // product; ground every rate question in it, not just EMI-shaped ones.
-const RATE_QUESTION_RE = /\b(interest|rate|% ?p\.?a\.?|percent|vaddi|entha (rate|interest|vaddi)|interest entha)\b/i
+const RATE_QUESTION_RE = /\b(interest|intrest|rate|rates|% ?p\.?a\.?|percent|vaddi|entha (rate|interest|vaddi)|interest entha|offer|offers|deal|deals|scheme|schemes)\b/i
 
 export function buildRateInstruction(customerMessage: string, fallback: { loanType?: string | null }): string | null {
   if (!RATE_QUESTION_RE.test(customerMessage)) return null
-  const loanType = detectLoanType(customerMessage) || detectLoanType(fallback.loanType || "") || "Home Loan"
+  const loanType = detectLoanType(customerMessage) || detectLoanType(fallback.loanType || "")
+  if (!loanType) {
+    return (
+      `RATE INQUIRY: The customer asked about interest rates, but has not specified which loan product they need (Personal Loan, Business Loan, Home Loan, Mortgage Loan, Education Loan, Two Wheeler, or Car Loan). ` +
+      `Your VERY NEXT reply must politely ask which loan product they are looking for before quoting rates (e.g. "Sure sir, which loan are you looking for — Personal, Business, Home, or something else?"). ` +
+      `Do NOT invent, guess, or default to Home Loan.`
+    )
+  }
   const rateInfo = BEST_RATES[loanType] || BEST_RATES["Home Loan"]
   return (
     `EXACT RATE (use this precise figure every time — never invent or vary it): ` +
@@ -221,7 +230,25 @@ export function buildEmiInstruction(customerMessage: string, fallback: { loanAmo
   const isIncomeOrEligibility = INCOME_CONTEXT_RE.test(customerMessage) || ELIGIBILITY_QUESTION_RE.test(customerMessage)
   if (!EMI_QUESTION_RE.test(customerMessage) && (isIncomeOrEligibility || !parseAmount(customerMessage))) return null
 
-  const loanType = detectLoanType(customerMessage) || detectLoanType(fallback.loanType || "") || "Home Loan"
+  const parsedAmt = parseAmount(customerMessage)
+  const incomeFramed = isIncomeOrEligibility
+
+  // If no loan amount is stated in the message or known in fallback, ask for the amount — do NOT hallucinate ₹20 Lakhs!
+  if (!parsedAmt && !fallback.loanAmount && !incomeFramed) {
+    return {
+      instruction:
+        `EMI QUESTION: The customer asked about EMI, but did not specify the required loan amount. ` +
+        `Your VERY NEXT reply must ask how much loan amount they need (e.g. "Sure sir, how much loan amount do you require so I can calculate the exact EMI for you?"). ` +
+        `Do NOT invent or guess any loan amount or default to ₹20,00,000.`,
+      principal: 0,
+      ratePct: 0,
+      tenureMonths: 0,
+      emi: 0,
+    }
+  }
+
+  const detectedLoan = detectLoanType(customerMessage) || detectLoanType(fallback.loanType || "")
+  const loanType = detectedLoan || "Home Loan"
   const rateInfo = BEST_RATES[loanType] || BEST_RATES["Home Loan"]
 
   // INCOME IS NOT PRINCIPAL (2026-09 fix): "my salary is 50k, what's the EMI?"
@@ -232,12 +259,10 @@ export function buildEmiInstruction(customerMessage: string, fallback: { loanAmo
   // 20 lakh loan, what's the EMI?" now quotes the default-amount EMI instead
   // of 20L — Priya then confirms the amount in conversation, which is far
   // safer than quoting an exact figure on a wrong principal.
-  const incomeFramed = isIncomeOrEligibility
-  const principal = (incomeFramed ? null : parseAmount(customerMessage)) || fallback.loanAmount || 2000000 // sane default: 20L
+  const principal = (incomeFramed ? null : parsedAmt) || fallback.loanAmount || 2000000 // default 20L for income-framed queries
   const tenureMonths = parseTenureMonths(customerMessage) || rateInfo.maxTenureYears * 12
 
   const emi = calculateEMI(principal, rateInfo.ratePct, tenureMonths)
-  const totalInt = totalInterest(principal, emi, tenureMonths)
 
   const instruction =
     `EXACT EMI CALCULATION (use this precise number, do NOT calculate your own): ` +

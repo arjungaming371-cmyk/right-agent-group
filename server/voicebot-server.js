@@ -35,9 +35,46 @@ const { WebSocketServer } = require("ws")
 const { spawn } = require("child_process")
 const voiceProviders = require("./voice-providers")
 const waCalls = require("./whatsapp-calls")
+const recorder = require("./recorder")
 // Last-resort spoken lines (clarify / hold / can't-reach-app) shared with
 // whatsapp-calls.js — code constants on purpose, see server/fallback-speech.js.
 const { CLARIFY_PHRASE, FALLBACK_PHRASE, START_FALLBACK_PHRASE } = require("./fallback-speech")
+
+function upsample8kTo16k(pcm8k) {
+  if (!pcm8k || !pcm8k.length) return Buffer.alloc(0)
+  const inSamples = Math.floor(pcm8k.length / 2)
+  const out = Buffer.alloc(inSamples * 4)
+  for (let i = 0; i < inSamples; i++) {
+    const s = pcm8k.readInt16LE(i * 2)
+    out.writeInt16LE(s, i * 4)
+    out.writeInt16LE(s, i * 4 + 2)
+  }
+  return out
+}
+
+async function uploadRecordingMeta(callSid, meta) {
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const res = await fetch(`${APP_URL}/api/calls/recording/upload`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        body: JSON.stringify({
+          callSid,
+          filename: meta.filename,
+          bytes: meta.bytes,
+          format: meta.format,
+          durationSec: meta.durationSec,
+        }),
+      })
+      if (res.ok) return true
+      throw new Error(`HTTP ${res.status}`)
+    } catch (e) {
+      console.error(`recording upload (attempt ${attempt}/2) error: ${e.message}`)
+      if (attempt < 2) await new Promise((r) => setTimeout(r, 2000))
+    }
+  }
+  return false
+}
 
 const PORT = parseInt(process.env.VOICEBOT_PORT || "3002")
 // HTTP bridge for the WhatsApp Business Calling integration (see
@@ -465,7 +502,7 @@ class CallSession {
     this.ws = ws
     this.urlParams = urlParams
     this.streamSid = null
-    this.callSid = null
+    this.callSid = (this.urlParams && this.urlParams.get("callSid")) || null
     this.language = "telugu"   // Telugu-first; the turn API confirms/switches per caller
     this.voice = null          // AI-Employee voice override, set by the start response
     this.startedAt = Date.now() // for real call duration (Voice Logs showed 0:00 without it)
@@ -483,6 +520,10 @@ class CallSession {
     const isVobizHeld = process.env.VOBIZ_HOLD === "true" || process.env.VOBIZ_HOLD === "1"
     this.isVobiz = isVobizExplicit && !isVobizHeld
     this.started = false      // guards against a duplicate Exotel "start" event replaying the greeting mid-call
+    this.greetingDone = false
+    this.recorder = null
+    this.outPcmQueue = []
+    if (this.callSid) this.initRecorder()
     // Two-stage playback pipeline: synthChain serializes GPU synthesis (one
     // F5 inference at a time), sendChain serializes playback. Synthesis of
     // sentence N+1 runs WHILE sentence N is playing out to the caller —
@@ -524,6 +565,35 @@ class CallSession {
     this.echoCallRepliesCut = 0
     this.echoCallerPeak = 0     // loudest frame while the mic was LIVE
     this.echoSummaryDone = false
+  }
+
+  initRecorder() {
+    if (this.recorder || !this.callSid) return
+    this.recorder = recorder.createFor(this.callSid)
+    if (this.recorder) this.recorder.start()
+  }
+
+  async finishRecording() {
+    if (!this.recorder) return
+    try {
+      while (this.outPcmQueue && this.outPcmQueue.length > 0) {
+        this.recorder.pushOutbound(this.outPcmQueue.shift())
+        this.recorder.pushInbound(recorder.SILENCE_20MS)
+      }
+      const t0 = Date.now()
+      const meta = await this.recorder.finalize()
+      if (!meta) {
+        console.log(`🎙 call recording ${this.callSid}: no audio captured — nothing saved`)
+        return
+      }
+      console.log(`🎙 call recording ${this.callSid}: ${meta.format} ${Math.round(meta.bytes / 1024)}KB  ${meta.durationSec}s  mixed in ${Date.now() - t0}ms`)
+      const ok = await uploadRecordingMeta(this.callSid, meta)
+      if (!ok) {
+        console.error(`🎙 call recording ${this.callSid}: saved locally (${meta.filename}) but app update failed`)
+      }
+    } catch (e) {
+      console.error(`call recording finalize error: ${e.message}`)
+    }
   }
 
   /**
@@ -727,6 +797,7 @@ class CallSession {
     } else {
       this.isVobiz = false
     }
+    this.initRecorder()
     const from = start.from || start.From || (this.urlParams ? this.urlParams.get("from") : "") || ""
     // Multi-branch routing: the CALLED number (the branch's DLT-approved
     // ExoPhone) decides which branch serves an inbound call. Exotel's field
@@ -774,11 +845,12 @@ class CallSession {
       }
       if (this.closed) return
 
-      // If caller spoke early during the pickup window, let utterance handler take over
-      if (this.processing || this.speaking) {
-        console.log(`🎙 call ${this.callSid}: caller spoke first during pickup window, skipping auto-greeting`)
-        return
+      // If caller is speaking early (e.g. "Hello?"), wait briefly for them to finish before speaking intro
+      const speakWaitStart = Date.now()
+      while (this.speaking && !this.closed && Date.now() - speakWaitStart < 2500) {
+        await new Promise((resolve) => setTimeout(resolve, 50))
       }
+      if (this.closed) return
 
       const r = await apiPromise
       console.log(`⏱ start API (answer → greeting text): ${Date.now() - t0}ms`)
@@ -788,12 +860,14 @@ class CallSession {
       if (this.voice) console.log(`🎙 voice: ${this.voice.provider}/${this.voice.speaker}`)
       // AI + recording disclosure, always the first thing the caller hears.
       if (r.disclosure) await this.speak(r.disclosure).catch(() => {})
-      await this.speak(r.text)
+      if (r.text) await this.speak(r.text)
+      this.greetingDone = true
       console.log(`⏱ answer → greeting fully spoken: ${Date.now() - t0}ms`)
     } catch (e) {
       console.error("start error:", e.message)
       const line = START_FALLBACK_PHRASE[this.language] || START_FALLBACK_PHRASE.english
       await this.speak(line).catch(() => {})
+      this.greetingDone = true
     }
   }
 
@@ -813,6 +887,7 @@ class CallSession {
     this.speechEpoch++
     this.botTalking = false
     this.processing = false
+    this.outPcmQueue = []
     this.synthChain = Promise.resolve()
     this.sendChain = Promise.resolve()
     // The turn whose reply is being abandoned is still being generated — stop
@@ -858,6 +933,13 @@ class CallSession {
     const frame = Buffer.from(payload, "base64")
     const energy = this.avgEnergy(frame)
     const ms = (frame.length / (SAMPLE_RATE * BYTES_PER_SAMPLE)) * 1000
+
+    if (this.recorder) {
+      const pcm16k = upsample8kTo16k(frame)
+      this.recorder.pushInbound(pcm16k)
+      const outFrame = this.outPcmQueue && this.outPcmQueue.length ? this.outPcmQueue.shift() : recorder.SILENCE_20MS
+      this.recorder.pushOutbound(outFrame)
+    }
 
     if (ECHO_PROBE) this.probeFrame(energy, ms)
 
@@ -925,6 +1007,13 @@ class CallSession {
     this.silenceMs = 0
     this.maxEnergy = 0
     if (!hadRealSpeech || this.processing) return
+
+    // If initial greeting has not completed playing yet, the caller was just answering/picking up
+    // (e.g. saying "Hello?"). Discard the pickup sound so it doesn't trigger a premature duplicate turn.
+    if (!this.greetingDone) {
+      console.log(`🎙 caller pickup sound before greeting finished (${durationMs.toFixed(0)}ms) — greeting has priority, skipping turn trigger`)
+      return
+    }
 
     // The epoch this turn belongs to. If the caller barges in partway
     // through, every step below stops mattering and must not clobber the
@@ -1057,6 +1146,15 @@ class CallSession {
    * barge-in would cut the text but the caller would keep hearing audio.
    */
   async playPcm(pcm8k, epoch) {
+    if (this.recorder && pcm8k && pcm8k.length) {
+      for (let off = 0; off < pcm8k.length; off += FRAME_BYTES) {
+        let slice = pcm8k.subarray(off, Math.min(off + FRAME_BYTES, pcm8k.length))
+        if (slice.length < FRAME_BYTES) {
+          slice = Buffer.concat([slice, Buffer.alloc(FRAME_BYTES - slice.length)])
+        }
+        this.outPcmQueue.push(upsample8kTo16k(slice))
+      }
+    }
     // stream in 100ms chunks, padded to whole frames
     const CHUNK = FRAME_BYTES * 5
     const bytesToMs = (n) => (n / (SAMPLE_RATE * BYTES_PER_SAMPLE)) * 1000
@@ -1136,7 +1234,12 @@ class CallSession {
     if (ECHO_PROBE && !this.botTalking) this.echoReplyOpen = true
     this.botTalking = true
     const lang = sentenceLang || this.language || "english"
-    const synth = this.synth(clean, epoch, lang)
+    // Serialize synth calls across the turn so Cartesia concurrency stays strictly at 1
+    // (well below its plan limit of 2, preventing HTTP 429 concurrency errors and fallback voice swaps)
+    const synth = (this.synthChain || Promise.resolve()).catch(() => {}).then(() => {
+      if (this.closed || epoch !== this.speechEpoch) return null
+      return this.synth(clean, epoch, lang)
+    })
     this.synthChain = synth
     // FIX (2026-09-20): the chain used to be `sendChain.then(...)` with no
     // catch — one rejected link (any ws.send throw, a synth bug) poisoned the
@@ -1253,6 +1356,7 @@ class CallSession {
       return
     }
     this.endReported = true
+    if (this.recorder) void this.finishRecording()
     const duration = Math.round((Date.now() - this.startedAt) / 1000)
     callTurnApi({ event: "end", callSid: this.callSid, duration }).catch((e) =>
       console.error("end report error:", e.message)
@@ -1557,6 +1661,9 @@ httpServer.on("error", (e) => {
 })
 }
 
-if (require.main === module) startServer()
+if (require.main === module) {
+  recorder.cleanupStale()
+  startServer()
+}
 
 module.exports = { CallSession, startServer, buildAudioFilter, splitIntoSentences }

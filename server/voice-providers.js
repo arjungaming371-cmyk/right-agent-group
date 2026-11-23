@@ -351,7 +351,7 @@ function normalizeForTts(text) {
 
 // ---------- Small fetch helpers ----------
 
-async function fetchWithRetry(url, init, tries = 2) {
+async function fetchWithRetry(url, init, tries = 3) {
   let lastErr
   for (let attempt = 1; attempt <= tries; attempt++) {
     let res
@@ -361,7 +361,7 @@ async function fetchWithRetry(url, init, tries = 2) {
       // Network-level failure (DNS, reset, timeout) — retryable.
       lastErr = e
       if (attempt < tries) {
-        await new Promise((r) => setTimeout(r, 400))
+        await new Promise((r) => setTimeout(r, 300 * attempt))
         continue
       }
       throw lastErr
@@ -376,7 +376,7 @@ async function fetchWithRetry(url, init, tries = 2) {
     lastErr = new Error(`HTTP ${res.status}: ${detail.slice(0, 200)}`)
     const retryable = res.status === 429 || res.status >= 500
     if (!retryable) throw lastErr
-    if (attempt < tries) await new Promise((r) => setTimeout(r, 400))
+    if (attempt < tries) await new Promise((r) => setTimeout(r, res.status === 429 ? 500 * attempt : 300 * attempt))
   }
   throw lastErr
 }

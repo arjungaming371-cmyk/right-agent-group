@@ -255,19 +255,17 @@ export async function POST(req: NextRequest) {
     const { data, error } = await db.from("leads").insert(payload).select().single()
     if (error) return apiError(error)
     logAudit("lead created", session.email, { leadId: data?.id, name: payload.name, phone: payload.phone })
-    // SPEED-TO-LEAD (Outpero): the new lead gets Priya's call in seconds —
-    // while they're still holding their phone. Fire-and-forget: lead creation
-    // never waits on (or fails because of) the dialer, and the kill switch +
-    // full compliance gate live inside speedToLeadDial(). New leads only —
-    // a dedupe-update above returns early without the trigger.
-    if (data?.id) maybeSpeedToLead({
-      id: data.id,
-      phone: String(payload.phone),
-      name: (data.name as string) || null,
-      language: (data.language as string) || null,
-      branch_id: (data.branch_id as string) || null,
-      notes: (data.notes as string) || null,
-    })
+    // Auto-dial only if explicitly requested AND not a manual dashboard entry
+    if (data?.id && body.auto_dial === true && payload.source !== "manual") {
+      maybeSpeedToLead({
+        id: data.id,
+        phone: String(payload.phone),
+        name: (data.name as string) || null,
+        language: (data.language as string) || null,
+        branch_id: (data.branch_id as string) || null,
+        notes: (data.notes as string) || null,
+      })
+    }
     return NextResponse.json(data)
   } catch (e: any) {
     return apiError(e)

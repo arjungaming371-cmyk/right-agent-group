@@ -242,10 +242,15 @@ export async function GET(req: NextRequest) {
   // outcome lets the radar show the truth: "84 answered · 12 no-answer".
   // Rows without a stamp yet count as 'dialed' (webhook still in flight).
   const outcomeRows = await query(
-    `SELECT COALESCE(outcome, 'dialed') AS outcome, count(*)::int AS n
-       FROM outbound_queue
-      WHERE status = 'called' AND ($1::uuid IS NULL OR branch_id = $1)
-      GROUP BY COALESCE(outcome, 'dialed')`,
+    `SELECT COALESCE(q.outcome, vc.outcome, 'dialed') AS outcome, count(*)::int AS n
+       FROM outbound_queue q
+       LEFT JOIN LATERAL (
+         SELECT outcome FROM voice_calls
+          WHERE (twilio_call_sid = q.call_sid OR phone = q.phone)
+          ORDER BY created_at DESC LIMIT 1
+       ) vc ON true
+      WHERE q.status = 'called' AND ($1::uuid IS NULL OR q.branch_id = $1)
+      GROUP BY COALESCE(q.outcome, vc.outcome, 'dialed')`,
     [branchId]
   ).catch(() => ({ rows: [] as { outcome: string; n: number }[] }))
   const outcomes: Record<string, number> = {}

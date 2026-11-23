@@ -374,16 +374,32 @@ async function getSystemPrompt(language: Language, channel: Channel = "whatsapp"
       `SELECT language, content FROM ai_scripts WHERE language IN ('base', $1)`,
       [language]
     )
-    const base = result.rows?.find((r: any) => r.language === "base")?.content
+    let base = result.rows?.find((r: any) => r.language === "base")?.content
     if (base) {
+      if (channel !== "call") {
+        base = base
+          .replace(/You are on a live phone call\./g, "You are in a live WhatsApp / chat conversation with the customer.")
+          .replace(/in one call\./g, "in the conversation.")
+          .replace(/IN THIS CALL/g, "IN THIS CHAT")
+          .replace(/end the call/g, "end the conversation")
+          .replace(/ending the call/g, "ending the conversation")
+      }
       const prompt = base + styles[language] + CHANNEL_BREVITY[channel] + await branchContextBlock(branchId)
       _scriptCache.set(cacheKey, { prompt, at: Date.now() })
       return prompt
     }
     // Legacy per-language rows already carry their own style block, so only
     // the channel brevity rule gets appended here.
-    const legacy = result.rows?.find((r: any) => r.language === language)?.content
+    let legacy = result.rows?.find((r: any) => r.language === language)?.content
     if (legacy) {
+      if (channel !== "call") {
+        legacy = legacy
+          .replace(/You are on a live phone call\./g, "You are in a live WhatsApp / chat conversation with the customer.")
+          .replace(/in one call\./g, "in the conversation.")
+          .replace(/IN THIS CALL/g, "IN THIS CHAT")
+          .replace(/end the call/g, "end the conversation")
+          .replace(/ending the call/g, "ending the conversation")
+      }
       const prompt = legacy + CHANNEL_BREVITY[channel] + await branchContextBlock(branchId)
       _scriptCache.set(cacheKey, { prompt, at: Date.now() })
       return prompt
@@ -404,7 +420,13 @@ async function getSystemPrompt(language: Language, channel: Channel = "whatsapp"
   if (channel === "call") {
     return DEFAULT_SCRIPTS.base + CALL_LANGUAGE_STYLES[language] + CHANNEL_BREVITY[channel]
   }
-  return (DEFAULT_SCRIPTS[language] || DEFAULT_SCRIPTS.english) + CHANNEL_BREVITY[channel]
+  let chatFallback = (DEFAULT_SCRIPTS[language] || DEFAULT_SCRIPTS.english)
+    .replace(/You are on a live phone call\./g, "You are in a live WhatsApp / chat conversation with the customer.")
+    .replace(/in one call\./g, "in the conversation.")
+    .replace(/IN THIS CALL/g, "IN THIS CHAT")
+    .replace(/end the call/g, "end the conversation")
+    .replace(/ending the call/g, "ending the conversation")
+  return chatFallback + CHANNEL_BREVITY[channel]
 }
 
 interface ChatMessage { role: "system" | "user" | "assistant"; content: string }

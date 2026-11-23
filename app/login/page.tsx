@@ -129,9 +129,9 @@ export default async function LoginPage({
               boxShadow: "0 24px 70px -18px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.04)",
             }}
           >
-            <h2 className="text-[22px] font-bold tracking-tight text-white">{otpStep ? "Check your email" : "Welcome back"}</h2>
+            <h2 className="text-[22px] font-bold tracking-tight text-white">{otpStep ? "Verification code" : "Welcome back"}</h2>
             <p className="mt-1.5 text-[13.5px] text-[#9aa5bd]">
-              {otpStep ? "Two-factor authentication is on for admin sign-ins" : "Sign in to access the operations console"}
+              {otpStep ? "Enter the 6-digit verification code sent to your WhatsApp / Email" : "Sign in to access the operations console"}
             </p>
 
             {error && (

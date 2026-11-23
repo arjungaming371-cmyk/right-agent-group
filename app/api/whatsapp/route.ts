@@ -3,7 +3,8 @@ import crypto from "crypto"
 import pool, { query, db } from "@/lib/db"
 import { chatWithLLM, detectLanguage, type Language } from "@/lib/llm"
 import { sendWhatsAppText, downloadBranchWhatsAppMedia, answerWhatsAppCall, rejectWhatsAppCall, type BranchWhatsAppCtx } from "@/lib/whatsapp"
-import { createOneTimeFormToken, recentFormLinkSent, sendApplicationLinkText, detectApplicationRequest } from "@/lib/whatsapp"
+import { createOneTimeFormToken, recentFormLinkSent, sendApplicationLinkText, detectApplicationRequest, formLinkMessage } from "@/lib/whatsapp"
+import { TELUGU_ASK_RE, HINDI_ASK_RE, ENGLISH_ASK_RE } from "@/lib/call-facts"
 import { finalizeWhatsAppCall, mapCallOutcome, callSidFor } from "@/lib/whatsapp-call-finalize"
 import { resolveBranchByWhatsAppPhoneId, type BranchRow } from "@/lib/branches"
 import { buildLeadBrief } from "@/lib/lead-brain"
@@ -481,6 +482,18 @@ async function handleInbound(msg: any, profileName: string | null, waBranch: Bra
   // Don't burn an LLM generation on "[image message]" placeholders.
   if (text.startsWith("[") && text.endsWith(" message]")) return
 
+  // Check if customer explicitly introduced their name in the message (e.g. "I am Ajay", "My name is Ajay")
+  const introMatch = text.match(/\b(?:i am|my name is|this is|myself|nenu)\s+([A-Za-z]{2,25})\b/i)
+  if (introMatch && introMatch[1]) {
+    const rawIntro = introMatch[1].trim()
+    const cleanIntro = rawIntro.charAt(0).toUpperCase() + rawIntro.slice(1).toLowerCase()
+    const ignoredWords = ["here", "calling", "interested", "looking", "applying", "asking", "fine", "good", "okay", "ready", "new"]
+    if (!ignoredWords.includes(cleanIntro.toLowerCase())) {
+      lead.name = cleanIntro
+      query(`UPDATE leads SET name = $1 WHERE id = $2`, [cleanIntro, lead.id]).catch(() => {})
+    }
+  }
+
   // ---- 3. AI auto-reply (isolated — failure never loses the message) ----
   // FREE: replies inside the 24h service window cost nothing on the Cloud API.
   // AI KILL SWITCH: the "messages" toggle stops AUTOMATED replies here. The
@@ -525,30 +538,102 @@ async function handleInbound(msg: any, profileName: string | null, waBranch: Bra
     const memFacts = memData?.facts || {}
     const memSummary = memData?.summary || ""
 
-    const isKnownCustomer = !!(lead.name && !/^(WA|Caller)\s*\d+$/i.test(lead.name))
-    const customerName = isKnownCustomer ? lead.name : (memFacts.name || null)
-    const customerCity = lead.address || memFacts.city || (memSummary.includes("Hyderabad") ? "Hyderabad" : null)
-    const customerLoan = memFacts.loan_type ? (memFacts.loan_type + (memFacts.loan_amount_needed ? ` (₹${Number(memFacts.loan_amount_needed).toLocaleString("en-IN")})` : "")) : lead.product_interest || null
-
-    let knownProfileBlock = ""
-    if (customerName) {
-      knownProfileBlock = `=== CRITICAL: RETURNING / KNOWN CUSTOMER PROFILE ===
-- Customer Name: "${customerName}"
-- Phone: ${lead.phone || `+${from}`}
-${customerCity ? `- City / Area: ${customerCity} (ALREADY KNOWN - NEVER ASK!)\n` : ""}${customerLoan ? `- Loan Requirement: ${customerLoan} (ALREADY KNOWN - NEVER ASK!)\n` : ""}${memSummary ? `- Details from Recent Conversation / Call: ${memSummary}\n` : ""}
-STRICT INSTRUCTIONS FOR KNOWN CUSTOMER:
-1. YOU ALREADY KNOW THEIR NAME ("${customerName}")! If the customer asks "What is my name?" or "Do you know my name?", IMMEDIATELY reply: "Your name is ${customerName} sir!"
-2. NEVER ask for their name, city/area, or what loan they need! All of these are ALREADY on file from their phone call.
-3. If the customer mentions having told everything on the call or asks for updates, warmly acknowledge their specific loan details: "${customerName} sir, yes! I have all your details from our call regarding your ${customerLoan || "loan"}."
-4. If they write in English, reply in helpful professional English. If they write in Telugu or Tenglish, reply in friendly Tenglish. Maintain a warm, highly professional loan advisor tone at all times.`
+    // Check recent application link sent to this customer
+    const sentLinkRes = await query(
+      `SELECT s.product, s.bank, s.status, s.clicked_at, lib.url
+       FROM link_sends s
+       LEFT JOIN link_library lib ON s.library_id = lib.id
+       WHERE s.lead_id = $1
+       ORDER BY s.created_at DESC LIMIT 1`,
+      [lead.id]
+    )
+    let linkContext = ""
+    if (sentLinkRes.rows && sentLinkRes.rows.length > 0) {
+      const sl = sentLinkRes.rows[0]
+      const isExternal = sl.url && !sl.url.includes("/apply")
+      linkContext = `
+APPLICATION LINK RECORD:
+- Loan Product Link Sent: ${sl.product}
+- Customer Clicked/Opened Link: ${sl.clicked_at ? "YES" : "NO"}
+- Destination Link Type: ${isExternal ? "EXTERNAL APPLICATION LINK (" + sl.url + ")" : "INTERNAL FORM (/apply)"}
+${isExternal ? "- IMPORTANT FOR EXTERNAL LINKS: Because this is an external portal, the customer completed the form on that external website. If the customer says they filled, completed, or submitted the application, or asks if we received it: ALWAYS warmly acknowledge their submission! Thank them, confirm that their application has been received and noted, and assure them our loan verification team is reviewing it and will contact them shortly. NEVER say their application is not submitted or not received." : ""}`
     }
 
-    const detectedLang = detectLanguage(text) as Language
-    const leadPreferredLang = (memFacts.preferred_language || lead.language) as Language | undefined
-    // If incoming message is short (<= 4 words) and detected as English, but lead preferred language is Telugu:
-    const lang = (leadPreferredLang === "telugu" && text.trim().split(/\s+/).length <= 4 && detectedLang === "english")
-      ? "telugu"
-      : detectedLang
+    // Auto-update lead and application status when customer confirms form submission
+    const FORM_CONFIRM_RE = /\b(completed filled|filled (it|the form|application|already)|submitted (the form|it|application)|form fill chesa|fill chesesa|form complete ayyindi|done filling|already filled|received the loan application)\b/i
+    if (FORM_CONFIRM_RE.test(text)) {
+      query(`UPDATE leads SET form_completed = true, status = 'form_completed', updated_at = now() WHERE id = $1`, [lead.id]).catch(() => {})
+      query(
+        `UPDATE loan_applications
+         SET status = 'pending', submitted_at = now()
+         WHERE lead_id = $1`,
+        [lead.id]
+      ).catch(() => {})
+    }
+
+    // Only treat as returning customer if there is actual history (memory, prior summary, or past conversations)
+    const hasPriorHistory = !isNewContact && (Boolean(memSummary) || Boolean(memFacts.loan_type) || historyRes.rows.length > 2)
+    const customerName = lead.name && !/^(WA|Caller)\s*\d+$/i.test(lead.name) ? lead.name : (memFacts.name || null)
+    const customerCity = lead.address || memFacts.city || (memSummary.includes("Hyderabad") ? "Hyderabad" : null)
+    const customerLoan = memFacts.loan_type ? (memFacts.loan_type + (memFacts.loan_amount_needed ? ` (₹${Number(memFacts.loan_amount_needed).toLocaleString("en-IN")})` : "")) : (hasPriorHistory ? lead.product_interest : null)
+
+    let knownProfileBlock = ""
+    if (hasPriorHistory && customerName) {
+      knownProfileBlock = `=== RETURNING CUSTOMER PROFILE ===
+- Customer Name: "${customerName}"
+- Phone: ${lead.phone || `+${from}`}
+${customerCity ? `- City / Area: ${customerCity}\n` : ""}${customerLoan ? `- Recorded Loan Requirement: ${customerLoan}\n` : ""}${memSummary ? `- Details from Recent Conversation / Call: ${memSummary}\n` : ""}
+STRICT INSTRUCTIONS FOR RETURNING CUSTOMER:
+1. Greet the customer warmly by name ("${customerName} sir").
+2. If they ask for updates or reference previous talks, acknowledge their specific loan requirement (${customerLoan || "loan"}).
+3. Never invent or hallucinate loan types or details not listed in the profile above.`
+    } else {
+      knownProfileBlock = `=== CUSTOMER CONTEXT ===
+- Contact Status: New inquiry / conversation
+${customerName ? `- Customer Stated Name: "${customerName}"\n` : ""}- Phone: ${lead.phone || `+${from}`}
+INSTRUCTIONS FOR NEW INQUIRY:
+1. This is a NEW inquiry. Do NOT assume or say they previously discussed any specific loan unless they explicitly mention it in this chat.
+2. Greet them warmly and professionally (e.g. "Hello ${customerName ? customerName + ' sir' : 'sir'}! Welcome to Right Agent Group. How can I help you with your loan requirements today?").
+3. Introduce Right Agent Group's loan services (Personal Loans, Business Loans, Home Loans, Mortgage Loans, Education Loans) and ask what they are looking for.`
+    }
+
+    // LANGUAGE DETERMINATION & PERSISTENCE
+    const isExplicitTelugu = TELUGU_ASK_RE.test(text)
+    const isExplicitHindi = HINDI_ASK_RE.test(text)
+    const isExplicitEnglish = ENGLISH_ASK_RE.test(text)
+
+    let lang: Language
+    let explicitSwitch = false
+
+    if (isExplicitTelugu) {
+      lang = "telugu"
+      explicitSwitch = true
+    } else if (isExplicitHindi) {
+      lang = "hindi"
+      explicitSwitch = true
+    } else if (isExplicitEnglish) {
+      lang = "english"
+      explicitSwitch = true
+    } else if (isNewContact || historyRes.rows.length === 0) {
+      // First turn of a new contact: use the detected language of their initial greeting
+      lang = detectLanguage(text) as Language
+      explicitSwitch = true
+    } else {
+      // Ongoing conversation:
+      // Short messages ("ya", "ok", "sure", "fine", "no", "yes") stick to the ongoing conversation language!
+      const wordCount = text.trim().split(/\s+/).length
+      const currentConversationLang = (lead.language as Language) || "english"
+      if (wordCount <= 4) {
+        lang = currentConversationLang
+      } else {
+        lang = detectLanguage(text) as Language
+      }
+    }
+
+    if (explicitSwitch && lang !== lead.language) {
+      lead.language = lang
+      query(`UPDATE leads SET language = $1 WHERE id = $2`, [lang, lead.id]).catch(() => {})
+    }
 
     // CHANNEL OVERRIDE: the shared script is written for live phone calls —
     // without this the AI "speaks" on WhatsApp (call greetings, hold-style
@@ -570,10 +655,25 @@ STRICT INSTRUCTIONS FOR KNOWN CUSTOMER:
       "If name and city are already known from the customer profile below, NEVER ask for them! " +
       "If the customer explicitly asks for the loan application, application form, or the link: " +
       "confirm it is DONE — say the form was just sent right here in this chat (the system " +
-      "delivers it automatically with your reply). Never say you will send it later, never " +
-      "point them to email or another app."
+      "delivers it automatically with your reply). In Telugu: 'Sure sir, application link idigo ee chat lo ne pampinchaanu, fill cheyandi'. Never say you will send it later, never point them to email or another app."
+
+    if (explicitSwitch) {
+      if (lang === "english") {
+        extraContext = [extraContext, "CRITICAL LANGUAGE MANDATE: The customer requested English. You MUST reply 100% in pure English from your very first word (e.g. 'Sure sir, let\\'s speak in English...'). Never use Telugu, Tenglish, or Hindi words."].filter(Boolean).join("\n\n")
+      } else if (lang === "hindi") {
+        extraContext = [extraContext, "CRITICAL LANGUAGE MANDATE: The customer requested Hindi. You MUST reply in natural Hinglish/Hindi from your very first word (e.g. 'Bilkul sir, Hindi mein baat karte hain...'). Never use Telugu words."].filter(Boolean).join("\n\n")
+      } else if (lang === "telugu") {
+        extraContext = [extraContext, "CRITICAL LANGUAGE MANDATE: The customer requested Telugu. You MUST reply in friendly conversational Tenglish from your very first word (e.g. 'Sure sir, Telugu lo matladadam...')."].filter(Boolean).join("\n\n")
+      }
+    }
+
+    const NO_DOUBTS_RE = /\b(no doubts?|no questions?|em ledu|ledu|chalu|nothing|nope|thank you bye|bye)\b/i
+    if (NO_DOUBTS_RE.test(text.trim())) {
+      extraContext = [extraContext, "CUSTOMER SATISFIED / CLOSING: The customer stated they have no further doubts or are concluding. Do NOT pitch or ask any new questions. Thank them warmly, remind them our loan officer will contact them shortly regarding the application, and wish them a great day."].filter(Boolean).join("\n\n")
+    }
 
     if (knownProfileBlock) extraContext = [extraContext, knownProfileBlock].filter(Boolean).join("\n\n")
+    if (linkContext) extraContext = [extraContext, linkContext].filter(Boolean).join("\n\n")
 
     // OPERATOR REQUEST — shape this reply exactly like the call path does
     // (see lib/default-scripts.ts SPEAK TO A HUMAN + lib/frustration.ts).
@@ -587,12 +687,9 @@ STRICT INSTRUCTIONS FOR KNOWN CUSTOMER:
     if (brief) extraContext = [extraContext, brief].join("\n\n")
     if (kbContext) extraContext = [extraContext, kbContext].filter(Boolean).join("\n\n")
 
-    // REAL MATH: same reasoning as the voice path (lib/finance.ts) — Priya
-    // states an exact code-computed EMI instead of an LLM-guessed one.
-    // Loan type may have been mentioned earlier in the thread, not this
-    // message — scan the whole recent conversation, same as the call path.
-    const conversationSoFar = [...historyRes.rows.map((h: any) => h.content), text].join(" ")
-    const detectedType = detectLoanType(conversationSoFar) || lead.product_interest || null
+    // REAL MATH: only scan CUSTOMER utterances for loan interest (never Priya's own options list!)
+    const customerMessagesSoFar = [...historyRes.rows.filter((h: any) => h.role === "user").map((h: any) => h.content), text].join(" ")
+    const detectedType = detectLoanType(customerMessagesSoFar) || (hasPriorHistory ? lead.product_interest : null)
     if (detectedType && detectedType !== lead.product_interest) {
       query(`UPDATE leads SET product_interest = $1 WHERE id = $2`, [detectedType, lead.id]).catch(() => {})
     }
@@ -673,13 +770,14 @@ STRICT INSTRUCTIONS FOR KNOWN CUSTOMER:
     if ((customerRequested || aiMentionedForm) && !(await recentFormLinkSent(lead.id))) {
       const token = await createOneTimeFormToken(lead.id)
       const linkResult = await sendApplicationLinkText(from, lead.name || "there", token, waBranch)
+      const linkMessageBody = formLinkMessage(lead.name || "there", token, waBranch?.brandName)
       // Mirror the operator send-form route: mark the lead as "form sent,
       // not yet filled" so the Leads table stays truthful.
       await db.from("leads").update({ form_completed: false, updated_at: new Date().toISOString() }).eq("id", lead.id)
       await query(
         `INSERT INTO whatsapp_messages (lead_id, phone_number, direction, content, status, branch_id)
          VALUES ($1, $2, 'outbound', $3, $4, $5)`,
-        [lead.id, `+${from}`, "Loan application form link (auto — requested in chat)", linkResult.ok ? "sent" : "failed", waBranch?.id || null]
+        [lead.id, `+${from}`, linkMessageBody, linkResult.ok ? "sent" : "failed", waBranch?.id || null]
       ).catch(() => {})
       await query(
         `INSERT INTO comm_logs (lead_id, type, summary, outcome) VALUES ($1, 'whatsapp', $2, $3)`,

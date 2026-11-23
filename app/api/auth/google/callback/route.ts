@@ -127,11 +127,15 @@ export async function GET(req: NextRequest) {
     const safeNext = isSafeNextPath(nextPath) ? nextPath : "/dashboard"
 
     // ---- TWO-FACTOR AUTH (Access Controls toggle) ----
-    // Admin sign-ins get an emailed 6-digit code before the session cookie
-    // is issued. Requires SMTP; if mail isn't configured the sign-in
-    // proceeds (fail-open, audit-logged) rather than locking the admin out.
-    if (role === "admin" && (await isSecurityEnabled("two_factor_auth"))) {
-      if (isMailConfigured()) {
+    // When enabled, sign-ins for ANY account in Team Access get a 6-digit code
+    // before the session cookie is issued. Delivered directly to their email
+    // (and WhatsApp for admin).
+    if (await isSecurityEnabled("two_factor_auth")) {
+      const mailConfigured = isMailConfigured()
+      const adminPhone = process.env.ADMIN_PHONE || "+916301689511"
+      const waConfigured = Boolean(process.env.WHATSAPP_TOKEN && adminPhone && role === "admin")
+
+      if (mailConfigured || waConfigured) {
         const code = String(randomInt(100000, 1000000))
         const codeHash = createHash("sha256").update(code).digest("hex")
         await query(
@@ -140,11 +144,39 @@ export async function GET(req: NextRequest) {
            ON CONFLICT (email) DO UPDATE SET code_hash = $2, attempts = 0, expires_at = now() + interval '10 minutes', created_at = now()`,
           [email, codeHash]
         )
-        sendMail({
-          to: email,
-          subject: `${code} is your Right Agent Group sign-in code`,
-          html: `<p>Your one-time sign-in code is:</p><p style="font-size:28px;font-weight:700;letter-spacing:4px">${code}</p><p>It expires in 10 minutes. If you didn't try to sign in, you can ignore this email.</p>`,
-        }).catch((e) => console.error("2FA mail error:", e.message))
+
+        // Send via Email to the team member's specific email address
+        if (mailConfigured) {
+          await sendMail({
+            to: email,
+            subject: `${code} is your Right Agent Group verification code`,
+            html: `
+              <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 24px; background: #0f121d; color: #ffffff; border-radius: 12px; border: 1px solid #1f2438;">
+                <div style="font-size: 20px; font-weight: 700; color: #8b7cff; margin-bottom: 16px;">Right Agent Group</div>
+                <p style="font-size: 15px; color: #e2e8f0; margin-bottom: 20px;">Hello,</p>
+                <p style="font-size: 14px; color: #94a3b8; margin-bottom: 24px;">Your one-time sign-in verification code for the operations console is:</p>
+                <div style="font-size: 32px; font-weight: 800; letter-spacing: 6px; color: #ffffff; background: #1a1e30; padding: 16px; border-radius: 8px; text-align: center; border: 1px solid #2e3654; margin-bottom: 24px;">
+                  ${code}
+                </div>
+                <p style="font-size: 13px; color: #94a3b8; line-height: 1.5;">This code will expire in <strong>10 minutes</strong>. If you did not attempt to sign in to Right Agent Group, please contact your administrator immediately.</p>
+                <hr style="border: none; border-top: 1px solid #222944; margin: 24px 0;" />
+                <p style="font-size: 11px; color: #64748b;">Right Agent Group · Operations Console Security</p>
+              </div>
+            `,
+          }).catch((e) => console.error("2FA mail error:", e.message))
+        }
+
+        // Send via WhatsApp to Admin Phone if WhatsApp is configured and user is admin
+        if (waConfigured) {
+          const { sendWhatsAppText } = await import("@/lib/whatsapp")
+          sendWhatsAppText(
+            adminPhone,
+            `🔐 *Right Agent Group Verification*\n\nYour sign-in code is: *${code}*\n\nValid for 10 minutes.`
+          ).catch((e) => {
+            console.error("2FA WhatsApp exception:", e.message)
+            return { ok: false, error: e.message }
+          })
+        }
 
         const pending = await createOtpPendingToken(email, role, safeNext, { orgId, branchId })
         const res = NextResponse.redirect(`${appUrl}/login?otp=1`)
@@ -153,16 +185,12 @@ export async function GET(req: NextRequest) {
         res.cookies.delete("oauth_next")
         return res
       }
-      console.warn("2FA is enabled but SMTP is not configured")
-      // FIX (2026-09-20): FAIL CLOSED. The old code issued a full admin
-      // session with no second factor when SMTP was down/broken — a security
-      // control the admin believes is enforced silently stopped being enforced
-      // (the audit row was the only trace). Refuse the sign-in instead.
+      console.warn("2FA is enabled but neither SMTP nor WhatsApp is configured")
       query(
-        `INSERT INTO audit_logs (action, performed_by, metadata) VALUES ('2FA blocked — SMTP not configured', $1, '{"source":"login"}')`,
+        `INSERT INTO audit_logs (action, performed_by, metadata) VALUES ('2FA blocked — no delivery channel', $1, '{"source":"login"}')`,
         [email]
       ).catch(() => {})
-      return fail("2FA is enabled but the mail system is unavailable. Contact the administrator.")
+      return fail("2FA is enabled but neither email nor WhatsApp is configured. Contact the administrator.")
     }
 
     // The full-access role's sign-ins never appear here — this notification

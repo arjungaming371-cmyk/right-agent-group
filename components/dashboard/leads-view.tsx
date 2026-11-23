@@ -5,7 +5,7 @@ import { useEffect, useState, useMemo } from "react"
 import {
   Users, Target, IndianRupee, BadgeCheck, Phone, MessageCircle, MessageSquare, RotateCcw,
   Plus, Search, Link2, Check, Download, Upload, Brain, Pin, Sparkles, CheckSquare,
-  PhoneCall, Instagram, X, ExternalLink, Clock, CheckCircle2, ArrowRight, Pencil, Landmark, AlertCircle
+  PhoneCall, Instagram, X, ExternalLink, Clock, CheckCircle2, ArrowRight, Pencil, Landmark, AlertCircle, FileText
 } from "lucide-react"
 import { formatCurrency, timeAgo, formatDateTime } from "@/lib/utils"
 import { pctOf } from "@/lib/maths"
@@ -160,10 +160,30 @@ function ScoreBadge({ score }: { score: number }) {
   )
 }
 
+const STATUS_STYLES: Record<string, { bg: string; color: string; label: string }> = {
+  qualified:      { bg: "rgba(34,197,94,0.15)",  color: "var(--accent-green)", label: "Qualified" },
+  interested:     { bg: "rgba(34,197,94,0.15)",  color: "var(--accent-green)", label: "Interested" },
+  contacted:      { bg: "rgba(59,130,246,0.15)", color: "var(--accent-blue)",  label: "Contacted" },
+  approved:       { bg: "rgba(16,185,129,0.15)", color: "#10b981",            label: "Approved" },
+  in_progress:    { bg: "rgba(245,158,11,0.15)", color: "var(--accent-yellow)",label: "In Progress" },
+  new:            { bg: "rgba(139,124,255,0.15)",color: "var(--accent-violet)",label: "New" },
+  not_interested: { bg: "rgba(239,68,68,0.15)",  color: "var(--accent-red)",   label: "Not Interested" },
+  rejected:       { bg: "rgba(239,68,68,0.15)",  color: "var(--accent-red)",   label: "Rejected" },
+  unknown:        { bg: "rgba(100,116,139,0.15)",color: "var(--text-secondary)", label: "Pending" },
+}
+
+function getLeadStatusStyle(lead: Lead) {
+  const st = String(lead.status || "").toLowerCase().trim()
+  if (st && STATUS_STYLES[st]) return STATUS_STYLES[st]
+  const inst = String(lead.interested || "").toLowerCase().trim()
+  if (inst && STATUS_STYLES[inst]) return STATUS_STYLES[inst]
+  return STATUS_STYLES.unknown
+}
+
 const INTERESTED_STYLES: Record<string, { bg: string; color: string; label: string }> = {
   interested:     { bg: "rgba(34,197,94,0.15)",  color: "var(--accent-green)", label: "Interested" },
   not_interested: { bg: "rgba(239,68,68,0.15)",  color: "var(--accent-red)", label: "Not Interested" },
-  unknown:        { bg: "rgba(100,116,139,0.15)",color: "var(--text-secondary)", label: "Unknown" },
+  unknown:        { bg: "rgba(100,116,139,0.15)",color: "var(--text-secondary)", label: "Pending" },
 }
 
 // Tinted fill + accent-coloured initials rather than white-on-solid-accent:
@@ -210,7 +230,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
   // A11y (2026-10-05): console modals close on Escape, matching the
   // marketing nav behavior.
   useEscapeDismiss(showAdd, () => setShowAdd(false))
-  const [form, setForm] = useState({ name: "", phone: "", address: "", product_interest: "Home Loan", loan_amount: "", language: "telugu" })
+  const [form, setForm] = useState({ name: "", phone: "", address: "", product_interest: "", loan_amount: "", language: "telugu" })
 
   type AgendaPreset = {
     id: string
@@ -356,16 +376,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
     setBankLinkTarget(lead)
     const prod = lead.product_interest || "Home Loan"
     setBankProduct(prod)
-    setSelectedBank("SBI")
-    try {
-      const res = await fetch("/api/links/library")
-      if (res.ok) {
-        const data = await res.json()
-        setAvailableBanks(data)
-        const match = data.find((b: any) => b.product.toLowerCase() === prod.toLowerCase())
-        if (match) setSelectedBank(match.bank)
-      }
-    } catch {}
+    setSelectedBank("Right Agent Group")
   }
 
   async function handleSendBankLink() {
@@ -377,20 +388,20 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           leadId: bankLinkTarget.id,
-          bank: selectedBank,
+          bank: selectedBank || "Right Agent Group",
           product: bankProduct,
         }),
       })
       const d = await res.json()
       if (res.ok) {
-        toast.success(`Sent ${selectedBank} ${bankProduct} link to ${bankLinkTarget.name || "customer"} via WhatsApp`)
+        toast.success(`Sent Right Agent Group application link (${bankProduct}) to ${bankLinkTarget.name || "customer"} via WhatsApp`)
         setBankLinkTarget(null)
         load()
       } else {
-        toast.error(d.error || "Failed to send bank link")
+        toast.error(d.error || "Failed to send application link")
       }
     } catch {
-      toast.error("Failed to send bank link")
+      toast.error("Failed to send application link")
     } finally {
       setSendingBankLink(false)
     }
@@ -835,9 +846,19 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
     const res = await fetch("/api/leads", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...form, loan_amount: form.loan_amount ? parseFloat(form.loan_amount) : null, source: "manual" }),
+      body: JSON.stringify({
+        ...form,
+        product_interest: form.product_interest.trim() || null,
+        loan_amount: form.loan_amount ? parseFloat(form.loan_amount) : null,
+        source: "manual"
+      }),
     })
-    if (res.ok) { setShowAdd(false); toast.success(`${form.name} added to leads`); load() }
+    if (res.ok) {
+      setShowAdd(false)
+      setForm({ name: "", phone: "", address: "", product_interest: "", loan_amount: "", language: "telugu" })
+      toast.success(`${form.name} added to leads`)
+      load()
+    }
     else { const d = await res.json().catch(() => ({})); toast.error(d.error || "Could not add lead") }
   }
 
@@ -919,7 +940,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
               return (
                 <button
                   key={t.key}
-                  onClick={() => { setScopeTab(t.key); setSelectedIds([]) }}
+                  onClick={() => { setScopeTab(t.key); setSelectedIds([]); setLeads([]) }}
                   style={{
                     display: "inline-flex", alignItems: "center", gap: 6,
                     height: 30, padding: "0 12px", borderRadius: 8, fontSize: 12, fontWeight: 600,
@@ -1088,7 +1109,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
 
         {/* Horizontal scroll container */}
         <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", minWidth: scopeTab === "crm" ? 1100 : 960, borderCollapse: "collapse" }}>
+        <table style={{ width: "100%", minWidth: scopeTab === "crm" ? 1180 : 960, borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ borderBottom: "1px solid var(--border)" }}>
               {scopeTab === "crm" ? (
@@ -1107,6 +1128,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                       color: "var(--text-muted)",
                       letterSpacing: "0.05em",
                       whiteSpace: "nowrap",
+                      minWidth: h === "CALLS" ? 70 : h === "UPDATED" ? 110 : h === "ACTIONS" ? 140 : undefined,
                       ...(h === "ACTIONS" ? { position: "sticky", right: 0, background: "var(--bg-card)", zIndex: 2, boxShadow: "-6px 0 10px rgba(0,0,0,0.12)" } : {}),
                     }}>{h}</th>
                   ))}
@@ -1121,6 +1143,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                     color: "var(--text-muted)",
                     letterSpacing: "0.05em",
                     whiteSpace: "nowrap",
+                    minWidth: h === "ACTIONS" ? 140 : undefined,
                     ...(h === "ACTIONS" ? { position: "sticky", right: 0, background: "var(--bg-card)", zIndex: 2, boxShadow: "-6px 0 10px rgba(0,0,0,0.12)" } : {}),
                   }}>{h}</th>
                 ))
@@ -1128,28 +1151,29 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
             </tr>
           </thead>
           <tbody>
-            {loading && Array.from({ length: 4 }).map((_, i) => (
-              <tr key={`sk-${i}`} style={{ borderBottom: "1px solid var(--border-light)" }}>
-                {scopeTab === "crm" && (
-                  <td style={{ padding: "8px 6px 8px 12px", width: 36 }}>
-                    <Skeleton w={14} h={14} r={3} />
-                  </td>
-                )}
-                <td style={{ padding: "8px 10px" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <Skeleton w={30} h={30} r={15} />
-                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                      <Skeleton w={100} h={11} />
-                      <Skeleton w={70} h={9} />
+            {loading ? (
+              Array.from({ length: 4 }).map((_, i) => (
+                <tr key={`sk-${i}`} style={{ borderBottom: "1px solid var(--border-light)" }}>
+                  {scopeTab === "crm" && (
+                    <td style={{ padding: "8px 6px 8px 12px", width: 36 }}>
+                      <Skeleton w={14} h={14} r={3} />
+                    </td>
+                  )}
+                  <td style={{ padding: "8px 10px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <Skeleton w={30} h={30} r={15} />
+                      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                        <Skeleton w={100} h={11} />
+                        <Skeleton w={70} h={9} />
+                      </div>
                     </div>
-                  </div>
-                </td>
-                {Array.from({ length: scopeTab === "social" ? 6 : 9 }).map((_, j) => (
-                  <td key={j} style={{ padding: "8px 10px" }}><Skeleton w={j === (scopeTab === "social" ? 5 : 8) ? 68 : 52} h={11} /></td>
-                ))}
-              </tr>
-            ))}
-            {!loading && loadError && (
+                  </td>
+                  {Array.from({ length: scopeTab === "social" ? 6 : 9 }).map((_, j) => (
+                    <td key={j} style={{ padding: "8px 10px" }}><Skeleton w={j === (scopeTab === "social" ? 5 : 8) ? 68 : 52} h={11} /></td>
+                  ))}
+                </tr>
+              ))
+            ) : loadError ? (
               <tr>
                 <td colSpan={scopeTab === "social" ? 7 : 11} style={{ padding: 32, textAlign: "center" }}>
                   <div style={{ color: "var(--accent-red)", fontSize: 13, fontWeight: 600, marginBottom: 12 }}>{loadError}</div>
@@ -1158,8 +1182,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                   </button>
                 </td>
               </tr>
-            )}
-            {!loading && !loadError && displayLeads.length === 0 && (
+            ) : displayLeads.length === 0 ? (
               <tr>
                 <td colSpan={scopeTab === "social" ? 7 : 11} style={{ padding: 40, textAlign: "center", color: "var(--text-muted)" }}>
                   {scopeTab === "social" ? (
@@ -1184,8 +1207,8 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                   )}
                 </td>
               </tr>
-            )}
-            {displayLeads.map((lead) => {
+            ) : (
+              displayLeads.map((lead) => {
               if (scopeTab === "social") {
                 return (
                   <tr key={lead.id} style={{ borderBottom: "1px solid var(--border-light)" }}>
@@ -1450,7 +1473,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
               }
 
               // CRM row
-              const ist = INTERESTED_STYLES[lead.interested] ?? INTERESTED_STYLES.unknown
+              const ist = getLeadStatusStyle(lead)
               return (
                 <tr key={lead.id} style={{ borderBottom: "1px solid var(--border-light)", background: selectedIds.includes(lead.id) ? "rgba(139,124,255,0.05)" : undefined }}>
                   {canEdit && scopeTab === "crm" && (
@@ -1619,9 +1642,9 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                           <button
                             onClick={() => openSendBankLinkModal(lead)}
                             disabled={!lead.phone && !lead.whatsapp_number}
-                            title="Send Official Bank Application Link"
+                            title="Send Right Agent Group Application Link"
                             style={{ background: "rgba(56,189,248,0.1)", border: "1px solid rgba(56,189,248,0.28)", color: "var(--accent-cyan)", borderRadius: 7, width: 28, height: 28, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
-                          ><Landmark size={12.5} strokeWidth={1.9} /></button>
+                          ><FileText size={12.5} strokeWidth={1.9} /></button>
                         </>
                       )}
                       <button
@@ -1634,7 +1657,8 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                   </td>
                 </tr>
               )
-            })}
+            })
+          )}
           </tbody>
         </table>
         {leads.length >= 200 && (
@@ -1906,11 +1930,12 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
               )
             })}
             <div style={{ marginBottom: 12 }}>
-              <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Loan Type</label>
+              <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Loan Type (Optional)</label>
               <select value={form.product_interest} onChange={(e) => setForm({ ...form, product_interest: e.target.value })}>
+                <option value="">-- None / Blank (General Inquiry) --</option>
                 {PRODUCT_GROUPS.map((g) => (
                   <optgroup key={g.label} label={g.label}>
-                    {g.products.map((t) => <option key={t}>{t}</option>)}
+                    {g.products.map((t) => <option key={t} value={t}>{t}</option>)}
                   </optgroup>
                 ))}
               </select>
@@ -2388,14 +2413,14 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
         </div>
       )}
 
-      {/* Send Bank Link Modal */}
+      {/* Send Application Link Modal */}
       {bankLinkTarget && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}>
           <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, padding: 26, width: "100%", maxWidth: 440 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <Landmark size={18} strokeWidth={2} style={{ color: "var(--accent-cyan)" }} />
-                <div style={{ fontWeight: 700, fontSize: 16 }}>Send Bank Application Link</div>
+                <FileText size={18} strokeWidth={2} style={{ color: "var(--accent-cyan)" }} />
+                <div style={{ fontWeight: 700, fontSize: 16 }}>Send Application Link</div>
               </div>
               <button
                 type="button"
@@ -2413,28 +2438,6 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
 
             <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16 }}>
               <div>
-                <label style={{ display: "block", fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>Select Bank / Lender</label>
-                <select
-                  value={selectedBank}
-                  onChange={(e) => setSelectedBank(e.target.value)}
-                  style={{ width: "100%", height: 38, fontSize: 13, padding: "0 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)" }}
-                >
-                  <option value="SBI">State Bank of India (SBI)</option>
-                  <option value="HDFC Bank">HDFC Bank</option>
-                  <option value="ICICI Bank">ICICI Bank</option>
-                  <option value="IDFC First">IDFC First Bank</option>
-                  <option value="Axis Bank">Axis Bank</option>
-                  <option value="Bajaj Finserv">Bajaj Finserv</option>
-                  <option value="IIFL Home">IIFL Home Loans</option>
-                  {availableBanks
-                    .filter((b) => !["SBI", "HDFC Bank", "ICICI Bank", "IDFC First", "Axis Bank", "Bajaj Finserv", "IIFL Home"].includes(b.bank))
-                    .map((b) => (
-                      <option key={b.id} value={b.bank}>{b.bank}</option>
-                    ))}
-                </select>
-              </div>
-
-              <div>
                 <label style={{ display: "block", fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>Loan Product</label>
                 <select
                   value={bankProduct}
@@ -2445,12 +2448,14 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                   <option value="Personal Loan">Personal Loan</option>
                   <option value="Business Loan">Business Loan</option>
                   <option value="Loan Against Property">Loan Against Property</option>
+                  <option value="Education Loan">Education Loan</option>
+                  <option value="Car Loan">Car Loan</option>
                 </select>
               </div>
             </div>
 
             <div style={{ padding: "10px 12px", borderRadius: 8, background: "rgba(56,189,248,0.08)", border: "1px solid rgba(56,189,248,0.2)", fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.5, marginBottom: 18 }}>
-              💡 Sends a branded short link via WhatsApp. The customer taps it, their click is tracked in the Applications tab, and they land on the bank&apos;s official application page. No sensitive documents touch your database.
+              💡 Sends Right Agent Group&apos;s loan application link via WhatsApp. When the customer opens it, their name and details are auto-filled, and their submitted application logs directly into your dashboard.
             </div>
 
             <div style={{ display: "flex", gap: 10 }}>

@@ -119,11 +119,16 @@ export async function POST(req: NextRequest) {
         transcript = []
       }
     }
-    const allText = transcript.map((t) => (typeof t.text === "string" ? t.text : "")).join(" ").toLowerCase()
+    const customerText = transcript
+      .filter((t) => t.role === "customer" || t.role === "user")
+      .map((t) => (typeof t.text === "string" ? t.text : ""))
+      .join(" ")
+      .toLowerCase()
+      .replace(/no\s+(?:problem|issue|doubt|doubts|worries)/gi, "")
 
-    const positiveWords = /yes\b|interested|please|confirm|okay|ok\b|sure|good|great/
-    const negativeWords = /\bno\b|not interested|busy|later|cancel|dont|nope/
-    const sentiment = negativeWords.test(allText) ? "Negative" : positiveWords.test(allText) ? "Positive" : "Neutral"
+    const positiveWords = /\b(?:yes|interested|please|confirm|okay|ok|sure|good|great|sare|avunu|cheppandi|vasthanu|vacchi|teesukostha|apply)\b/i
+    const negativeWords = /\b(?:not interested|dont call|do not call|never call|stop calling|wrong number|vaddu|waste)\b/i
+    const sentiment = negativeWords.test(customerText) ? "Negative" : positiveWords.test(customerText) ? "Positive" : "Neutral"
 
     await db.from("voice_calls").update({ sentiment }).eq("twilio_call_sid", callSid)
     // FIX (2026-09-22): this update used to stomp ANY existing status — a

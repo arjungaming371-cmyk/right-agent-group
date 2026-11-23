@@ -15,6 +15,7 @@
 import { db, query } from "./db"
 import pool from "./db"
 import { analyzeLeadTranscript, type LeadFacts, type LeadAnalysisResult } from "./llm"
+import { refreshLeadScore } from "./scoring"
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 export function isValidUUID(id: any): id is string {
@@ -172,7 +173,9 @@ async function applyAnalysis(leadId: string, result: LeadAnalysisResult): Promis
       console.warn("[lead-brain] sync to leads table skipped:", syncErr.message)
     }
 
-    // Automatically create or update a pending loan application in loan_applications so the Dashboard > Loan Applications tab displays it
+    // If an official loan application already exists in loan_applications (submitted via form or created by staff),
+    // sync non-status details (amount, contact). NEVER auto-create fake applications from chat/call inquiries,
+    // and NEVER touch or overwrite `status` (status is strictly controlled by human team members only).
     try {
       if (mergedFacts.loan_amount_needed || mergedFacts.loan_type) {
         const leadRes = await client.query(`SELECT name, phone, branch_id, address FROM leads WHERE id = $1`, [leadId])
@@ -193,14 +196,9 @@ async function applyAnalysis(leadId: string, result: LeadAnalysisResult): Promis
             : "Personal"
           const loanAmt = mergedFacts.loan_amount_needed ? Number(mergedFacts.loan_amount_needed) : null
 
-          const existingApp = await client.query(`SELECT id FROM loan_applications WHERE lead_id = $1 LIMIT 1`, [leadId])
-          if (existingApp.rows.length === 0) {
-            await client.query(
-              `INSERT INTO loan_applications (lead_id, customer_name, full_name, phone, whatsapp_number, city, address, loan_type, loan_amount, status, submitted_at, branch_id)
-               VALUES ($1, $2, $2, $3, $3, $4, $4, $5, $6, 'pending', now(), $7)`,
-              [leadId, custName, custPhone, custCity, cleanLt, loanAmt, leadRow.branch_id || null]
-            )
-          } else {
+          const existingApp = await client.query(`SELECT id, status FROM loan_applications WHERE lead_id = $1 LIMIT 1`, [leadId])
+          if (existingApp.rows.length > 0) {
+            // Update details only — NEVER change or overwrite status (updated by team members only)
             await client.query(
               `UPDATE loan_applications
                SET customer_name = COALESCE(NULLIF($2, ''), customer_name),
@@ -283,6 +281,10 @@ export function runPostCallAnalysis(callSid: string): void {
       }
 
       await applyAnalysis(call.lead_id, result)
+      const sentimentDisplay = result.sentiment === "positive" ? "Positive" : (result.sentiment === "frustrated" || result.sentiment === "hostile") ? "Negative" : "Neutral"
+      await query(`UPDATE voice_calls SET sentiment = $1 WHERE twilio_call_sid = $2`, [sentimentDisplay, callSid]).catch(() => {})
+      await refreshLeadScore(call.lead_id, sentimentDisplay).catch(() => {})
+
       await insertInteraction(
         call.lead_id,
         "voice",
@@ -557,25 +559,51 @@ export async function buildLeadBrief(leadId: string): Promise<string> {
     ].filter(Boolean).join(", ")
     if (identity) lines.push(`IDENTITY — ${identity}`)
 
-    // LOAN APPLICATION ALREADY ON FILE
-    if (row.latest_application || row.form_completed) {
-      const app = row.latest_application
-      const refNum = app?.ref_number ? `Ref #${app.ref_number}` : ""
-      const appType = app?.loan_type || row.product_interest || "loan"
-      const appAmt = app?.loan_amount ? `₹${Number(app.loan_amount).toLocaleString("en-IN")}` : row.loan_amount ? `₹${Number(row.loan_amount).toLocaleString("en-IN")}` : ""
-      const appStatus = app?.status || "under review"
-      
-      lines.push(
-        `LOAN APPLICATION ALREADY ON FILE (${[refNum, appType, appAmt, `status: ${appStatus}`].filter(Boolean).join(", ")}):\n` +
-        `- The customer ALREADY submitted their loan application. NEVER say "we are sending you a loan application" or ask them to fill any form.\n` +
-        `- Acknowledge their submitted application directly if asked. Answer all caller questions (office visits, timings 9 AM to 6 PM, insurance, rates, process, eligibility) directly using the Knowledge Base. NEVER deflect by repeatedly saying our loan officer will review and call them.`
-      )
+    // LOAN APPLICATION STATUS — STRICT 2-STATE LOGIC (INQUIRY vs OFFICIALLY FILLED)
+    const app = row.latest_application
+    const appType = app?.loan_type || row.product_interest || "loan"
+    const appAmt = app?.loan_amount ? `₹${Number(app.loan_amount).toLocaleString("en-IN")}` : row.loan_amount ? `₹${Number(row.loan_amount).toLocaleString("en-IN")}` : ""
+    const appStatus = (app?.status || "pending").toLowerCase()
+    const isFormFilled = Boolean(row.form_completed)
+
+    if (isFormFilled) {
+      if (appStatus === "sanctioned" || appStatus === "approved") {
+        lines.push(
+          `LOAN APPLICATION STATUS — SANCTIONED (OFFICIALLY SANCTIONED BY TEAM):\n` +
+          `- The customer's loan application (${[appType, appAmt].filter(Boolean).join(", ")}) was officially SANCTIONED by our team!\n` +
+          `- Congratulate the customer warmly when speaking with them.\n` +
+          `- Inform them: Our Loan Officer will contact them regarding the sanction letter and disbursal process.\n` +
+          `- Do NOT ask for any forms or documents.`
+        )
+      } else if (appStatus === "rejected" || appStatus === "lost") {
+        lines.push(
+          `LOAN APPLICATION STATUS — NOT SANCTIONED / REJECTED:\n` +
+          `- The customer's loan application could not be sanctioned at this stage.\n` +
+          `- Be courteous, empathetic, and respectful. Inform them that our Loan Officer will get in touch to discuss potential alternative options.`
+        )
+      } else if (appStatus === "disbursed") {
+        lines.push(
+          `LOAN APPLICATION STATUS — DISBURSED:\n` +
+          `- The loan amount has already been disbursed! Thank them warmly for choosing Right Agent Group.`
+        )
+      } else {
+        lines.push(
+          `LOAN APPLICATION STATUS — SUBMITTED (UNDER REVIEW BY LOAN OFFICER):\n` +
+          `- The customer has ALREADY filled and submitted their official loan application (${[appType, appAmt].filter(Boolean).join(", ")}).\n` +
+          `- All required details and documents were already submitted inside that application.\n` +
+          `- NEVER ask them to fill out any form or link.\n` +
+          `- NEVER ask them for documents (PAN, Aadhaar, salary slips, etc.) over the phone — all documents were already submitted!\n` +
+          `- Inform them: Our Loan Officer is currently reviewing their complete application and will contact them directly for the next steps.`
+        )
+      }
     } else {
       lines.push(
-        `LOAN APPLICATION STATUS — NO APPLICATION ON FILE:\n` +
-        `- The customer has NOT submitted any loan application form yet (zero applications exist in the database).\n` +
-        `- NEVER claim or tell the customer "we already have your application" or "your application is in our system" — you do NOT have any form from them.\n` +
-        `- When the customer asks for the application form or link ("application pampandi" / "link pampandi"), ALWAYS agree immediately: "Sure sir, నేను మీ WhatsApp కి application link పంపిస్తున్నాను, fill చేయండి."`
+        `LOAN APPLICATION STATUS — INQUIRY ONLY (NO OFFICIAL APPLICATION FILLED YET):\n` +
+        `- The customer has NOT filled or submitted any official loan application form yet.\n` +
+        `- They have inquired / expressed interest in a ${appType} of ${appAmt}.\n` +
+        `- STRICT BAN: NEVER claim "You already applied" or "We have your application in our system" or ask them to provide documents over the phone!\n` +
+        `- Treat them as an interested inquiry lead: Discuss their loan requirement naturally. Ask if they want the official application form link on WhatsApp, or if they prefer visiting our Gandimaisamma office directly to complete the application in person.\n` +
+        `- All final documents and KYC will be collected directly inside that official application form or at the office.`
       )
     }
 

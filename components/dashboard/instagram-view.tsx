@@ -35,6 +35,7 @@ import {
   Edit3,
   Bookmark,
   Layers,
+  ChevronDown,
 } from "lucide-react"
 import { useToast } from "../ui/toast"
 import { ClickableRow } from "../ui/interactive"
@@ -266,6 +267,12 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
   const [deletingTemplateId, setDeletingTemplateId] = useState<string | null>(null)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const messagesContainerRef = useRef<HTMLDivElement>(null)
+  const isInitialConvLoadRef = useRef(true)
+  const isAtBottomRef = useRef(true)
+  const [isAtBottom, setIsAtBottom] = useState(true)
+  const activeIgUserIdRef = useRef<string | null>(null)
+  activeIgUserIdRef.current = activeIgUserId
   const toast = useToast()
 
   // Fetch current user session role
@@ -283,7 +290,7 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
       if (res.ok) {
         const data = await res.json()
         setConversations(data || [])
-        if (!activeIgUserId && data && data.length > 0) {
+        if (!activeIgUserIdRef.current && data && data.length > 0) {
           setActiveIgUserId(data[0].ig_user_id)
         }
         setIgLoadError(null)
@@ -297,7 +304,7 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
     } finally {
       setLoading(false)
     }
-  }, [activeIgUserId])
+  }, [])
 
   useEffect(() => {
     loadConversations()
@@ -318,7 +325,7 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
           (c.ig_username && c.ig_username.toLowerCase() === q) ||
           (c.lead_name && c.lead_name.toLowerCase().includes(q))
       )
-      if (match) {
+      if (match && match.ig_user_id !== activeIgUserIdRef.current) {
         setActiveIgUserId(match.ig_user_id)
       }
     }
@@ -433,13 +440,25 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
 
   // Load message history for selected user
   const loadMessages = useCallback(
-    async (igUserId: string) => {
-      setLoadingMsgs(true)
+    async (igUserId: string, silent = false) => {
+      if (!silent) {
+        setLoadingMsgs(true)
+      }
       try {
         const res = await fetch(`/api/instagram/messages?ig_user_id=${encodeURIComponent(igUserId)}`)
         if (res.ok) {
           const data = await res.json()
-          setMessages(data || [])
+          const next = Array.isArray(data) ? data : []
+          setMessages((prev) => {
+            if (prev.length === next.length) {
+              const prevLast = prev[prev.length - 1]
+              const nextLast = next[next.length - 1]
+              if (prevLast?.id === nextLast?.id && prevLast?.status === nextLast?.status) {
+                return prev
+              }
+            }
+            return next
+          })
 
           // Mark as read
           fetch("/api/instagram/read", {
@@ -449,9 +468,13 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
           }).catch(() => {})
         }
       } catch {
-        toast.error("Failed to load Instagram messages")
+        if (!silent) {
+          toast.error("Failed to load Instagram messages")
+        }
       } finally {
-        setLoadingMsgs(false)
+        if (!silent) {
+          setLoadingMsgs(false)
+        }
       }
     },
     [toast]
@@ -459,13 +482,52 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
 
   useEffect(() => {
     if (activeIgUserId) {
-      loadMessages(activeIgUserId)
+      isInitialConvLoadRef.current = true
+      isAtBottomRef.current = true
+      setIsAtBottom(true)
+      setMessages([])
+      loadMessages(activeIgUserId, false)
     }
   }, [activeIgUserId, loadMessages])
 
+  // Periodic silent polling for incoming Instagram messages without disruptive spinners
+  usePolling(() => {
+    if (activeIgUserId) {
+      loadMessages(activeIgUserId, true)
+    }
+  }, activeIgUserId ? 4000 : 0)
+
+  // Smart autoscroll: only scrolls if initial conversation load OR if user is already at the bottom
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+    const el = messagesContainerRef.current
+    if (!el) return
+    if (isInitialConvLoadRef.current) {
+      el.scrollTop = el.scrollHeight
+      isInitialConvLoadRef.current = false
+    } else if (isAtBottomRef.current) {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" })
+    }
   }, [messages])
+
+  const handleScroll = useCallback(() => {
+    const el = messagesContainerRef.current
+    if (!el) return
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    isAtBottomRef.current = atBottom
+    setIsAtBottom(atBottom)
+  }, [])
+
+  const scrollToBottom = useCallback((smooth = true) => {
+    const el = messagesContainerRef.current
+    if (!el) return
+    if (smooth) {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" })
+    } else {
+      el.scrollTop = el.scrollHeight
+    }
+    isAtBottomRef.current = true
+    setIsAtBottom(true)
+  }, [])
 
   const activeConv = useMemo(() => {
     return conversations.find((c) => c.ig_user_id === activeIgUserId)
@@ -510,7 +572,9 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
       if (res.ok) {
         setInputMsg("")
         setWindowExpiredError(null)
-        loadMessages(activeIgUserId)
+        isAtBottomRef.current = true
+        setIsAtBottom(true)
+        loadMessages(activeIgUserId, true)
         loadConversations()
       } else {
         const err = await res.json().catch(() => ({}))
@@ -649,9 +713,9 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
       <div
         className={mobileDetailOpen ? "hidden md:flex" : "flex"}
         style={{
-          width: 340,
-          minWidth: 280,
-          maxWidth: 360,
+          width: 360,
+          minWidth: 320,
+          maxWidth: 380,
           flexShrink: 0,
           borderRight: `1px solid ${IG_THEME.hairline}`,
           flexDirection: "column",
@@ -1035,10 +1099,10 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
                   <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11.5, color: IG_THEME.textSecondary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                     <span>{activeConv.last_type === "comment" ? "💬 Post Comment" : "✉️ Direct Message"}</span>
                     <span>•</span>
-                    {activeConv.is_social_prospect ? (
-                      <span style={{ color: IG_THEME.accentYellow, fontWeight: 600 }}>Social Prospect</span>
-                    ) : (
+                    {activeConv.lead_id && !activeConv.is_social_prospect ? (
                       <span style={{ color: IG_THEME.accentGreen, fontWeight: 600 }}>CRM Lead</span>
+                    ) : (
+                      <span style={{ color: IG_THEME.accentYellow, fontWeight: 600 }}>Social Prospect</span>
                     )}
                     {activeConv.lead_phone && !showInfo && (
                       <>
@@ -1118,6 +1182,8 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
                     gap: 5,
                     fontSize: 12,
                     fontWeight: 600,
+                    flexShrink: 0,
+                    whiteSpace: "nowrap",
                   }}
                   title="Toggle Contact & Lead details"
                 >
@@ -1129,6 +1195,8 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
 
             {/* Message Thread Area */}
             <div
+              ref={messagesContainerRef}
+              onScroll={handleScroll}
               style={{
                 flex: 1,
                 padding: "20px 24px",
@@ -1136,6 +1204,7 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
                 display: "flex",
                 flexDirection: "column",
                 gap: 12,
+                position: "relative",
               }}
             >
               {loadingMsgs ? (
@@ -1222,6 +1291,43 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
                 })
               )}
               <div ref={messagesEndRef} />
+
+              {/* Scroll to bottom button when user scrolls up */}
+              {!isAtBottom && messages.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => scrollToBottom(true)}
+                  style={{
+                    position: "sticky",
+                    bottom: 8,
+                    alignSelf: "center",
+                    zIndex: 10,
+                    background: "rgba(24, 24, 32, 0.92)",
+                    backdropFilter: "blur(6px)",
+                    border: `1px solid ${IG_THEME.hairline}`,
+                    borderRadius: "20px",
+                    padding: "5px 12px",
+                    color: "#fff",
+                    fontSize: 11.5,
+                    fontWeight: 600,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 5,
+                    cursor: "pointer",
+                    boxShadow: "0 4px 14px rgba(0,0,0,0.4)",
+                    transition: "all 0.15s ease",
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "rgba(35, 35, 48, 0.98)"
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "rgba(24, 24, 32, 0.92)"
+                  }}
+                >
+                  <ChevronDown size={14} style={{ color: IG_THEME.accentPink }} />
+                  <span>Scroll to bottom</span>
+                </button>
+              )}
             </div>
 
             {/* Quick Reply Suggestion Chips */}
@@ -1425,6 +1531,7 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
                       display: "flex",
                       alignItems: "center",
                       gap: 5,
+                      whiteSpace: "nowrap",
                       transition: "all 0.15s ease",
                     }}
                   >
@@ -1445,6 +1552,7 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
                       display: "flex",
                       alignItems: "center",
                       gap: 5,
+                      whiteSpace: "nowrap",
                       transition: "all 0.15s ease",
                     }}
                   >
@@ -1558,7 +1666,7 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
       {/* RIGHT PANEL: Contact & Lead Details (Collapsible) */}
       {showInfo && activeConv && (
         <div
-          className="absolute inset-y-0 right-0 z-30 w-full sm:w-[320px] shadow-2xl xl:relative xl:shadow-none"
+          className="absolute inset-y-0 right-0 z-30 w-full sm:w-[320px] shadow-2xl 2xl:relative 2xl:shadow-none"
           style={{
             borderLeft: `1px solid ${IG_THEME.hairline}`,
             background: IG_THEME.sidebarBg,

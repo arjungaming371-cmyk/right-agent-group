@@ -943,13 +943,18 @@ export default function QueueView({ role }: { role: Role }) {
                       <div style={{ display: "flex", gap: 6 }}>
                         {canOperate && isPending && (
                           <>
-                            <button onClick={() => dialNow(item)} disabled={acting} title="Dial now" aria-label={`Dial ${item.name || item.phone} now`} style={{ background: "rgba(139,124,255,0.12)", border: "1px solid rgba(139,124,255,0.28)", color: "var(--accent-violet)", borderRadius: 8, width: 30, height: 30, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                            <button onClick={() => dialNow(item)} disabled={acting} title="Dial now" aria-label={`Dial ${item.name || item.phone} now`} style={{ background: "rgba(139,124,255,0.12)", border: "1px solid rgba(139,124,255,0.28)", color: "var(--accent-violet)", borderRadius: 8, width: 30, height: 30, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
                               <PhoneCall size={13} strokeWidth={2} />
                             </button>
-                            <button onClick={() => cancelOne(item)} disabled={acting} title="Cancel" aria-label={`Cancel call to ${item.name || item.phone}`} style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)", color: "var(--accent-red)", borderRadius: 8, width: 30, height: 30, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                            <button onClick={() => cancelOne(item)} disabled={acting} title="Cancel" aria-label={`Cancel call to ${item.name || item.phone}`} style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)", color: "var(--accent-red)", borderRadius: 8, width: 30, height: 30, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
                               <XCircle size={13} strokeWidth={2} />
                             </button>
                           </>
+                        )}
+                        {canOperate && !isPending && (
+                          <button onClick={() => dialNow(item)} disabled={acting} title="Redial now" aria-label={`Redial ${item.name || item.phone}`} style={{ background: "rgba(139,124,255,0.12)", border: "1px solid rgba(139,124,255,0.28)", color: "var(--accent-violet)", borderRadius: 8, width: 30, height: 30, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+                            <RotateCcw size={13} strokeWidth={2} />
+                          </button>
                         )}
                         {!canOperate && <span style={{ fontSize: 11, color: "var(--text-muted)" }}>View only</span>}
                       </div>

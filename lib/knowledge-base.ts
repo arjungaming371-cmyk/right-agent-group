@@ -56,10 +56,15 @@ function looksLikeQuestion(q: string): boolean {
 
 const INDIC_FAST_MAP: Array<{ regex: RegExp; keywords: string }> = [
   { regex: /(?:enduku|endhuku|kyun|kyu|reason|endhukandi)/i, keywords: "documents required process" },
-  { regex: /(?:ekkada|ekkadiki|kahan|kidhar|address|location|place|branch|office|gandimaisamma|complex)/i, keywords: "office address contact location details" },
-  { regex: /(?:timings?|samayam|hours?|epudu|kab|morning|evening)/i, keywords: "office timings morning evening 9 AM 6 PM" },
-  { regex: /(?:documents?|papers?|aadhaar|aadhar|pan|salary|bank statement|slips?|patralu|kagithalu)/i, keywords: "documents required loan application" },
-  { regex: /(?:vaddi|byaj|interest|rate|percentage|sbi|himsab|emi)/i, keywords: "home loan interest rates banking partners" },
+  { regex: /(?:ekkada|ekkadiki|kahan|kidhar|address|adress|addres|adrs|location|locashun|place|branch|office|ofis|gandimaisamma|complex|karyalayam)/i, keywords: "office address contact location details" },
+  { regex: /(?:timings?|samayam|hours?|epudu|kab|morning|evening|open|close|sunday)/i, keywords: "office timings morning evening 9 AM 6 PM" },
+  { regex: /(?:documents?|docoments|papers?|aadhaar|aadhar|pan|salary|bank statement|slips?|patralu|kagithalu)/i, keywords: "documents required loan application" },
+  { regex: /(?:education|edukashun|edukation|study|studyyy|student|college|school|university|btech|ms|abroad|chaduvu|phd)/i, keywords: "education loan interest rates banking partners" },
+  { regex: /(?:business|biznis|vyapar|vyaparam|shop|kirana|dukan|commercial|firm|msme)/i, keywords: "business loan interest rates banking partners" },
+  { regex: /(?:personal|emergency|salaried|instant|urgent loan|shadi|medical)/i, keywords: "personal loan interest rates banking partners" },
+  { regex: /(?:car|bike|two wheeler|four wheeler|vehicle|auto|motor)/i, keywords: "vehicle loan car bike interest rates" },
+  { regex: /(?:home loan|housing|house loan|flat|villa|plot|construction|illu|makan)/i, keywords: "home loan interest rates banking partners" },
+  { regex: /(?:vaddi|byaj|interest|intrest|rate|rates|ofers|offers|percentage|sbi|emi)/i, keywords: "interest rates loan products banking partners" },
   { regex: /(?:ela|kaise|how|apply|process|vidhanam|steps?)/i, keywords: "how loan application process works" },
   { regex: /(?:insurance|bima|health|term|life|suraksha|cover)/i, keywords: "insurance plans partners" },
   { regex: /(?:fraud|otp|pin|cvv|scam|donga|paisa|payment|money)/i, keywords: "fraud safety never ask otp payments" },
@@ -79,7 +84,27 @@ async function ftsSearch(q: string): Promise<KbHit[]> {
      LIMIT $2`,
     [q, MAX_RESULTS]
   )
-  return res.rows.map((r: any) => ({ title: r.title, content: r.content, rank: Number(r.rank) || 0 }))
+  if (res.rows && res.rows.length > 0) {
+    return res.rows.map((r: any) => ({ title: r.title, content: r.content, rank: Number(r.rank) || 0 }))
+  }
+
+  // Typo resilience fallback: partial token match when strict dictionary FTS matches 0 rows
+  const tokens = (q.match(/[A-Za-z0-9]{3,}/g) || []).filter((w) => !SKIP_PATTERNS.test(w)).slice(0, 3)
+  if (tokens.length > 0) {
+    const conditions = tokens.map((_, i) => `(title ILIKE $${i + 1} OR content ILIKE $${i + 1})`).join(" OR ")
+    const params = tokens.map((t) => `%${t}%`)
+    const fallbackRes = await query(
+      `SELECT title, content, 0.5 AS rank
+       FROM knowledge_base
+       WHERE is_active = true AND (${conditions})
+       LIMIT $${tokens.length + 1}`,
+      [...params, MAX_RESULTS]
+    ).catch(() => ({ rows: [] }))
+    if (fallbackRes.rows && fallbackRes.rows.length > 0) {
+      return fallbackRes.rows.map((r: any) => ({ title: r.title, content: r.content, rank: 0.5 }))
+    }
+  }
+  return []
 }
 
 function formatHits(hits: KbHit[]): string {

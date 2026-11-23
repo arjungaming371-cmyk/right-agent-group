@@ -36,9 +36,9 @@ export function normalizeCallLanguage(input: unknown): CallLanguage {
 
 // Explicit language REQUESTS — the customer is asking to switch, so switch
 // immediately. These were already in the turn route; kept verbatim.
-const TELUGU_ASK_RE = /\b(telugu|telgu|tenglish|telegu)\b|తెలుగు|telugulo|telugula/i
-const HINDI_ASK_RE = /\b(hindi|hinglish|hind)\b|हिंदी|हिन्दी|hindimein|hindime/i
-const ENGLISH_ASK_RE = /\b(english|eng|inglish)\b|englishlo|englishmein/i
+export const TELUGU_ASK_RE = /\b(telugu|telgu|tenglish|telegu)\b|తెలుగు|telugulo|telugula|telugulo matladu|telugu please/i
+export const HINDI_ASK_RE = /\b(hindi|hindhi|hinglish|hind)\b|हिंदी|हिन्दी|hindimein|hindime|hindi please|hindhi please|hindi me boliye|hindi me baat/i
+export const ENGLISH_ASK_RE = /\b(english|eng|inglish)\b|englishlo|englishmein|english please|speak english|talk in english/i
 
 // Roman-letter English function words — a REAL English sentence leans on
 // these; Tenglish answers and STT noise mostly don't.

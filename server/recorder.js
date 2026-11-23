@@ -335,7 +335,7 @@ function cleanupStale(maxAgeMs = 24 * 60 * 60 * 1000) {
     let entries = []
     try { entries = fs.readdirSync(dir) } catch { return 0 }
     for (const f of entries) {
-      if (!/^wacall-[\w.-]+\.(in|out)\.pcm$/.test(f)) continue
+      if (!/^[\w.-]+\.(in|out)\.pcm$/.test(f)) continue
       const full = path.join(dir, f)
       try {
         const st = fs.statSync(full)

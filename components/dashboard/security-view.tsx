@@ -26,7 +26,7 @@ function hourLabel(h: number) {
 }
 
 const LABELS: Record<string, { label: string; desc: string }> = {
-  two_factor_auth: { label: "Two-Factor Authentication", desc: "Email a one-time code on every admin sign-in (needs SMTP_* set in .env)." },
+  two_factor_auth: { label: "Two-Factor Authentication", desc: "Send a one-time 6-digit verification code on sign-in to any email in Team Access (via Email & WhatsApp)." },
   single_sign_on:  { label: "Single Sign-On (SSO)",        desc: "Google SSO is the only sign-in method — always enforced, allowlisted emails only." },
   ip_allowlist:    { label: "IP Allowlist",                desc: "Block console access from IPs not in the IP_ALLOWLIST list in .env." },
   call_recording_encryption: { label: "Block Recording Playback Caching", desc: "Recordings are always encrypted at rest by the telephony provider. When this is on, playback is streamed only — never cached to local disk." },
@@ -191,23 +191,32 @@ export default function SecurityView({ role = "admin" }: { role?: Role }) {
 
   async function toggle(key: string, current: boolean) {
     setSaving(key)
-    setSettings(prev => prev.map(s => s.key === key ? { ...s, enabled: !current } : s))
+    const nextVal = !current
+    setSettings(prev => prev.map(s => s.key === key ? { ...s, enabled: nextVal } : s))
     try {
-      await fetch("/api/security", {
+      const res = await fetch("/api/security", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key, enabled: !current }),
+        body: JSON.stringify({ key, enabled: nextVal }),
       })
-      await load()
+      const d = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toast.error(d.error || `Could not update ${LABELS[key]?.label || key}`)
+        setSettings(prev => prev.map(s => s.key === key ? { ...s, enabled: current } : s))
+      } else {
+        toast.success(`${LABELS[key]?.label || key} ${nextVal ? "enabled" : "disabled"}`)
+        await load()
+      }
     } catch {
       // revert on failure
       setSettings(prev => prev.map(s => s.key === key ? { ...s, enabled: current } : s))
+      toast.error(`Could not update ${LABELS[key]?.label || key}`)
     }
     setSaving(null)
   }
 
   const orderedSettings = ORDER.map(key => settings.find(s => s.key === key)).filter(Boolean) as Setting[]
-  const activeCount = orderedSettings.filter(s => s.enabled).length
+  const activeCount = orderedSettings.filter(s => s.enabled || s.key === "single_sign_on").length
   const total = orderedSettings.length || 4
   const score = Math.round((activeCount / total) * 100)
   const grade = score === 100 ? "A+" : score >= 75 ? "A" : score >= 50 ? "B" : "C"

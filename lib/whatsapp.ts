@@ -706,13 +706,18 @@ export async function sendApplicationLink(
 /** Mints a one-time form token bound to the lead (14-day TTL; pre-migration
  * DBs without form_links.expires_at fall back to no TTL). Same pattern the
  * operator send-form route and IG promotion use. */
-export async function createOneTimeFormToken(leadId: string): Promise<string> {
+export async function createOneTimeFormToken(leadId: string, preferredProduct?: string): Promise<string> {
   const { query } = await import("./db")
   const token = crypto.randomUUID().slice(0, 8)
   try {
+    let product = preferredProduct
+    if (!product) {
+      const leadRes = await query(`SELECT product_interest FROM leads WHERE id = $1 LIMIT 1`, [leadId])
+      product = leadRes.rows?.[0]?.product_interest || "Home Loan"
+    }
     await query(
-      `INSERT INTO link_sends (token, lead_id, bank, product, status) VALUES ($1, $2, 'SBI', 'Home Loan', 'sent')`,
-      [token, leadId]
+      `INSERT INTO link_sends (token, lead_id, bank, product, status) VALUES ($1, $2, 'Right Agent Group', $3, 'sent')`,
+      [token, leadId, product]
     )
   } catch (e: any) {
     // Fallback if link_sends not ready

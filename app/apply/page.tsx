@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import {
   PhoneCall,
   Loader2,
@@ -25,6 +25,16 @@ export default function ApplyPage() {
   const [errorMsg, setErrorMsg] = useState("")
   const [submitted, setSubmitted] = useState(false)
   const [submittedPhone, setSubmittedPhone] = useState("")
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const p = new URLSearchParams(window.location.search)
+      if (p.get("name")) setName(p.get("name") || "")
+      if (p.get("phone")) setPhone(p.get("phone") || "")
+      if (p.get("type")) setLoanType(p.get("type") || "")
+      if (p.get("amount")) setLoanAmount(p.get("amount") || "")
+    }
+  }, [])
 
   function sanitizeDigits(raw: string) {
     let d = raw.replace(/\D/g, "")

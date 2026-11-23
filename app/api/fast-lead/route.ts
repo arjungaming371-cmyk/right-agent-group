@@ -78,6 +78,17 @@ export async function POST(req: NextRequest) {
     const lead = leadRes.rows[0]
     const leadId = lead?.id
 
+    // 1b. Log into loan_applications so it appears in the Customer Loan Applications console
+    try {
+      await query(
+        `INSERT INTO loan_applications (lead_id, customer_name, full_name, phone, whatsapp_number, loan_type, loan_amount, status, submitted_at)
+         VALUES ($1, $2, $2, $3, $3, $4, $5, 'pending', now())`,
+        [leadId, name, normalizedPhone, loanType, loanAmount]
+      )
+    } catch (e: any) {
+      console.warn("Could not insert into loan_applications:", e?.message)
+    }
+
     // 2. Trigger Instant Speed-to-Lead Outbound Voice Call via Priya
     let callSid: string | null = null
     let callError: string | null = null

@@ -3,74 +3,67 @@
 import React, { useEffect, useState, useCallback, useMemo } from "react"
 import {
   ExternalLink, CheckCircle2, Clock, Eye, AlertCircle, RefreshCw,
-  Plus, Search, Landmark, ArrowRight, DollarSign, Copy, Check,
-  Sparkles, Trash2, X, Filter, ChevronRight
+  Search, Landmark, DollarSign, Check, X, Filter, Plus, Pencil, Trash2,
+  Copy, Link2, FileText, Globe, Layers, ArrowUpRight
 } from "lucide-react"
 import { formatCurrency, timeAgo, formatDateTime } from "@/lib/utils"
 import { usePolling } from "@/lib/use-poll"
 import { SkeletonList } from "../ui/skeleton"
 import { useToast } from "../ui/toast"
-import { useEscapeDismiss } from "../ui/interactive"
 
 type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
 
-type LinkSend = {
-  id: string
-  token: string
-  lead_id: string | null
-  lead_name: string | null
-  lead_phone: string | null
-  lead_city: string | null
-  lead_loan_amount: number | null
-  bank: string
-  product: string
-  channel: string
-  sent_by: string | null
-  sent_at: string
-  clicked_at: string | null
-  applied_at: string | null
-  sanctioned_at: string | null
-  disbursed_at: string | null
-  loan_amount: number | null
-  notes: string | null
-  status: "sent" | "opened" | "applied" | "sanctioned" | "disbursed" | "lost"
-  target_bank_url?: string | null
-}
-
-type BankLink = {
+interface LoanLink {
   id: string
   bank: string
   product: string
   url: string
   active: boolean
+  created_at: string
 }
 
-const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
-  sent: { label: "Link Sent", color: "var(--accent-blue)", bg: "rgba(59,130,246,0.12)" },
-  opened: { label: "Opened / Clicked", color: "var(--accent-yellow)", bg: "rgba(234,179,8,0.12)" },
-  applied: { label: "Applied at Bank", color: "var(--accent-violet)", bg: "rgba(139,124,255,0.15)" },
-  sanctioned: { label: "Sanctioned", color: "var(--accent-cyan)", bg: "rgba(56,189,248,0.15)" },
-  disbursed: { label: "Disbursed", color: "var(--accent-green)", bg: "rgba(34,197,94,0.15)" },
-  lost: { label: "Dropped / Rejected", color: "var(--accent-red)", bg: "rgba(239,68,68,0.12)" },
-}
+const COMMON_LOAN_TYPES = [
+  "Home Loan",
+  "Personal Loan",
+  "Business Loan",
+  "Loan Against Property",
+  "Education Loan",
+  "Car Loan",
+  "Mortgage Loan",
+  "Gold Loan",
+]
 
 export default function LoanAppsView({ role, initialSearch }: { role: Role; initialSearch?: string }) {
   const canEdit = role !== "viewer"
   const toast = useToast()
 
-  const [links, setLinks] = useState<LinkSend[]>([])
-  const [stats, setStats] = useState<any>({})
-  const [loading, setLoading] = useState(true)
+  // Tab: "apps" (Customer Applications) | "links" (Loan Type Links & Routing)
+  const [activeTab, setActiveTab] = useState<"apps" | "links">("apps")
+
+  // Applications state
   const [search, setSearch] = useState(initialSearch || "")
   const [statusFilter, setStatusFilter] = useState<string>("all")
-  const [actingId, setActingId] = useState<string | null>(null)
-  const [copiedToken, setCopiedToken] = useState<string | null>(null)
-
-  // Internal applications vs Bank links sub-tabs
-  const [sourceTab, setSourceTab] = useState<"internal" | "links">("internal")
   const [internalApps, setInternalApps] = useState<any[]>([])
   const [loadingInternal, setLoadingInternal] = useState(false)
+  const [updatingAppId, setUpdatingAppId] = useState<string | null>(null)
 
+  // Loan Type Links state
+  const [links, setLinks] = useState<LoanLink[]>([])
+  const [loadingLinks, setLoadingLinks] = useState(false)
+  const [linkSearch, setLinkSearch] = useState("")
+
+  // Add / Edit Modal state
+  const [showLinkModal, setShowLinkModal] = useState(false)
+  const [editingLink, setEditingLink] = useState<LoanLink | null>(null)
+  const [linkFormProduct, setLinkFormProduct] = useState("Home Loan")
+  const [customProduct, setCustomProduct] = useState("")
+  const [linkFormUrl, setLinkFormUrl] = useState("")
+  const [linkFormBank, setLinkFormBank] = useState("Right Agent Group")
+  const [linkFormActive, setLinkFormActive] = useState(true)
+  const [savingLink, setSavingLink] = useState(false)
+  const [deletingLinkId, setDeletingLinkId] = useState<string | null>(null)
+
+  // Load customer loan applications
   const loadInternalApps = useCallback(async () => {
     setLoadingInternal(true)
     try {
@@ -84,131 +77,200 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
     }
   }, [])
 
-  useEffect(() => {
-    loadInternalApps()
-  }, [loadInternalApps])
-
-  // Bank library modal
-  const [showLibrary, setShowLibrary] = useState(false)
-  useEscapeDismiss(showLibrary, () => setShowLibrary(false))
-  const [library, setLibrary] = useState<BankLink[]>([])
-  const [newBank, setNewBank] = useState({ bank: "", product: "Home Loan", url: "" })
-  const [savingBank, setSavingBank] = useState(false)
-
-  // Disbursed modal
-  const [disburseTarget, setDisburseTarget] = useState<LinkSend | null>(null)
-  const [disburseAmount, setDisburseAmount] = useState<string>("")
-
-  const loadData = useCallback(async () => {
+  // Load loan type links
+  const loadLinks = useCallback(async () => {
+    setLoadingLinks(true)
     try {
-      const q = new URLSearchParams()
-      if (statusFilter !== "all") q.set("status", statusFilter)
-      if (search.trim()) q.set("search", search.trim())
-
-      const res = await fetch(`/api/links/sends?${q.toString()}`)
+      const res = await fetch("/api/links/library?all=true")
       if (res.ok) {
         const data = await res.json()
-        setLinks(data.links || [])
-        setStats(data.stats || {})
+        setLinks(Array.isArray(data) ? data : [])
       }
-    } catch {
-      // keep previous state
-    } finally {
-      setLoading(false)
+    } catch {} finally {
+      setLoadingLinks(false)
     }
-  }, [statusFilter, search])
-
-  const loadLibrary = useCallback(async () => {
-    try {
-      const res = await fetch("/api/links/library")
-      if (res.ok) setLibrary(await res.json())
-    } catch {}
   }, [])
 
   useEffect(() => {
-    loadData()
-  }, [loadData])
+    loadInternalApps()
+    loadLinks()
+  }, [loadInternalApps, loadLinks])
 
-  useEffect(() => {
-    if (showLibrary) loadLibrary()
-  }, [showLibrary, loadLibrary])
+  usePolling(loadInternalApps, 15000)
 
-  usePolling(loadData, 15000)
-
-  // Update link status
-  async function updateStatus(id: string, newStatus: string, loanAmount?: number) {
-    setActingId(id)
+  // Update internal customer application status (Team Members Only)
+  async function updateInternalAppStatus(id: string, newStatus: string) {
+    setUpdatingAppId(id)
     try {
-      const res = await fetch("/api/links/sends", {
+      const res = await fetch("/api/loans", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           id,
           status: newStatus,
-          loan_amount: loanAmount !== undefined ? loanAmount : undefined,
         }),
       })
       if (res.ok) {
-        toast.success(`Status updated to ${STATUS_CONFIG[newStatus]?.label || newStatus}`)
-        loadData()
+        toast.success(`Application marked as ${newStatus.toUpperCase()}`)
+        setInternalApps((prev) =>
+          prev.map((app) => (app.id === id ? { ...app, status: newStatus } : app))
+        )
       } else {
         const d = await res.json().catch(() => ({}))
-        toast.error(d.error || "Could not update the loan status")
+        toast.error(d.error || "Could not update status")
       }
     } catch {
-      toast.error("Failed to update status")
+      toast.error("Network error updating application")
     } finally {
-      setActingId(null)
+      setUpdatingAppId(null)
     }
   }
 
-  async function handleAddBank() {
-    if (!newBank.bank.trim() || !newBank.url.trim()) return
-    setSavingBank(true)
+  // Open modal to add link
+  function openAddLinkModal() {
+    setEditingLink(null)
+    setLinkFormProduct("Home Loan")
+    setCustomProduct("")
+    setLinkFormUrl("")
+    setLinkFormBank("Right Agent Group")
+    setLinkFormActive(true)
+    setShowLinkModal(true)
+  }
+
+  // Open modal to edit existing link
+  function openEditLinkModal(link: LoanLink) {
+    setEditingLink(link)
+    if (COMMON_LOAN_TYPES.includes(link.product)) {
+      setLinkFormProduct(link.product)
+      setCustomProduct("")
+    } else {
+      setLinkFormProduct("custom")
+      setCustomProduct(link.product)
+    }
+    setLinkFormUrl(link.url)
+    setLinkFormBank(link.bank || "Right Agent Group")
+    setLinkFormActive(link.active)
+    setShowLinkModal(true)
+  }
+
+  // Save (Create or Update) Link
+  async function handleSaveLink(e: React.FormEvent) {
+    e.preventDefault()
+    const product = linkFormProduct === "custom" ? customProduct.trim() : linkFormProduct
+    const url = linkFormUrl.trim()
+    const bank = linkFormBank.trim() || "Right Agent Group"
+
+    if (!product) {
+      toast.error("Please enter or select a Loan Type")
+      return
+    }
+    if (!url) {
+      toast.error("Please enter the Application Link URL")
+      return
+    }
+
+    setSavingLink(true)
     try {
-      const res = await fetch("/api/links/library", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newBank),
+      if (editingLink) {
+        // Update existing link (PATCH)
+        const res = await fetch("/api/links/library", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: editingLink.id,
+            bank,
+            product,
+            url,
+            active: linkFormActive,
+          }),
+        })
+        const d = await res.json()
+        if (res.ok) {
+          toast.success(`Updated ${product} application link`)
+          setShowLinkModal(false)
+          loadLinks()
+        } else {
+          toast.error(d.error || "Failed to update link")
+        }
+      } else {
+        // Create new link (POST)
+        const res = await fetch("/api/links/library", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            bank,
+            product,
+            url,
+            active: linkFormActive,
+          }),
+        })
+        const d = await res.json()
+        if (res.ok) {
+          toast.success(`Added ${product} application link`)
+          setShowLinkModal(false)
+          loadLinks()
+        } else {
+          toast.error(d.error || "Failed to add link")
+        }
+      }
+    } catch {
+      toast.error("Failed to save application link")
+    } finally {
+      setSavingLink(false)
+    }
+  }
+
+  // Delete Link
+  async function handleDeleteLink(id: string, product: string) {
+    if (!confirm(`Are you sure you want to delete the application link for ${product}?`)) return
+    setDeletingLinkId(id)
+    try {
+      const res = await fetch(`/api/links/library?id=${id}`, {
+        method: "DELETE",
       })
       if (res.ok) {
-        toast.success(`Added ${newBank.bank} ${newBank.product} link`)
-        setNewBank({ bank: "", product: "Home Loan", url: "" })
-        loadLibrary()
+        toast.success(`Deleted application link for ${product}`)
+        setLinks((prev) => prev.filter((l) => l.id !== id))
       } else {
-        toast.error("Failed to add bank link")
+        const d = await res.json().catch(() => ({}))
+        toast.error(d.error || "Failed to delete link")
       }
     } catch {
-      toast.error("Failed to add bank link")
+      toast.error("Network error deleting link")
     } finally {
-      setSavingBank(false)
+      setDeletingLinkId(null)
     }
   }
 
-  async function handleDeleteBank(id: string) {
+  // Toggle active status directly
+  async function toggleLinkActive(link: LoanLink) {
     try {
-      const res = await fetch(`/api/links/library?id=${id}`, { method: "DELETE" })
+      const res = await fetch("/api/links/library", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: link.id,
+          active: !link.active,
+        }),
+      })
       if (res.ok) {
-        toast.success("Bank link removed")
-        loadLibrary()
+        toast.success(`${link.product} link is now ${!link.active ? "ACTIVE" : "INACTIVE"}`)
+        setLinks((prev) =>
+          prev.map((l) => (l.id === link.id ? { ...l, active: !l.active } : l))
+        )
+      } else {
+        toast.error("Failed to toggle status")
       }
     } catch {
-      toast.error("Could not remove bank link")
+      toast.error("Failed to toggle status")
     }
   }
 
-  function copyLink(token: string) {
-    const origin = typeof window !== "undefined" ? window.location.origin : ""
-    const url = `${origin}/l/${token}`
-    navigator.clipboard.writeText(url)
-    setCopiedToken(token)
-    toast.success("Short link copied to clipboard")
-    setTimeout(() => setCopiedToken(null), 2000)
+  // Copy URL to clipboard
+  function copyToClipboard(text: string, label: string) {
+    navigator.clipboard.writeText(text)
+    toast.success(`Copied ${label} link to clipboard`)
   }
-
-  // Calculate commission estimate (~0.6% average DSA payout)
-  const totalDisbursed = Number(stats.disbursed_volume || 0)
-  const estCommission = totalDisbursed * 0.006
 
   const internalStats = useMemo(() => {
     const total = internalApps.length
@@ -230,238 +292,268 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
     }
   }, [internalApps])
 
+  const filteredApps = useMemo(() => {
+    return internalApps.filter((app) => {
+      // Status filter
+      if (statusFilter === "pending" && !/pending|review|new/i.test(app.status || "")) return false
+      if (statusFilter === "sanctioned" && !/sanctioned|approved/i.test(app.status || "")) return false
+      if (statusFilter === "disbursed" && !/disbursed/i.test(app.status || "")) return false
+      if (statusFilter === "rejected" && !/rejected|lost/i.test(app.status || "")) return false
+
+      // Search filter
+      if (!search.trim()) return true
+      const s = search.toLowerCase()
+      return (
+        (app.customer_name || "").toLowerCase().includes(s) ||
+        (app.phone || "").toLowerCase().includes(s) ||
+        (app.loan_type || "").toLowerCase().includes(s) ||
+        (app.city || "").toLowerCase().includes(s)
+      )
+    })
+  }, [internalApps, statusFilter, search])
+
+  const filteredLinks = useMemo(() => {
+    if (!linkSearch.trim()) return links
+    const s = linkSearch.toLowerCase()
+    return links.filter(
+      (l) =>
+        (l.product || "").toLowerCase().includes(s) ||
+        (l.bank || "").toLowerCase().includes(s) ||
+        (l.url || "").toLowerCase().includes(s)
+    )
+  }, [links, linkSearch])
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
 
-      {/* Sub-tab Switcher: Customer Form Applications vs Partner Bank Links */}
-      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-        <button
-          type="button"
-          onClick={() => setSourceTab("internal")}
-          style={{
-            padding: "8px 16px",
-            borderRadius: 9,
-            fontSize: 13,
-            fontWeight: 600,
-            border: sourceTab === "internal" ? "1px solid var(--accent-violet)" : "1px solid var(--border)",
-            background: sourceTab === "internal" ? "rgba(139,124,255,0.12)" : "var(--bg-card)",
-            color: sourceTab === "internal" ? "var(--accent-violet)" : "var(--text-muted)",
-            cursor: "pointer",
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 7,
-          }}
-        >
-          <span>Customer Form Applications</span>
-          <span style={{ fontSize: 11, padding: "1px 7px", borderRadius: 999, background: sourceTab === "internal" ? "var(--accent-violet)" : "var(--overlay-soft)", color: sourceTab === "internal" ? "#fff" : "var(--text-muted)" }}>
-            {internalApps.length}
-          </span>
-        </button>
+      {/* Primary Tab Navigation: Customer Applications vs Loan Type Links */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12, borderBottom: "1px solid var(--border)", paddingBottom: 14 }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button
+            type="button"
+            onClick={() => setActiveTab("apps")}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "8px 16px",
+              borderRadius: 8,
+              fontWeight: 600,
+              fontSize: 13,
+              cursor: "pointer",
+              border: activeTab === "apps" ? "1px solid var(--accent-violet)" : "1px solid var(--border)",
+              background: activeTab === "apps" ? "rgba(139,124,255,0.12)" : "var(--bg-secondary)",
+              color: activeTab === "apps" ? "var(--accent-violet)" : "var(--text-secondary)",
+            }}
+          >
+            <FileText size={15} strokeWidth={2} />
+            Customer Applications
+            <span style={{ fontSize: 11, padding: "1px 7px", borderRadius: 10, background: activeTab === "apps" ? "var(--accent-violet)" : "rgba(255,255,255,0.1)", color: "#fff" }}>
+              {internalApps.length}
+            </span>
+          </button>
 
-        <button
-          type="button"
-          onClick={() => setSourceTab("links")}
-          style={{
-            padding: "8px 16px",
-            borderRadius: 9,
-            fontSize: 13,
-            fontWeight: 600,
-            border: sourceTab === "links" ? "1px solid var(--accent-violet)" : "1px solid var(--border)",
-            background: sourceTab === "links" ? "rgba(139,124,255,0.12)" : "var(--bg-card)",
-            color: sourceTab === "links" ? "var(--accent-violet)" : "var(--text-muted)",
-            cursor: "pointer",
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 7,
-          }}
-        >
-          <span>Partner Bank Links</span>
-          <span style={{ fontSize: 11, padding: "1px 7px", borderRadius: 999, background: sourceTab === "links" ? "var(--accent-violet)" : "var(--overlay-soft)", color: sourceTab === "links" ? "#fff" : "var(--text-muted)" }}>
-            {links.length}
-          </span>
-        </button>
-      </div>
-
-      {/* Top Banner & Financial Metrics */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14 }}>
-        <div className="card" style={{ padding: "16px 20px" }}>
-          <div style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 500, marginBottom: 4 }}>
-            {sourceTab === "internal" ? "Customer Applications" : "Links Sent"}
-          </div>
-          <div style={{ fontSize: 24, fontWeight: 700, color: "var(--text-primary)" }}>
-            {sourceTab === "internal" ? internalStats.total : (stats.total || 0)}
-          </div>
-          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
-            {sourceTab === "internal" ? "Submitted via WhatsApp & Web" : "Across all products"}
-          </div>
+          <button
+            type="button"
+            onClick={() => setActiveTab("links")}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "8px 16px",
+              borderRadius: 8,
+              fontWeight: 600,
+              fontSize: 13,
+              cursor: "pointer",
+              border: activeTab === "links" ? "1px solid var(--accent-cyan)" : "1px solid var(--border)",
+              background: activeTab === "links" ? "rgba(56,189,248,0.12)" : "var(--bg-secondary)",
+              color: activeTab === "links" ? "var(--accent-cyan)" : "var(--text-secondary)",
+            }}
+          >
+            <Link2 size={15} strokeWidth={2} />
+            Loan Type Links & Routing
+            <span style={{ fontSize: 11, padding: "1px 7px", borderRadius: 10, background: activeTab === "links" ? "var(--accent-cyan)" : "rgba(255,255,255,0.1)", color: "#000", fontWeight: 700 }}>
+              {links.length}
+            </span>
+          </button>
         </div>
 
-        <div className="card" style={{ padding: "16px 20px" }}>
-          <div style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 500, marginBottom: 4 }}>
-            {sourceTab === "internal" ? "Approved / Sanctioned" : "Opened by Leads"}
-          </div>
-          <div style={{ fontSize: 24, fontWeight: 700, color: sourceTab === "internal" ? "var(--accent-green)" : "var(--accent-yellow)" }}>
-            {sourceTab === "internal" ? (
-              <>
+        {activeTab === "links" && canEdit && (
+          <button
+            type="button"
+            onClick={openAddLinkModal}
+            className="btn-primary"
+            style={{ display: "flex", alignItems: "center", gap: 6, height: 36, padding: "0 14px", fontSize: 12.5 }}
+          >
+            <Plus size={15} strokeWidth={2.2} />
+            Add Loan Link
+          </button>
+        )}
+      </div>
+
+      {/* ======================================================== */}
+      {/* TAB 1: CUSTOMER APPLICATIONS */}
+      {/* ======================================================== */}
+      {activeTab === "apps" && (
+        <>
+          {/* Top Banner & Financial Metrics */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14 }}>
+            <div className="card" style={{ padding: "16px 20px" }}>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 500, marginBottom: 4 }}>
+                Customer Applications
+              </div>
+              <div style={{ fontSize: 24, fontWeight: 700, color: "var(--text-primary)" }}>
+                {internalStats.total}
+              </div>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+                Submitted via WhatsApp, Web & Ads
+              </div>
+            </div>
+
+            <div className="card" style={{ padding: "16px 20px" }}>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 500, marginBottom: 4 }}>
+                Approved / Sanctioned
+              </div>
+              <div style={{ fontSize: 24, fontWeight: 700, color: "var(--accent-green)" }}>
                 {internalStats.approved}
                 <span style={{ fontSize: 13, fontWeight: 500, color: "var(--text-muted)", marginLeft: 6 }}>
                   ({internalStats.total > 0 ? Math.round((internalStats.approved / internalStats.total) * 100) : 0}%)
                 </span>
-              </>
-            ) : (
-              <>
-                {stats.opened || 0}
-                <span style={{ fontSize: 13, fontWeight: 500, color: "var(--text-muted)", marginLeft: 6 }}>
-                  ({stats.total > 0 ? Math.round(((stats.opened || 0) / stats.total) * 100) : 0}%)
-                </span>
-              </>
-            )}
-          </div>
-          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
-            {sourceTab === "internal" ? "Verified & credit eligible" : "Clicked redirect link"}
-          </div>
-        </div>
-
-        <div className="card" style={{ padding: "16px 20px" }}>
-          <div style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 500, marginBottom: 4 }}>
-            {sourceTab === "internal" ? "Under Review / In Progress" : "Applied & In Progress"}
-          </div>
-          <div style={{ fontSize: 24, fontWeight: 700, color: "var(--accent-violet)" }}>
-            {sourceTab === "internal" ? internalStats.pending : ((stats.applied || 0) - (stats.disbursed || 0))}
-          </div>
-          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
-            {sourceTab === "internal" ? `${internalStats.approved} ready for disbursal` : `${stats.sanctioned || 0} already sanctioned`}
-          </div>
-        </div>
-
-        <div className="card" style={{ padding: "16px 20px", background: "linear-gradient(145deg, rgba(34,197,94,0.06), rgba(34,197,94,0.02))", borderColor: "rgba(34,197,94,0.25)" }}>
-          <div style={{ fontSize: 12, color: "var(--accent-green)", fontWeight: 600, marginBottom: 4, display: "flex", alignItems: "center", gap: 6 }}>
-            <DollarSign size={13} strokeWidth={2.2} /> {sourceTab === "internal" ? "Pipeline / Approved Volume" : "Total Disbursed"}
-          </div>
-          <div style={{ fontSize: 22, fontWeight: 700, color: "var(--text-primary)" }}>
-            {sourceTab === "internal"
-              ? formatCurrency(internalStats.approvedVolume)
-              : (totalDisbursed > 0 ? formatCurrency(totalDisbursed) : "₹0")}
-          </div>
-          <div style={{ fontSize: 11.5, color: "var(--accent-green)", marginTop: 4, fontWeight: 500 }}>
-            {sourceTab === "internal"
-              ? `Est. DSA Payout: ~${formatCurrency(Math.round(internalStats.approvedVolume * 0.015))}`
-              : `Est. Commission: ~${formatCurrency(estCommission)}`}
-          </div>
-        </div>
-      </div>
-
-      {/* Control bar */}
-      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: "14px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", flex: 1, minWidth: 260 }}>
-          <div style={{ position: "relative", width: "100%", maxWidth: 300, minWidth: 200 }}>
-            <Search size={14} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)" }} />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search lead, phone, bank, or product…"
-              style={{ width: "100%", height: 34, fontSize: 12.5, paddingLeft: 32, paddingRight: 10, borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)" }}
-            />
-          </div>
-
-          <div style={{ display: "flex", gap: 4, overflowX: "auto", flexWrap: "nowrap", alignItems: "center", paddingBottom: 2 }}>
-            {[
-              { id: "all", label: "All" },
-              { id: "sent", label: "Sent" },
-              { id: "opened", label: "Opened" },
-              { id: "applied", label: "Applied" },
-              { id: "sanctioned", label: "Sanctioned" },
-              { id: "disbursed", label: "Disbursed" },
-            ].map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setStatusFilter(tab.id)}
-                style={{
-                  height: 32,
-                  padding: "0 12px",
-                  fontSize: 12,
-                  fontWeight: 600,
-                  borderRadius: 7,
-                  border: statusFilter === tab.id ? "1px solid rgba(139,124,255,0.4)" : "1px solid transparent",
-                  background: statusFilter === tab.id ? "rgba(139,124,255,0.12)" : "transparent",
-                  color: statusFilter === tab.id ? "var(--accent-violet)" : "var(--text-secondary)",
-                  whiteSpace: "nowrap",
-                  flexShrink: 0,
-                }}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <button
-            type="button"
-            onClick={() => setShowLibrary(true)}
-            className="btn-ghost"
-            style={{ height: 34, fontSize: 12, padding: "0 12px", display: "inline-flex", alignItems: "center", gap: 6 }}
-          >
-            <Landmark size={14} /> Bank Library
-          </button>
-
-          <button
-            type="button"
-            onClick={loadData}
-            className="icon-btn"
-            title="Refresh"
-            style={{ width: 34, height: 34 }}
-          >
-            <RefreshCw size={14} />
-          </button>
-        </div>
-      </div>
-
-      {/* Main Table: Customer Applications or Bank Link Sends */}
-      <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
-        {sourceTab === "internal" ? (
-          loadingInternal ? (
-            <div style={{ padding: 24 }}><SkeletonList rows={6} /></div>
-          ) : internalApps.length === 0 ? (
-            <div style={{ padding: 48, textAlign: "center", color: "var(--text-muted)" }}>
-              <Landmark size={36} strokeWidth={1.5} style={{ margin: "0 auto 12px", opacity: 0.4 }} />
-              <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>No customer loan applications yet</div>
-              <div style={{ fontSize: 12, marginTop: 4 }}>
-                Applications submitted by leads via WhatsApp or the web application form will appear here.
+              </div>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+                Verified & credit eligible
               </div>
             </div>
-          ) : (
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", minWidth: 1040, borderCollapse: "collapse", textAlign: "left", fontSize: 12.5 }}>
-                <thead>
-                  <tr style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-muted)", fontSize: 11.5, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                    <th style={{ padding: "10px 16px" }}>Applicant & Contact</th>
-                    <th style={{ padding: "10px 16px" }}>Loan Type & City</th>
-                    <th style={{ padding: "10px 16px" }}>Requested Amount</th>
-                    <th style={{ padding: "10px 16px" }}>Submitted</th>
-                    <th style={{ padding: "10px 16px" }}>Status</th>
-                    <th style={{ padding: "10px 16px", textAlign: "right" }}>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {internalApps
-                    .filter((app) => {
-                      if (!search.trim()) return true
-                      const s = search.toLowerCase()
-                      return (
-                        (app.customer_name || "").toLowerCase().includes(s) ||
-                        (app.phone || "").toLowerCase().includes(s) ||
-                        (app.loan_type || "").toLowerCase().includes(s) ||
-                        (app.city || "").toLowerCase().includes(s)
-                      )
-                    })
-                    .map((app) => {
-                      const isApproved = /approved|sanctioned/i.test(app.status || "")
-                      const isPending = /pending|review|new/i.test(app.status || "")
-                      const statusColor = isApproved ? "var(--accent-green)" : isPending ? "var(--accent-yellow)" : "var(--accent-blue)"
-                      const statusBg = isApproved ? "rgba(45,212,160,0.12)" : isPending ? "rgba(247,183,49,0.12)" : "rgba(59,130,246,0.12)"
+
+            <div className="card" style={{ padding: "16px 20px" }}>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 500, marginBottom: 4 }}>
+                Under Review / In Progress
+              </div>
+              <div style={{ fontSize: 24, fontWeight: 700, color: "var(--accent-violet)" }}>
+                {internalStats.pending}
+              </div>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+                {internalStats.approved} ready for bank login
+              </div>
+            </div>
+
+            <div className="card" style={{ padding: "16px 20px", background: "linear-gradient(145deg, rgba(34,197,94,0.06), rgba(34,197,94,0.02))", borderColor: "rgba(34,197,94,0.25)" }}>
+              <div style={{ fontSize: 12, color: "var(--accent-green)", fontWeight: 600, marginBottom: 4, display: "flex", alignItems: "center", gap: 6 }}>
+                <DollarSign size={13} strokeWidth={2.2} /> Pipeline / Approved Volume
+              </div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: "var(--text-primary)" }}>
+                {formatCurrency(internalStats.approvedVolume)}
+              </div>
+              <div style={{ fontSize: 11.5, color: "var(--accent-green)", marginTop: 4, fontWeight: 500 }}>
+                Est. DSA Payout: ~{formatCurrency(Math.round(internalStats.approvedVolume * 0.015))}
+              </div>
+            </div>
+          </div>
+
+          {/* Control bar */}
+          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: "14px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", flex: 1, minWidth: 260 }}>
+              <div style={{ position: "relative", width: "100%", maxWidth: 300, minWidth: 200 }}>
+                <Search size={14} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)" }} />
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search applicant, phone, loan type…"
+                  style={{ width: "100%", height: 34, fontSize: 12.5, paddingLeft: 32, paddingRight: 10, borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)" }}
+                />
+              </div>
+
+              <div style={{ display: "flex", gap: 4, overflowX: "auto", flexWrap: "nowrap", alignItems: "center", paddingBottom: 2 }}>
+                {[
+                  { id: "all", label: "All" },
+                  { id: "pending", label: "Under Review" },
+                  { id: "sanctioned", label: "Sanctioned" },
+                  { id: "disbursed", label: "Disbursed" },
+                  { id: "rejected", label: "Rejected" },
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setStatusFilter(tab.id)}
+                    style={{
+                      height: 32,
+                      padding: "0 12px",
+                      fontSize: 12,
+                      fontWeight: 600,
+                      borderRadius: 7,
+                      border: statusFilter === tab.id ? "1px solid rgba(139,124,255,0.4)" : "1px solid transparent",
+                      background: statusFilter === tab.id ? "rgba(139,124,255,0.12)" : "transparent",
+                      color: statusFilter === tab.id ? "var(--accent-violet)" : "var(--text-secondary)",
+                      whiteSpace: "nowrap",
+                      flexShrink: 0,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <button
+                type="button"
+                onClick={loadInternalApps}
+                className="icon-btn"
+                title="Refresh Applications"
+                style={{ width: 34, height: 34, cursor: "pointer" }}
+              >
+                <RefreshCw size={14} />
+              </button>
+            </div>
+          </div>
+
+          {/* Main Table: Customer Loan Applications */}
+          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
+            {loadingInternal ? (
+              <div style={{ padding: 24 }}><SkeletonList rows={6} /></div>
+            ) : filteredApps.length === 0 ? (
+              <div style={{ padding: 48, textAlign: "center", color: "var(--text-muted)" }}>
+                <Landmark size={36} strokeWidth={1.5} style={{ margin: "0 auto 12px", opacity: 0.4 }} />
+                <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>No customer loan applications found</div>
+                <div style={{ fontSize: 12, marginTop: 4 }}>
+                  Applications submitted by customers on Right Agent Group forms will appear here.
+                </div>
+              </div>
+            ) : (
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", minWidth: 1040, borderCollapse: "collapse", textAlign: "left", fontSize: 12.5 }}>
+                  <thead>
+                    <tr style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-muted)", fontSize: 11.5, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                      <th style={{ padding: "10px 16px" }}>Applicant & Contact</th>
+                      <th style={{ padding: "10px 16px" }}>Loan Type & City</th>
+                      <th style={{ padding: "10px 16px" }}>Requested Amount</th>
+                      <th style={{ padding: "10px 16px" }}>Submitted</th>
+                      <th style={{ padding: "10px 16px" }}>Status</th>
+                      <th style={{ padding: "10px 16px", textAlign: "right" }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredApps.map((app) => {
+                      const st = (app.status || "pending").toLowerCase()
+                      const isSanctioned = st === "sanctioned" || st === "approved"
+                      const isRejected = st === "rejected" || st === "lost"
+                      const isDisbursed = st === "disbursed"
+                      const statusColor = isSanctioned
+                        ? "var(--accent-cyan)"
+                        : isDisbursed
+                        ? "var(--accent-green)"
+                        : isRejected
+                        ? "var(--accent-red)"
+                        : "var(--accent-yellow)"
+                      const statusBg = isSanctioned
+                        ? "rgba(56,189,248,0.15)"
+                        : isDisbursed
+                        ? "rgba(34,197,94,0.15)"
+                        : isRejected
+                        ? "rgba(239,68,68,0.12)"
+                        : "rgba(234,179,8,0.12)"
 
                       return (
                         <tr key={app.id} style={{ borderBottom: "1px solid var(--border-light)" }}>
@@ -483,10 +575,48 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
                             <div style={{ fontSize: 10, opacity: 0.75 }}>{formatDateTime(app.submitted_at || app.created_at)}</div>
                           </td>
                           <td style={{ padding: "12px 16px" }}>
-                            <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 9px", borderRadius: 6, fontSize: 11.5, fontWeight: 600, background: statusBg, color: statusColor }}>
-                              <span style={{ width: 6, height: 6, borderRadius: "50%", background: statusColor }} />
-                              {app.status || "submitted"}
-                            </span>
+                            {canEdit ? (
+                              <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                                <select
+                                  value={st === "approved" ? "sanctioned" : st}
+                                  disabled={updatingAppId === app.id}
+                                  onChange={(e) => updateInternalAppStatus(app.id, e.target.value)}
+                                  style={{
+                                    padding: "4px 8px",
+                                    borderRadius: 6,
+                                    fontSize: 11.5,
+                                    fontWeight: 600,
+                                    background: statusBg,
+                                    color: statusColor,
+                                    border: `1px solid ${statusColor}40`,
+                                    cursor: "pointer",
+                                    outline: "none",
+                                  }}
+                                  title="Update Sanction Status (Team Members Only)"
+                                >
+                                  <option value="pending" style={{ background: "var(--bg-card)", color: "var(--text-primary)" }}>
+                                    ⏳ Under Review / Pending
+                                  </option>
+                                  <option value="sanctioned" style={{ background: "var(--bg-card)", color: "var(--text-primary)" }}>
+                                    ✅ Sanctioned
+                                  </option>
+                                  <option value="rejected" style={{ background: "var(--bg-card)", color: "var(--text-primary)" }}>
+                                    ❌ Not Sanctioned / Rejected
+                                  </option>
+                                  <option value="disbursed" style={{ background: "var(--bg-card)", color: "var(--text-primary)" }}>
+                                    💰 Disbursed
+                                  </option>
+                                </select>
+                                <span style={{ fontSize: 9, color: "var(--text-muted)", opacity: 0.75, letterSpacing: "0.02em" }}>
+                                  Staff Action Only
+                                </span>
+                              </div>
+                            ) : (
+                              <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 9px", borderRadius: 6, fontSize: 11.5, fontWeight: 600, background: statusBg, color: statusColor }}>
+                                <span style={{ width: 6, height: 6, borderRadius: "50%", background: statusColor }} />
+                                {st}
+                              </span>
+                            )}
                           </td>
                           <td style={{ padding: "12px 16px", textAlign: "right" }}>
                             <button
@@ -494,7 +624,7 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
                                 window.dispatchEvent(new CustomEvent("rag:navigate", { detail: { view: "leads", search: app.phone || app.customer_name } }))
                               }}
                               className="btn-ghost"
-                              style={{ height: 28, fontSize: 11.5, padding: "0 10px" }}
+                              style={{ height: 28, fontSize: 11.5, padding: "0 10px", cursor: "pointer" }}
                               title="View Lead in CRM"
                             >
                               View in CRM
@@ -503,272 +633,222 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
                         </tr>
                       )
                     })}
-                </tbody>
-              </table>
-            </div>
-          )
-        ) : loading ? (
-          <div style={{ padding: 24 }}><SkeletonList rows={6} /></div>
-        ) : links.length === 0 ? (
-          <div style={{ padding: 48, textAlign: "center", color: "var(--text-muted)" }}>
-            <Landmark size={36} strokeWidth={1.5} style={{ margin: "0 auto 12px", opacity: 0.4 }} />
-            <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>No bank application links sent yet</div>
-            <div style={{ fontSize: 12, marginTop: 4 }}>
-              Open any lead in the Leads tab and click &quot;Send Bank Link&quot; to send official bank application links.
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* ======================================================== */}
+      {/* TAB 2: LOAN TYPE LINKS & ROUTING (User Customizable) */}
+      {/* ======================================================== */}
+      {activeTab === "links" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+
+          {/* Educational info card */}
+          <div style={{ background: "rgba(56,189,248,0.07)", border: "1px solid rgba(56,189,248,0.25)", borderRadius: 12, padding: "14px 18px", display: "flex", alignItems: "flex-start", gap: 12 }}>
+            <Globe size={20} strokeWidth={2} style={{ color: "var(--accent-cyan)", flexShrink: 0, marginTop: 2 }} />
+            <div style={{ fontSize: 12.5, lineHeight: 1.55, color: "var(--text-secondary)" }}>
+              <strong style={{ color: "var(--text-primary)" }}>Dynamic Loan Link Routing:</strong> Enter your custom loan application link for any loan type below. When Priya or your agents send an application link via WhatsApp for that loan type, the customer&apos;s link will automatically open the URL configured here. You can change or delete links at any time. If no link is entered for a loan type, the system defaults to Right Agent Group&apos;s internal form (<code style={{ color: "var(--accent-cyan)" }}>/apply</code>).
             </div>
           </div>
-        ) : (
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", minWidth: 1040, borderCollapse: "collapse", textAlign: "left", fontSize: 12.5 }}>
-              <thead>
-                <tr style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-muted)", fontSize: 11.5, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                  <th style={{ padding: "10px 16px" }}>Lead & Contact</th>
-                  <th style={{ padding: "10px 16px" }}>Bank & Product</th>
-                  <th style={{ padding: "10px 16px" }}>Tracking Link</th>
-                  <th style={{ padding: "10px 16px" }}>Timeline</th>
-                  <th style={{ padding: "10px 16px" }}>Status</th>
-                  <th style={{ padding: "10px 16px", textAlign: "right" }}>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {links.map((item) => {
-                  const cfg = STATUS_CONFIG[item.status] || STATUS_CONFIG.sent
-                  const isActing = actingId === item.id
 
-                  return (
-                    <tr key={item.id} style={{ borderBottom: "1px solid var(--border-light)" }}>
-                      {/* Lead */}
-                      <td style={{ padding: "12px 16px" }}>
-                        <div style={{ fontWeight: 600, color: "var(--text-primary)" }}>{item.lead_name || "Unknown Lead"}</div>
-                        <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2 }}>
-                          {item.lead_phone || "—"} {item.lead_city ? `· ${item.lead_city}` : ""}
-                        </div>
-                      </td>
-
-                      {/* Bank & Product */}
-                      <td style={{ padding: "12px 16px" }}>
-                        <div style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
-                          <span style={{ padding: "2px 7px", borderRadius: 5, background: "var(--overlay-soft)", color: "var(--text-primary)", fontSize: 11.5 }}>
-                            {item.bank}
-                          </span>
-                          <span>{item.product}</span>
-                        </div>
-                        {item.target_bank_url && (
-                          <a
-                            href={item.target_bank_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, color: "var(--accent-blue)", marginTop: 3, textDecoration: "none" }}
-                          >
-                            Bank portal <ExternalLink size={10} />
-                          </a>
-                        )}
-                      </td>
-
-                      {/* Tracking link */}
-                      <td style={{ padding: "12px 16px" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <code style={{ fontSize: 11.5, padding: "2px 6px", background: "var(--bg-secondary)", borderRadius: 4, border: "1px solid var(--border)" }}>
-                            /l/{item.token}
-                          </code>
-                          <button
-                            type="button"
-                            onClick={() => copyLink(item.token)}
-                            className="icon-btn"
-                            title="Copy link"
-                            style={{ width: 24, height: 24 }}
-                          >
-                            {copiedToken === item.token ? <Check size={12} color="var(--accent-green)" /> : <Copy size={12} />}
-                          </button>
-                        </div>
-                      </td>
-
-                      {/* Timeline */}
-                      <td style={{ padding: "12px 16px", fontSize: 11.5 }}>
-                        <div style={{ color: "var(--text-secondary)" }}>
-                          Sent {timeAgo(item.sent_at)} {item.sent_by ? `by ${item.sent_by.split("@")[0]}` : ""}
-                        </div>
-                        {item.clicked_at ? (
-                          <div style={{ color: "var(--accent-yellow)", marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}>
-                            <Eye size={11} /> Clicked {timeAgo(item.clicked_at)}
-                          </div>
-                        ) : (
-                          <div style={{ color: "var(--text-muted)", marginTop: 2 }}>Not clicked yet</div>
-                        )}
-                      </td>
-
-                      {/* Status */}
-                      <td style={{ padding: "12px 16px" }}>
-                        <span
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: 5,
-                            padding: "3px 9px",
-                            borderRadius: 6,
-                            fontSize: 11.5,
-                            fontWeight: 600,
-                            background: cfg.bg,
-                            color: cfg.color,
-                          }}
-                        >
-                          <span style={{ width: 6, height: 6, borderRadius: "50%", background: cfg.color }} />
-                          {cfg.label}
-                        </span>
-                        {item.loan_amount && (
-                          <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--accent-green)", marginTop: 4 }}>
-                            {formatCurrency(item.loan_amount)}
-                          </div>
-                        )}
-                      </td>
-
-                      {/* Quick Status Action Stepper */}
-                      <td style={{ padding: "12px 16px", textAlign: "right" }}>
-                        {canEdit && (
-                          <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                            {item.status === "sent" && (
-                              <button
-                                type="button"
-                                disabled={isActing}
-                                onClick={() => updateStatus(item.id, "applied")}
-                                className="btn-ghost"
-                                style={{ height: 28, fontSize: 11.5, padding: "0 8px" }}
-                                title="Mark as submitted to bank"
-                              >
-                                Mark Applied
-                              </button>
-                            )}
-
-                            {item.status === "opened" && (
-                              <button
-                                type="button"
-                                disabled={isActing}
-                                onClick={() => updateStatus(item.id, "applied")}
-                                className="btn-ghost"
-                                style={{ height: 28, fontSize: 11.5, padding: "0 8px", color: "var(--accent-violet)" }}
-                                title="Customer submitted form to bank"
-                              >
-                                Mark Applied
-                              </button>
-                            )}
-
-                            {item.status === "applied" && (
-                              <button
-                                type="button"
-                                disabled={isActing}
-                                onClick={() => updateStatus(item.id, "sanctioned")}
-                                className="btn-ghost"
-                                style={{ height: 28, fontSize: 11.5, padding: "0 8px", color: "var(--accent-cyan)" }}
-                                title="Bank sanctioned the loan"
-                              >
-                                Sanctioned
-                              </button>
-                            )}
-
-                            {item.status === "sanctioned" && (
-                              <button
-                                type="button"
-                                disabled={isActing}
-                                onClick={() => {
-                                  setDisburseTarget(item)
-                                  setDisburseAmount(item.lead_loan_amount ? String(item.lead_loan_amount) : "")
-                                }}
-                                className="btn-primary"
-                                style={{ height: 28, fontSize: 11.5, padding: "0 10px" }}
-                                title="Bank disbursed loan amount"
-                              >
-                                Disburse
-                              </button>
-                            )}
-
-                            {item.status === "disbursed" && (
-                              <span style={{ fontSize: 11.5, color: "var(--accent-green)", fontWeight: 600 }}>
-                                Completed ✓
-                              </span>
-                            )}
-
-                            {item.status !== "disbursed" && item.status !== "lost" && (
-                              <button
-                                type="button"
-                                disabled={isActing}
-                                onClick={() => updateStatus(item.id, "lost")}
-                                className="icon-btn"
-                                title="Mark lost / dropped"
-                                style={{ width: 28, height: 28, color: "var(--text-muted)" }}
-                              >
-                                <X size={12} />
-                              </button>
-                            )}
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {/* Disbursed Amount Entry Modal */}
-      {disburseTarget && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}>
-          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, padding: 24, width: "100%", maxWidth: 380 }}>
-            <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 8, color: "var(--text-primary)" }}>Mark Loan Disbursed</div>
-            <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16 }}>
-              Enter the final disbursed loan amount for {disburseTarget.lead_name || "this customer"} ({disburseTarget.bank}).
-            </p>
-            <div style={{ marginBottom: 16 }}>
-              <label style={{ display: "block", fontSize: 12, color: "var(--text-secondary)", marginBottom: 6 }}>
-                Disbursed Amount (₹)
-              </label>
+          {/* Search bar & Refresh */}
+          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+            <div style={{ position: "relative", width: "100%", maxWidth: 320 }}>
+              <Search size={14} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)" }} />
               <input
-                type="number"
-                value={disburseAmount}
-                onChange={(e) => setDisburseAmount(e.target.value)}
-                placeholder="2500000"
-                style={{ width: "100%", height: 38, fontSize: 14, padding: "0 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)" }}
+                type="text"
+                value={linkSearch}
+                onChange={(e) => setLinkSearch(e.target.value)}
+                placeholder="Search loan type, link URL, provider…"
+                style={{ width: "100%", height: 34, fontSize: 12.5, paddingLeft: 32, paddingRight: 10, borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)" }}
               />
             </div>
-            <div style={{ display: "flex", gap: 10 }}>
+
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <button
                 type="button"
-                onClick={() => setDisburseTarget(null)}
-                className="btn-ghost"
-                style={{ flex: 1, height: 38 }}
+                onClick={loadLinks}
+                className="icon-btn"
+                title="Refresh Links"
+                style={{ width: 34, height: 34, cursor: "pointer" }}
               >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const amt = disburseAmount ? parseFloat(disburseAmount) : undefined
-                  updateStatus(disburseTarget.id, "disbursed", amt)
-                  setDisburseTarget(null)
-                }}
-                className="btn-primary"
-                style={{ flex: 1, height: 38 }}
-              >
-                Confirm Disbursed
+                <RefreshCw size={14} />
               </button>
             </div>
+          </div>
+
+          {/* Links List */}
+          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
+            {loadingLinks ? (
+              <div style={{ padding: 24 }}><SkeletonList rows={4} /></div>
+            ) : filteredLinks.length === 0 ? (
+              <div style={{ padding: 48, textAlign: "center", color: "var(--text-muted)" }}>
+                <Link2 size={36} strokeWidth={1.5} style={{ margin: "0 auto 12px", opacity: 0.4 }} />
+                <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>No custom loan links configured yet</div>
+                <div style={{ fontSize: 12, marginTop: 4, maxWidth: 440, margin: "4px auto 16px" }}>
+                  Right now, all loan types route to Right Agent Group&apos;s standard online application form (<code style={{ color: "var(--accent-cyan)" }}>/apply</code>). Click below to add a custom link for any loan type.
+                </div>
+                {canEdit && (
+                  <button
+                    type="button"
+                    onClick={openAddLinkModal}
+                    className="btn-primary"
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 34, padding: "0 14px", fontSize: 12.5 }}
+                  >
+                    <Plus size={14} strokeWidth={2.2} /> Add Loan Link
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", minWidth: 880, borderCollapse: "collapse", textAlign: "left", fontSize: 12.5 }}>
+                  <thead>
+                    <tr style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-muted)", fontSize: 11.5, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                      <th style={{ padding: "10px 16px" }}>Loan Type</th>
+                      <th style={{ padding: "10px 16px" }}>Provider / Label</th>
+                      <th style={{ padding: "10px 16px" }}>Destination Application Link</th>
+                      <th style={{ padding: "10px 16px" }}>Status</th>
+                      <th style={{ padding: "10px 16px", textAlign: "right" }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredLinks.map((link) => (
+                      <tr key={link.id} style={{ borderBottom: "1px solid var(--border-light)" }}>
+                        <td style={{ padding: "12px 16px" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <div style={{ width: 8, height: 8, borderRadius: "50%", background: link.active ? "var(--accent-green)" : "var(--text-muted)" }} />
+                            <strong style={{ color: "var(--text-primary)", fontSize: 13 }}>{link.product}</strong>
+                          </div>
+                        </td>
+                        <td style={{ padding: "12px 16px", color: "var(--text-secondary)" }}>
+                          {link.bank || "Right Agent Group"}
+                        </td>
+                        <td style={{ padding: "12px 16px" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, maxWidth: 420 }}>
+                            <span
+                              style={{
+                                fontFamily: "monospace",
+                                fontSize: 12,
+                                background: "var(--bg-secondary)",
+                                border: "1px solid var(--border)",
+                                padding: "3px 8px",
+                                borderRadius: 6,
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                                display: "inline-block",
+                                maxWidth: 340,
+                                color: "var(--accent-cyan)",
+                              }}
+                              title={link.url}
+                            >
+                              {link.url}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => copyToClipboard(link.url, link.product)}
+                              className="icon-btn"
+                              title="Copy Application Link"
+                              style={{ width: 26, height: 26, flexShrink: 0 }}
+                            >
+                              <Copy size={13} />
+                            </button>
+                            <a
+                              href={link.url.startsWith("/") ? link.url : link.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="icon-btn"
+                              title="Test Link in New Tab"
+                              style={{ width: 26, height: 26, flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                            >
+                              <ArrowUpRight size={13} />
+                            </a>
+                          </div>
+                        </td>
+                        <td style={{ padding: "12px 16px" }}>
+                          {canEdit ? (
+                            <button
+                              type="button"
+                              onClick={() => toggleLinkActive(link)}
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 6,
+                                padding: "3px 8px",
+                                borderRadius: 6,
+                                fontSize: 11,
+                                fontWeight: 600,
+                                cursor: "pointer",
+                                border: link.active ? "1px solid rgba(34,197,94,0.4)" : "1px solid rgba(255,255,255,0.15)",
+                                background: link.active ? "rgba(34,197,94,0.12)" : "rgba(255,255,255,0.05)",
+                                color: link.active ? "var(--accent-green)" : "var(--text-muted)",
+                              }}
+                              title="Click to toggle Active / Inactive"
+                            >
+                              <span style={{ width: 6, height: 6, borderRadius: "50%", background: link.active ? "var(--accent-green)" : "var(--text-muted)" }} />
+                              {link.active ? "Active" : "Disabled"}
+                            </button>
+                          ) : (
+                            <span style={{ fontSize: 11, color: link.active ? "var(--accent-green)" : "var(--text-muted)" }}>
+                              {link.active ? "Active" : "Disabled"}
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ padding: "12px 16px", textAlign: "right" }}>
+                          {canEdit && (
+                            <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                              <button
+                                type="button"
+                                onClick={() => openEditLinkModal(link)}
+                                className="icon-btn"
+                                title="Edit / Change Link"
+                                style={{ width: 28, height: 28, color: "var(--accent-violet)" }}
+                              >
+                                <Pencil size={13} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteLink(link.id, link.product)}
+                                disabled={deletingLinkId === link.id}
+                                className="icon-btn"
+                                title="Delete Link"
+                                style={{ width: 28, height: 28, color: "var(--accent-red)" }}
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}
 
-      {/* Bank Library Modal */}
-      {showLibrary && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}>
-          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, padding: 28, width: "100%", maxWidth: 640, maxHeight: "90vh", display: "flex", flexDirection: "column" }}>
+      {/* ======================================================== */}
+      {/* MODAL: ADD / EDIT LOAN LINK */}
+      {/* ======================================================== */}
+      {showLinkModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.72)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}>
+          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, padding: 26, width: "100%", maxWidth: 460 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <Landmark size={18} strokeWidth={2} style={{ color: "var(--accent-violet)" }} />
-                <div style={{ fontWeight: 700, fontSize: 16 }}>Bank Link Library</div>
+                <Link2 size={18} strokeWidth={2.2} style={{ color: "var(--accent-cyan)" }} />
+                <div style={{ fontWeight: 700, fontSize: 16, color: "var(--text-primary)" }}>
+                  {editingLink ? "Edit Loan Application Link" : "Add Loan Application Link"}
+                </div>
               </div>
               <button
                 type="button"
-                onClick={() => setShowLibrary(false)}
+                onClick={() => setShowLinkModal(false)}
                 className="icon-btn"
                 style={{ width: 28, height: 28 }}
               >
@@ -776,103 +856,96 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
               </button>
             </div>
 
-            <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16 }}>
-              Official loan application URLs. When you or Priya send a link to a lead, it creates a short redirect that logs click analytics before sending the customer straight to the bank portal.
-            </p>
-
-            {/* Add Bank Form */}
-            {canEdit && (
-              <div style={{ background: "var(--bg-secondary)", borderRadius: 10, padding: 14, marginBottom: 18, border: "1px solid var(--border-light)" }}>
-                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10 }}>Add Lender Application Link</div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
-                  <input
-                    value={newBank.bank}
-                    onChange={(e) => setNewBank({ ...newBank, bank: e.target.value })}
-                    placeholder="Bank / NBFC Name (e.g. SBI)"
-                    style={{ height: 34, fontSize: 12.5, padding: "0 10px", borderRadius: 7, border: "1px solid var(--border)", background: "var(--bg-primary)", color: "var(--text-primary)" }}
-                  />
-                  <select
-                    value={newBank.product}
-                    onChange={(e) => setNewBank({ ...newBank, product: e.target.value })}
-                    style={{ height: 34, fontSize: 12.5, padding: "0 10px", borderRadius: 7, border: "1px solid var(--border)", background: "var(--bg-primary)", color: "var(--text-primary)" }}
-                  >
-                    <option value="Home Loan">Home Loan</option>
-                    <option value="Personal Loan">Personal Loan</option>
-                    <option value="Business Loan">Business Loan</option>
-                    <option value="Loan Against Property">Loan Against Property</option>
-                  </select>
-                </div>
-                <div style={{ display: "flex", gap: 10 }}>
-                  <input
-                    value={newBank.url}
-                    onChange={(e) => setNewBank({ ...newBank, url: e.target.value })}
-                    placeholder="Official URL (e.g. https://homeloans.sbi/)"
-                    style={{ flex: 1, height: 34, fontSize: 12.5, padding: "0 10px", borderRadius: 7, border: "1px solid var(--border)", background: "var(--bg-primary)", color: "var(--text-primary)" }}
-                  />
-                  <button
-                    type="button"
-                    onClick={handleAddBank}
-                    disabled={!newBank.bank.trim() || !newBank.url.trim() || savingBank}
-                    className="btn-primary"
-                    style={{ height: 34, padding: "0 14px", fontSize: 12 }}
-                  >
-                    {savingBank ? "Saving…" : "Add"}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* List */}
-            <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8 }}>
-              {library.map((b) => (
-                <div
-                  key={b.id}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    padding: "10px 14px",
-                    borderRadius: 8,
-                    border: "1px solid var(--border-light)",
-                    background: "var(--bg-secondary)",
-                    fontSize: 12.5,
-                  }}
+            <form onSubmit={handleSaveLink} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <div>
+                <label style={{ display: "block", fontSize: 12, color: "var(--text-muted)", marginBottom: 4, fontWeight: 500 }}>
+                  Loan Type / Category *
+                </label>
+                <select
+                  value={linkFormProduct}
+                  onChange={(e) => setLinkFormProduct(e.target.value)}
+                  style={{ width: "100%", height: 38, fontSize: 13, padding: "0 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)" }}
                 >
-                  <div>
-                    <div style={{ fontWeight: 600, color: "var(--text-primary)" }}>
-                      {b.bank} <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>· {b.product}</span>
-                    </div>
-                    <div style={{ fontSize: 11, color: "var(--accent-blue)", marginTop: 2, wordBreak: "break-all" }}>
-                      {b.url}
-                    </div>
-                  </div>
+                  {COMMON_LOAN_TYPES.map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                  <option value="custom">✏️ Other / Custom Loan Type…</option>
+                </select>
 
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: 12 }}>
-                    <a
-                      href={b.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="icon-btn"
-                      title="Test URL"
-                      style={{ width: 28, height: 28 }}
-                    >
-                      <ExternalLink size={13} />
-                    </a>
-                    {canEdit && (
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteBank(b.id)}
-                        className="icon-btn"
-                        title="Delete"
-                        style={{ width: 28, height: 28, color: "var(--text-muted)" }}
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
+                {linkFormProduct === "custom" && (
+                  <input
+                    type="text"
+                    value={customProduct}
+                    onChange={(e) => setCustomProduct(e.target.value)}
+                    placeholder="Enter custom loan type (e.g. Doctor Loan, Machinery Loan)"
+                    style={{ width: "100%", height: 36, fontSize: 12.5, padding: "0 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", marginTop: 8 }}
+                    required
+                  />
+                )}
+              </div>
+
+              <div>
+                <label style={{ display: "block", fontSize: 12, color: "var(--text-muted)", marginBottom: 4, fontWeight: 500 }}>
+                  Application Link URL *
+                </label>
+                <input
+                  type="text"
+                  value={linkFormUrl}
+                  onChange={(e) => setLinkFormUrl(e.target.value)}
+                  placeholder="Paste URL (e.g. https://... or /apply)"
+                  style={{ width: "100%", height: 38, fontSize: 13, padding: "0 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)" }}
+                  required
+                />
+                <span style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
+                  Customers requesting this loan type on WhatsApp or voice will be directed to this exact URL.
+                </span>
+              </div>
+
+              <div>
+                <label style={{ display: "block", fontSize: 12, color: "var(--text-muted)", marginBottom: 4, fontWeight: 500 }}>
+                  Provider / Label (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={linkFormBank}
+                  onChange={(e) => setLinkFormBank(e.target.value)}
+                  placeholder="e.g. Right Agent Group, SBI Portal, Internal Form"
+                  style={{ width: "100%", height: 36, fontSize: 12.5, padding: "0 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)" }}
+                />
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0" }}>
+                <input
+                  type="checkbox"
+                  id="linkActiveToggle"
+                  checked={linkFormActive}
+                  onChange={(e) => setLinkFormActive(e.target.checked)}
+                  style={{ width: 16, height: 16, accentColor: "var(--accent-cyan)", cursor: "pointer" }}
+                />
+                <label htmlFor="linkActiveToggle" style={{ fontSize: 12.5, color: "var(--text-primary)", cursor: "pointer" }}>
+                  Active (Priya and tracking redirects will use this link)
+                </label>
+              </div>
+
+              <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => setShowLinkModal(false)}
+                  className="btn-ghost"
+                  style={{ flex: 1, height: 38 }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingLink}
+                  className="btn-primary"
+                  style={{ flex: 1, height: 38 }}
+                >
+                  {savingLink ? "Saving…" : editingLink ? "Update Link" : "Save Link"}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

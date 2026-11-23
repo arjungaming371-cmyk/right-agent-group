@@ -40,7 +40,7 @@ export default function OtpForm() {
     <form onSubmit={submit} className="mt-7">
       <div className="mb-4 flex items-center gap-2.5 text-[13px] text-[#9aa5bd]">
         <KeyRound size={15} strokeWidth={2} className="text-[#8b7cff]" />
-        A 6-digit code was emailed to you. Enter it to finish signing in.
+        A 6-digit code was sent to your WhatsApp / Email. Enter it to finish signing in.
       </div>
       {error && (
         <div className="mb-4 rounded-[10px] border border-[#fb5670]/30 bg-[#fb5670]/[0.08] px-4 py-3 text-[13px] text-[#ff8fa0]">

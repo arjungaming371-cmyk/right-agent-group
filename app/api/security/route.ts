@@ -39,12 +39,14 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "key (string) and enabled (boolean) required" }, { status: 400 })
   }
 
-  // Turning 2FA on without SMTP configured would lock the admin out at their
-  // next login — the OTP email would have nowhere to send from. Block it
-  // here rather than let it fail silently at sign-in time.
-  if (key === "two_factor_auth" && enabled && !isMailConfigured()) {
+  // 2FA requires at least one delivery channel (SMTP email or WhatsApp) so
+  // the admin is not locked out at next sign-in.
+  const mailConfigured = isMailConfigured()
+  const adminPhone = process.env.ADMIN_PHONE || "+916301689511"
+  const waConfigured = Boolean(process.env.WHATSAPP_TOKEN && adminPhone)
+  if (key === "two_factor_auth" && enabled && !mailConfigured && !waConfigured) {
     return NextResponse.json(
-      { error: "Set SMTP_HOST / SMTP_USER / SMTP_PASS in .env before enabling Two-Factor Authentication — otherwise the login OTP email can't send." },
+      { error: "Configure SMTP (email) or WhatsApp before enabling Two-Factor Authentication — otherwise the login OTP cannot be delivered." },
       { status: 400 }
     )
   }

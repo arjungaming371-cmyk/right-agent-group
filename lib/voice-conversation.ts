@@ -68,9 +68,9 @@ export const RETURNING_GREETINGS = DEFAULT_VOICE_OPENERS.returning
 // not a telemarketer. The pitch only comes later, if it fits.
 export const INBOUND_GREETINGS = DEFAULT_VOICE_OPENERS.inbound
 
-// Inbound calls auto-create a lead with a placeholder like "Caller 8090"
-// before we know the real name — never greet someone by that fake name.
-const PLACEHOLDER_NAME_RE = /^(Caller \d+|Unknown|WA \d+)$/i
+// Inbound/outbound calls may have a placeholder like "Caller 8090" or "Customer"
+// before we know the real name — never greet someone by that placeholder name.
+const PLACEHOLDER_NAME_RE = /^(Caller \d+|Unknown|WA \d+|Customer|Lead|User|Sir|Madam|Client)$/i
 
 /**
  * Pick the opener for a call: the "{name}" personalized variant when we know
@@ -134,9 +134,9 @@ export const DND_INTENT_RE = new RegExp(
     // Telugu
     `\\b(?:call|calls|phone)\\s+(?:cheyyakandi|cheyoddu|cheyyoddu|cheyakandi|cheyavaddu|vaddu)(?:\\s+andi)?\\b`,
     `\\b(?:malli|inkosari)\\s+(?:call|phone)\\s+(?:cheyyakandi|cheyoddu|cheyyoddu|cheyakandi)\\b`,
-    `\\b(?:naaku\\s+)?(?:calls?\\s+)?vaddu\\b`,
+    `\\b(?:naaku\\s+calls?\\s+vaddu|calls?\\s+vaddu|malli\\s+(?:call\\s+)?vaddu)\\b`,
     `\\b(?:number|na number)\\s+(?:remove|delete|teeseyandi|theeseyandi)\\s*(?:cheyyandi)?\\b`,
-    `కాల్ చేయకండి|కాల్స్ వద్దు|మళ్లీ కాల్ చేయకండి|నెంబర్ తీసేయండి|కాల్ చేయొద్దు|నాకు వద్దు|ఫోన్ చేయకండి|నా నెంబర్ తీసేయండి|ఫోన్ చేయొద్దు`,
+    `కాల్ చేయకండి|కాల్స్ వద్దు|మళ్లీ కాల్ చేయకండి|నెంబర్ తీసేయండి|కాల్ చేయొద్దు|నాకు కాల్స్ వద్దు|ఫోన్ చేయకండి|నా నెంబర్ తీసేయండి|ఫోన్ చేయొద్దు`,
     // Hindi
     `\\b(?:call|phone)\\s+(?:mat|nahi)\\s+(?:karo|karna|kariye)\\b`,
     `\\b(?:dobara|phir|kabhi)\\s+call\\s+mat\\s+(?:karo|karna|kariye)\\b`,
@@ -171,6 +171,7 @@ export const CONTINUATION_INTENT_RE = new RegExp(
 export const UNAMBIGUOUS_GOODBYE_RE = new RegExp(
   '\\b(' +
   'bye|goodbye|bye[- ]?bye|bye bye|thanks bye|thank you bye|sare bye|ok bye|okay bye|chalo bye|' +
+  'catch you later|talk to you later|see you later|catch up later|call you later|have a good day|have a nice day|good night|take care|bye for now|talk later|' +
   'phone pettestunna|phone pettestha|phone pettesthunna|phone cut chestunna|phone cut chestha|phone pettandi|phone cut cheyyandi|' +
   'selavu|veedkolu|alvida|phir milenge' +
   ')\\b|' +
@@ -186,16 +187,16 @@ export const AMBIGUOUS_CLOSING_RE = new RegExp(
   '\\b(' +
   'no doubts?|no more doubts?|no questions?|all clear|everything clear|that is all|that\'s all|that is it|that\'s it|' +
   'nothing else|nothing more|no thanks?|no thank you|' +
-  'em ledu|emi ledu|em ledhu|emi ledhu|em ledandi|emi ledandi|inka em ledu|inka emi ledu|' +
+  'em ledu|emi ledu|em ledhu|emi ledhu|em ledandi|emi ledandi|inka em ledu|inka emi ledu|inkem vaddu|inka em vaddu|inkem ledu|inkem ledhu|' +
   'doubts? em levu|doubts? emi levu|doubts? levu|doubts? levandi|doubt em ledu|doubt ledu|' +
   'chalu|chalandi|chalu sir|avunu chalu|saripothundi|saripoddi|' +
   'anthe|anthe andi|anthe sir|anthey|' +
   'untanu|untanu sir|untanandi|untanu mari|sare untanu|inka untanu|' +
   'koi doubt nahi|kuch nahi|sab clear hai|bas itna hi|itna hi|ho gaya' +
   ')\\b|' +
-  '^(no|no sir|no madam|ledu|ledu sir|ledandi|ledu andi|nahi|nahi sir|chalu|anthe|untanu|sare andi|ok andi|okay andi|okay|ok|sare)[.!? ]*$|' +
-  '^(లేదు|లేదండి|లేదు సర్|ఏం లేదు|ఏమీ లేదు|చాలు|చాలండి|అంతే|ఉంటాను|సరే అండి|సరే సర్|ఓకే)[.!? ]*$|' +
-  'ఏం లేదు|ఏమీ లేదు|ఏం లేదండి|ఇంకేం లేదు|డౌట్స్ లేవు|డౌట్ లేదు|చాలు|చాలండి|అంతే|సరిపోతుంది|అంతా క్లియర్|క్లియర్ అయింది|' +
+  '^(no|no sir|no madam|ledu|ledu sir|ledandi|ledu andi|nahi|nahi sir|chalu|anthe|untanu|inkem vaddu)[.!? ]*$|' +
+  '^(లేదు|లేదండి|లేదు సర్|ఏం లేదు|ఏమీ లేదు|చాలు|చాలండి|అంతే|ఉంటాను|ఇంకేం వద్దు)[.!? ]*$|' +
+  'ఏం లేదు|ఏమీ లేదు|ఏం లేదండి|ఇంకేం లేదు|ఇంకేం వద్దు|డౌట్స్ లేవు|డౌట్ లేదు|చాలు|చాలండి|అంతే|సరిపోతుంది|అంతా క్లియర్|క్లియర్ అయింది|' +
   'कोई डाउट नहीं|कुछ नहीं|बस इतना ही|हो गया',
   'i'
 )
@@ -367,10 +368,48 @@ export async function startCall(
         console.error("voice_calls upsert error (call row may be missing/stale):", e instanceof Error ? e.message : e))
   }
 
+  let callInstructions = ""
+  if (callSid) {
+    try {
+      const cRes = await query(`SELECT instructions FROM voice_calls WHERE twilio_call_sid = $1 LIMIT 1`, [callSid])
+      callInstructions = cRes.rows[0]?.instructions || ""
+    } catch {}
+  }
+  const isEmiCollection = callInstructions && /\b(emi|overdue|due|defaul|not paid|harsh|warning|settle|recover|police|penalty|arrears)\b/i.test(callInstructions)
+  const isNonLoanCustom = callInstructions && !/\b(loan|borrow|lakh|crore|home|personal|education|business|emi|cibil|interest)\b/i.test(callInstructions)
+
   const hasName = name && !PLACEHOLDER_NAME_RE.test(name)
   let greeting = ""
 
-  if (direction === "inbound") {
+  if (isEmiCollection) {
+    if (language === "telugu") {
+      greeting = hasName
+        ? `నమస్కారం ${name} garu, Right Agent Group నుంచి మాట్లాడుతున్నాను sir. మీ overdue loan EMI payment గురించి మాట్లాడటానికి call చేశాను.`
+        : `నమస్కారం sir, Right Agent Group నుంచి మాట్లాడుతున్నాను. మీ overdue loan EMI payment గురించి మాట్లాడటానికి call చేశాను.`
+    } else if (language === "hindi") {
+      greeting = hasName
+        ? `नमस्ते ${name} जी, Right Agent Group से बात कर रही हूँ। आपके overdue loan EMI payment के सिलसिले में call किया है।`
+        : `नमस्ते sir, Right Agent Group से बात कर रही हूँ। आपके overdue loan EMI payment के सिलसिले में call किया है।`
+    } else {
+      greeting = hasName
+        ? `Hello ${name}, this is Priya calling from Right Agent Group regarding your overdue loan EMI payment.`
+        : `Hello sir, this is Priya calling from Right Agent Group regarding your overdue loan EMI payment.`
+    }
+  } else if (isNonLoanCustom) {
+    if (language === "telugu") {
+      greeting = hasName
+        ? `నమస్కారం ${name} garu, Right Agent Group నుంచి ప్రియ మాట్లాడుతున్నాను sir. మాట్లాడటానికి ఒక నిమిషం time ఉందా?`
+        : `నమస్కారం sir, Right Agent Group నుంచి ప్రియ మాట్లాడుతున్నాను. మాట్లాడటానికి ఒక నిమిషం time ఉందా?`
+    } else if (language === "hindi") {
+      greeting = hasName
+        ? `नमस्ते ${name} जी, Right Agent Group से प्रिया बात कर रही हूँ। क्या आपके पास बात करने के लिए एक मिनट का समय है?`
+        : `नमस्ते sir, Right Agent Group से प्रिया बात कर रही हूँ। क्या आपके पास बात करने के लिए एक मिनट का समय है?`
+    } else {
+      greeting = hasName
+        ? `Hello ${name}, this is Priya calling from Right Agent Group. Do you have a minute to speak?`
+        : `Hello sir, this is Priya calling from Right Agent Group. Do you have a minute to speak?`
+    }
+  } else if (direction === "inbound") {
     greeting = greetingFor(language, "inbound", hasName ? name! : undefined)
   } else if (callSid.startsWith("wacall-")) {
     if (isRepeatCall) {
@@ -560,9 +599,52 @@ async function buildTurnInstructions(
   // and forbid word-for-word recital, so she weaves it into the script
   // naturally instead of robotic monologuing. Both turn paths (blocking +
   // streaming) and both channels (phone + WhatsApp) pass through here.
-  let merged = instructions
-    ? `WHAT THIS CALL IS ABOUT — the operator's talking points for THIS call. Work them into the conversation naturally (never recite them word-for-word), open by steering toward this agenda, and stay on it unless the customer redirects:\n${instructions}`
-    : ""
+  const isEmiCollection = Boolean(instructions && /\b(emi|overdue|due|defaul|not paid|harsh|warning|settle|recover|police|penalty|arrears)\b/i.test(instructions))
+  const isNonLoanCall = Boolean(instructions && !/\b(loan|borrow|lakh|crore|home|personal|education|business|emi|cibil|interest)\b/i.test(instructions))
+
+  let merged = ""
+  if (isEmiCollection) {
+    merged = `=== CRITICAL OPERATOR MANDATE: OVERDUE LOAN EMI COLLECTION CALL ===
+OPERATOR AGENDA & INSTRUCTIONS FOR THIS CALL:
+"${instructions}"
+
+YOU ARE PRIYA IN FIRM DEBT RECOVERY MODE.
+THIS IS A COLLECTION CALL FOR A BORROWER WHO HAS NOT PAID THEIR LOAN EMI FOR 5 MONTHS.
+
+STRICT OPERATIONAL DIRECTIVES:
+1. OVERRIDE ALL SALES & INTAKE CONTEXT:
+   - NEVER pitch new loans, never ask what loan they want, never mention interest rates (like 7.15%), and never invite them for new inquiries!
+   - This call is 100% focused on collecting the pending overdue EMI payment.
+2. FIRM, FORMAL, DIRECT STATEMENT:
+   - State clearly and firmly that their EMI payment is severely overdue (pending for 5 months) and must be paid immediately.
+   - Speak authoritatively:
+     "Ajay Kumar garu, మీ loan account లో 5 నెలల నుంచి EMI payment pending ఉంది sir. దీన్ని వెంటనే clear చేయాలి."
+3. STRICT WARNING & LEGAL NOTICE (FORMAL ESCALATION):
+   - The operator instructed to give a strict warning. Use standard, legally enforceable banking recovery warnings:
+     "ఈరోజు లోపు payment clear చేయకపోతే, మీ account immediate గా formal legal recovery team కి handover అవుతుంది, severe legal recovery notice issue అవుతుంది, మరియు మీ CIBIL score permanently damage అవుతుంది sir. దయచేసి వెంటనే payment చేయండి."
+   - If the borrower tries to make excuses, delays, or tries to dismiss, press firmly:
+     "ఇప్పటికే 5 నెలలు overdue అయింది sir. ఇంక ఆలస్యం చేయడానికి వీలులేదు. ఈరోజు ఎన్ని గంటల లోపు payment complete చేస్తారు?"
+4. DEMAND PAYMENT COMMITMENT:
+   - Demand an exact time and method of payment before ending the call:
+     "Online లో UPI/Bank transfer ద్వారా ఇప్పుడే pay చేస్తారా, లేక immediate గా branch కి వచ్చి settle చేస్తారా sir?"`
+  } else if (isNonLoanCall) {
+    merged = `=== CRITICAL OPERATOR MANDATE: NON-LOAN CUSTOM INSTRUCTIONS CALL ===
+OPERATOR AGENDA FOR THIS CALL:
+"${instructions}"
+
+STRICT OPERATIONAL DIRECTIVES:
+1. THIS IS NOT A LOAN SALES OR INTAKE CALL:
+   - STRICT BAN: DO NOT pitch any loan (home loan, personal loan, business loan, education loan).
+   - NEVER ask "మీ loan requirement గురించి ఏమైనా doubts ఉన్నాయా", "ఎన్ని lakh loan కావాలి", or ask about loan inquiries!
+2. STICK 100% TO THE OPERATOR'S AGENDA:
+   - Convey the exact message specified by the operator (e.g. employee reporting instructions, office address, timings, joining details, or general reminder).
+   - Address the customer respectfully.
+   - If they ask for office address or timings, use the official knowledge base facts:
+     * Office: 4-143 Mallikarjuna Complex, 5th Floor, Gandimaisamma X Road, Medchal District (above Masters GYM), Hyderabad.
+     * Office Timings: Morning 9 AM to Evening 6 PM.`
+  } else if (instructions) {
+    merged = `WHAT THIS CALL IS ABOUT — the operator's talking points for THIS call. Work them into the conversation naturally (never recite them word-for-word), open by steering toward this agenda, and stay on it unless the customer redirects:\n${instructions}`
+  }
 
   // DATE/TIME AWARENESS: without this the model has no idea what the real
   // date/time is — can't correctly say "today"/"tomorrow", the right
@@ -577,7 +659,11 @@ async function buildTurnInstructions(
   } else if (direction === "outbound") {
     merged = [
       merged,
-      "CALL DIRECTION RULE: THIS IS AN OUTBOUND CALL. You placed this call to follow up with the customer about their loan requirement.",
+      isEmiCollection
+        ? "CALL DIRECTION RULE: THIS IS AN OUTBOUND OVERDUE EMI COLLECTION CALL. You placed this call to demand immediate payment of their overdue loan EMI."
+        : isNonLoanCall
+        ? "CALL DIRECTION RULE: THIS IS AN OUTBOUND OPERATOR-DIRECTED CALL. You placed this call strictly to convey the operator's message and agenda above."
+        : "CALL DIRECTION RULE: THIS IS AN OUTBOUND CALL. You placed this call to follow up with the customer about their loan requirement.",
     ].filter(Boolean).join("\n\n")
   }
 
@@ -589,7 +675,7 @@ async function buildTurnInstructions(
   // wait here is whichever single read is slowest rather than the sum.
   const [brief, kbFromSpeech, financeRows] = await contextPromise
 
-  let kbContext = kbFromSpeech
+  let kbContext = isEmiCollection ? "" : kbFromSpeech
 
   // KB RETRY WITH CONVERSATION CONTEXT (2026-09-30): the first search uses
   // only the customer's raw words — but on a real call the question is often
@@ -598,14 +684,15 @@ async function buildTurnInstructions(
   // that first search missed, retry ONCE with Priya's last question prepended
   // — it usually carries the actual topic. One extra indexed Postgres query,
   // and only on the miss path, so the common case pays nothing.
-  if (!kbContext && history.length > 0) {
+  if (!isEmiCollection && !kbContext && history.length > 0) {
     const lastPriyaTurn = [...history].reverse().find((h) => h.role === "model")
     if (lastPriyaTurn?.content) {
       kbContext = await searchKnowledgeBase(`${lastPriyaTurn.content} ${speech}`.slice(0, 300)).catch(() => "")
     }
   }
 
-  if (brief) merged = [merged, brief].filter(Boolean).join("\n\n")
+  // If this is an EMI collection call or non-loan call, DO NOT inject the new loan intake brief!
+  if (!isEmiCollection && !isNonLoanCall && brief) merged = [merged, brief].filter(Boolean).join("\n\n")
 
   // IN-CALL FACT MEMORY (2026-09-30): lead_memory is only written AFTER the
   // call (post-call analysis), and the model's live window holds the last 12
@@ -666,23 +753,37 @@ async function buildTurnInstructions(
   // -------------------------------------------------------------------------
   const customerMessages = [...history.filter((h) => h.role === "user").map((h) => h.content), speech].join(" ").toLowerCase()
   const customerExplicitlySaidFormFilled = /\b(already\s*(?:apply|applied|submitted|fill|filled|pampinch)|form\s*(?:fill\s*ches|submitt)|apply\s*ches[a-z]*)\b/i.test(customerMessages)
-  const hasAppOnRecord = /LOAN APPLICATION ALREADY ON FILE/i.test(brief || "")
+  const isSanctionedOnRecord = /LOAN APPLICATION STATUS — SANCTIONED/i.test(brief || "")
+  const isFormSubmitted = /LOAN APPLICATION STATUS — SUBMITTED/i.test(brief || "") || customerExplicitlySaidFormFilled
 
-  if (hasAppOnRecord || customerExplicitlySaidFormFilled) {
+  if (isNonLoanCall) {
+    // Non-loan call: do not ground on loan applications or inquiry forms
+  } else if (isSanctionedOnRecord) {
     merged = [
       merged,
-      `=== LIVE STATE: LOAN APPLICATION ON FILE ===
-- The customer has ALREADY submitted their loan application. NEVER ask them to fill out another application or promise to send a new application link.
-- ANSWER ALL CALLER QUERIES DIRECTLY: Answer whatever the customer is asking (office visits, office timings 9 AM to 6 PM, insurance plans, rates, eligibility, documents, or products) directly using the Knowledge Base.
-- BANNED DEFLECTION: NEVER say "మా loan officer మీ profile review చేసి త్వరలోనే మీకు call చేస్తారు" or refuse to answer by deflecting to the loan officer. You are the knowledgeable advisor — answer their questions clearly now!`,
+      `=== LIVE STATE: LOAN IS OFFICIALLY SANCTIONED ===
+- The customer's loan has been SANCTIONED by our team! Congratulate them warmly.
+- State that our Loan Officer will coordinate directly regarding the sanction letter and disbursal process.
+- NEVER ask for documents or application forms.`,
+    ].filter(Boolean).join("\n\n")
+  } else if (isFormSubmitted) {
+    merged = [
+      merged,
+      `=== LIVE STATE: LOAN APPLICATION ALREADY FILLED & SUBMITTED ===
+- The customer has ALREADY filled out and submitted their complete official application with all their details and documents.
+- NEVER ask them to fill out any form or promise to send a new application link.
+- NEVER ask them for documents (PAN, Aadhaar, salary slips, etc.) over the phone — all documents were already submitted inside their application!
+- Inform them clearly: "Our Loan Officer is reviewing your complete application and will get in touch with you directly for the next steps."
+- If the customer asks questions about office timings (9 AM - 6 PM), address, or general process, answer directly from Knowledge Base.`,
     ].filter(Boolean).join("\n\n")
   } else {
     merged = [
       merged,
-      `=== CRITICAL GROUNDING: NO LOAN APPLICATION ON FILE ===
-- This caller has ZERO submitted loan applications with us.
-- NEVER say or claim "మీ application already మా దగ్గర ఉంది sir" (we already have your application) or "already in our system"!
-- Listen attentively to their requirement, answer their questions with exact facts, and guide them politely.`,
+      `=== CRITICAL GROUNDING: INQUIRY ONLY (NO LOAN APPLICATION SUBMITTED YET) ===
+- This caller has NOT submitted any official loan application yet. They only inquired about a loan.
+- STRICT BAN: NEVER say or claim "మీ application already మా దగ్గర ఉంది sir" (we already have your application) or "already in our system"!
+- STRICT BAN: NEVER ask them to provide documents (PAN, Aadhaar) over the phone — all documents are submitted when they fill the official application!
+- Acknowledge their loan requirement warmly. Ask if they would like the official application link sent to their WhatsApp, or if they would prefer to visit our Gandimaisamma office directly to complete the application in person.`,
     ].filter(Boolean).join("\n\n")
   }
 
@@ -697,7 +798,7 @@ async function buildTurnInstructions(
       `=== CUSTOMER NAME IS ALREADY KNOWN ===
 - Customer name is ALREADY KNOWN as "${effectiveName}". Address them respectfully as ${effectiveName} sir/garu.
 - STRICT BAN: NEVER ask for their name, full name, or "మీ full name చెప్తారా". That step is DONE.
-- Move directly to discussing their loan requirement (purpose, amount, loan type).`,
+${isEmiCollection ? "- Move directly to demanding payment of their overdue loan EMI." : isNonLoanCall ? "- Move directly to conveying the operator's message." : "- Move directly to discussing their loan requirement (purpose, amount, loan type)."}`
     ].filter(Boolean).join("\n\n")
   }
 
@@ -717,17 +818,32 @@ async function buildTurnInstructions(
   * Maximum 1 to 2 short sentences ONLY (under 25 words).
   * Speak like a warm, courteous, knowledgeable loan advisor. Say ONE thing, ask ONE simple question, or answer their doubt directly, then stop and listen.
   * NEVER string 3 or 4 clauses together with commas into an 8-second monologue.
-  * When the customer responds with "Hello" or "Hello andi", acknowledge warmly and state your purpose naturally: "Hello sir, నమస్కారం! మీ loan requirement గురించి మాట్లాడటానికి call చేశాను, చెప్పండి sir."
+  * When the customer responds with "Hello" or "Hello andi":
+    ${isEmiCollection
+      ? `Acknowledge firmly and state: "నమస్కారం sir, మీ loan account లో overdue EMI payment గురించి మాట్లాడటానికి call చేశాను, ఈరోజు payment clear చేయాలి sir."`
+      : isNonLoanCall
+      ? `Acknowledge warmly and state your exact call purpose according to the operator instructions.`
+      : instructions
+      ? `Acknowledge warmly and state your exact call purpose according to the operator instructions.`
+      : direction === "inbound"
+      ? `Acknowledge warmly: "నమస్కారం sir, Right Agent Group కి call చేసినందుకు ధన్యవాదాలు, చెప్పండి sir మీకు ఎలా help చేయగలను?"`
+      : `Acknowledge warmly and state your purpose naturally: "Hello sir, నమస్కారం! Right Agent Group నుంచి మాట్లాడుతున్నాను, మీకు ఏదైనా loan requirement ఉందా sir?"`
+    }
   * When the customer responds with "time undi cheppandi", "aa time undi", "time undi", "cheppandi", "haa cheppandi", or "avunu cheppandi":
     They are saying: "Yes, I have time, go ahead and speak / tell me why you called."
     THEY ARE NOT ASKING FOR OFFICE TIMINGS, APPOINTMENT SLOTS, OR CLOCK TIME! NEVER reply with office hours.
-    Instead, warmly acknowledge and state your call purpose in clean Telugu: "Sure sir, మీ loan requirement గురించి మాట్లాడటానికి call చేశాను, మీకు ఎన్ని lakh loan కావాలి sir?"
+    ${isEmiCollection
+      ? `Instead, firmly state your call purpose in clean Telugu: "Sure sir, మీ loan account లో 5 నెలల EMI pending ఉంది. దాన్ని వెంటనే ఎప్పుడు clear చేస్తారు sir?"`
+      : isNonLoanCall
+      ? `Instead, state your exact call purpose according to the operator instructions.`
+      : `Instead, warmly acknowledge and state your call purpose in clean Telugu: "Sure sir, మీ loan requirement గురించి మాట్లాడటానికి call చేశాను, మీకు ఎన్ని lakh loan కావాలి sir?"`
+    }
 
 - STRICT ANTI-REPETITION MANDATE (TODAY'S CRITICAL MANDATE):
   * Check the previous conversation turns carefully. NEVER repeat the same statement, loan approval pitch, appointment pitch, or question you already said!
   * If you already told the caller their loan is approved or asked them to send documents on WhatsApp, DO NOT repeat that pitch again! Move forward to their specific question or next single step.
   * If the caller says "Enti?" (What?) or expresses confusion, explain in ONE simple sentence in plain words (e.g. "Just మీ PAN మరియు Aadhaar card upload చేయాలి sir, మిగతా ప్రాసెస్ అంతా ready గా ఉంది").
-  * When the customer responds with short words like "So", "Enti", "Ok", or "Karanam", DO NOT restart your loan pitch! Acknowledge briefly and ask what specific doubt they have.
+  * When the customer responds with short acknowledgments like "Ok", "Sare", "Hmm", DO NOT restart your pitch and DO NOT ask if they have doubts! Acknowledge warmly (e.g. "Sure sir / అవును sir") and continue the next logical step or wait for them.
 
 - AUDIO CLARITY COMPLAINT HANDLING (ONLY WHEN THE CUSTOMER COMPLAINS):
   * ONLY if the caller explicitly complains about audio ("Voice clear-ga ledu", "vinipiyatledu", "voice cut avtundi"):
@@ -737,16 +853,34 @@ async function buildTurnInstructions(
   * Stick STRICTLY to the Company Script and the provided KNOWLEDGE BASE facts below.
   * Office Address: "Office: 4-143 Mallikarjuna Complex, 5th Floor, Gandimaisamma X Road, Medchal District (above Masters GYM), Hyderabad."
   * Office Timings: "Morning 9 AM to Evening 6 PM."
-  * Home Loan Rates: "Home loan rates start from 7.25% p.a. (SBI & top banks) with tenure up to 30 years."
+  * Interest Rates: Quote rates strictly based on the specific loan product requested by the caller (from Knowledge Base / Rate context). Never assume or force Home Loan if the caller hasn't requested it.
   * If the customer asks for any unverified detail or direction not in the Knowledge Base, honestly state: "పూర్తి details మరియు exact location link మా loan officer మీకు WhatsApp లో పంపిస్తారు sir."
+
+${isEmiCollection ? `- STRICT RECOVERY FOCUS (ABSOLUTE MANDATE):
+  * This is an OVERDUE EMI COLLECTION CALL.
+  * NEVER pitch new loans, never discuss education loan documents, and never quote new interest rates!
+  * Demand payment of the 5 months overdue EMI immediately.
+  * State the formal escalation: account handover to legal recovery, severe CIBIL score damage, and legal recovery notice.` : `- STRICT PRODUCT LOCKING & ANTI-DEFLECTION (ABSOLUTE MANDATE):
+  * When the customer asks for or discusses an EDUCATION LOAN, BUSINESS LOAN, PERSONAL LOAN, CAR/BIKE LOAN, or LAP:
+    - NEVER pitch or mention Home Loans! NEVER say "actually we specialize in home loans" or "would you like to explore home loans instead"!
+    - Stay 100% focused on their requested product.
+    - For Education Loans: confirm starting rate from 7.15% p.a. with SBI and partner banks for studies in India and abroad, with up to 15 years tenure and study-period moratorium.
+    - Required documents for Education Loans:
+      1. Student: KYC (PAN, Aadhaar), academic marksheets, college admission letter, fee structure.
+      2. Parent/Co-applicant (Sponsor): KYC, latest 3 months salary slips + 6 months bank statement (if salaried) OR 2-3 years ITR + 6 months bank statement (if self-employed).
+      DO NOT ask the student for 3 years ITR — financial documents come from the parent/co-applicant!`}
 
 - NATURAL TURN TAKING & CONCLUSION:
   * When the customer asks a doubt or question, answer it clearly and briefly (1 to 2 short sentences), then STOP.
   * RESPECT CUSTOMER DEFERRAL (PARENTS DETAILS / DOCUMENTS):
     When the customer says they will provide parents details or documents later ("tarvata chepta", "maare cheptha", "ippudu cheppanu", "later", "not now"), RESPECT IT IMMEDIATELY! NEVER ask again, NEVER repeat "చెప్పండి వింటున్నాను" or pressure them. Acknowledge warmly: "సరే sir, no problem, ఆ details తర్వాత అయినా ఇవ్వొచ్చు. నేను మీ WhatsApp కి application link పంపిస్తాను." and proceed.
-  * STRICT BAN ON TRAILING REPETITIVE QUESTIONS: NEVER append "ఇంకేమైనా doubts ఉన్నాయా sir?", "ఇంకేమైనా అడగాలా sir?", "ఇంకేమైనా వివరాలు కావాలా sir?", or any closing question at the end of every turn! Answer what was asked and STOP talking. Let the caller speak.
-  * ${alreadyAskedDoubts ? 'CRITICAL: You have ALREADY asked about doubts in this call. NEVER ask "దీని గురించి ఇంకా ఏమైనా doubts ఉన్నాయా sir?" or any doubt question again! Answer the question directly and stop.' : 'You may ask "దీని గురించి ఇంకా ఏమైనా doubts ఉన్నాయా sir?" at most ONCE in the entire call, but NEVER repeat it in later turns.'}
-  * NO UNILATERAL HANGUPS: NEVER say goodbye ("Thank you sir, have a great day, bye" or "bye") while the customer is still speaking, asking questions, or discussing banks/loans. ONLY say goodbye when the customer EXPLICITLY indicates they are done (e.g. "chalu andi", "em ledu", "thank you bye", "untanu"). Conclude politely ONLY when the customer has finished.`,
+  * STRICT BAN ON TRAILING REPETITIVE QUESTIONS: NEVER append "ఇంకేమైనా doubts ఉన్నాయా sir?", "ఇంకేమైనా అడగాలా sir?", "ఇంకేమైనా వివరాలు కావాలా sir?", "do you have any other questions regarding the loan process?", or any closing question at the end of turns! Answer what was asked and STOP talking. Let the caller speak.
+  * STRICT BAN ON PROACTIVE DOUBT QUESTIONS: Never proactively append doubt questions ("Do you have any doubts?", "దీని గురించి ఇంకా ఏమైనా doubts ఉన్నాయా sir?") at the end of answers. Answer what was asked and STOP talking. Let the caller ask if they have anything.
+  * SINGLE CLEAN SIGN-OFF:
+    When the customer indicates they are done or says goodbye ("catch you later", "talk to you later", "see you later", "bye", "chalu"):
+    - Respond with ONE warm, concise closing (e.g. "Sure sir, thank you for your time! Have a great day, goodbye!") and conclude.
+    - NEVER repeat closing phrases or contradict time of day (e.g. never say "have a good evening" then "have a great day").
+  * NO UNILATERAL HANGUPS: NEVER say goodbye ("Thank you sir, have a great day, bye" or "bye") while the customer is still speaking, asking questions, or discussing banks/loans. ONLY say goodbye when the customer EXPLICITLY indicates they are done (e.g. "chalu andi", "em ledu", "thank you bye", "untanu", "catch you later"). Conclude politely ONLY when the customer has finished.`,
   ].filter(Boolean).join("\n\n")
 
   // KNOWLEDGE BASE: unlike the Lead Brain brief above, this runs on EVERY
@@ -758,16 +892,13 @@ async function buildTurnInstructions(
   // plausible-sounding but WRONG number. lib/finance.ts does the actual
   // arithmetic here and hands Priya an exact figure to state — she never
   // computes EMI/eligibility herself.
-  if (leadId && financeRows) {
+  if (!isEmiCollection && !isNonLoanCall && leadId && financeRows) {
     const [leadRow, memoryRow] = financeRows
     const knownIncome = memoryRow.data?.facts?.monthly_income ? Number(memoryRow.data.facts.monthly_income) : null
 
-    // Loan type may have been mentioned in an EARLIER turn ("I have a shop,
-    // want to expand") while the rate/EMI QUESTION comes later ("what's the
-    // interest?") — detecting only off the current utterance missed that
-    // and silently fell back to Home Loan. Scan the whole conversation.
-    const conversationSoFar = [...history.map((h) => h.content), speech].join(" ")
-    const detectedType = detectLoanType(conversationSoFar) || leadRow.data?.product_interest || null
+    // Only scan CUSTOMER utterances for loan interest (never Priya's own list of loans!)
+    const customerSpeechSoFar = [...history.filter((h) => h.role === "user").map((h) => h.content), speech].join(" ")
+    const detectedType = detectLoanType(customerSpeechSoFar) || leadRow.data?.product_interest || null
     if (detectedType && detectedType !== leadRow.data?.product_interest) {
       db.from("leads").update({ product_interest: detectedType }).eq("id", leadId).catch(() => {})
       invalidateFinanceRowsCache(leadId)

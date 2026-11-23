@@ -77,7 +77,7 @@ Example: "Hi @{username}, check your DM! Sent you the complete loan details and 
 We arrange Home Loans (from 7.25% p.a.), Business Loans (up to ₹75 Lakhs), and Loan Against Property with 20+ top banks in Hyderabad with 0 advance fees.
 
 💬 Ask any questions directly on WhatsApp with our senior loan advisor:
-https://wa.me/916301689511?text=Hi%20Right%20Agent%20Group,%20I%20commented%20on%20Instagram%20and%20want%20to%20know%20more%20about%20loans
+https://wa.me/918333993223?text=Hi%20Right%20Agent%20Group,%20I%20commented%20on%20Instagram%20and%20want%20to%20know%20more%20about%20loans
 
 Feel free to ask any questions on WhatsApp or reply right here in this DM!`,
 }

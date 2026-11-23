@@ -28,9 +28,8 @@ type UploadBody = {
 }
 
 // Keep this charset IN SYNC with RECORDING_NAME_RE in lib/recordings.ts —
-// a callSid accepted here must also pass the serving route's allowlist, or
-// the recording uploads fine and then 404s in the dashboard player.
-const CALL_SID_RE = /^wacall-[A-Za-z0-9_.\-+=:@]{1,200}$/
+// accepts wacall-* and telephony call SIDs (UUIDs, Exotel/Vobiz call identifiers).
+const CALL_SID_RE = /^[A-Za-z0-9_.\-+=:@]{1,200}$/
 
 export async function POST(req: NextRequest) {
   if (!verifyServiceKey(req)) {

@@ -328,8 +328,10 @@ export default function QuickChat({ role = "agent", userEmail = "" }: { role?: U
         />
       )}
 
-      <div className="glass" style={{
+      <div style={{
         position: "fixed",
+        background: "var(--bg-card, #0f121d)",
+        border: "1px solid var(--border)",
         ...(expanded
           ? {
               top: "50%", left: "50%", transform: "translate(-50%, -50%)",

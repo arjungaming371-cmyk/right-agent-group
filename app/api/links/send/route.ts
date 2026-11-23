@@ -46,12 +46,13 @@ export async function POST(req: NextRequest) {
     const token = genShortToken()
     const branchId = userBranch || lead.branch_id || null
 
-    // Look up library entry if available
+    // Look up library entry for this loan product
     const libRes = await query(
-      `SELECT id FROM link_library WHERE lower(bank) = lower($1) AND lower(product) = lower($2) AND active = true LIMIT 1`,
-      [bank, prod]
+      `SELECT id, bank, url FROM link_library WHERE lower(product) = lower($1) AND active = true ORDER BY created_at DESC LIMIT 1`,
+      [prod]
     )
     const libraryId = libRes.rows?.[0]?.id || null
+    const effectiveBank = libRes.rows?.[0]?.bank || bank || "Right Agent Group"
 
     // Record in link_sends
     const insertRes = await query(

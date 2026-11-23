@@ -362,9 +362,10 @@ async function handleInboundDM(messaging: any, igBranch: BranchInstagramCtx = nu
     // the inbound message is already stored and a human can reply manually.
     if (await isAiPaused("messages", branchId)) return
 
+    const igLang = (detectLanguage(text) as Language) || "english"
     const aiReply = await chatWithLLM(
       [...history, { role: "user", content: text }],
-      "english",
+      igLang,
       extraInstructions
     )
 
@@ -587,9 +588,10 @@ async function handleInboundComment(val: any, igBranch: BranchInstagramCtx = nul
       kbContext: kbContext || "None",
     })
 
+    const igCommentLang = (detectLanguage(text) as Language) || "english"
     let publicAiReply = await chatWithLLM(
       [{ role: "user", content: text }],
-      "english",
+      igCommentLang,
       extraInstructions
     )
 
@@ -612,7 +614,7 @@ async function handleInboundComment(val: any, igBranch: BranchInstagramCtx = nul
       // 2. Send Private DM Reply to Commenter with WhatsApp 1-tap link
       let privateDmText = renderTemplate(igTemplates.privateDm, { username })
       if (!privateDmText.includes("wa.me")) {
-        privateDmText += `\n\n💬 Ask any questions directly on WhatsApp with our senior loan advisor:\nhttps://wa.me/916301689511?text=Hi%20Right%20Agent%20Group,%20I%20commented%20on%20Instagram%20and%20have%20questions%20about%20loans\n\nFeel free to ask on WhatsApp or reply right here!`
+        privateDmText += `\n\n💬 Ask any questions directly on WhatsApp with our senior loan advisor:\nhttps://wa.me/918333993223?text=Hi%20Right%20Agent%20Group,%20I%20commented%20on%20Instagram%20and%20have%20questions%20about%20loans\n\nFeel free to ask on WhatsApp or reply right here!`
       }
 
       const privSent = await privateReplyInstagramComment(commentId, privateDmText, igBranch)
