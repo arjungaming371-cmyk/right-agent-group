@@ -453,7 +453,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
   const [bulkWaIncludeLink, setBulkWaIncludeLink] = useState(true)
   const [bulkWaProduct, setBulkWaProduct] = useState("Home Loan")
   const [bulkWaBusy, setBulkWaBusy] = useState(false)
-  const [bulkWaResult, setBulkWaResult] = useState<{ total: number; sentCount: number; skippedDnd: number; failedCount: number } | null>(null)
+  const [bulkWaResult, setBulkWaResult] = useState<{ total: number; sentCount: number; skippedDnd: number; failedCount: number; errors?: string[] } | null>(null)
   const [bulkWaMode, setBulkWaMode] = useState<"template" | "text">("template")
   const [bulkWaTemplateName, setBulkWaTemplateName] = useState("loan_application_form")
   const [bulkWaTemplateLang, setBulkWaTemplateLang] = useState("en")
@@ -690,6 +690,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
           sentCount: d.sentCount || 0,
           skippedDnd: d.skippedDnd || 0,
           failedCount: d.failedCount || 0,
+          errors: d.errors || [],
         })
         setSelectedIds([])
       } else {
@@ -2643,6 +2644,19 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                   </div>
                 </div>
 
+                {bulkWaResult.errors && bulkWaResult.errors.length > 0 && (
+                  <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 10, padding: "10px 14px", fontSize: 11.5, color: "#f87171", marginBottom: 14 }}>
+                    <div style={{ fontWeight: 700, marginBottom: 4, display: "flex", alignItems: "center", gap: 6 }}>
+                      ⚠️ Meta Rejection Details:
+                    </div>
+                    {bulkWaResult.errors.map((err, idx) => (
+                      <div key={idx} style={{ marginTop: 3, fontFamily: "monospace", fontSize: 11, wordBreak: "break-all" }}>
+                        • {err}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
                 <div style={{ background: "rgba(37,211,102,0.06)", border: "1px solid rgba(37,211,102,0.2)", borderRadius: 10, padding: "12px 14px", fontSize: 11.5, color: "var(--text-secondary)", marginBottom: 18, lineHeight: 1.6 }}>
                   🛡️ <strong>Permanent Audit History:</strong> This summary is saved in <strong>Security &gt; Audit Log</strong> for complete compliance tracking. Outbound messages are recorded in each customer&apos;s history and in <strong>WhatsApp Inbox</strong>, where AI responds to replies automatically.
                 </div>
@@ -2743,14 +2757,18 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
                       <span style={{ fontSize: 10.5, color: "var(--text-muted)", alignSelf: "center" }}>Quick presets:</span>
                       {[
-                        { name: "loan_application_form", label: "📄 loan_application_form" },
-                        { name: "call_followup", label: "📞 call_followup" },
-                        { name: "missed_call_followup", label: "⚠️ missed_call_followup" },
+                        { name: "hello_world", lang: "en_US", label: "🌍 hello_world (Instant Meta Test)" },
+                        { name: "loan_application_form", lang: "en", label: "📄 loan_application_form" },
+                        { name: "call_followup", lang: "en", label: "📞 call_followup" },
+                        { name: "missed_call_followup", lang: "en", label: "⚠️ missed_call_followup" },
                       ].map((p) => (
                         <button
                           key={p.name}
                           type="button"
-                          onClick={() => setBulkWaTemplateName(p.name)}
+                          onClick={() => {
+                            setBulkWaTemplateName(p.name)
+                            if (p.lang) setBulkWaTemplateLang(p.lang)
+                          }}
                           style={{
                             fontSize: 11,
                             padding: "3px 8px",
@@ -2776,6 +2794,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                           onChange={(e) => setBulkWaTemplateLang(e.target.value)}
                           style={{ width: "100%", height: 34, fontSize: 12, padding: "0 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)" }}
                         >
+                          <option value="en_US">English US (en_US)</option>
                           <option value="en">English (en)</option>
                           <option value="te">Telugu (te)</option>
                           <option value="hi">Hindi (hi)</option>

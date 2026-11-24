@@ -640,19 +640,21 @@ export async function sendWhatsAppTemplate(
   if (dnd) return dnd
 
   const components: any[] = []
-  if (options?.bodyVariables && options.bodyVariables.length > 0) {
-    components.push({
-      type: "body",
-      parameters: options.bodyVariables.map((v) => ({ type: "text", text: String(v) })),
-    })
-  }
-  if (options?.buttonUrlVariable) {
-    components.push({
-      type: "button",
-      sub_type: "url",
-      index: "0",
-      parameters: [{ type: "text", text: String(options.buttonUrlVariable) }],
-    })
+  if (templateName !== "hello_world") {
+    if (options?.bodyVariables && options.bodyVariables.length > 0) {
+      components.push({
+        type: "body",
+        parameters: options.bodyVariables.map((v) => ({ type: "text", text: String(v) })),
+      })
+    }
+    if (options?.buttonUrlVariable) {
+      components.push({
+        type: "button",
+        sub_type: "url",
+        index: "0",
+        parameters: [{ type: "text", text: String(options.buttonUrlVariable) }],
+      })
+    }
   }
 
   const payload: any = {
