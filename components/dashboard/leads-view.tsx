@@ -442,6 +442,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
   const [bulkWaIncludeLink, setBulkWaIncludeLink] = useState(true)
   const [bulkWaProduct, setBulkWaProduct] = useState("Home Loan")
   const [bulkWaBusy, setBulkWaBusy] = useState(false)
+  const [bulkWaResult, setBulkWaResult] = useState<{ total: number; sentCount: number; skippedDnd: number; failedCount: number } | null>(null)
 
   // ── Lead Name & Details Editing ──
   const [editingLeadId, setEditingLeadId] = useState<string | null>(null)
@@ -664,8 +665,12 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
       })
       const d = await res.json()
       if (res.ok) {
-        toast.success(`Sent WhatsApp to ${d.sentCount} lead${d.sentCount === 1 ? "" : "s"}!${d.skippedDnd ? ` (${d.skippedDnd} skipped on DND)` : ""}${d.failedCount ? ` (${d.failedCount} failed)` : ""}`)
-        setShowBulkWaModal(false)
+        setBulkWaResult({
+          total: d.total || selectedIds.length,
+          sentCount: d.sentCount || 0,
+          skippedDnd: d.skippedDnd || 0,
+          failedCount: d.failedCount || 0,
+        })
         setSelectedIds([])
       } else {
         toast.error(d.error || "Failed to send bulk WhatsApp")
@@ -1720,6 +1725,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
           </span>
           <button
             onClick={() => {
+              setBulkWaResult(null)
               setShowBulkWaModal(true)
             }}
             style={{
@@ -2573,7 +2579,12 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
               </div>
               <button
                 type="button"
-                onClick={() => !bulkWaBusy && setShowBulkWaModal(false)}
+                onClick={() => {
+                  if (!bulkWaBusy) {
+                    setBulkWaResult(null)
+                    setShowBulkWaModal(false)
+                  }
+                }}
                 className="icon-btn"
                 style={{ width: 28, height: 28 }}
               >
@@ -2581,7 +2592,54 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
               </button>
             </div>
 
-            <div style={{ fontSize: 12.5, color: "var(--text-secondary)", marginBottom: 16 }}>
+            {bulkWaResult ? (
+              <div>
+                <div style={{ textAlign: "center", padding: "12px 0 20px" }}>
+                  <div style={{ width: 52, height: 52, borderRadius: "50%", background: "rgba(34,197,94,0.15)", border: "2px solid #22c55e", display: "inline-flex", alignItems: "center", justifyContent: "center", color: "#22c55e", marginBottom: 12 }}>
+                    <CheckCircle2 size={26} strokeWidth={2.4} />
+                  </div>
+                  <div style={{ fontSize: 17, fontWeight: 700, color: "var(--text-primary)" }}>
+                    Bulk WhatsApp Campaign Sent!
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
+                    Results have been saved to your System Audit Log.
+                  </div>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 18 }}>
+                  <div style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 8px", textAlign: "center" }}>
+                    <div style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500 }}>Delivered</div>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: "#22c55e", marginTop: 4 }}>{bulkWaResult.sentCount}</div>
+                  </div>
+                  <div style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 8px", textAlign: "center" }}>
+                    <div style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500 }}>Skipped (DND)</div>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: "#eab308", marginTop: 4 }}>{bulkWaResult.skippedDnd}</div>
+                  </div>
+                  <div style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 8px", textAlign: "center" }}>
+                    <div style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500 }}>Failed</div>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: bulkWaResult.failedCount > 0 ? "#ef4444" : "var(--text-muted)", marginTop: 4 }}>{bulkWaResult.failedCount}</div>
+                  </div>
+                </div>
+
+                <div style={{ background: "rgba(37,211,102,0.06)", border: "1px solid rgba(37,211,102,0.2)", borderRadius: 10, padding: "12px 14px", fontSize: 11.5, color: "var(--text-secondary)", marginBottom: 18, lineHeight: 1.6 }}>
+                  🛡️ <strong>Permanent Audit History:</strong> This summary is saved in <strong>Security &gt; Audit Log</strong> for complete compliance tracking. Outbound messages are recorded in each customer&apos;s history and in <strong>WhatsApp Inbox</strong>, where AI responds to replies automatically.
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setBulkWaResult(null)
+                    setShowBulkWaModal(false)
+                  }}
+                  className="btn-primary"
+                  style={{ width: "100%", height: 38, fontSize: 13, fontWeight: 600 }}
+                >
+                  Done
+                </button>
+              </div>
+            ) : (
+              <>
+                <div style={{ fontSize: 12.5, color: "var(--text-secondary)", marginBottom: 16 }}>
               Blasting to <strong style={{ color: "var(--accent-green)" }}>{selectedIds.length} selected lead{selectedIds.length === 1 ? "" : "s"}</strong> over official Meta WhatsApp Cloud API.
             </div>
 
@@ -2718,9 +2776,11 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                 {bulkWaBusy ? "Sending…" : `Send to ${selectedIds.length} Lead${selectedIds.length === 1 ? "" : "s"}`}
               </button>
             </div>
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </div>
+    </div>
+  )}
 
       {memoryLeadId && (
         <LeadMemoryModal leadId={memoryLeadId} canEdit={canEdit} onClose={() => setMemoryLeadId(null)} />

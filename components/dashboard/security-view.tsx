@@ -8,7 +8,7 @@ import AiPauseCard from "./ai-pause-card"
 import SystemHealthView from "./system-health-view"
 
 type Setting = { key: string; enabled: boolean }
-type AuditLog = { id: string; action: string; performed_by: string; created_at: string }
+type AuditLog = { id: string; action: string; performed_by: string; created_at: string; metadata?: any }
 
 type ComplianceSettings = { enabled: boolean; startHour: number; endHour: number; days: string[] }
 type DndEntry = { phone: string; reason: string | null; source: string; created_at: string }
@@ -386,19 +386,51 @@ export default function SecurityView({ role = "admin" }: { role?: Role }) {
           {!loading && logs.length === 0 && (
             <div style={{ padding: 24, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>No audit events yet.</div>
           )}
-          {logs.map((log) => (
-            <div key={log.id} style={{ padding:"14px 24px",borderBottom:"1px solid var(--border-light)",display:"flex",alignItems:"center",gap:14 }}>
-              <span style={{ width:30,height:30,borderRadius:8,background:"var(--overlay-hover)",display:"inline-flex",alignItems:"center",justifyContent:"center",color:"var(--text-muted)",flexShrink:0 }}><FileLock2 size={14} strokeWidth={1.8} /></span>
-              <div style={{ flex:1 }}>
-                <div style={{ fontSize:14,fontWeight:500 }}>{log.action}</div>
-                <div style={{ fontSize:12,color:"var(--text-muted)",marginTop:2 }}>{log.performed_by}</div>
+          {logs.map((log) => {
+            let meta: any = null
+            if (log.metadata) {
+              if (typeof log.metadata === "object") meta = log.metadata
+              else if (typeof log.metadata === "string") {
+                try { meta = JSON.parse(log.metadata) } catch {}
+              }
+            }
+
+            return (
+              <div key={log.id} style={{ padding:"14px 24px",borderBottom:"1px solid var(--border-light)",display:"flex",alignItems:"center",gap:14 }}>
+                <span style={{ width:30,height:30,borderRadius:8,background:"var(--overlay-hover)",display:"inline-flex",alignItems:"center",justifyContent:"center",color:"var(--text-muted)",flexShrink:0 }}><FileLock2 size={14} strokeWidth={1.8} /></span>
+                <div style={{ flex:1 }}>
+                  <div style={{ fontSize:14,fontWeight:500,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap" }}>
+                    <span>{log.action}</span>
+                    {meta?.sentCount !== undefined && (
+                      <span style={{ display:"inline-flex",alignItems:"center",gap:6,fontSize:11,fontWeight:600 }}>
+                        <span style={{ background:"rgba(34,197,94,0.15)",color:"#22c55e",padding:"2px 8px",borderRadius:5 }}>
+                          ✅ {meta.sentCount} sent
+                        </span>
+                        {meta.skippedDnd > 0 && (
+                          <span style={{ background:"rgba(234,179,8,0.15)",color:"#eab308",padding:"2px 8px",borderRadius:5 }}>
+                            🛡️ {meta.skippedDnd} DND
+                          </span>
+                        )}
+                        {meta.failedCount > 0 && (
+                          <span style={{ background:"rgba(239,68,68,0.15)",color:"#ef4444",padding:"2px 8px",borderRadius:5 }}>
+                            ❌ {meta.failedCount} failed
+                          </span>
+                        )}
+                        <span style={{ color:"var(--text-muted)",fontSize:10.5 }}>
+                          (of {meta.total} leads)
+                        </span>
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize:12,color:"var(--text-muted)",marginTop:2 }}>{log.performed_by}</div>
+                </div>
+                <div style={{ fontSize:12,color:"var(--text-muted)",whiteSpace:"nowrap",textAlign:"right" }}>
+                  <div>{timeAgo(log.created_at)}</div>
+                  <div style={{ fontSize:10.5 }}>{formatDateTime(log.created_at)}</div>
+                </div>
               </div>
-              <div style={{ fontSize:12,color:"var(--text-muted)",whiteSpace:"nowrap",textAlign:"right" }}>
-                <div>{timeAgo(log.created_at)}</div>
-                <div style={{ fontSize:10.5 }}>{formatDateTime(log.created_at)}</div>
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       </div>
 
