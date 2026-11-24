@@ -117,7 +117,7 @@ export const WA_CALLBACK_GREETINGS = DEFAULT_VOICE_OPENERS.whatsappCallback
 // Plain "thank you" / "धन्यवाद" / "ధన్యవాదాలు" must NOT hang up —
 // Priya says thanks naturally in the middle of a conversation.
 export const GOODBYE_RE =
-  /\b(goodbye|bye|bye[- ]?bye|take care)\b|have a (great|good|nice|wonderful) day|din shubh ho|phir milenge|alvida|manchi roju|selavu|veedkolu|अलविदा|फिर मिलेंगे|दिन शुभ हो|వీడ్కోలు|సెలవు|మంచి రోజు జరగాలి/i
+  /\b(goodbye|bye|bye[- ]?bye|take care)\b|have a (great|good|nice|wonderful) day|din shubh ho|phir milenge|alvida|manchi roju|selavu|veedkolu|call cut చేస్తున్నా|call cut chestunna|phone cut చేస్తున్నా|phone cut chestunna|call cut చేస్తాను|call cut chesthanu|call disconnect|अलविदा|फिर मिलेंगे|दिन शुभ हो|వీడ్కోలు|సెలవు|మంచి రోజు జరగాలి/i
 
 // ==============================================================================
 // INTENT HIERARCHY: DND -> CALLBACK -> UNAMBIGUOUS GOODBYE -> CONFIRMATION CHECK
@@ -166,17 +166,32 @@ export const CONTINUATION_INTENT_RE = new RegExp(
   'i'
 )
 
+// 2b. EXPLICIT CALL DISCONNECT / HANGUP COMMANDS:
+// When the caller explicitly tells Priya to cut or disconnect the call.
+export const CALL_DISCONNECT_RE = new RegExp(
+  '\\b(' +
+  '(?:calls?|phone|callulu)\\s+(?:cut\\s+cheyandi|cut\\s+cheyyandi|cut\\s+chey|cut\\s+chesta|cut\\s+chestha|cut\\s+chestunna|cut\\s+cheyoddu|pettandi|pettestunna|pettestha|pettesthunna|disconnect\\s+cheyandi|disconnect\\s+kandi)|' +
+  'cut\\s+(?:the\\s+)?(?:call|calls|phone)|cut\\s+(?:call|calls|phone)|' +
+  'disconnect\\s+(?:the\\s+)?(?:call|calls|phone)|hang\\s*up|end\\s+(?:the\\s+)?call|' +
+  '(?:call|calls|phone)\\s+(?:kaat\\s+do|kat\\s+do|cut\\s+karo|cut\\s+kardo|rakho|rakh\\s+do|kaatna)' +
+  ')\\b|' +
+  'కాల్ కట్ చేయండి|కాల్స్ కట్ చేయండి|కాల్ కట్|కాల్ పెట్టండి|ఫోన్ కట్ చేయండి|ఫోన్ పెట్టండి|కాల్ డిస్‌కనెక్ట్ చేయండి|' +
+  'कॉल काट दो|कॉल कट करो|फोन काट दो|फोन रखो|कॉल कट कर दो',
+  'i'
+)
+
 // 3. UNAMBIGUOUS GOODBYES:
 // Explicit sign-offs that cannot be mistaken for mid-conversation fillers.
 export const UNAMBIGUOUS_GOODBYE_RE = new RegExp(
   '\\b(' +
   'bye|goodbye|bye[- ]?bye|bye bye|thanks bye|thank you bye|sare bye|ok bye|okay bye|chalo bye|' +
   'catch you later|talk to you later|see you later|catch up later|call you later|have a good day|have a nice day|good night|take care|bye for now|talk later|' +
+  'calls? cut cheyandi|calls? cut cheyyandi|calls? cut chestunna|calls? cut chestha|calls? pettandi|' +
   'phone pettestunna|phone pettestha|phone pettesthunna|phone cut chestunna|phone cut chestha|phone pettandi|phone cut cheyyandi|' +
   'selavu|veedkolu|alvida|phir milenge' +
   ')\\b|' +
   '^(?:sare|ok|okay)[\\s,]+(?:andi[\\s,]+)?(?:thank you|thanks)?\\s*bye[!.]*$|' +
-  'ఫోన్ పెట్టేస్తున్నా|ఫోన్ కట్ చేస్తున్నా|ఫోన్ పెట్టండి|సెలవు|వీడ్కోలు|సరే బాయ్|ఓకే బాయ్|బాయ్|अलविदा|बाय|फोन रख रहा हूँ|फोन रख रही हूँ',
+  'కాల్ కట్ చేయండి|కాల్స్ కట్ చేయండి|ఫోన్ పెట్టేస్తున్నా|ఫోన్ కట్ చేస్తున్నా|ఫోన్ పెట్టండి|సెలవు|వీడ్కోలు|సరే బాయ్|ఓకే బాయ్|బాయ్|अलविदा|बाय|फोन रख रहा हूँ|फोन रख रही हूँ',
   'i'
 )
 
@@ -1172,8 +1187,8 @@ export async function handleTurn(opts: {
       return { text: reply, hangup: true }
     }
 
-    // 5. UNAMBIGUOUS GOODBYE: Clear sign-off without contrast/continuation
-    if (history.length > 0 && UNAMBIGUOUS_GOODBYE_RE.test(speech)) {
+    // 5. UNAMBIGUOUS GOODBYE OR DISCONNECT COMMAND: Clear sign-off without contrast/continuation
+    if (history.length > 0 && (UNAMBIGUOUS_GOODBYE_RE.test(speech) || CALL_DISCONNECT_RE.test(speech))) {
       const reply = getVoiceClosingsSnapshot().goodbye[language]
       updateTranscriptAsync(callSid, speech, reply)
       if (callSid) {
@@ -1261,9 +1276,10 @@ export async function handleTurn(opts: {
   // Same guard as the early bye-check above: without history.length > 0 a
   // pickup utterance like "sare andi" / "ok andi" matched here AFTER Priya's
   // first reply and hung the call up immediately.
-  const isCustomerEnding = history.length > 0 && !hasContinuation && (UNAMBIGUOUS_GOODBYE_RE.test(speech) || (AMBIGUOUS_CLOSING_RE.test((speech || "").trim()) && isAfterDoubtInquiry(history)))
+  const isCustomerDisconnect = CALL_DISCONNECT_RE.test(speech)
+  const isCustomerEnding = isCustomerDisconnect || (history.length > 0 && !hasContinuation && (UNAMBIGUOUS_GOODBYE_RE.test(speech) || (AMBIGUOUS_CLOSING_RE.test((speech || "").trim()) && isAfterDoubtInquiry(history))))
   const isCustomerActive = /\b(bank|loan|rate|interest|emi|lakh|address|office|document|sbi|hdfc|icici|kavali|cheppandi|enduku|ela|details|doubt|process)\b/i.test(speech)
-  const isPriyaEnding = !hasContinuation && !isCustomerActive && GOODBYE_RE.test(reply) && (history.length >= 3 && (UNAMBIGUOUS_GOODBYE_RE.test(speech) || AMBIGUOUS_CLOSING_RE.test((speech || "").trim()) || isAfterDoubtInquiry(history)))
+  const isPriyaEnding = !hasContinuation && !isCustomerActive && GOODBYE_RE.test(reply) && (history.length >= 2 || isCustomerDisconnect)
   const hangup = isCustomerEnding || isPriyaEnding
   if (hangup && callSid) {
     db.from("voice_calls").update({ status: "completed" }).eq("twilio_call_sid", callSid).catch(() => {})
@@ -1356,8 +1372,8 @@ export async function handleTurnStream(
       return { hangup: true }
     }
 
-    // 5. UNAMBIGUOUS GOODBYE
-    if (history.length > 0 && UNAMBIGUOUS_GOODBYE_RE.test(speech)) {
+    // 5. UNAMBIGUOUS GOODBYE OR DISCONNECT COMMAND
+    if (history.length > 0 && (UNAMBIGUOUS_GOODBYE_RE.test(speech) || CALL_DISCONNECT_RE.test(speech))) {
       const reply = getVoiceClosingsSnapshot().goodbye[language]
       updateTranscriptAsync(callSid, speech, reply)
       onSentence(reply)
@@ -1457,9 +1473,10 @@ export async function handleTurnStream(
 
   // Same guard as the early bye-check: no history → never hang up on the
   // strength of a single pickup utterance ("sare andi" right after pickup).
-  const isCustomerEnding = history.length > 0 && !hasContinuation && (UNAMBIGUOUS_GOODBYE_RE.test(speech) || (AMBIGUOUS_CLOSING_RE.test((speech || "").trim()) && isAfterDoubtInquiry(history)))
+  const isCustomerDisconnect = CALL_DISCONNECT_RE.test(speech)
+  const isCustomerEnding = isCustomerDisconnect || (history.length > 0 && !hasContinuation && (UNAMBIGUOUS_GOODBYE_RE.test(speech) || (AMBIGUOUS_CLOSING_RE.test((speech || "").trim()) && isAfterDoubtInquiry(history))))
   const isCustomerActive = /\b(bank|loan|rate|interest|emi|lakh|address|office|document|sbi|hdfc|icici|kavali|cheppandi|enduku|ela|details|doubt|process)\b/i.test(speech)
-  const isPriyaEnding = !hasContinuation && !isCustomerActive && GOODBYE_RE.test(reply) && (history.length >= 3 && (UNAMBIGUOUS_GOODBYE_RE.test(speech) || AMBIGUOUS_CLOSING_RE.test((speech || "").trim()) || isAfterDoubtInquiry(history)))
+  const isPriyaEnding = !hasContinuation && !isCustomerActive && GOODBYE_RE.test(reply) && (history.length >= 2 || isCustomerDisconnect)
   const hangup = isCustomerEnding || isPriyaEnding
   if (hangup && callSid) {
     db.from("voice_calls").update({ status: "completed" }).eq("twilio_call_sid", callSid).catch(() => {})
