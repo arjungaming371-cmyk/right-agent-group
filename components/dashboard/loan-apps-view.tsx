@@ -8,9 +8,10 @@ import {
   Settings2, Tag, ChevronDown, History, Info
 } from "lucide-react"
 import { formatCurrency, timeAgo, formatDateTime } from "@/lib/utils"
-import { usePolling } from "@/lib/use-poll"
+import { usePolling, broadcastCrmSync } from "@/lib/use-poll"
 import { SkeletonList } from "../ui/skeleton"
 import { useToast } from "../ui/toast"
+import { COMMON_LOAN_TYPES } from "@/lib/products"
 
 type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
 
@@ -33,17 +34,6 @@ export interface CustomStatus {
   is_default: boolean
   sort_order: number
 }
-
-const COMMON_LOAN_TYPES = [
-  "Home Loan",
-  "Personal Loan",
-  "Business Loan",
-  "Loan Against Property",
-  "Education Loan",
-  "Car Loan",
-  "Mortgage Loan",
-  "Gold Loan",
-]
 
 const STATUS_COLOR_PRESETS = [
   { name: "Violet", color: "#8B5CF6", bg: "rgba(139,92,246,0.15)" },
@@ -240,6 +230,7 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
           )
         )
         setActiveRemarkApp(null)
+        broadcastCrmSync()
       } else {
         const d = await res.json().catch(() => ({}))
         toast.error(d.error || "Failed to save remarks")
@@ -330,6 +321,7 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
         setInternalApps((prev) =>
           prev.map((a) => (a.id === app.id ? { ...a, status: newStatus } : a))
         )
+        broadcastCrmSync()
       } else {
         const d = await res.json().catch(() => ({}))
         toast.error(d.error || "Could not update status")

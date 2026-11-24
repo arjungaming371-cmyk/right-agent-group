@@ -52,7 +52,7 @@ export async function GET(req: NextRequest) {
         SELECT
           count(*) FILTER (WHERE status = 'new')       AS new,
           count(*) FILTER (WHERE status = 'contacted')  AS contacted,
-          count(*) FILTER (WHERE (status IN ('qualified', 'interested', 'form_opened', 'approved', 'docs_pending', 'link_sent') OR score >= 70))  AS qualified,
+          count(*) FILTER (WHERE (status IN ('qualified', 'interested', 'form_opened', 'approved', 'docs_pending', 'link_sent', 'sanctioned', 'disbursed') OR score >= 70))  AS qualified,
           (SELECT count(*) FROM loan_applications WHERE ${B("branch_id")})      AS applied
         FROM leads
         WHERE ${B("branch_id")}
@@ -80,7 +80,7 @@ export async function GET(req: NextRequest) {
           (SELECT count(*)::int FROM leads WHERE ${B("branch_id")})                                          AS total_leads,
           (SELECT count(*)::int FROM voice_calls WHERE ${B("branch_id")} AND created_at > now() - (${dayParam}::int * interval '1 day')) AS total_calls,
           (SELECT count(*)::int FROM whatsapp_messages WHERE ${B("branch_id")} AND created_at > now() - (${dayParam}::int * interval '1 day')) AS total_messages,
-          (SELECT count(*)::int FROM leads WHERE ${B("branch_id")} AND (status IN ('qualified', 'interested', 'form_opened', 'approved', 'docs_pending', 'link_sent') OR score >= 70)) AS qualified_leads,
+          (SELECT count(*)::int FROM leads WHERE ${B("branch_id")} AND (status IN ('qualified', 'interested', 'form_opened', 'approved', 'docs_pending', 'link_sent', 'sanctioned', 'disbursed') OR score >= 70)) AS qualified_leads,
           (SELECT COALESCE(avg(duration), 0)::int FROM voice_calls WHERE ${B("branch_id")} AND duration > 0 AND created_at > now() - (${dayParam}::int * interval '1 day')) AS avg_duration,
           (SELECT count(*)::int FROM voice_calls WHERE ${B("branch_id")} AND (duration > 0 OR outcome IN ('completed', 'answered', 'resolved')) AND created_at > now() - (${dayParam}::int * interval '1 day')) AS connected_calls,
           (SELECT count(*)::int FROM voice_calls WHERE ${B("branch_id")} AND (outcome IN ('resolved', 'completed', 'answered') OR status = 'completed') AND created_at > now() - (${dayParam}::int * interval '1 day')) AS resolved_calls,

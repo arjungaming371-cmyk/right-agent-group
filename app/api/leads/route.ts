@@ -6,6 +6,7 @@ import { sessionBranchId } from "@/lib/branches"
 import { logAudit } from "@/lib/audit"
 import { normalizePhone, phoneLast10, PHONE_MATCH_SQL } from "@/lib/phone"
 import { maybeSpeedToLead } from "@/lib/speed-to-lead"
+import { invalidateLeadBriefCache } from "@/lib/lead-brain"
 
 // leads.lead_code only exists once migrations/2026-07-31_lead_code.sql has
 // been applied. Naming a missing column in the WHERE clause makes Postgres
@@ -167,7 +168,8 @@ export async function GET(req: NextRequest) {
     // whichever is newest — NOT score.
     const res = await query(
       `SELECT leads.*, fl.form_token, fl.form_used_at, fl.form_sent_at,
-              igm.last_message, igm.last_direction, igm.last_type, igm.last_interaction_at
+              igm.last_message, igm.last_direction, igm.last_type, igm.last_interaction_at,
+              la.loan_app_id, la.loan_status, la.loan_status_reason, la.loan_remarks, la.app_loan_type, la.app_loan_amount, la.loan_submitted_at
        FROM leads
        LEFT JOIN LATERAL (
          SELECT token AS form_token, clicked_at AS form_used_at, created_at AS form_sent_at
@@ -186,6 +188,12 @@ export async function GET(req: NextRequest) {
          WHERE instagram_messages.lead_id = leads.id
          ORDER BY created_at DESC LIMIT 1
        ) igm ON true
+       LEFT JOIN LATERAL (
+         SELECT id AS loan_app_id, status AS loan_status, status_reason AS loan_status_reason, remarks AS loan_remarks, loan_type AS app_loan_type, loan_amount AS app_loan_amount, submitted_at AS loan_submitted_at
+         FROM loan_applications
+         WHERE loan_applications.lead_id = leads.id OR (loan_applications.phone = leads.phone AND leads.phone IS NOT NULL AND leads.phone <> '')
+         ORDER BY submitted_at DESC LIMIT 1
+       ) la ON true
        ${whereClause}
        ORDER BY
          leads.pinned DESC,
@@ -305,6 +313,49 @@ export async function PATCH(req: NextRequest) {
   const { data, error } = await leadQuery.eq("id", id).select().single()
   if (error) return apiError(error)
   if (!data) return NextResponse.json({ error: "lead not found in your branch" }, { status: 404 })
+
+  // Two-way synchronization: cascade updates to loan_applications & outbound_queue
+  invalidateLeadBriefCache(id)
+
+  const syncName = cleanUpdates.name ? String(cleanUpdates.name).trim() : null
+  const syncPhone = cleanUpdates.phone ? String(cleanUpdates.phone).trim() : null
+  const syncProduct = cleanUpdates.product_interest ? String(cleanUpdates.product_interest).trim() : null
+  const syncAmount = cleanUpdates.loan_amount !== undefined ? cleanUpdates.loan_amount : null
+  const syncStatus = cleanUpdates.status ? String(cleanUpdates.status).trim() : null
+
+  // 1. Sync to loan_applications
+  await query(
+    `UPDATE loan_applications
+     SET customer_name = COALESCE($1, customer_name),
+         full_name = COALESCE($1, full_name),
+         phone = COALESCE($2, phone),
+         whatsapp_number = COALESCE($2, whatsapp_number),
+         loan_type = COALESCE($3, loan_type),
+         loan_amount = COALESCE($4, loan_amount),
+         status = COALESCE($5, status)
+     WHERE lead_id = $6::uuid OR (phone = $7 AND $7 IS NOT NULL AND $7 <> '')`,
+    [
+      syncName,
+      syncPhone,
+      syncProduct,
+      syncAmount,
+      syncStatus,
+      id,
+      data.phone || null,
+    ]
+  ).catch(() => {})
+
+  // 2. Sync to pending calls in outbound_queue
+  if (syncName || syncPhone) {
+    await query(
+      `UPDATE outbound_queue
+       SET lead_name = COALESCE($1, lead_name),
+           phone = COALESCE($2, phone)
+       WHERE phone = $3 AND status = 'pending'`,
+      [syncName, syncPhone, data.phone]
+    ).catch(() => {})
+  }
+
   logAudit("lead updated", session.email, { leadId: id, fields: Object.keys(cleanUpdates) })
   return NextResponse.json(data)
 }

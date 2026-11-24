@@ -56,4 +56,15 @@ export const PRODUCT_GROUPS: { label: string; products: string[] }[] = [
   },
 ]
 
+export const COMMON_LOAN_TYPES = [
+  "Home Loan",
+  "Personal Loan",
+  "Business Loan",
+  "Loan Against Property",
+  "Education Loan",
+  "Car Loan",
+  "Mortgage Loan",
+  "Gold Loan",
+]
+
 export const LOAN_TYPES = PRODUCT_GROUPS.flatMap((g) => g.products)

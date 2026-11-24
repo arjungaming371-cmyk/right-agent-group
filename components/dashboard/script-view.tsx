@@ -733,7 +733,7 @@ export default function ScriptView() {
             <div>
               <label style={{ fontSize: 11, color: "var(--text-muted)", display: "block", marginBottom: 3 }}>Product</label>
               <select value={gen.product} onChange={(e) => setGen({ ...gen, product: e.target.value })} style={{ width: "100%" }}>
-                <option>Home Loan</option><option>Personal Loan</option><option>Business Loan</option><option>Loan Against Property</option>
+                <option>Home Loan</option><option>Personal Loan</option><option>Business Loan</option><option>Loan Against Property</option><option>Education Loan</option><option>Car Loan</option><option>Mortgage Loan</option><option>Gold Loan</option>
               </select>
             </div>
             <div>

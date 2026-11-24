@@ -9,7 +9,7 @@ import {
 } from "lucide-react"
 import { formatCurrency, timeAgo, formatDateTime } from "@/lib/utils"
 import { pctOf } from "@/lib/maths"
-import { usePolling } from "@/lib/use-poll"
+import { usePolling, broadcastCrmSync } from "@/lib/use-poll"
 import { useToast } from "../ui/toast"
 import { useEscapeDismiss } from "../ui/interactive"
 import { Skeleton } from "../ui/skeleton"
@@ -18,7 +18,7 @@ import VoiceDictation from "../ui/voice-dictation"
 import { smartFilter } from "@/lib/smart-search"
 import { checkAgendaRules } from "@/lib/agenda-rules"
 
-import { PRODUCT_GROUPS, LOAN_TYPES } from "@/lib/products"
+import { PRODUCT_GROUPS, LOAN_TYPES, COMMON_LOAN_TYPES } from "@/lib/products"
 
 type Lead = {
   id: string; name: string; phone: string | null; address: string; whatsapp_number: string
@@ -27,9 +27,13 @@ type Lead = {
   form_token: string | null; form_used_at: string | null; form_sent_at: string | null
   form_completed: boolean
   pinned?: boolean; pinned_at?: string | null
-  // Short human-readable code (RAG-0001). Optional because a row fetched
-  // before the 2026-07-31_lead_code migration has run won't carry one.
   lead_code?: string | null
+  loan_app_id?: string | null
+  loan_status?: string | null
+  loan_status_reason?: string | null
+  loan_remarks?: string | null
+  app_loan_type?: string | null
+  app_loan_amount?: number | null
   // Instagram Separation (2026-09-26): lane fields. source/instagram_handle
   // power the IG-origin badge in the CRM tab; the prospect fields power the
   // Instagram Prospects tab. Optional so pre-migration rows render fine.
@@ -161,18 +165,25 @@ function ScoreBadge({ score }: { score: number }) {
 }
 
 const STATUS_STYLES: Record<string, { bg: string; color: string; label: string }> = {
+  sanctioned:     { bg: "rgba(56,189,248,0.15)", color: "#38bdf8",            label: "Sanctioned" },
+  disbursed:      { bg: "rgba(34,197,94,0.15)",  color: "#22c55e",            label: "Disbursed" },
   qualified:      { bg: "rgba(34,197,94,0.15)",  color: "var(--accent-green)", label: "Qualified" },
   interested:     { bg: "rgba(34,197,94,0.15)",  color: "var(--accent-green)", label: "Interested" },
   contacted:      { bg: "rgba(59,130,246,0.15)", color: "var(--accent-blue)",  label: "Contacted" },
   approved:       { bg: "rgba(16,185,129,0.15)", color: "#10b981",            label: "Approved" },
   in_progress:    { bg: "rgba(245,158,11,0.15)", color: "var(--accent-yellow)",label: "In Progress" },
+  pending:        { bg: "rgba(234,179,8,0.15)",  color: "var(--accent-yellow)",label: "Under Review" },
   new:            { bg: "rgba(139,124,255,0.15)",color: "var(--accent-violet)",label: "New" },
   not_interested: { bg: "rgba(239,68,68,0.15)",  color: "var(--accent-red)",   label: "Not Interested" },
-  rejected:       { bg: "rgba(239,68,68,0.15)",  color: "var(--accent-red)",   label: "Rejected" },
+  rejected:       { bg: "rgba(239,68,68,0.15)",  color: "var(--accent-red)",   label: "Not Sanctioned / Rejected" },
   unknown:        { bg: "rgba(100,116,139,0.15)",color: "var(--text-secondary)", label: "Pending" },
 }
 
 function getLeadStatusStyle(lead: Lead) {
+  // If loan application status exists, it reflects the true finance pipeline status
+  const loanSt = String(lead.loan_status || "").toLowerCase().trim()
+  if (loanSt && STATUS_STYLES[loanSt]) return STATUS_STYLES[loanSt]
+
   const st = String(lead.status || "").toLowerCase().trim()
   if (st && STATUS_STYLES[st]) return STATUS_STYLES[st]
   const inst = String(lead.interested || "").toLowerCase().trim()
@@ -494,6 +505,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
       } else {
         toast.success(`Lead name updated to "${trimmed}"`)
         setEditingLeadId(null)
+        broadcastCrmSync()
       }
     } catch {
       toast.error("Failed to update lead name — check connection")
@@ -560,6 +572,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
         setLeads((prev) => prev.map((l) => (l.id === editModalLead.id ? { ...l, ...updated } : l)))
         toast.success(`Lead "${trimmedName}" updated`)
         setEditModalLead(null)
+        broadcastCrmSync()
       } else {
         const d = await res.json().catch(() => ({}))
         toast.error(d.error || "Failed to update lead")
@@ -1657,6 +1670,11 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                   <td style={{ padding: "8px 10px", fontWeight: 600, fontSize: 12.5, whiteSpace: "nowrap" }}>{lead.loan_amount ? formatCurrency(lead.loan_amount) : "—"}</td>
                   <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
                     <span style={{ background: ist.bg, color: ist.color, borderRadius: 5, padding: "2px 7px", fontSize: 11, fontWeight: 600 }}>{ist.label}</span>
+                    {lead.loan_status_reason && (
+                      <div style={{ fontSize: 9.5, color: ist.color, marginTop: 2, maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={`Reason: ${lead.loan_status_reason}${lead.loan_remarks ? ` | Note: ${lead.loan_remarks}` : ""}`}>
+                        {lead.loan_status_reason}
+                      </div>
+                    )}
                   </td>
                   <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}><FormLinkCell lead={lead} /></td>
                   <td style={{ padding: "8px 10px", fontSize: 12, color: "var(--text-secondary)", textAlign: "center", fontVariantNumeric: "tabular-nums" }}>{lead.call_count ?? 0}</td>
@@ -2534,12 +2552,9 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                   onChange={(e) => setBankProduct(e.target.value)}
                   style={{ width: "100%", height: 38, fontSize: 13, padding: "0 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)" }}
                 >
-                  <option value="Home Loan">Home Loan</option>
-                  <option value="Personal Loan">Personal Loan</option>
-                  <option value="Business Loan">Business Loan</option>
-                  <option value="Loan Against Property">Loan Against Property</option>
-                  <option value="Education Loan">Education Loan</option>
-                  <option value="Car Loan">Car Loan</option>
+                  {COMMON_LOAN_TYPES.map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
                 </select>
               </div>
             </div>
@@ -2776,11 +2791,9 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                           onChange={(e) => setBulkWaProduct(e.target.value)}
                           style={{ width: "100%", height: 34, fontSize: 12, padding: "0 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)" }}
                         >
-                          <option value="Home Loan">Home Loan</option>
-                          <option value="Personal Loan">Personal Loan</option>
-                          <option value="Business Loan">Business Loan</option>
-                          <option value="Loan Against Property">Loan Against Property</option>
-                          <option value="Gold Loan">Gold Loan</option>
+                          {COMMON_LOAN_TYPES.map((t) => (
+                            <option key={t} value={t}>{t}</option>
+                          ))}
                         </select>
                       </div>
                     </div>
@@ -2861,11 +2874,9 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                             onChange={(e) => setBulkWaProduct(e.target.value)}
                             style={{ width: "100%", height: 34, fontSize: 12, padding: "0 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)" }}
                           >
-                            <option value="Home Loan">Home Loan</option>
-                            <option value="Personal Loan">Personal Loan</option>
-                            <option value="Business Loan">Business Loan</option>
-                            <option value="Loan Against Property">Loan Against Property</option>
-                            <option value="Car Loan">Car Loan</option>
+                            {COMMON_LOAN_TYPES.map((t) => (
+                              <option key={t} value={t}>{t}</option>
+                            ))}
                           </select>
                         </div>
                       )}

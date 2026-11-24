@@ -120,15 +120,58 @@ export const PATCH = withRoute("loans", async (req: NextRequest) => {
       [JSON.stringify([historyEntry]), id]
     ).catch(() => {})
 
-    // Invalidate lead brief cache and record interaction if lead_id exists
-    if (data.lead_id) {
-      invalidateLeadBriefCache(data.lead_id)
-      const summaryText = `Status: ${updates.status || data.status}${updates.status_reason ? ` (${updates.status_reason})` : ""}${updates.remarks ? ` — Note: ${updates.remarks}` : ""}`
+    // Invalidate lead brief cache and sync status/remarks to leads table
+    const targetLeadId = data.lead_id
+    const targetPhone = data.phone
+    const newStatus = String(updates.status || data.status)
+    const summaryText = `Status: ${newStatus}${updates.status_reason ? ` (${updates.status_reason})` : ""}${updates.remarks ? ` — Note: ${updates.remarks}` : ""}`
+
+    if (targetLeadId || targetPhone) {
+      if (targetLeadId) invalidateLeadBriefCache(targetLeadId)
+      
+      // Sync status & append remark to leads.notes
       await query(
-        `INSERT INTO lead_interactions (lead_id, channel, direction, one_line_summary, occurred_at)
-         VALUES ($1, 'manual', 'out', $2, now())
-         ON CONFLICT DO NOTHING`,
-        [data.lead_id, summaryText.slice(0, 500)]
+        `UPDATE leads
+         SET status = $1,
+             notes = CASE 
+               WHEN notes IS NULL OR notes = '' THEN $2 
+               ELSE notes || E'\n' || $2 
+             END,
+             updated_at = now()
+         WHERE (id = $3::uuid OR (phone = $4 AND $4 IS NOT NULL AND $4 <> ''))`,
+        [newStatus, `[Loan Status Update] ${summaryText}`, targetLeadId || null, targetPhone || null]
+      ).catch(() => {})
+
+      if (targetLeadId) {
+        await query(
+          `INSERT INTO lead_interactions (lead_id, channel, direction, one_line_summary, occurred_at)
+           VALUES ($1, 'manual', 'out', $2, now())
+           ON CONFLICT DO NOTHING`,
+          [targetLeadId, summaryText.slice(0, 500)]
+        ).catch(() => {})
+      }
+    }
+  }
+
+  // Two-way sync: If customer details (name, phone, amount, type) were modified in loan_applications, sync back to leads
+  if (data.lead_id || data.phone) {
+    const rawAny = raw as Record<string, any>
+    const nameToSync = rawAny.customer_name || rawAny.full_name
+    const phoneToSync = rawAny.phone || rawAny.whatsapp_number
+    const amountToSync = rawAny.loan_amount
+    const typeToSync = rawAny.loan_type
+
+    if (nameToSync || phoneToSync || amountToSync || typeToSync) {
+      await query(
+        `UPDATE leads
+         SET name = COALESCE($1, name),
+             phone = COALESCE($2, phone),
+             whatsapp_number = COALESCE($2, whatsapp_number),
+             loan_amount = COALESCE($3, loan_amount),
+             product_interest = COALESCE($4, product_interest),
+             updated_at = now()
+         WHERE (id = $5::uuid OR (phone = $6 AND $6 IS NOT NULL AND $6 <> ''))`,
+        [nameToSync || null, phoneToSync || null, amountToSync || null, typeToSync || null, data.lead_id || null, data.phone || null]
       ).catch(() => {})
     }
   }

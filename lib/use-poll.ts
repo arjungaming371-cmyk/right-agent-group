@@ -41,6 +41,16 @@ let activePollingView: string | null = null
 
 export function setActivePollingView(key: string | null): void {
   activePollingView = key
+  if (typeof window !== "undefined" && key) {
+    window.dispatchEvent(new CustomEvent("active-view-changed", { detail: key }))
+  }
+}
+
+/** Broadcasts a global sync signal across all open dashboard views when data changes */
+export function broadcastCrmSync(): void {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("crm-sync"))
+  }
 }
 
 /** Provided per-view by the shell's keep-alive hosts; null elsewhere. */
@@ -76,19 +86,37 @@ export function usePolling(fn: () => void, intervalMs: number): void {
       if (document.hidden) {
         stop()
       } else {
-        // Catch up immediately rather than making the user wait out a full
-        // interval on a screen they just came back to. tick() (not
-        // saved.current()) so a parked view's catch-up is skipped too.
         tick()
         start()
       }
     }
 
+    const onViewChange = (e: any) => {
+      // Immediately refresh when the user switches to this view tab
+      if (viewKey && e?.detail === viewKey) {
+        saved.current()
+      }
+    }
+
+    const onCrmSync = () => {
+      // Catch up immediately if another view or modal updated data
+      tick()
+    }
+
     if (!document.hidden) start()
     document.addEventListener("visibilitychange", onVisibility)
+    if (typeof window !== "undefined") {
+      window.addEventListener("active-view-changed", onViewChange)
+      window.addEventListener("crm-sync", onCrmSync)
+    }
+
     return () => {
       stop()
       document.removeEventListener("visibilitychange", onVisibility)
+      if (typeof window !== "undefined") {
+        window.removeEventListener("active-view-changed", onViewChange)
+        window.removeEventListener("crm-sync", onCrmSync)
+      }
     }
   }, [intervalMs, viewKey])
 }

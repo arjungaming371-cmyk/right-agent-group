@@ -1,5 +1,6 @@
 "use client"
 import { useEffect, useState } from "react"
+import { usePolling } from "@/lib/use-poll"
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -67,6 +68,7 @@ export default function AnalyticsView({ role = "admin" }: { role?: "admin" | "ag
     }
   }
   useEffect(() => { load() }, [days])
+  usePolling(load, 30000)
 
   async function emailReport() {
     setSending(true)
