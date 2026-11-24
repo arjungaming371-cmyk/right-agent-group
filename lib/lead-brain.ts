@@ -461,6 +461,8 @@ export async function buildLeadBrief(leadId: string): Promise<string> {
             'loan_type', la.loan_type,
             'loan_amount', la.loan_amount,
             'status', la.status,
+            'status_reason', la.status_reason,
+            'remarks', la.remarks,
             'submitted_at', la.submitted_at
           ) FROM loan_applications la WHERE la.lead_id = l.id ORDER BY la.submitted_at DESC NULLS LAST, la.created_at DESC LIMIT 1
          ) AS latest_application,
@@ -567,10 +569,12 @@ export async function buildLeadBrief(leadId: string): Promise<string> {
     const isFormFilled = Boolean(row.form_completed)
 
     if (isFormFilled) {
+      const statusNote = app?.status_reason || app?.remarks || ""
       if (appStatus === "sanctioned" || appStatus === "approved") {
         lines.push(
           `LOAN APPLICATION STATUS — SANCTIONED (OFFICIALLY SANCTIONED BY TEAM):\n` +
           `- The customer's loan application (${[appType, appAmt].filter(Boolean).join(", ")}) was officially SANCTIONED by our team!\n` +
+          (statusNote ? `- Officer Remarks: "${statusNote}"\n` : "") +
           `- Congratulate the customer warmly when speaking with them.\n` +
           `- Inform them: Our Loan Officer will contact them regarding the sanction letter and disbursal process.\n` +
           `- Do NOT ask for any forms or documents.`
@@ -579,7 +583,11 @@ export async function buildLeadBrief(leadId: string): Promise<string> {
         lines.push(
           `LOAN APPLICATION STATUS — NOT SANCTIONED / REJECTED:\n` +
           `- The customer's loan application could not be sanctioned at this stage.\n` +
-          `- Be courteous, empathetic, and respectful. Inform them that our Loan Officer will get in touch to discuss potential alternative options.`
+          (statusNote
+            ? `- EXACT REASON RECORDED BY LOAN OFFICER: "${statusNote}".\n` +
+              `- When the customer asks why their loan was rejected or why it didn't pass, EXPLAIN THIS EXACT REASON TO THEM politely, empathetically, and clearly in their language (Telugu, Hindi, or English).\n` +
+              `- Offer solutions: e.g. adding an eligible family co-applicant, clearing existing obligations, or applying through a partner NBFC with flexible eligibility.\n`
+            : `- Be courteous, empathetic, and respectful. Inform them that our Loan Officer will get in touch to discuss potential alternative options.\n`)
         )
       } else if (appStatus === "disbursed") {
         lines.push(
@@ -588,19 +596,21 @@ export async function buildLeadBrief(leadId: string): Promise<string> {
         )
       } else {
         lines.push(
-          `LOAN APPLICATION STATUS — SUBMITTED (UNDER REVIEW BY LOAN OFFICER):\n` +
-          `- The customer has ALREADY filled and submitted their official loan application (${[appType, appAmt].filter(Boolean).join(", ")}).\n` +
-          `- All required details and documents were already submitted inside that application.\n` +
-          `- NEVER ask them to fill out any form or link.\n` +
-          `- NEVER ask them for documents (PAN, Aadhaar, salary slips, etc.) over the phone — all documents were already submitted!\n` +
-          `- Inform them: Our Loan Officer is currently reviewing their complete application and will contact them directly for the next steps.`
+          `LOAN APPLICATION STATUS — ${appStatus.toUpperCase().replace(/_/g, " ")}:\n` +
+          `- Current status in system: ${appStatus.replace(/_/g, " ")}.\n` +
+          (statusNote
+            ? `- Officer Remark / Reason: "${statusNote}".\n` +
+              `- If the customer asks for an update or status, explain this to them clearly in their language.\n`
+            : `- Inform them: Our Loan Officer is currently processing their application and will contact them directly for the next steps.\n`)
         )
       }
     } else {
+      const inquiryNote = app?.remarks || row.notes || ""
       lines.push(
         `LOAN APPLICATION STATUS — INQUIRY ONLY (NO OFFICIAL APPLICATION FILLED YET):\n` +
         `- The customer has NOT filled or submitted any official loan application form yet.\n` +
         `- They have inquired / expressed interest in a ${appType} of ${appAmt}.\n` +
+        (inquiryNote ? `- Staff note on file: "${inquiryNote}". If the customer asks about their previous inquiry, refer to this note naturally.\n` : "") +
         `- STRICT BAN: NEVER claim "You already applied" or "We have your application in our system" or ask them to provide documents over the phone!\n` +
         `- Treat them as an interested inquiry lead: Discuss their loan requirement naturally. Ask if they want the official application form link on WhatsApp, or if they prefer visiting our Gandimaisamma office directly to complete the application in person.\n` +
         `- All final documents and KYC will be collected directly inside that official application form or at the office.`

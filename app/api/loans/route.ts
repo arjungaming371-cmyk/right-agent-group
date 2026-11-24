@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import { apiError } from "@/lib/api-error"
-import { db } from "@/lib/db"
+import { db, query } from "@/lib/db"
 import { requireModuleOrRole } from "@/lib/auth"
 import { sessionBranchId } from "@/lib/branches"
 import { logAudit } from "@/lib/audit"
 import { withRoute, readJson } from "@/lib/api-route"
+import { invalidateLeadBriefCache } from "@/lib/lead-brain"
 
 export const GET = withRoute("loans", async (req: NextRequest) => {
   const { searchParams } = new URL(req.url)
@@ -99,6 +100,38 @@ export const PATCH = withRoute("loans", async (req: NextRequest) => {
   const { data, error } = await upQuery.eq("id", id).select().single()
   if (error) return apiError(error)
   if (!data) return NextResponse.json({ error: "application not found in your branch" }, { status: 404 })
+
+  // Log to audit
   logAudit("loan application updated", session.email, { loanAppId: id, fields: Object.keys(updates) })
+
+  // Append entry to status_history if status, reason, or remarks were modified
+  if (updates.status || updates.status_reason || updates.remarks) {
+    const historyEntry = {
+      status: updates.status || data.status,
+      status_reason: updates.status_reason || data.status_reason || null,
+      remarks: updates.remarks || data.remarks || null,
+      updated_by: session.email || "staff",
+      updated_at: new Date().toISOString(),
+    }
+    await query(
+      `UPDATE loan_applications
+       SET status_history = COALESCE(status_history, '[]'::jsonb) || $1::jsonb
+       WHERE id = $2`,
+      [JSON.stringify([historyEntry]), id]
+    ).catch(() => {})
+
+    // Invalidate lead brief cache and record interaction if lead_id exists
+    if (data.lead_id) {
+      invalidateLeadBriefCache(data.lead_id)
+      const summaryText = `Status: ${updates.status || data.status}${updates.status_reason ? ` (${updates.status_reason})` : ""}${updates.remarks ? ` — Note: ${updates.remarks}` : ""}`
+      await query(
+        `INSERT INTO lead_interactions (lead_id, channel, direction, one_line_summary, occurred_at)
+         VALUES ($1, 'manual', 'out', $2, now())
+         ON CONFLICT DO NOTHING`,
+        [data.lead_id, summaryText.slice(0, 500)]
+      ).catch(() => {})
+    }
+  }
+
   return NextResponse.json(data)
 })
