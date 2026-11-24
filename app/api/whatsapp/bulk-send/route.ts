@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { db, query } from "@/lib/db"
 import {
   sendWhatsAppText,
+  sendWhatsAppTemplate,
   branchWhatsAppCtx,
   dndGate,
   createOneTimeFormToken,
@@ -25,9 +26,16 @@ export const POST = withRoute("whatsapp", async (req: NextRequest) => {
     return NextResponse.json({ error: "No leads selected" }, { status: 400 })
   }
 
+  const sendMode = String(body.sendMode || "text").trim() // "text" | "template"
+  const templateName = String(body.templateName || "loan_application_form").trim()
+  const templateLanguage = String(body.templateLanguage || "en").trim()
   const rawMessage = String(body.message || "").trim()
-  if (!rawMessage) {
-    return NextResponse.json({ error: "Message text is required" }, { status: 400 })
+
+  if (sendMode === "text" && !rawMessage) {
+    return NextResponse.json({ error: "Message text is required for free-form send" }, { status: 400 })
+  }
+  if (sendMode === "template" && !templateName) {
+    return NextResponse.json({ error: "Template name is required" }, { status: 400 })
   }
 
   const includeLink = Boolean(body.includeLink)
@@ -67,23 +75,41 @@ export const POST = withRoute("whatsapp", async (req: NextRequest) => {
       continue
     }
 
-    // Personalize message
-    let finalMessage = rawMessage.replace(/\{name\}/gi, lead.name || "Customer")
+    let finalMessage = ""
+    let token = ""
 
-    // If application link requested, generate one-time token
     if (includeLink) {
       try {
-        const token = await createOneTimeFormToken(lead.id, product)
-        const link = appUrl ? `${appUrl}/l/${token}` : `/l/${token}`
-        finalMessage += `\n\nApply or check details here:\n${link}`
+        token = await createOneTimeFormToken(lead.id, product)
       } catch {
-        finalMessage += `\n\nApply here:\n${appUrl || ""}/apply`
+        token = ""
       }
     }
 
-    // Send WhatsApp text
     try {
-      const result = await sendWhatsAppText(rawTarget, finalMessage, waBranch)
+      let result: { ok: boolean; id?: string; error?: string }
+
+      if (sendMode === "template") {
+        finalMessage = `[Meta Template: ${templateName}] Sent to ${lead.name || "Customer"}`
+        result = await sendWhatsAppTemplate(
+          rawTarget,
+          templateName,
+          {
+            language: templateLanguage,
+            bodyVariables: [lead.name || "there"],
+            buttonUrlVariable: token || undefined,
+          },
+          waBranch
+        )
+      } else {
+        finalMessage = rawMessage.replace(/\{name\}/gi, lead.name || "Customer")
+        if (includeLink) {
+          const link = appUrl && token ? `${appUrl}/l/${token}` : `${appUrl || ""}/apply`
+          finalMessage += `\n\nApply or check details here:\n${link}`
+        }
+        result = await sendWhatsAppText(rawTarget, finalMessage, waBranch)
+      }
+
       if (result.ok) {
         sentCount++
         // Log in whatsapp_messages

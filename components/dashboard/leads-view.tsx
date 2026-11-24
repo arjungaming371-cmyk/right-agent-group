@@ -443,6 +443,9 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
   const [bulkWaProduct, setBulkWaProduct] = useState("Home Loan")
   const [bulkWaBusy, setBulkWaBusy] = useState(false)
   const [bulkWaResult, setBulkWaResult] = useState<{ total: number; sentCount: number; skippedDnd: number; failedCount: number } | null>(null)
+  const [bulkWaMode, setBulkWaMode] = useState<"template" | "text">("template")
+  const [bulkWaTemplateName, setBulkWaTemplateName] = useState("loan_application_form")
+  const [bulkWaTemplateLang, setBulkWaTemplateLang] = useState("en")
 
   // ── Lead Name & Details Editing ──
   const [editingLeadId, setEditingLeadId] = useState<string | null>(null)
@@ -650,7 +653,8 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
 
   // Send Bulk WhatsApp campaign to selected leads
   async function sendBulkWaCampaign() {
-    if (!bulkWaMessage.trim()) return
+    if (bulkWaMode === "text" && !bulkWaMessage.trim()) return
+    if (bulkWaMode === "template" && !bulkWaTemplateName.trim()) return
     setBulkWaBusy(true)
     try {
       const res = await fetch("/api/whatsapp/bulk-send", {
@@ -658,6 +662,9 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           leadIds: selectedIds,
+          sendMode: bulkWaMode,
+          templateName: bulkWaTemplateName.trim(),
+          templateLanguage: bulkWaTemplateLang,
           message: bulkWaMessage.trim(),
           includeLink: bulkWaIncludeLink,
           product: bulkWaProduct,
@@ -2639,101 +2646,232 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
               </div>
             ) : (
               <>
-                <div style={{ fontSize: 12.5, color: "var(--text-secondary)", marginBottom: 16 }}>
-              Blasting to <strong style={{ color: "var(--accent-green)" }}>{selectedIds.length} selected lead{selectedIds.length === 1 ? "" : "s"}</strong> over official Meta WhatsApp Cloud API.
-            </div>
-
-            {/* Quick Template Chips */}
-            <div style={{ marginBottom: 14 }}>
-              <label style={{ display: "block", fontSize: 11.5, color: "var(--text-muted)", marginBottom: 6, fontWeight: 500 }}>
-                Quick Templates / Prompts
-              </label>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <button
-                  type="button"
-                  onClick={() => setBulkWaMessage("Hello {name}, greetings from Right Agent Group! We provide fast-track approval on Personal, Business, and Home Loans with minimal documentation and attractive interest rates.")}
-                  style={{ textAlign: "left", fontSize: 11.5, padding: "8px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", cursor: "pointer" }}
-                >
-                  🟢 <strong>General Loan Offer:</strong> &quot;Hello {`{name}`}, greetings from Right Agent Group! We provide fast-track approval...&quot;
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setBulkWaMessage("Hello {name}, this is a gentle follow-up regarding your recent loan inquiry with Right Agent Group. Our loan officer is ready to process your file. Please complete your application below.")}
-                  style={{ textAlign: "left", fontSize: 11.5, padding: "8px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", cursor: "pointer" }}
-                >
-                  📄 <strong>Document / Application Follow-up:</strong> &quot;Hello {`{name}`}, this is a gentle follow-up regarding your recent loan inquiry...&quot;
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setBulkWaMessage("Special Rate Offer for {name}: Right Agent Group has partner tie-ups with 20+ leading banks offering reduced processing fees and ROI starting from 10.5% p.a.")}
-                  style={{ textAlign: "left", fontSize: 11.5, padding: "8px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", cursor: "pointer" }}
-                >
-                  ⚡ <strong>Low Interest Rate Promo:</strong> &quot;Special Rate Offer for {`{name}`}: Partner tie-ups with 20+ leading banks...&quot;
-                </button>
-              </div>
-            </div>
-
-            {/* Message Body Textarea */}
-            <div style={{ marginBottom: 14 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                <label style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 500 }}>
-                  Message Content *
-                </label>
-                <span style={{ fontSize: 10.5, color: "var(--accent-violet)" }}>Use {`{name}`} for customer&apos;s name</span>
-              </div>
-              <textarea
-                value={bulkWaMessage}
-                onChange={(e) => setBulkWaMessage(e.target.value)}
-                placeholder="Type your WhatsApp message here..."
-                rows={4}
-                style={{
-                  width: "100%",
-                  fontSize: 12.5,
-                  padding: 10,
-                  borderRadius: 8,
-                  border: "1px solid var(--border)",
-                  background: "var(--bg-secondary)",
-                  color: "var(--text-primary)",
-                  resize: "vertical",
-                }}
-                required
-              />
-            </div>
-
-            {/* Include Link Toggle & Product */}
-            <div style={{ background: "var(--bg-secondary)", borderRadius: 10, padding: 12, border: "1px solid var(--border)", marginBottom: 16 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: bulkWaIncludeLink ? 10 : 0 }}>
-                <input
-                  type="checkbox"
-                  id="bulkWaIncludeLinkToggle"
-                  checked={bulkWaIncludeLink}
-                  onChange={(e) => setBulkWaIncludeLink(e.target.checked)}
-                  style={{ width: 16, height: 16, accentColor: "#25D366", cursor: "pointer" }}
-                />
-                <label htmlFor="bulkWaIncludeLinkToggle" style={{ fontSize: 12.5, color: "var(--text-primary)", cursor: "pointer", fontWeight: 600 }}>
-                  Include Personalized One-Time Application Link
-                </label>
-              </div>
-
-              {bulkWaIncludeLink && (
-                <div>
-                  <label style={{ display: "block", fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
-                    Link Loan Product (Directs applicant to this form)
-                  </label>
-                  <select
-                    value={bulkWaProduct}
-                    onChange={(e) => setBulkWaProduct(e.target.value)}
-                    style={{ width: "100%", height: 34, fontSize: 12, padding: "0 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)" }}
-                  >
-                    <option value="Home Loan">Home Loan</option>
-                    <option value="Personal Loan">Personal Loan</option>
-                    <option value="Business Loan">Business Loan</option>
-                    <option value="Loan Against Property">Loan Against Property</option>
-                    <option value="Car Loan">Car Loan</option>
-                  </select>
+                <div style={{ fontSize: 12.5, color: "var(--text-secondary)", marginBottom: 14 }}>
+                  Blasting to <strong style={{ color: "var(--accent-green)" }}>{selectedIds.length} selected lead{selectedIds.length === 1 ? "" : "s"}</strong> over official Meta WhatsApp Cloud API.
                 </div>
-              )}
-            </div>
+
+                {/* Send Mode Selector: Meta Template vs Free-form */}
+                <div style={{ display: "flex", gap: 6, marginBottom: 14, background: "var(--bg-secondary)", padding: 4, borderRadius: 8, border: "1px solid var(--border)" }}>
+                  <button
+                    type="button"
+                    onClick={() => setBulkWaMode("template")}
+                    style={{
+                      flex: 1,
+                      height: 32,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      borderRadius: 6,
+                      border: "none",
+                      background: bulkWaMode === "template" ? "#25D366" : "transparent",
+                      color: bulkWaMode === "template" ? "#06331d" : "var(--text-secondary)",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 6,
+                    }}
+                  >
+                    🛡️ Meta Approved Template
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBulkWaMode("text")}
+                    style={{
+                      flex: 1,
+                      height: 32,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      borderRadius: 6,
+                      border: "none",
+                      background: bulkWaMode === "text" ? "var(--bg-card)" : "transparent",
+                      color: bulkWaMode === "text" ? "var(--text-primary)" : "var(--text-secondary)",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 6,
+                    }}
+                  >
+                    💬 Free-form Text (24h Window)
+                  </button>
+                </div>
+
+                {bulkWaMode === "template" ? (
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ background: "rgba(37,211,102,0.06)", border: "1px solid rgba(37,211,102,0.2)", borderRadius: 10, padding: 12, marginBottom: 12, fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.5 }}>
+                      ✅ <strong>Recommended for Cold &amp; Follow-up Leads:</strong> Meta approved templates deliver 100% reliably even if the customer hasn&apos;t messaged you recently. The CRM automatically fills &#123;&#123;1&#125;&#125; with the customer&apos;s name and maps the action button to their one-time application link.
+                    </div>
+
+                    <div style={{ marginBottom: 10 }}>
+                      <label style={{ display: "block", fontSize: 11.5, color: "var(--text-muted)", marginBottom: 4, fontWeight: 500 }}>
+                        Meta Template Name
+                      </label>
+                      <input
+                        type="text"
+                        value={bulkWaTemplateName}
+                        onChange={(e) => setBulkWaTemplateName(e.target.value)}
+                        placeholder="e.g. loan_application_form, call_followup, or custom template"
+                        style={{
+                          width: "100%",
+                          height: 36,
+                          padding: "0 10px",
+                          borderRadius: 8,
+                          border: "1px solid var(--border)",
+                          background: "var(--bg-secondary)",
+                          color: "var(--text-primary)",
+                          fontSize: 12.5,
+                        }}
+                      />
+                    </div>
+
+                    {/* Quick suggestion chips */}
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+                      <span style={{ fontSize: 10.5, color: "var(--text-muted)", alignSelf: "center" }}>Quick presets:</span>
+                      {[
+                        { name: "loan_application_form", label: "📄 loan_application_form" },
+                        { name: "call_followup", label: "📞 call_followup" },
+                        { name: "missed_call_followup", label: "⚠️ missed_call_followup" },
+                      ].map((p) => (
+                        <button
+                          key={p.name}
+                          type="button"
+                          onClick={() => setBulkWaTemplateName(p.name)}
+                          style={{
+                            fontSize: 11,
+                            padding: "3px 8px",
+                            borderRadius: 6,
+                            border: bulkWaTemplateName === p.name ? "1px solid #25D366" : "1px solid var(--border)",
+                            background: bulkWaTemplateName === p.name ? "rgba(37,211,102,0.15)" : "var(--bg-secondary)",
+                            color: bulkWaTemplateName === p.name ? "#22c55e" : "var(--text-secondary)",
+                            cursor: "pointer",
+                          }}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                      <div>
+                        <label style={{ display: "block", fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
+                          Template Language
+                        </label>
+                        <select
+                          value={bulkWaTemplateLang}
+                          onChange={(e) => setBulkWaTemplateLang(e.target.value)}
+                          style={{ width: "100%", height: 34, fontSize: 12, padding: "0 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)" }}
+                        >
+                          <option value="en">English (en)</option>
+                          <option value="te">Telugu (te)</option>
+                          <option value="hi">Hindi (hi)</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label style={{ display: "block", fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
+                          Link Loan Product
+                        </label>
+                        <select
+                          value={bulkWaProduct}
+                          onChange={(e) => setBulkWaProduct(e.target.value)}
+                          style={{ width: "100%", height: 34, fontSize: 12, padding: "0 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)" }}
+                        >
+                          <option value="Home Loan">Home Loan</option>
+                          <option value="Personal Loan">Personal Loan</option>
+                          <option value="Business Loan">Business Loan</option>
+                          <option value="Loan Against Property">Loan Against Property</option>
+                          <option value="Gold Loan">Gold Loan</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {/* Quick Template Chips for freeform */}
+                    <div style={{ marginBottom: 14 }}>
+                      <label style={{ display: "block", fontSize: 11.5, color: "var(--text-muted)", marginBottom: 6, fontWeight: 500 }}>
+                        Quick Message Prompts
+                      </label>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        <button
+                          type="button"
+                          onClick={() => setBulkWaMessage("Hello {name}, greetings from Right Agent Group! We provide fast-track approval on Personal, Business, and Home Loans with minimal documentation and attractive interest rates.")}
+                          style={{ textAlign: "left", fontSize: 11.5, padding: "8px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", cursor: "pointer" }}
+                        >
+                          🟢 <strong>General Loan Offer:</strong> &quot;Hello {`{name}`}, greetings from Right Agent Group! We provide fast-track approval...&quot;
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setBulkWaMessage("Hello {name}, this is a gentle follow-up regarding your recent loan inquiry with Right Agent Group. Our loan officer is ready to process your file. Please complete your application below.")}
+                          style={{ textAlign: "left", fontSize: 11.5, padding: "8px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", cursor: "pointer" }}
+                        >
+                          📄 <strong>Document / Application Follow-up:</strong> &quot;Hello {`{name}`}, this is a gentle follow-up regarding your recent loan inquiry...&quot;
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Message Body Textarea */}
+                    <div style={{ marginBottom: 14 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                        <label style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 500 }}>
+                          Message Content *
+                        </label>
+                        <span style={{ fontSize: 10.5, color: "var(--accent-violet)" }}>Use {`{name}`} for customer&apos;s name</span>
+                      </div>
+                      <textarea
+                        value={bulkWaMessage}
+                        onChange={(e) => setBulkWaMessage(e.target.value)}
+                        placeholder="Type your WhatsApp message here..."
+                        rows={4}
+                        style={{
+                          width: "100%",
+                          fontSize: 12.5,
+                          padding: 10,
+                          borderRadius: 8,
+                          border: "1px solid var(--border)",
+                          background: "var(--bg-secondary)",
+                          color: "var(--text-primary)",
+                          resize: "vertical",
+                        }}
+                      />
+                    </div>
+
+                    {/* Include Link Toggle & Product */}
+                    <div style={{ background: "var(--bg-secondary)", borderRadius: 10, padding: 12, border: "1px solid var(--border)", marginBottom: 16 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: bulkWaIncludeLink ? 10 : 0 }}>
+                        <input
+                          type="checkbox"
+                          id="bulkWaIncludeLinkToggle"
+                          checked={bulkWaIncludeLink}
+                          onChange={(e) => setBulkWaIncludeLink(e.target.checked)}
+                          style={{ width: 16, height: 16, accentColor: "#25D366", cursor: "pointer" }}
+                        />
+                        <label htmlFor="bulkWaIncludeLinkToggle" style={{ fontSize: 12.5, color: "var(--text-primary)", cursor: "pointer", fontWeight: 600 }}>
+                          Include Personalized One-Time Application Link
+                        </label>
+                      </div>
+
+                      {bulkWaIncludeLink && (
+                        <div>
+                          <label style={{ display: "block", fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
+                            Link Loan Product (Directs applicant to this form)
+                          </label>
+                          <select
+                            value={bulkWaProduct}
+                            onChange={(e) => setBulkWaProduct(e.target.value)}
+                            style={{ width: "100%", height: 34, fontSize: 12, padding: "0 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)" }}
+                          >
+                            <option value="Home Loan">Home Loan</option>
+                            <option value="Personal Loan">Personal Loan</option>
+                            <option value="Business Loan">Business Loan</option>
+                            <option value="Loan Against Property">Loan Against Property</option>
+                            <option value="Car Loan">Car Loan</option>
+                          </select>
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
 
             {/* Compliance Note */}
             <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 16, lineHeight: 1.5 }}>

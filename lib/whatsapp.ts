@@ -624,6 +624,57 @@ export async function sendWhatsAppText(
   return result
 }
 
+export async function sendWhatsAppTemplate(
+  to: string,
+  templateName: string,
+  options?: {
+    language?: string
+    bodyVariables?: string[]
+    buttonUrlVariable?: string
+  },
+  branch?: BranchWhatsAppCtx
+): Promise<{ ok: boolean; id?: string; error?: string }> {
+  const number = normalizeNumber(to)
+  if (!isValidNormalizedNumber(number)) return { ok: false, error: `Invalid number: ${to}` }
+  const dnd = await dndGate(number)
+  if (dnd) return dnd
+
+  const components: any[] = []
+  if (options?.bodyVariables && options.bodyVariables.length > 0) {
+    components.push({
+      type: "body",
+      parameters: options.bodyVariables.map((v) => ({ type: "text", text: String(v) })),
+    })
+  }
+  if (options?.buttonUrlVariable) {
+    components.push({
+      type: "button",
+      sub_type: "url",
+      index: "0",
+      parameters: [{ type: "text", text: String(options.buttonUrlVariable) }],
+    })
+  }
+
+  const payload: any = {
+    to: number,
+    type: "template",
+    template: {
+      name: templateName,
+      language: { code: options?.language || "en" },
+    },
+  }
+  if (components.length > 0) {
+    payload.template.components = components
+  }
+
+  const result = await graphPost(payload, branch)
+  if (result.ok && branch) {
+    const { recordUsage } = await import("./branches")
+    recordUsage(branch.id, "whatsapp")
+  }
+  return result
+}
+
 /**
  * Sends the loan application form link after a call collects
  * name/address/WhatsApp. Business-initiated → MUST use an approved
