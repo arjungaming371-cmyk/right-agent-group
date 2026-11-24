@@ -2655,6 +2655,18 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                         • {err}
                       </div>
                     ))}
+                    {bulkWaResult.errors.some((e) => e.includes("132001") || e.includes("does not exist")) && (
+                      <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid rgba(239,68,68,0.2)", fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.5 }}>
+                        💡 <strong>Why this failed:</strong> Meta only sends templates that already exist in your Meta WhatsApp Business Manager.
+                        <br />• <strong>To test immediately:</strong> Pick <code style={{ color: "#22c55e" }}>hello_world</code> (Lang: <code style={{ color: "#22c55e" }}>en_US</code>) — Meta pre-approves this for instant testing!
+                        <br />• <strong>To send custom templates:</strong> Go to <em>Priya&apos;s Script &gt; WhatsApp &amp; Meta Templates</em>, click <em>Copy for Meta Approval</em>, and paste it into your Meta WhatsApp Manager.
+                      </div>
+                    )}
+                    {bulkWaResult.errors.some((e) => e.includes("131030") || e.includes("allowed list")) && (
+                      <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid rgba(239,68,68,0.2)", fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.5 }}>
+                        💡 <strong>Why this failed:</strong> In Meta Sandbox test mode, you can only send messages to phone numbers added to your Meta Developer Console allowed list (e.g. 6301689511).
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -2755,34 +2767,47 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                     </div>
 
                     {/* Quick suggestion chips from Meta Catalog */}
-                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
-                      <span style={{ fontSize: 10.5, color: "var(--text-muted)", alignSelf: "center" }}>Quick presets:</span>
-                      {META_TEMPLATES_CATALOG.map((p) => {
-                        const isSelected = bulkWaTemplateName === p.name
-                        return (
-                          <button
-                            key={p.name}
-                            type="button"
-                            onClick={() => {
-                              setBulkWaTemplateName(p.name)
-                              if (p.languages[0]?.code) setBulkWaTemplateLang(p.languages[0].code)
-                            }}
-                            style={{
-                              fontSize: 11,
-                              padding: "3px 8px",
-                              borderRadius: 6,
-                              border: isSelected ? "1px solid #25D366" : "1px solid var(--border)",
-                              background: isSelected ? "rgba(37,211,102,0.15)" : "var(--bg-secondary)",
-                              color: isSelected ? "#22c55e" : "var(--text-secondary)",
-                              cursor: "pointer",
-                              fontWeight: isSelected ? 600 : 400,
-                            }}
-                          >
-                            {p.name === "hello_world" ? "🌍 " : p.category === "MARKETING" ? "📢 " : "📄 "}
-                            {p.name}
-                          </button>
-                        )
-                      })}
+                    <div style={{ marginBottom: 12 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                        <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500 }}>Choose Template Preset:</span>
+                        <span style={{ fontSize: 10, color: "#22c55e", background: "rgba(34,197,94,0.12)", padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>
+                          ⚡ hello_world is pre-approved by Meta
+                        </span>
+                      </div>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        {META_TEMPLATES_CATALOG.map((p) => {
+                          const isSelected = bulkWaTemplateName === p.name
+                          const isReady = p.name === "hello_world"
+                          return (
+                            <button
+                              key={p.name}
+                              type="button"
+                              onClick={() => {
+                                setBulkWaTemplateName(p.name)
+                                if (p.languages[0]?.code) setBulkWaTemplateLang(p.languages[0].code)
+                              }}
+                              style={{
+                                fontSize: 11,
+                                padding: "4px 9px",
+                                borderRadius: 6,
+                                border: isSelected
+                                  ? (isReady ? "1px solid #22c55e" : "1px solid #38bdf8")
+                                  : (isReady ? "1px solid rgba(34,197,94,0.4)" : "1px solid var(--border)"),
+                                background: isSelected
+                                  ? (isReady ? "rgba(34,197,94,0.2)" : "rgba(56,189,248,0.18)")
+                                  : (isReady ? "rgba(34,197,94,0.06)" : "var(--bg-secondary)"),
+                                color: isSelected
+                                  ? (isReady ? "#4ade80" : "#38bdf8")
+                                  : (isReady ? "#22c55e" : "var(--text-secondary)"),
+                                cursor: "pointer",
+                                fontWeight: isSelected ? 700 : 500,
+                              }}
+                            >
+                              {p.name === "hello_world" ? "🌍 hello_world (Instant Test)" : `📄 ${p.name}`}
+                            </button>
+                          )
+                        })}
+                      </div>
                     </div>
 
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
@@ -2835,6 +2860,11 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                           <div style={{ color: "#d1d5db", lineHeight: 1.45, whiteSpace: "pre-wrap", fontSize: 11, margin: "6px 0" }}>
                             {curTpl.samplePreview}
                           </div>
+                          {curTpl.name !== "hello_world" && (
+                            <div style={{ background: "rgba(234,179,8,0.09)", border: "1px solid rgba(234,179,8,0.3)", borderRadius: 6, padding: "6px 10px", margin: "8px 0", fontSize: 11, color: "#facc15", lineHeight: 1.4 }}>
+                              ⚠️ <strong>Meta Submission Needed:</strong> Before Meta will deliver &quot;{curTpl.name}&quot;, it must be created in your Meta WhatsApp Manager (click &quot;Copy Format&quot; below). For instant sending right now, choose <strong>🌍 hello_world</strong>!
+                            </div>
+                          )}
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8, paddingTop: 6, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
                             <span style={{ fontSize: 10, color: "var(--text-muted)" }}>
                               {curTpl.pricing}
