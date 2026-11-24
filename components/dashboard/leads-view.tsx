@@ -458,6 +458,8 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
   const [bulkWaMode, setBulkWaMode] = useState<"template" | "text">("template")
   const [bulkWaTemplateName, setBulkWaTemplateName] = useState("loan_application_form")
   const [bulkWaTemplateLang, setBulkWaTemplateLang] = useState("en")
+  const [libraryProducts, setLibraryProducts] = useState<string[]>([])
+  const allLoanProducts = Array.from(new Set([...COMMON_LOAN_TYPES, ...libraryProducts]))
 
   // ── Lead Name & Details Editing ──
   const [editingLeadId, setEditingLeadId] = useState<string | null>(null)
@@ -745,6 +747,12 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
     // Lane tab badges — two tiny COUNT queries riding the same poll cycle.
     fetch("/api/leads?count=1&scope=crm").then((r) => (r.ok ? r.json() : null)).then((d) => d && setCrmCount(d.count ?? 0)).catch(() => {})
     fetch("/api/leads?count=1&scope=social").then((r) => (r.ok ? r.json() : null)).then((d) => d && setSocialCount(d.count ?? 0)).catch(() => {})
+    fetch("/api/links/library").then((r) => (r.ok ? r.json() : [])).then((data) => {
+      if (Array.isArray(data)) {
+        const prods = data.filter((l: any) => l.active && l.product).map((l: any) => String(l.product).trim())
+        setLibraryProducts(Array.from(new Set(prods)))
+      }
+    }).catch(() => {})
     const params = new URLSearchParams()
     params.set("scope", scopeTab)
     if (debouncedSearch) params.set("search", debouncedSearch)
@@ -2554,7 +2562,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                   onChange={(e) => setBankProduct(e.target.value)}
                   style={{ width: "100%", height: 38, fontSize: 13, padding: "0 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)" }}
                 >
-                  {COMMON_LOAN_TYPES.map((t) => (
+                  {allLoanProducts.map((t) => (
                     <option key={t} value={t}>{t}</option>
                   ))}
                 </select>
@@ -2693,24 +2701,25 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                 </div>
 
                 {/* Send Mode Selector: Meta Template vs Free-form */}
-                <div style={{ display: "flex", gap: 6, marginBottom: 14, background: "var(--bg-secondary)", padding: 4, borderRadius: 8, border: "1px solid var(--border)" }}>
+                <div style={{ display: "flex", gap: 6, marginBottom: 14, background: "var(--bg-secondary)", padding: 4, borderRadius: 10, border: "1px solid var(--border)" }}>
                   <button
                     type="button"
                     onClick={() => setBulkWaMode("template")}
                     style={{
                       flex: 1,
-                      height: 32,
+                      height: 34,
                       fontSize: 12,
                       fontWeight: 600,
-                      borderRadius: 6,
+                      borderRadius: 7,
                       border: "none",
-                      background: bulkWaMode === "template" ? "#25D366" : "transparent",
-                      color: bulkWaMode === "template" ? "#06331d" : "var(--text-secondary)",
+                      background: bulkWaMode === "template" ? "var(--gradient-brand)" : "transparent",
+                      color: bulkWaMode === "template" ? "#fff" : "var(--text-secondary)",
                       cursor: "pointer",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
                       gap: 6,
+                      transition: "all 0.15s ease",
                     }}
                   >
                     🛡️ Meta Approved Template
@@ -2720,18 +2729,19 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                     onClick={() => setBulkWaMode("text")}
                     style={{
                       flex: 1,
-                      height: 32,
+                      height: 34,
                       fontSize: 12,
                       fontWeight: 600,
-                      borderRadius: 6,
+                      borderRadius: 7,
                       border: "none",
-                      background: bulkWaMode === "text" ? "var(--bg-card)" : "transparent",
-                      color: bulkWaMode === "text" ? "var(--text-primary)" : "var(--text-secondary)",
+                      background: bulkWaMode === "text" ? "var(--gradient-brand)" : "transparent",
+                      color: bulkWaMode === "text" ? "#fff" : "var(--text-secondary)",
                       cursor: "pointer",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
                       gap: 6,
+                      transition: "all 0.15s ease",
                     }}
                   >
                     💬 Free-form Text (24h Window)
@@ -2836,7 +2846,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                           onChange={(e) => setBulkWaProduct(e.target.value)}
                           style={{ width: "100%", height: 34, fontSize: 12, padding: "0 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)" }}
                         >
-                          {COMMON_LOAN_TYPES.map((t) => (
+                          {allLoanProducts.map((t) => (
                             <option key={t} value={t}>{t}</option>
                           ))}
                         </select>
@@ -2860,9 +2870,13 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                           <div style={{ color: "#d1d5db", lineHeight: 1.45, whiteSpace: "pre-wrap", fontSize: 11, margin: "6px 0" }}>
                             {curTpl.samplePreview}
                           </div>
-                          {curTpl.name !== "hello_world" && (
-                            <div style={{ background: "rgba(234,179,8,0.09)", border: "1px solid rgba(234,179,8,0.3)", borderRadius: 6, padding: "6px 10px", margin: "8px 0", fontSize: 11, color: "#facc15", lineHeight: 1.4 }}>
-                              ⚠️ <strong>Meta Submission Needed:</strong> Before Meta will deliver &quot;{curTpl.name}&quot;, it must be created in your Meta WhatsApp Manager (click &quot;Copy Format&quot; below). For instant sending right now, choose <strong>🌍 hello_world</strong>!
+                          {curTpl.name === "hello_world" ? (
+                            <div style={{ background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.3)", borderRadius: 6, padding: "6px 10px", margin: "8px 0", fontSize: 11, color: "#4ade80", lineHeight: 1.4 }}>
+                              ⚡ <strong>Meta Pre-Approved:</strong> Ready for instant delivery to any WhatsApp number right now.
+                            </div>
+                          ) : (
+                            <div style={{ background: "rgba(56,189,248,0.08)", border: "1px solid rgba(56,189,248,0.25)", borderRadius: 6, padding: "6px 10px", margin: "8px 0", fontSize: 11, color: "var(--accent-cyan)", lineHeight: 1.4 }}>
+                              🛡️ <strong>Registered on Meta Cloud API:</strong> Auto-fills customer name and maps application button. (Meta reviews take 1-5 mins; use <em>hello_world</em> for immediate tests).
                             </div>
                           )}
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8, paddingTop: 6, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
@@ -2889,52 +2903,58 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                 ) : (
                   <>
                     {/* Quick Template Chips for freeform */}
-                    <div style={{ marginBottom: 14 }}>
+                    <div style={{ marginBottom: 12 }}>
                       <label style={{ display: "block", fontSize: 11.5, color: "var(--text-muted)", marginBottom: 6, fontWeight: 500 }}>
                         Quick Message Prompts ({`{name}`} auto-filled)
                       </label>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
                         <button
                           type="button"
                           onClick={() => setBulkWaMessage("Hello {name}, greetings from Right Agent Group! We provide fast-track approval on Personal, Business, and Home Loans with minimal documentation and attractive interest rates.")}
-                          style={{ textAlign: "left", fontSize: 11.5, padding: "7px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", cursor: "pointer" }}
+                          style={{ textAlign: "left", fontSize: 11, padding: "6px 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", cursor: "pointer", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                          title="General Loan Offer: Hello {name}, greetings from Right Agent Group..."
                         >
-                          🟢 <strong>General Loan Offer:</strong> &quot;Hello {`{name}`}, greetings from Right Agent Group! We provide fast-track approval...&quot;
+                          🟢 General Loan Offer
                         </button>
                         <button
                           type="button"
                           onClick={() => setBulkWaMessage("Hello {name}, this is a gentle follow-up regarding your recent loan inquiry with Right Agent Group. Our loan officer is ready to process your file. Please complete your application below.")}
-                          style={{ textAlign: "left", fontSize: 11.5, padding: "7px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", cursor: "pointer" }}
+                          style={{ textAlign: "left", fontSize: 11, padding: "6px 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", cursor: "pointer", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                          title="Application Follow-up: Hello {name}, this is a gentle follow-up..."
                         >
-                          📄 <strong>Application Follow-up:</strong> &quot;Hello {`{name}`}, this is a gentle follow-up regarding your recent loan inquiry...&quot;
+                          📄 Application Follow-up
                         </button>
                         <button
                           type="button"
                           onClick={() => setBulkWaMessage("Hello {name}, to fast-track your loan file approval, please keep your PAN Card, Aadhaar, and 6 months bank statement ready. Our advisor will guide you through instant sanction.")}
-                          style={{ textAlign: "left", fontSize: 11.5, padding: "7px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", cursor: "pointer" }}
+                          style={{ textAlign: "left", fontSize: 11, padding: "6px 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", cursor: "pointer", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                          title="Document Checklist: Hello {name}, to fast-track your loan file approval..."
                         >
-                          📋 <strong>Document Checklist:</strong> &quot;Hello {`{name}`}, to fast-track your loan file approval, please keep your PAN Card...&quot;
+                          📋 Document Checklist
                         </button>
                         <button
                           type="button"
                           onClick={() => setBulkWaMessage("Hello {name}, special festive offer! Avail Home and Business Loans starting from 7.25% p.a. through 20+ partner banks in Hyderabad with minimal documentation.")}
-                          style={{ textAlign: "left", fontSize: 11.5, padding: "7px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", cursor: "pointer" }}
+                          style={{ textAlign: "left", fontSize: 11, padding: "6px 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", cursor: "pointer", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                          title="Festive Rate Offer: Hello {name}, special festive offer! Avail Home and Business Loans..."
                         >
-                          🎉 <strong>Festive Rate Offer:</strong> &quot;Hello {`{name}`}, special festive offer! Avail Home and Business Loans...&quot;
+                          🎉 Festive Rate Offer
                         </button>
                         <button
                           type="button"
                           onClick={() => setBulkWaMessage("నమస్కారం {name} గారు, రైట్ ఏజెంట్ గ్రూప్ నుండి మాట్లాడుతున్నాము. మీకు హోమ్ లోన్ లేదా బిజినెస్ లోన్ తక్కువ వడ్డీతో అవసరమా? మా బ్యాంకింగ్ కౌన్సిలర్ మీకు వెంటనే సహాయం చేస్తారు.")}
-                          style={{ textAlign: "left", fontSize: 11.5, padding: "7px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", cursor: "pointer" }}
+                          style={{ textAlign: "left", fontSize: 11, padding: "6px 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", cursor: "pointer", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                          title="Telugu Offer: నమస్కారం {name} గారు..."
                         >
-                          🇮🇳 <strong>Telugu Offer:</strong> &quot;నమస్కారం {`{name}`} గారు, రైట్ ఏజెంట్ గ్రూప్ నుండి...&quot;
+                          🇮🇳 Telugu Offer
                         </button>
                         <button
                           type="button"
                           onClick={() => setBulkWaMessage("नमस्ते {name} जी, राइट एजेंट ग्रुप से नमस्कार। यदि आपको होम, पर्सनल या बिजनेस लोन की आवश्यकता है तो सबसे कम ब्याज दरों पर आवेदन करें।")}
-                          style={{ textAlign: "left", fontSize: 11.5, padding: "7px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", cursor: "pointer" }}
+                          style={{ textAlign: "left", fontSize: 11, padding: "6px 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", cursor: "pointer", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                          title="Hindi Offer: नमस्ते {name} जी, राइट एजेंट ग्रुप से नमस्कार..."
                         >
-                          🇮🇳 <strong>Hindi Offer:</strong> &quot;नमस्ते {`{name}`} जी, राइट एजेंट ग्रुप से नमस्कार...&quot;
+                          🇮🇳 Hindi Offer
                         </button>
                       </div>
                     </div>
@@ -3019,14 +3039,14 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
               <button
                 type="button"
                 onClick={sendBulkWaCampaign}
-                disabled={bulkWaBusy || !bulkWaMessage.trim()}
+                disabled={bulkWaBusy || (bulkWaMode === "text" && !bulkWaMessage.trim())}
                 style={{
                   flex: 1,
                   height: 40,
-                  borderRadius: 8,
+                  borderRadius: 10,
                   border: "none",
-                  background: "#25D366",
-                  color: "#06331d",
+                  background: "var(--gradient-brand)",
+                  color: "#ffffff",
                   fontWeight: 700,
                   fontSize: 13,
                   cursor: "pointer",
@@ -3034,6 +3054,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                   alignItems: "center",
                   justifyContent: "center",
                   gap: 6,
+                  boxShadow: "0 4px 14px rgba(91,124,250,0.35)",
                   opacity: bulkWaBusy ? 0.7 : 1,
                 }}
               >

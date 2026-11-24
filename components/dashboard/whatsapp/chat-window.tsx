@@ -459,21 +459,28 @@ export default function ChatWindow({
               </div>
 
               {/* Categories */}
-              <div style={{ display: "flex", gap: 6, padding: "8px 12px", borderBottom: `1px solid ${WA.hairline}`, overflowX: "auto", background: "#182229" }}>
+              <div style={{ display: "flex", gap: 6, padding: "8px 12px", borderBottom: `1px solid ${WA.hairline}`, overflowX: "auto", background: "#182229", flexShrink: 0, minHeight: 42, alignItems: "center" }}>
                 {["All", "Application", "Documents", "Rates", "Company", "Telugu", "Hindi"].map((c) => (
                   <button
                     key={c}
                     type="button"
                     onClick={() => setTplCat(c)}
                     style={{
-                      fontSize: 11,
-                      padding: "3px 9px",
-                      borderRadius: 12,
+                      fontSize: 11.5,
+                      height: 26,
+                      minHeight: 26,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      padding: "0 10px",
+                      borderRadius: 13,
                       border: tplCat === c ? "1px solid #00a884" : `1px solid ${WA.hairline}`,
                       background: tplCat === c ? "rgba(0,168,132,0.18)" : "transparent",
                       color: tplCat === c ? "#00a884" : WA.textSecondary,
                       cursor: "pointer",
                       whiteSpace: "nowrap",
+                      flexShrink: 0,
+                      fontWeight: tplCat === c ? 600 : 400,
                     }}
                   >
                     {c}

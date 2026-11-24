@@ -543,7 +543,11 @@ async function graphPost(payload: Record<string, any>, branch?: BranchWhatsAppCt
     clearTimeout(timeoutId)
     const data: any = await res.json().catch(() => ({}))
     if (!res.ok) {
-      const msg = data?.error?.message || `HTTP ${res.status}`
+      let msg = data?.error?.message || `HTTP ${res.status}`
+      if (data?.error?.code === 132001 || msg.includes("132001")) {
+        const tplName = payload.template?.name || "template"
+        msg = `(#132001) Template "${tplName}" is still PENDING Meta approval (or translation not found). Please wait 1-2 minutes for Meta to approve it, or use "hello_world" for instant sending.`
+      }
       // Surface WHY Meta refused — expired token (190), outside the 24h
       // service window (131047), re-engagement required, wrong number…
       console.error(`WA send failed → ${payload.to || "?"} HTTP ${res.status}: ${msg}${data?.error?.error_data?.details ? ` — ${data.error.error_data.details}` : ""}${data?.error?.code ? ` (code ${data.error.code})` : ""} tokenPrefix="${token.slice(0, 15)}..." phoneId="${phoneId}" error:`, JSON.stringify(data?.error || data))
@@ -657,12 +661,17 @@ export async function sendWhatsAppTemplate(
     }
   }
 
+  let langCode = options?.language || "en"
+  if (templateName === "hello_world" && langCode === "en") {
+    langCode = "en_US"
+  }
+
   const payload: any = {
     to: number,
     type: "template",
     template: {
       name: templateName,
-      language: { code: options?.language || "en" },
+      language: { code: langCode },
     },
   }
   if (components.length > 0) {

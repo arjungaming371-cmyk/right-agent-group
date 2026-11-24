@@ -40,7 +40,7 @@ type Tab = "base" | "voice" | "whatsapp" | "instagram"
 const TABS: { id: Tab; label: string; icon: React.ReactNode; desc: string }[] = [
   { id: "base", label: "Base Script", icon: <Languages size={14} strokeWidth={2} />, desc: "Priya's core persona, rules & qualification flow (all channels)" },
   { id: "voice", label: "Voice Calls", icon: <Phone size={14} strokeWidth={2} />, desc: "Spoken openers & closings for Phone + WhatsApp calls (English, Hindi, Telugu)" },
-  { id: "whatsapp", label: "WhatsApp & Meta Templates", icon: <MessageSquare size={14} strokeWidth={2} />, desc: "Official Meta Cloud API templates catalog, copyable formats & 24h fallback copy" },
+  { id: "whatsapp", label: "WhatsApp Templates", icon: <MessageSquare size={14} strokeWidth={2} />, desc: "Official Meta Cloud API templates catalog, copyable formats & 24h fallback copy" },
   { id: "instagram", label: "Instagram", icon: <Instagram size={14} strokeWidth={2} />, desc: "DM persona & public comment reply prompts" },
 ]
 
@@ -663,7 +663,7 @@ export default function ScriptView() {
             <div>
               <div style={{ fontWeight: 700, fontSize: 16, color: "var(--text-primary)", display: "flex", alignItems: "center", gap: 8 }}>
                 <span>🛡️ Official Meta WhatsApp Cloud API Templates</span>
-                <span style={{ fontSize: 11, background: "rgba(37,211,102,0.15)", color: "#22c55e", padding: "2px 8px", borderRadius: 12, fontWeight: 700 }}>
+                <span style={{ fontSize: 11, background: "rgba(37,211,102,0.15)", color: "#22c55e", padding: "2px 8px", borderRadius: 12, fontWeight: 700, whiteSpace: "nowrap" }}>
                   {META_TEMPLATES_CATALOG.length} Ready Templates
                 </span>
               </div>
@@ -800,7 +800,7 @@ export default function ScriptView() {
                       <div style={{ whiteSpace: "pre-wrap", color: "#d1d5db" }}>
                         {tpl.body.split(/({{\d+}})/g).map((part, i) =>
                           part.startsWith("{{") ? (
-                            <span key={i} style={{ background: "rgba(37,211,102,0.25)", color: "#4ade80", padding: "1px 4px", borderRadius: 4, fontWeight: 700, fontFamily: "monospace" }}>
+                            <span key={i} style={{ background: "rgba(37,211,102,0.25)", color: "#4ade80", padding: "0 4px", borderRadius: 4, fontWeight: 700, fontFamily: "monospace" }}>
                               {part}
                             </span>
                           ) : (
@@ -1108,7 +1108,7 @@ export default function ScriptView() {
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 20, paddingBottom: 80 }}>
 
       {/* Tabs */}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>

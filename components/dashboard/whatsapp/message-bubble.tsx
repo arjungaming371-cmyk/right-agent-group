@@ -110,6 +110,26 @@ function MediaBody({ msg, onOpenImage }: { msg: Msg; onOpenImage: (url: string) 
   return null
 }
 
+function renderWhatsAppFormattedText(text: string) {
+  if (!text) return ""
+  const parts = text.split(/(\*[^*\n]+\*|_[^_\n]+_|~[^~\n]+~|`[^`\n]+`)/g)
+  return parts.map((part, i) => {
+    if (part.startsWith("*") && part.endsWith("*") && part.length > 2) {
+      return <strong key={i} style={{ fontWeight: 700 }}>{part.slice(1, -1)}</strong>
+    }
+    if (part.startsWith("_") && part.endsWith("_") && part.length > 2) {
+      return <em key={i} style={{ fontStyle: "italic" }}>{part.slice(1, -1)}</em>
+    }
+    if (part.startsWith("~") && part.endsWith("~") && part.length > 2) {
+      return <del key={i} style={{ opacity: 0.8 }}>{part.slice(1, -1)}</del>
+    }
+    if (part.startsWith("`") && part.endsWith("`") && part.length > 2) {
+      return <code key={i} style={{ fontFamily: "monospace", background: "rgba(0,0,0,0.25)", padding: "1px 4px", borderRadius: 3 }}>{part.slice(1, -1)}</code>
+    }
+    return part
+  })
+}
+
 export default function MessageBubble({
   msg, contactName, showTail, grouped, onReply, onReact, onForward, onJump, onOpenImage, onRetry,
 }: {
@@ -285,7 +305,7 @@ export default function MessageBubble({
                 />
               )}
             </span>
-            {bodyText}
+            {renderWhatsAppFormattedText(bodyText)}
           </div>
         ) : null}
 

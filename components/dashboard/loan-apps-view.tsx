@@ -396,6 +396,7 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
           toast.success(`Updated ${product} application link`)
           setShowLinkModal(false)
           loadLinks()
+          broadcastCrmSync()
         } else {
           toast.error(d.error || "Failed to update link")
         }
@@ -416,6 +417,7 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
           toast.success(`Added ${product} application link`)
           setShowLinkModal(false)
           loadLinks()
+          broadcastCrmSync()
         } else {
           toast.error(d.error || "Failed to add link")
         }
@@ -438,6 +440,7 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
       if (res.ok) {
         toast.success(`Deleted application link for ${product}`)
         setLinks((prev) => prev.filter((l) => l.id !== id))
+        broadcastCrmSync()
       } else {
         const d = await res.json().catch(() => ({}))
         toast.error(d.error || "Failed to delete link")
@@ -465,6 +468,7 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
         setLinks((prev) =>
           prev.map((l) => (l.id === link.id ? { ...l, active: !l.active } : l))
         )
+        broadcastCrmSync()
       } else {
         toast.error("Failed to toggle status")
       }
