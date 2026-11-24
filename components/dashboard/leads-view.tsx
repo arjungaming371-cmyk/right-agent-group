@@ -431,6 +431,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [showQueueModal, setShowQueueModal] = useState(false)
   const [queueBusy, setQueueBusy] = useState(false)
+  const [bypassRecentCooloff, setBypassRecentCooloff] = useState(false)
   const [queueForm, setQueueForm] = useState<{ channel: string; timing: "now" | "later"; scheduledAt: string; language: string }>({
     channel: "phone", timing: "now", scheduledAt: "", language: "auto",
   })
@@ -617,6 +618,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
           language: queueForm.language,
           talking_points: queueTalkingPoints.trim() || undefined,
           agenda_label: queueAgendaPreset.trim() || undefined,
+          skipRecentCalledHours: bypassRecentCooloff ? 0 : 24,
         }),
       })
       const d = await res.json()
@@ -1679,7 +1681,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
             <CheckSquare size={15} strokeWidth={2} style={{ color: "var(--accent-violet)" }} />
             {selectedIds.length} lead{selectedIds.length === 1 ? "" : "s"} selected
           </span>
-          <button onClick={() => setShowQueueModal(true)} className="btn-primary" style={{ height: 36 }}>
+          <button onClick={() => { setBypassRecentCooloff(selectedIds.length === 1); setShowQueueModal(true); }} className="btn-primary" style={{ height: 36 }}>
             <PhoneCall size={14} strokeWidth={2} /> Add to Call Queue
           </button>
           <button onClick={() => setSelectedIds([])} className="btn-ghost" style={{ height: 36 }}>
@@ -1805,8 +1807,24 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
               <input type="datetime-local" value={queueForm.scheduledAt} onChange={(e) => setQueueForm({ ...queueForm, scheduledAt: e.target.value })} style={{ width: "100%", marginBottom: 14 }} />
             )}
 
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 12px", background: "var(--bg-secondary)", border: bypassRecentCooloff ? "1px solid rgba(139,124,255,0.4)" : "1px solid var(--border)", borderRadius: 8, marginBottom: 14 }}>
+              <input
+                type="checkbox"
+                id="bypassRecentCheckbox"
+                checked={bypassRecentCooloff}
+                onChange={(e) => setBypassRecentCooloff(e.target.checked)}
+                style={{ width: 16, height: 16, marginTop: 2, accentColor: "var(--accent-violet)", cursor: "pointer" }}
+              />
+              <label htmlFor="bypassRecentCheckbox" style={{ fontSize: 12, color: "var(--text-primary)", cursor: "pointer", userSelect: "none" }}>
+                <strong>Allow redialing recently-contacted numbers</strong>
+                <span style={{ display: "block", fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
+                  Bypasses the 24-hour cool-off guard so you can immediately call leads that were already called today.
+                </span>
+              </label>
+            </div>
+
             <div style={{ fontSize: 11.5, color: "var(--text-muted)", background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 8, padding: "9px 12px", marginBottom: 16, lineHeight: 1.6 }}>
-              Automatic protections (always on): DND / do-not-call leads are skipped · numbers already pending in the queue are not stacked · numbers called in the last 24h are skipped · calling-window rules pause and resume automatically.
+              Automatic protections: DND / do-not-call leads are always skipped · numbers already pending in the queue are not duplicated · calling-window rules pause and resume automatically.
             </div>
 
             <div style={{ display: "flex", gap: 10 }}>
