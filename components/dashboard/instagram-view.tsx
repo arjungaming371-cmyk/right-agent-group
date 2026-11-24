@@ -153,6 +153,36 @@ export const DEFAULT_INSTAGRAM_TEMPLATES: InstagramTemplate[] = [
     text: "Namaskaram {username} garu! Right Agent Group nundi... Hyderabad lo 7.25% starting rate tho Home Loan available. Meeku details kavala?",
     category: "Telugu",
   },
+  {
+    id: "default-8",
+    label: "💳 Personal Loan",
+    text: "Instant Personal Loans up to ₹25 Lakhs with zero collateral and minimal documentation. Disbursal in 24 hours. Would you like to check your eligibility?",
+    category: "Loans",
+  },
+  {
+    id: "default-9",
+    label: "🏢 Loan Against Property",
+    text: "Get high-value Loan Against Property (LAP) up to ₹5 Crores at lowest interest rates with flexible tenure up to 15 years. What is the approximate property value?",
+    category: "Loans",
+  },
+  {
+    id: "default-10",
+    label: "📋 Required Documents",
+    text: "Basic documents required to initiate your loan file: 1) PAN & Aadhaar, 2) 6 Months Bank Statement, 3) 3 Months Salary Slips or 2 Years ITR. No advance fees charged.",
+    category: "General",
+  },
+  {
+    id: "default-11",
+    label: "🧮 EMI Calculation",
+    text: "Our team can calculate your exact monthly EMI and comparison across 20+ banks. How much loan amount and tenure are you planning for?",
+    category: "Offers",
+  },
+  {
+    id: "default-12",
+    label: "🇮🇳 Hindi Greeting",
+    text: "नमस्ते {username} जी! राइट एजेंट ग्रुप की तरफ से नमस्कार। हमारे पास होम, पर्सनल और बिजनेस लोन न्यूनतम ब्याज दरों पर उपलब्ध हैं। क्या आपको अधिक जानकारी चाहिए?",
+    category: "Hindi",
+  },
 ]
 
 export function applyInstagramTemplateVars(text: string, conv?: Conversation | null) {

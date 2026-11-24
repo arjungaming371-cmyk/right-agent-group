@@ -19,6 +19,7 @@ import { smartFilter } from "@/lib/smart-search"
 import { checkAgendaRules } from "@/lib/agenda-rules"
 
 import { PRODUCT_GROUPS, LOAN_TYPES, COMMON_LOAN_TYPES } from "@/lib/products"
+import { META_TEMPLATES_CATALOG } from "@/lib/meta-templates"
 
 type Lead = {
   id: string; name: string; phone: string | null; address: string; whatsapp_number: string
@@ -2753,35 +2754,35 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                       />
                     </div>
 
-                    {/* Quick suggestion chips */}
+                    {/* Quick suggestion chips from Meta Catalog */}
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
                       <span style={{ fontSize: 10.5, color: "var(--text-muted)", alignSelf: "center" }}>Quick presets:</span>
-                      {[
-                        { name: "hello_world", lang: "en_US", label: "🌍 hello_world (Instant Meta Test)" },
-                        { name: "loan_application_form", lang: "en", label: "📄 loan_application_form" },
-                        { name: "call_followup", lang: "en", label: "📞 call_followup" },
-                        { name: "missed_call_followup", lang: "en", label: "⚠️ missed_call_followup" },
-                      ].map((p) => (
-                        <button
-                          key={p.name}
-                          type="button"
-                          onClick={() => {
-                            setBulkWaTemplateName(p.name)
-                            if (p.lang) setBulkWaTemplateLang(p.lang)
-                          }}
-                          style={{
-                            fontSize: 11,
-                            padding: "3px 8px",
-                            borderRadius: 6,
-                            border: bulkWaTemplateName === p.name ? "1px solid #25D366" : "1px solid var(--border)",
-                            background: bulkWaTemplateName === p.name ? "rgba(37,211,102,0.15)" : "var(--bg-secondary)",
-                            color: bulkWaTemplateName === p.name ? "#22c55e" : "var(--text-secondary)",
-                            cursor: "pointer",
-                          }}
-                        >
-                          {p.label}
-                        </button>
-                      ))}
+                      {META_TEMPLATES_CATALOG.map((p) => {
+                        const isSelected = bulkWaTemplateName === p.name
+                        return (
+                          <button
+                            key={p.name}
+                            type="button"
+                            onClick={() => {
+                              setBulkWaTemplateName(p.name)
+                              if (p.languages[0]?.code) setBulkWaTemplateLang(p.languages[0].code)
+                            }}
+                            style={{
+                              fontSize: 11,
+                              padding: "3px 8px",
+                              borderRadius: 6,
+                              border: isSelected ? "1px solid #25D366" : "1px solid var(--border)",
+                              background: isSelected ? "rgba(37,211,102,0.15)" : "var(--bg-secondary)",
+                              color: isSelected ? "#22c55e" : "var(--text-secondary)",
+                              cursor: "pointer",
+                              fontWeight: isSelected ? 600 : 400,
+                            }}
+                          >
+                            {p.name === "hello_world" ? "🌍 " : p.category === "MARKETING" ? "📢 " : "📄 "}
+                            {p.name}
+                          </button>
+                        )
+                      })}
                     </div>
 
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
@@ -2816,28 +2817,94 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                         </select>
                       </div>
                     </div>
+
+                    {/* Live Meta Template Preview & Copy */}
+                    {(() => {
+                      const curTpl = META_TEMPLATES_CATALOG.find((t) => t.name === bulkWaTemplateName)
+                      if (!curTpl) return null
+                      return (
+                        <div style={{ marginTop: 12, background: "rgba(0,0,0,0.3)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px", fontSize: 11.5 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                            <span style={{ fontWeight: 700, color: "var(--accent-green)" }}>
+                              📋 {curTpl.displayName}
+                            </span>
+                            <span style={{ fontSize: 9.5, padding: "1px 6px", borderRadius: 4, background: curTpl.category === "UTILITY" ? "rgba(59,130,246,0.2)" : "rgba(234,179,8,0.2)", color: curTpl.category === "UTILITY" ? "#60a5fa" : "#facc15", fontWeight: 700 }}>
+                              {curTpl.category}
+                            </span>
+                          </div>
+                          <div style={{ color: "#d1d5db", lineHeight: 1.45, whiteSpace: "pre-wrap", fontSize: 11, margin: "6px 0" }}>
+                            {curTpl.samplePreview}
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8, paddingTop: 6, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+                            <span style={{ fontSize: 10, color: "var(--text-muted)" }}>
+                              {curTpl.pricing}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (typeof navigator !== "undefined" && navigator.clipboard) {
+                                  navigator.clipboard.writeText(curTpl.copyTextForMeta)
+                                  toast.success(`Copied "${curTpl.name}" format for Meta WhatsApp Manager`)
+                                }
+                              }}
+                              style={{ fontSize: 10.5, color: "#25D366", background: "transparent", border: "none", cursor: "pointer", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 4 }}
+                            >
+                              📋 Copy Format for Meta Approval
+                            </button>
+                          </div>
+                        </div>
+                      )
+                    })()}
                   </div>
                 ) : (
                   <>
                     {/* Quick Template Chips for freeform */}
                     <div style={{ marginBottom: 14 }}>
                       <label style={{ display: "block", fontSize: 11.5, color: "var(--text-muted)", marginBottom: 6, fontWeight: 500 }}>
-                        Quick Message Prompts
+                        Quick Message Prompts ({`{name}`} auto-filled)
                       </label>
                       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                         <button
                           type="button"
                           onClick={() => setBulkWaMessage("Hello {name}, greetings from Right Agent Group! We provide fast-track approval on Personal, Business, and Home Loans with minimal documentation and attractive interest rates.")}
-                          style={{ textAlign: "left", fontSize: 11.5, padding: "8px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", cursor: "pointer" }}
+                          style={{ textAlign: "left", fontSize: 11.5, padding: "7px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", cursor: "pointer" }}
                         >
                           🟢 <strong>General Loan Offer:</strong> &quot;Hello {`{name}`}, greetings from Right Agent Group! We provide fast-track approval...&quot;
                         </button>
                         <button
                           type="button"
                           onClick={() => setBulkWaMessage("Hello {name}, this is a gentle follow-up regarding your recent loan inquiry with Right Agent Group. Our loan officer is ready to process your file. Please complete your application below.")}
-                          style={{ textAlign: "left", fontSize: 11.5, padding: "8px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", cursor: "pointer" }}
+                          style={{ textAlign: "left", fontSize: 11.5, padding: "7px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", cursor: "pointer" }}
                         >
-                          📄 <strong>Document / Application Follow-up:</strong> &quot;Hello {`{name}`}, this is a gentle follow-up regarding your recent loan inquiry...&quot;
+                          📄 <strong>Application Follow-up:</strong> &quot;Hello {`{name}`}, this is a gentle follow-up regarding your recent loan inquiry...&quot;
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setBulkWaMessage("Hello {name}, to fast-track your loan file approval, please keep your PAN Card, Aadhaar, and 6 months bank statement ready. Our advisor will guide you through instant sanction.")}
+                          style={{ textAlign: "left", fontSize: 11.5, padding: "7px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", cursor: "pointer" }}
+                        >
+                          📋 <strong>Document Checklist:</strong> &quot;Hello {`{name}`}, to fast-track your loan file approval, please keep your PAN Card...&quot;
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setBulkWaMessage("Hello {name}, special festive offer! Avail Home and Business Loans starting from 7.25% p.a. through 20+ partner banks in Hyderabad with minimal documentation.")}
+                          style={{ textAlign: "left", fontSize: 11.5, padding: "7px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", cursor: "pointer" }}
+                        >
+                          🎉 <strong>Festive Rate Offer:</strong> &quot;Hello {`{name}`}, special festive offer! Avail Home and Business Loans...&quot;
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setBulkWaMessage("నమస్కారం {name} గారు, రైట్ ఏజెంట్ గ్రూప్ నుండి మాట్లాడుతున్నాము. మీకు హోమ్ లోన్ లేదా బిజినెస్ లోన్ తక్కువ వడ్డీతో అవసరమా? మా బ్యాంకింగ్ కౌన్సిలర్ మీకు వెంటనే సహాయం చేస్తారు.")}
+                          style={{ textAlign: "left", fontSize: 11.5, padding: "7px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", cursor: "pointer" }}
+                        >
+                          🇮🇳 <strong>Telugu Offer:</strong> &quot;నమస్కారం {`{name}`} గారు, రైట్ ఏజెంట్ గ్రూప్ నుండి...&quot;
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setBulkWaMessage("नमस्ते {name} जी, राइट एजेंट ग्रुप से नमस्कार। यदि आपको होम, पर्सनल या बिजनेस लोन की आवश्यकता है तो सबसे कम ब्याज दरों पर आवेदन करें।")}
+                          style={{ textAlign: "left", fontSize: 11.5, padding: "7px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", cursor: "pointer" }}
+                        >
+                          🇮🇳 <strong>Hindi Offer:</strong> &quot;नमस्ते {`{name}`} जी, राइट एजेंट ग्रुप से नमस्कार...&quot;
                         </button>
                       </div>
                     </div>

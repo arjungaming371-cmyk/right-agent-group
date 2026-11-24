@@ -17,6 +17,7 @@ import { Avatar, IconBtn } from "./bits"
 import MessageBubble from "./message-bubble"
 import EmojiPicker from "./emoji-picker"
 import VoiceDictation from "../../ui/voice-dictation"
+import { WHATSAPP_QUICK_CHAT_TEMPLATES } from "@/lib/meta-templates"
 
 export default function ChatWindow({
   lead, messages, ready, canEdit, sending, text, setText, onSend,
@@ -52,6 +53,8 @@ export default function ChatWindow({
   onLoadEarlier?: () => Promise<void>
 }) {
   const [showEmoji, setShowEmoji] = useState(false)
+  const [showTemplates, setShowTemplates] = useState(false)
+  const [tplCat, setTplCat] = useState("All")
   const [attachOpen, setAttachOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
@@ -414,9 +417,125 @@ export default function ChatWindow({
             </div>
           )}
 
+          {showTemplates && (
+            <div
+              style={{
+                position: "absolute",
+                bottom: 66,
+                left: 16,
+                right: 16,
+                maxWidth: 480,
+                maxHeight: 390,
+                background: "#202c33",
+                borderRadius: 12,
+                zIndex: 40,
+                boxShadow: "0 10px 40px rgba(0,0,0,0.65)",
+                border: `1px solid ${WA.hairline}`,
+                display: "flex",
+                flexDirection: "column",
+                overflow: "hidden",
+              }}
+            >
+              <div
+                style={{
+                  padding: "10px 14px",
+                  borderBottom: `1px solid ${WA.hairline}`,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  background: "#111b21",
+                }}
+              >
+                <div style={{ fontWeight: 600, fontSize: 13, color: WA.textPrimary, display: "flex", alignItems: "center", gap: 6 }}>
+                  ⚡ Quick Response Templates
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowTemplates(false)}
+                  style={{ background: "transparent", border: "none", color: WA.textSecondary, cursor: "pointer", padding: 2 }}
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              {/* Categories */}
+              <div style={{ display: "flex", gap: 6, padding: "8px 12px", borderBottom: `1px solid ${WA.hairline}`, overflowX: "auto", background: "#182229" }}>
+                {["All", "Application", "Documents", "Rates", "Company", "Telugu", "Hindi"].map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setTplCat(c)}
+                    style={{
+                      fontSize: 11,
+                      padding: "3px 9px",
+                      borderRadius: 12,
+                      border: tplCat === c ? "1px solid #00a884" : `1px solid ${WA.hairline}`,
+                      background: tplCat === c ? "rgba(0,168,132,0.18)" : "transparent",
+                      color: tplCat === c ? "#00a884" : WA.textSecondary,
+                      cursor: "pointer",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {c}
+                  </button>
+                ))}
+              </div>
+
+              {/* Templates List */}
+              <div style={{ padding: "8px 10px", overflowY: "auto", display: "flex", flexDirection: "column", gap: 6 }}>
+                {WHATSAPP_QUICK_CHAT_TEMPLATES
+                  .filter((t) => tplCat === "All" || t.category === tplCat)
+                  .map((t) => {
+                    const renderedText = t.text.replace(/\{name\}/gi, lead.name || "there")
+                    return (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => {
+                          setText((prev) => (prev ? `${prev}\n${renderedText}` : renderedText))
+                          setShowTemplates(false)
+                          setTimeout(growTA, 50)
+                        }}
+                        style={{
+                          textAlign: "left",
+                          padding: "8px 10px",
+                          borderRadius: 8,
+                          background: "#111b21",
+                          border: `1px solid ${WA.hairline}`,
+                          cursor: "pointer",
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 3 }}>
+                          <span style={{ fontWeight: 600, fontSize: 12.5, color: WA.textPrimary }}>{t.label}</span>
+                          <span style={{ fontSize: 10, color: "#00a884", background: "rgba(0,168,132,0.12)", padding: "1px 6px", borderRadius: 4 }}>
+                            {t.category}
+                          </span>
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 11.5,
+                            color: WA.textSecondary,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            display: "-webkit-box",
+                            WebkitLineClamp: 2,
+                            WebkitBoxOrient: "vertical",
+                            lineHeight: 1.4,
+                          }}
+                        >
+                          {renderedText}
+                        </div>
+                      </button>
+                    )
+                  })}
+              </div>
+            </div>
+          )}
+
           <div style={{ display: "flex", alignItems: "flex-end", gap: 8 }}>
-            <IconBtn title="Emoji" active={showEmoji} onClick={() => { setShowEmoji(v => !v); setAttachOpen(false) }}><Smile size={22} /></IconBtn>
-            <IconBtn title="Attach" active={attachOpen} onClick={() => { setAttachOpen(v => !v); setShowEmoji(false) }}><Paperclip size={20} /></IconBtn>
+            <IconBtn title="Emoji" active={showEmoji} onClick={() => { setShowEmoji(v => !v); setAttachOpen(false); setShowTemplates(false) }}><Smile size={22} /></IconBtn>
+            <IconBtn title="Attach" active={attachOpen} onClick={() => { setAttachOpen(v => !v); setShowEmoji(false); setShowTemplates(false) }}><Paperclip size={20} /></IconBtn>
+            <IconBtn title="Quick Templates" active={showTemplates} onClick={() => { setShowTemplates(v => !v); setShowEmoji(false); setAttachOpen(false) }}><FileText size={20} /></IconBtn>
 
             <div style={{ flex: 1, background: WA.panelBg, borderRadius: 10, display: "flex", alignItems: "flex-end", padding: "2px 6px 2px 14px" }}>
               <textarea
