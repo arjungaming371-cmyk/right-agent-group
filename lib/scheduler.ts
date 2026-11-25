@@ -140,9 +140,22 @@ async function runInstagramCommentScan() {
 
       for (const c of comments) {
         if (!c.id || !c.text) continue
-        const senderId = c.from?.id || ""
+        const senderId = String(c.from?.id || "")
         const username = (c.from?.username || c.username || "").toLowerCase()
-        if (senderId === accountId) continue
+        if (
+          senderId === accountId ||
+          senderId === "17841437996447189" ||
+          username === "arjungaming371" ||
+          username.includes("rightagent")
+        ) {
+          continue
+        }
+
+        // Only process fresh comments created within the last 5 minutes — NEVER reply to old comments
+        const commTime = c.timestamp ? new Date(c.timestamp).getTime() : NaN
+        if (isNaN(commTime) || Date.now() - commTime > 5 * 60 * 1000) {
+          continue
+        }
 
         await fetch(`${appUrl}/api/instagram`, {
           method: "POST",
@@ -161,6 +174,8 @@ async function runInstagramCommentScan() {
                       text: c.text,
                       from: c.from || { id: c.id, username: c.username || "instagram_user" },
                       media: { id: m.id },
+                      created_time: c.timestamp,
+                      timestamp: c.timestamp,
                     },
                   },
                 ],
@@ -211,15 +226,22 @@ async function runInstagramDMScan() {
       const messages = conv.messages?.data || []
       for (const m of messages) {
         if (!m.id || !m.message) continue
-        const senderId = m.from?.id || ""
+        const senderId = String(m.from?.id || "")
         const senderUsername = (m.from?.username || "").toLowerCase()
 
         // Skip our own outbound messages
-        if (senderId === accountId || senderUsername === "arjungaming371") continue
+        if (
+          senderId === accountId ||
+          senderId === "17841437996447189" ||
+          senderUsername === "arjungaming371" ||
+          senderUsername.includes("rightagent")
+        ) {
+          continue
+        }
 
-        // Check if message is within the last 48 hours to avoid re-triggering ancient messages
+        // Only process fresh DMs created within the last 5 minutes — NEVER reply to old DMs
         const msgTime = new Date(m.created_time).getTime()
-        if (isNaN(msgTime) || Date.now() - msgTime > 48 * 3600 * 1000) continue
+        if (isNaN(msgTime) || Date.now() - msgTime > 5 * 60 * 1000) continue
 
         // Check if message already exists in DB
         const existing = await query(
