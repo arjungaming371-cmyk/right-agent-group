@@ -6,7 +6,7 @@ import {
   Users, Target, IndianRupee, BadgeCheck, Phone, MessageCircle, MessageSquare, RotateCcw,
   Plus, Search, Link2, Check, Download, Upload, Brain, Pin, Sparkles, CheckSquare,
   PhoneCall, Instagram, X, ExternalLink, Clock, CheckCircle2, ArrowRight, Pencil, Landmark, AlertCircle, FileText,
-  ShieldCheck, Zap, Copy, Trash2
+  ShieldCheck, Zap, Copy, Trash2, Headphones
 } from "lucide-react"
 import { formatCurrency, timeAgo, formatDateTime } from "@/lib/utils"
 import { pctOf } from "@/lib/maths"
@@ -1787,17 +1787,23 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                             style={{ background: "rgba(139,124,255,0.12)", border: "1px solid rgba(139,124,255,0.28)", color: "var(--accent-violet)", borderRadius: 7, width: 28, height: 28, display: "inline-flex", alignItems: "center", justifyContent: "center", opacity: calling === lead.id ? 0.5 : 1, cursor: "pointer" }}
                           ><Phone size={12.5} strokeWidth={1.9} /></button>
                           <button
-                            onClick={() => setWaTarget(lead)}
+                            onClick={() => {
+                              const target = lead.phone || lead.whatsapp_number || lead.name || lead.id
+                              window.dispatchEvent(new CustomEvent("rag:navigate", { detail: { view: "whatsapp", search: target } }))
+                            }}
                             disabled={!lead.phone && !lead.whatsapp_number}
-                            title="Send WhatsApp"
+                            title="Open in WhatsApp Chat"
                             style={{ background: "rgba(45,212,160,0.1)", border: "1px solid rgba(45,212,160,0.28)", color: "var(--accent-green)", borderRadius: 7, width: 28, height: 28, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
                           ><MessageCircle size={12.5} strokeWidth={1.9} /></button>
                           <button
-                            onClick={() => openSendBankLinkModal(lead)}
-                            disabled={!lead.phone && !lead.whatsapp_number}
-                            title="Send Right Agent Group Application Link"
+                            onClick={() => {
+                              const target = lead.phone || lead.name || ""
+                              window.dispatchEvent(new CustomEvent("rag:navigate", { detail: { view: "voice", search: target } }))
+                            }}
+                            disabled={!lead.phone && !lead.name}
+                            title="Listen Call Records"
                             style={{ background: "rgba(56,189,248,0.1)", border: "1px solid rgba(56,189,248,0.28)", color: "var(--accent-cyan)", borderRadius: 7, width: 28, height: 28, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
-                          ><FileText size={12.5} strokeWidth={1.9} /></button>
+                          ><Headphones size={12.5} strokeWidth={1.9} /></button>
                         </>
                       )}
                       <button

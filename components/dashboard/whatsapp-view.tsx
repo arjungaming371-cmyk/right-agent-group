@@ -30,7 +30,7 @@ import { Phone } from "lucide-react"
 // same two (Updates/Communities don't exist on the Cloud API).
 type PanelMode = "chats" | "calls"
 
-export default function WhatsAppView({ role }: { role: Role }) {
+export default function WhatsAppView({ role, initialSearch }: { role: Role; initialSearch?: string }) {
   const canEdit = role !== "viewer"
   const toast = useToast()
   const [leads, setLeads]           = useState<Lead[]>([])
@@ -123,9 +123,59 @@ export default function WhatsAppView({ role }: { role: Role }) {
     } catch {}
   }, [])
 
+  const pendingTargetRef = useRef<string | null>(initialSearch || null)
+
+  const matchAndSelectLead = useCallback((list: Lead[], target: string | null) => {
+    if (!target || !list.length) return false
+    const q = target.trim().toLowerCase()
+    const digits = q.replace(/\D/g, "").slice(-10)
+    const found = list.find((l) => {
+      if (l.id === target) return true
+      const p1 = String(l.phone || "").replace(/\D/g, "").slice(-10)
+      const p2 = String(l.whatsapp_number || "").replace(/\D/g, "").slice(-10)
+      if (digits && digits.length >= 7 && (p1 === digits || p2 === digits)) return true
+      return String(l.name || "").trim().toLowerCase() === q
+    })
+    if (found) {
+      didInitialSelect.current = true
+      setSelected(found)
+      return true
+    }
+    return false
+  }, [])
+
+  useEffect(() => {
+    if (initialSearch) {
+      pendingTargetRef.current = initialSearch
+      if (matchAndSelectLead(leads, initialSearch)) {
+        pendingTargetRef.current = null
+      }
+    }
+  }, [initialSearch, leads, matchAndSelectLead])
+
+  useEffect(() => {
+    function onNav(e: Event) {
+      const ce = e as CustomEvent<{ view: string; search?: string }>
+      if (ce.detail?.view === "whatsapp" && ce.detail.search) {
+        pendingTargetRef.current = ce.detail.search
+        if (matchAndSelectLead(leads, ce.detail.search)) {
+          pendingTargetRef.current = null
+        }
+      }
+    }
+    window.addEventListener("rag:navigate", onNav)
+    return () => window.removeEventListener("rag:navigate", onNav)
+  }, [leads, matchAndSelectLead])
+
   const applyLeads = (data: Lead[], archived: boolean) => {
     if (!Array.isArray(data)) return
     archived ? setArchivedLeads(data) : setLeads(data)
+    if (!archived && pendingTargetRef.current) {
+      if (matchAndSelectLead(data, pendingTargetRef.current)) {
+        pendingTargetRef.current = null
+        return
+      }
+    }
     if (!archived && data.length > 0 && !didInitialSelect.current) {
       didInitialSelect.current = true
       setSelected(prev => prev || data[0])

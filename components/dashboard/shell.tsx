@@ -436,8 +436,8 @@ export default function DashboardShell() {
       case "leads":        return <LeadsView role={role} initialSearch={seedSearch?.view === "leads" ? seedSearch.q : undefined} />
       case "loans":        return <LoanAppsView role={role} initialSearch={seedSearch?.view === "loans" ? seedSearch.q : undefined} />
       case "queue":        return <QueueView role={role} />
-      case "voice":        return <VoiceLogsView role={role} />
-      case "whatsapp":     return <WhatsAppView role={role} />
+      case "voice":        return <VoiceLogsView role={role} initialSearch={seedSearch?.view === "voice" ? seedSearch.q : undefined} />
+      case "whatsapp":     return <WhatsAppView role={role} initialSearch={seedSearch?.view === "whatsapp" ? seedSearch.q : undefined} />
       case "instagram":    return <InstagramView initialSearch={seedSearch?.view === "instagram" ? seedSearch.q : undefined} />
       case "calendar":     return <CalendarView role={role} />
       case "security":     return <SecurityView role={role} />

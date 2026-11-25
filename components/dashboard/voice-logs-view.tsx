@@ -46,7 +46,7 @@ function proxyRecordingUrl(url: string | null): string | null {
   return url
 }
 
-export default function VoiceLogsView({ role }: { role: Role }) {
+export default function VoiceLogsView({ role, initialSearch }: { role: Role; initialSearch?: string }) {
   const canEdit = role !== "viewer"
   const toast = useToast()
   const [calls, setCalls]   = useState<Call[]>([])
@@ -56,7 +56,22 @@ export default function VoiceLogsView({ role }: { role: Role }) {
   const [selected, setSelected] = useState<Call | null>(null)
   // A11y (2026-10-05): the call detail modal now closes on Escape.
   useEscapeDismiss(!!selected, () => { setSelected(null) })
-  const [search, setSearch] = useState("")
+  const [search, setSearch] = useState(initialSearch || "")
+
+  useEffect(() => {
+    if (initialSearch) setSearch(initialSearch)
+  }, [initialSearch])
+
+  useEffect(() => {
+    function onNav(e: Event) {
+      const ce = e as CustomEvent<{ view: string; search?: string }>
+      if (ce.detail?.view === "voice" && ce.detail.search !== undefined) {
+        setSearch(ce.detail.search)
+      }
+    }
+    window.addEventListener("rag:navigate", onNav)
+    return () => window.removeEventListener("rag:navigate", onNav)
+  }, [])
 
   const filteredCalls = useMemo(() => {
     return smartFilter(calls, search, (c) => [
