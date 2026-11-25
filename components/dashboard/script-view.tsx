@@ -1,9 +1,8 @@
 "use client"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Lightbulb, Save, RotateCcw, CalendarClock, Timer, RefreshCw, Languages, Sparkles, Check, X, Phone, MessageSquare, Instagram, Info, Wand2, Braces, Eye, Copy, ExternalLink, CheckCircle2, ShieldCheck, Clock, Link2 } from "lucide-react"
+import { Lightbulb, Save, RotateCcw, CalendarClock, Timer, RefreshCw, Languages, Sparkles, Check, X, Phone, MessageSquare, Instagram, Info, Wand2, Braces, Eye } from "lucide-react"
 import { formatDateTime } from "@/lib/utils"
 import { extractMergeFields, renderMergeFields, sampleVars } from "@/lib/script-studio"
-import { META_TEMPLATES_CATALOG, MetaTemplateDefinition } from "@/lib/meta-templates"
 
 type Script = {
   language: string
@@ -40,7 +39,7 @@ type Tab = "base" | "voice" | "whatsapp" | "instagram"
 const TABS: { id: Tab; label: string; icon: React.ReactNode; desc: string }[] = [
   { id: "base", label: "Base Script", icon: <Languages size={14} strokeWidth={2} />, desc: "Priya's core persona, rules & qualification flow (all channels)" },
   { id: "voice", label: "Voice Calls", icon: <Phone size={14} strokeWidth={2} />, desc: "Spoken openers & closings for Phone + WhatsApp calls (English, Hindi, Telugu)" },
-  { id: "whatsapp", label: "WhatsApp Templates", icon: <MessageSquare size={14} strokeWidth={2} />, desc: "Official Meta Cloud API templates catalog, copyable formats & 24h fallback copy" },
+  { id: "whatsapp", label: "WhatsApp", icon: <MessageSquare size={14} strokeWidth={2} />, desc: "24-hour fallback texts (when the customer messaged us first)" },
   { id: "instagram", label: "Instagram", icon: <Instagram size={14} strokeWidth={2} />, desc: "DM persona & public comment reply prompts" },
 ]
 
@@ -172,20 +171,6 @@ export default function ScriptView() {
   const [generating, setGenerating]   = useState(false)
   const [actingId, setActingId]       = useState<string | null>(null)
   const [ptMsg, setPtMsg]             = useState<{ type: "ok" | "err"; text: string } | null>(null)
-
-  // WhatsApp Meta Templates viewer state
-  const [copiedTpl, setCopiedTpl] = useState<string | null>(null)
-  const [tplCategoryFilter, setTplCategoryFilter] = useState<string>("ALL")
-  const [liveTplStatuses, setLiveTplStatuses] = useState<Record<string, { status: string; category?: string; languages: string[] }>>({})
-
-  useEffect(() => {
-    fetch("/api/whatsapp/templates")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (d?.liveStatuses) setLiveTplStatuses(d.liveStatuses)
-      })
-      .catch(() => {})
-  }, [])
 
   const rowFor = useCallback((key: string) => scripts.find((s) => s.language === key), [scripts])
 
@@ -660,253 +645,27 @@ export default function ScriptView() {
   }
 
   function renderWhatsAppTab() {
-    const filteredMetaTemplates = META_TEMPLATES_CATALOG.filter((t) => {
-      if (tplCategoryFilter === "ALL") return true
-      return t.category === tplCategoryFilter
-    })
-
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-        {/* Meta Cloud API Approved Templates Section */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
         <div>
-          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 12, marginBottom: 14 }}>
-            <div>
-              <div style={{ fontWeight: 700, fontSize: 16, color: "var(--text-primary)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                <ShieldCheck size={18} style={{ color: "var(--accent-blue)" }} />
-                <span>Official Meta WhatsApp Cloud API Templates</span>
-                <span style={{ fontSize: 11, background: "rgba(91,124,250,0.14)", color: "var(--accent-blue)", padding: "2px 9px", borderRadius: 12, fontWeight: 700, whiteSpace: "nowrap" }}>
-                  {META_TEMPLATES_CATALOG.length} Ready Templates
-                </span>
-              </div>
-              <div style={{ fontSize: 12.5, color: "var(--text-secondary)", marginTop: 4, maxWidth: 650, lineHeight: 1.5 }}>
-                Pre-configured templates for Right Agent Group. Live approval status is synced directly from your <strong>Meta WhatsApp Business Account</strong>.
-              </div>
-            </div>
-
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <a
-                href="https://business.facebook.com/wa/manage/message-templates/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn-ghost"
-                style={{
-                  fontSize: 12,
-                  height: 34,
-                  padding: "0 14px",
-                  textDecoration: "none",
-                }}
-              >
-                <ExternalLink size={14} /> Open Meta WhatsApp Manager
-              </a>
-            </div>
+          <div style={{ fontWeight: 700, fontSize: 13.5, marginBottom: 2, color: "var(--accent-violet)" }}>
+            24-Hour Free-form In-Window Fallback Texts
           </div>
-
-          {/* Filter Pills */}
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16 }}>
-            {["ALL", "UTILITY", "MARKETING"].map((cat) => {
-              const active = tplCategoryFilter === cat
-              return (
-                <button
-                  key={cat}
-                  type="button"
-                  onClick={() => setTplCategoryFilter(cat)}
-                  style={{
-                    fontSize: 11.5,
-                    height: 30,
-                    padding: "0 14px",
-                    borderRadius: 20,
-                    border: active ? "none" : "1px solid var(--border)",
-                    background: active ? "var(--gradient-brand)" : "var(--bg-secondary)",
-                    color: active ? "#fff" : "var(--text-secondary)",
-                    cursor: "pointer",
-                    fontWeight: 600,
-                  }}
-                >
-                  {cat === "ALL" ? `All Templates (${META_TEMPLATES_CATALOG.length})` : `${cat} (${META_TEMPLATES_CATALOG.filter(t => t.category === cat).length})`}
-                </button>
-              )
-            })}
+          <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginBottom: 4 }}>
+            These texts are sent when a customer has interacted with you in the last 24 hours or if a Meta template is pending.
           </div>
-
-          {/* Templates Grid */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 16 }}>
-            {filteredMetaTemplates.map((tpl) => {
-              const isCopied = copiedTpl === tpl.name
-              const live = liveTplStatuses[tpl.name]
-              const liveStatus = live?.status || (tpl.isPreApproved ? "APPROVED" : undefined)
-              return (
-                <div
-                  key={tpl.name}
-                  style={{
-                    background: "var(--bg-secondary)",
-                    border: "1px solid var(--border)",
-                    borderRadius: 12,
-                    padding: 16,
-                    display: "flex",
-                    flexDirection: "column",
-                    justifyContent: "space-between",
-                    gap: 12,
-                    position: "relative",
-                  }}
-                >
-                  <div>
-                    {/* Header info */}
-                    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
-                      <div>
-                        <div style={{ fontWeight: 700, fontSize: 14, color: "var(--text-primary)" }}>
-                          {tpl.displayName}
-                        </div>
-                        <div style={{ fontFamily: "monospace", fontSize: 11.5, color: "var(--accent-cyan)", marginTop: 2 }}>
-                          {tpl.name}
-                        </div>
-                      </div>
-
-                      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
-                        <span
-                          style={{
-                            fontSize: 10,
-                            padding: "2px 7px",
-                            borderRadius: 6,
-                            fontWeight: 700,
-                            background: tpl.category === "UTILITY" ? "rgba(91,124,250,0.14)" : "rgba(247,183,49,0.14)",
-                            color: tpl.category === "UTILITY" ? "var(--accent-blue)" : "var(--accent-yellow)",
-                            border: `1px solid ${tpl.category === "UTILITY" ? "rgba(91,124,250,0.3)" : "rgba(247,183,49,0.3)"}`,
-                          }}
-                        >
-                          {tpl.category}
-                        </span>
-                        {liveStatus === "APPROVED" ? (
-                          <span style={{ fontSize: 10, color: "var(--accent-green)", fontWeight: 700, display: "flex", alignItems: "center", gap: 3 }}>
-                            <CheckCircle2 size={11} /> Meta Approved
-                          </span>
-                        ) : liveStatus === "PENDING" ? (
-                          <span style={{ fontSize: 10, color: "var(--accent-yellow)", fontWeight: 700, display: "flex", alignItems: "center", gap: 3 }}>
-                            <Clock size={11} /> Pending Review
-                          </span>
-                        ) : liveStatus === "REJECTED" ? (
-                          <span style={{ fontSize: 10, color: "var(--accent-red)", fontWeight: 700, display: "flex", alignItems: "center", gap: 3 }}>
-                            <X size={11} /> Rejected
-                          </span>
-                        ) : (
-                          <span style={{ fontSize: 9.5, color: "var(--text-muted)" }}>{tpl.pricing}</span>
-                        )}
-                      </div>
-                    </div>
-
-                    <p style={{ fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.45, marginBottom: 12 }}>
-                      {tpl.description}
-                    </p>
-
-                    {/* WhatsApp Mock Bubble — theme-aware */}
-                    <div
-                      style={{
-                        background: "var(--bg-card)",
-                        border: "1px solid var(--border)",
-                        borderRadius: 10,
-                        padding: "12px 14px",
-                        fontSize: 12,
-                        lineHeight: 1.5,
-                        color: "var(--text-primary)",
-                      }}
-                    >
-                      {tpl.header && (
-                        <div style={{ fontWeight: 700, fontSize: 11.5, color: "var(--accent-green)", marginBottom: 6, borderBottom: "1px solid var(--border-light)", paddingBottom: 4 }}>
-                          {tpl.header}
-                        </div>
-                      )}
-                      <div style={{ whiteSpace: "pre-wrap", color: "var(--text-secondary)" }}>
-                        {tpl.body.split(/({{\d+}})/g).map((part, i) =>
-                          part.startsWith("{{") ? (
-                            <span key={i} style={{ background: "rgba(45,212,160,0.16)", color: "var(--accent-green)", padding: "0 2px", borderRadius: 3, fontWeight: 700, fontFamily: "monospace" }}>
-                              {part}
-                            </span>
-                          ) : (
-                            part
-                          )
-                        )}
-                      </div>
-                      {tpl.footer && (
-                        <div style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 8, fontStyle: "italic" }}>
-                          {tpl.footer}
-                        </div>
-                      )}
-                      {tpl.button && (
-                        <div style={{ marginTop: 10, borderTop: "1px solid var(--border-light)", paddingTop: 8, textAlign: "center" }}>
-                          <span style={{ fontSize: 11, fontWeight: 600, color: "var(--accent-cyan)", display: "inline-flex", alignItems: "center", gap: 5 }}>
-                            <Link2 size={12} /> {tpl.button.text} {tpl.button.type === "URL" ? "↗" : ""}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Actions Bar */}
-                  <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between", paddingTop: 4 }}>
-                    <div style={{ fontSize: 10.5, color: "var(--text-muted)" }}>
-                      Langs: {(live?.languages?.length ? live.languages : tpl.languages.map(l => l.code)).join(", ")}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (typeof navigator !== "undefined" && navigator.clipboard) {
-                          navigator.clipboard.writeText(tpl.copyTextForMeta)
-                          setCopiedTpl(tpl.name)
-                          setTimeout(() => setCopiedTpl(null), 2500)
-                        }
-                      }}
-                      className="btn-ghost"
-                      style={{
-                        fontSize: 11.5,
-                        height: 30,
-                        padding: "0 12px",
-                        borderColor: isCopied ? "var(--accent-green)" : undefined,
-                        color: isCopied ? "var(--accent-green)" : undefined,
-                      }}
-                    >
-                      {isCopied ? (
-                        <>
-                          <Check size={13} /> Copied for Meta!
-                        </>
-                      ) : (
-                        <>
-                          <Copy size={13} /> Copy for Meta Approval
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
+          {sectionUpdated("whatsapp_fallbacks")}
         </div>
-
-        {/* 24-Hour Emergency Fallback texts */}
-        <div style={{ borderTop: "1px solid var(--border)", paddingTop: 20 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-            <div>
-              <div style={{ fontWeight: 700, fontSize: 14.5, color: "var(--accent-violet)" }}>
-                💬 24-Hour Free-form In-Window Fallback Texts
-              </div>
-              <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 2 }}>
-                These texts are sent when a customer has interacted with you in the last 24 hours or if a Meta template fails.
-              </div>
-            </div>
-            {sectionUpdated("whatsapp_fallbacks")}
-          </div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 12 }}>
-            {WA_FALLBACK_FIELDS.map((f) => (
-              <Field
-                key={f.key}
-                label={f.label}
-                hint={f.hint}
-                rows={4}
-                value={waFallbacks[f.key] || ""}
-                onChange={(v) => setWaFallbacks((prev) => ({ ...prev, [f.key]: v }))}
-              />
-            ))}
-          </div>
-        </div>
+        {WA_FALLBACK_FIELDS.map((f) => (
+          <Field
+            key={f.key}
+            label={f.label}
+            hint={f.hint}
+            rows={4}
+            value={waFallbacks[f.key] || ""}
+            onChange={(v) => setWaFallbacks((prev) => ({ ...prev, [f.key]: v }))}
+          />
+        ))}
       </div>
     )
   }
