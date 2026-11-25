@@ -47,13 +47,13 @@ function buildComprehensiveDescription(item: any): string {
   const location = item.lead_address || item.city || ""
 
   if (item.category === "loan_confirmed") {
-    parts.push(`Confirmed requirement for ${product}${amount ? ` of ${amount}` : ""}${location ? ` in ${location}` : ""}.`)
+    parts.push(`🟢 LOAN CONFIRMED ON CALL — Caller confirmed requirement for ${product}${amount ? ` of ${amount}` : ""}${location ? ` in ${location}` : ""}.`)
     if (item.call_duration) {
       const mins = Math.floor(item.call_duration / 60)
       const secs = item.call_duration % 60
       parts.push(`Discussed on a ${mins > 0 ? `${mins}m ` : ""}${secs}s call (${item.call_language || "Telugu"}).`)
     }
-    parts.push(`WhatsApp application link sent. Follow up to collect KYC & bank documents.`)
+    parts.push(`Application link sent on WhatsApp. Follow up for documentation & bank processing.`)
   } else if (item.category === "callback") {
     parts.push(`Callback requested for ${product}${amount ? ` (${amount})` : ""}.`)
     if (item.quote) parts.push(`Note: "${item.quote}".`)
@@ -131,7 +131,8 @@ export async function GET(req: NextRequest) {
             LIMIT 1
          ) last_call ON true
         WHERE e.status IN ('confirmed', 'needs_review', 'rescheduled')
-          AND e.event_at >= now() - interval '14 days'
+          AND e.event_type IN ('callback', 'branch_visit')
+          AND e.event_at >= now() - interval '1 day'
           AND ($1::uuid IS NULL OR e.branch_id = $1::uuid)
         ORDER BY e.event_at ASC
         LIMIT 100`,

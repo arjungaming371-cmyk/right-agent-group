@@ -3,23 +3,16 @@ import { useCallback, useEffect, useState, useMemo } from "react"
 import {
   Phone,
   CheckCheck,
-  CheckCircle2,
   MessageCircle,
   RefreshCw,
   BellRing,
-  Clock,
-  Sparkles,
-  CalendarClock,
-  Building2,
-  AlertTriangle,
-  MapPin,
-  Banknote,
-  Info
+  ExternalLink,
+  Clock
 } from "lucide-react"
 import { SkeletonList } from "../ui/skeleton"
 import { usePolling } from "@/lib/use-poll"
 
-// UNIFIED HUMAN ACTION CENTER (Compact & Streamlined)
+// UNIFIED HUMAN ATTENTION REQUIRED — authentic website CSS design
 
 type AttentionCategory = "all" | "loan_confirmed" | "calendar" | "escalation"
 
@@ -67,37 +60,14 @@ function timeAgo(iso: string): string {
   return `${Math.floor(s / 86400)}d ago`
 }
 
-function formatDuration(seconds?: number | null): string {
-  if (!seconds || seconds <= 0) return ""
-  const mins = Math.floor(seconds / 60)
-  const secs = seconds % 60
-  return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`
-}
-
-function formatEventTiming(isoDate?: string | null): { text: string; isOverdue: boolean; badge: string } {
-  if (!isoDate) return { text: "", isOverdue: false, badge: "" }
-  const d = new Date(isoDate)
-  if (isNaN(d.getTime())) return { text: "", isOverdue: false, badge: "" }
-
-  const now = new Date()
-  const diffMinutes = Math.round((d.getTime() - now.getTime()) / 60000)
-  const isToday = d.toDateString() === now.toDateString()
-  const isOverdue = diffMinutes < 0
-
-  const timeStr = d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true })
-  const dateStr = d.toLocaleDateString("en-IN", { day: "numeric", month: "short" })
-
-  if (isOverdue) {
-    const overdueMins = Math.abs(diffMinutes)
-    const label = overdueMins > 60 ? `${Math.floor(overdueMins / 60)}h overdue` : `${overdueMins}m overdue`
-    return { text: `${isToday ? "Today" : dateStr} at ${timeStr}`, isOverdue: true, badge: label }
-  }
-
-  if (isToday) {
-    return { text: `Today at ${timeStr}`, isOverdue: false, badge: diffMinutes <= 60 ? `Due in ${diffMinutes}m` : `Today ${timeStr}` }
-  }
-
-  return { text: `${dateStr} at ${timeStr}`, isOverdue: false, badge: dateStr }
+const LEAD_STATUS_LABEL: Record<string, string> = {
+  new: "New",
+  contacted: "Contacted",
+  qualified: "Qualified",
+  applied: "Applied",
+  interested: "Interested",
+  not_interested: "Not interested",
+  callback: "Callback asked",
 }
 
 export default function AttentionView({ role }: { role: Role }) {
@@ -176,7 +146,7 @@ export default function AttentionView({ role }: { role: Role }) {
     return {
       all: items.length,
       loans: items.filter(i => i.category === "loan_confirmed").length,
-      callbacks: items.filter(i => i.category === "callback" || i.category === "branch_visit" || i.category === "document_deadline" || i.category === "reminder").length,
+      callbacks: items.filter(i => i.category === "callback" || i.category === "branch_visit").length,
       escalations: items.filter(i => i.category === "escalation").length,
     }
   }, [items])
@@ -185,7 +155,7 @@ export default function AttentionView({ role }: { role: Role }) {
     if (!items) return []
     if (activeTab === "all") return items
     if (activeTab === "loan_confirmed") return items.filter(i => i.category === "loan_confirmed")
-    if (activeTab === "calendar") return items.filter(i => i.category === "callback" || i.category === "branch_visit" || i.category === "document_deadline" || i.category === "reminder")
+    if (activeTab === "calendar") return items.filter(i => i.category === "callback" || i.category === "branch_visit")
     if (activeTab === "escalation") return items.filter(i => i.category === "escalation")
     return items
   }, [items, activeTab])
@@ -195,35 +165,35 @@ export default function AttentionView({ role }: { role: Role }) {
   return (
     <div className="mx-auto max-w-4xl pb-8">
       {/* Header */}
-      <div className="mb-3.5 flex flex-wrap items-center justify-between gap-2.5">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="flex items-center gap-2 text-[16px] font-bold text-[var(--text-primary)]">
-            <BellRing size={16} className="text-amber-400" />
+          <h2 className="flex items-center gap-2 text-[18px] font-bold text-[var(--text-primary)]">
+            <BellRing size={18} className="text-amber-400" />
             Human Attention Required
             {counts.all > 0 && (
-              <span className="rounded-full bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 text-[11px] font-bold text-amber-400">
+              <span className="rounded-full bg-amber-500/15 border border-amber-500/30 px-2.5 py-0.5 text-[11px] font-bold text-amber-400">
                 {counts.all} waiting
               </span>
             )}
           </h2>
-          <p className="text-[12px] text-[var(--text-secondary)]">
-            Confirmed loan leads, scheduled callbacks, and customer escalations.
+          <p className="text-[13px] text-[var(--text-secondary)]">
+            Priya detected these customers need a person — frustration, a direct request, or an unsupported ask.
           </p>
         </div>
         <button
           onClick={load}
           aria-label="Refresh"
-          className="flex h-7 items-center gap-1.5 rounded-md border border-[var(--border)] px-2.5 text-[11.5px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition"
+          className="flex h-8 items-center gap-1.5 rounded-lg border border-[var(--border)] px-3 text-[12px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--overlay-soft)] transition"
         >
-          <RefreshCw size={12} /> Refresh
+          <RefreshCw size={13} /> Refresh
         </button>
       </div>
 
       {/* Filter Tabs */}
-      <div className="mb-3.5 flex flex-wrap items-center gap-1.5 border-b border-[var(--border)] pb-2 text-[11.5px]">
+      <div className="mb-4 flex flex-wrap items-center gap-2 border-b border-[var(--border)] pb-2 text-[12px]">
         <button
           onClick={() => setActiveTab("all")}
-          className={`rounded-md px-2.5 py-1 font-semibold transition ${
+          className={`rounded-md px-3 py-1 font-semibold transition ${
             activeTab === "all"
               ? "bg-[var(--accent-blue)] text-white"
               : "text-[var(--text-secondary)] hover:bg-[var(--overlay-soft)]"
@@ -233,202 +203,167 @@ export default function AttentionView({ role }: { role: Role }) {
         </button>
         <button
           onClick={() => setActiveTab("loan_confirmed")}
-          className={`flex items-center gap-1 rounded-md px-2.5 py-1 font-semibold transition ${
+          className={`flex items-center gap-1.5 rounded-md px-3 py-1 font-semibold transition ${
             activeTab === "loan_confirmed"
               ? "bg-emerald-600 text-white"
               : "text-emerald-400 hover:bg-emerald-500/10"
           }`}
         >
-          <Sparkles size={11.5} /> Confirmed Loans ({counts.loans})
+          Confirmed Loans ({counts.loans})
         </button>
         <button
           onClick={() => setActiveTab("calendar")}
-          className={`flex items-center gap-1 rounded-md px-2.5 py-1 font-semibold transition ${
+          className={`flex items-center gap-1.5 rounded-md px-3 py-1 font-semibold transition ${
             activeTab === "calendar"
               ? "bg-blue-600 text-white"
               : "text-blue-400 hover:bg-blue-500/10"
           }`}
         >
-          <CalendarClock size={11.5} /> Callbacks & Visits ({counts.callbacks})
+          Callbacks & Visits ({counts.callbacks})
         </button>
         <button
           onClick={() => setActiveTab("escalation")}
-          className={`flex items-center gap-1 rounded-md px-2.5 py-1 font-semibold transition ${
+          className={`flex items-center gap-1.5 rounded-md px-3 py-1 font-semibold transition ${
             activeTab === "escalation"
               ? "bg-rose-600 text-white"
               : "text-rose-400 hover:bg-rose-500/10"
           }`}
         >
-          <AlertTriangle size={11.5} /> Escalations ({counts.escalations})
+          Escalations ({counts.escalations})
         </button>
       </div>
 
       {error && (
-        <div className="mb-3 rounded-md border border-amber-500/35 bg-amber-500/10 px-3 py-1.5 text-[12px] text-amber-300">
+        <div className="mb-4 rounded-lg border border-amber-500/35 bg-amber-500/10 px-3.5 py-2 text-[12px] text-amber-300">
           {error}
         </div>
       )}
 
       {/* Main List */}
       {items === null ? (
-        <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-4">
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-6">
           <SkeletonList rows={3} />
         </div>
       ) : filteredItems.length === 0 ? (
-        <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-8 text-center">
-          <CheckCheck size={26} className="mx-auto mb-2 text-emerald-400" />
-          <div className="text-[13px] font-semibold text-[var(--text-primary)]">All caught up! Zero pending tasks</div>
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-10 text-center">
+          <CheckCheck size={28} className="mx-auto mb-3 text-[var(--accent-green)]" />
+          <div className="text-[14px] font-semibold text-[var(--text-primary)]">Nothing needs a human right now</div>
+          <p className="mx-auto mt-1 max-w-md text-[12.5px] text-[var(--text-secondary)]">
+            When Priya hears frustration, a request for a person, or a loan confirmation, the lead lands here.
+          </p>
         </div>
       ) : (
-        <ul className="flex flex-col gap-2.5">
+        <ul className="flex flex-col gap-3">
           {filteredItems.map(item => {
             const isLoan = item.category === "loan_confirmed"
-            const isVisit = item.category === "branch_visit"
             const isCallback = item.category === "callback"
-            const isEscalation = item.category === "escalation"
-            const timing = item.event_at ? formatEventTiming(item.event_at) : null
-            const callDurStr = formatDuration(item.call_duration)
+            const isVisit = item.category === "branch_visit"
 
-            const displayName = item.full_spoken_name || item.lead_name || "Unknown Lead"
-            const product = item.product_interest ? item.product_interest.toUpperCase() : "LOAN"
-            const amount = item.loan_amount ? `₹${Number(item.loan_amount).toLocaleString("en-IN")}` : null
-            const location = item.lead_address || item.city || item.location
+            // Authentic badge styling exactly matching the website design
+            let badgeText = "Needs a person"
+            let badgeBg = "rgba(234,179,8,0.14)"
+            let badgeColor = "var(--accent-yellow)"
+
+            if (isLoan) {
+              badgeText = "Loan Confirmed"
+              badgeBg = "rgba(16,185,129,0.14)"
+              badgeColor = "#10b981"
+            } else if (isCallback) {
+              badgeText = "Callback Scheduled"
+              badgeBg = "rgba(59,130,246,0.14)"
+              badgeColor = "var(--accent-blue)"
+            } else if (isVisit) {
+              badgeText = "Office Visit"
+              badgeBg = "rgba(168,85,247,0.14)"
+              badgeColor = "#a855f7"
+            }
+
+            const displayName = item.full_spoken_name || item.lead_name || item.lead_phone || "Unknown lead"
+            const leadStatus = item.lead_status ? (LEAD_STATUS_LABEL[item.lead_status.toLowerCase()] || item.lead_status) : "Qualified"
+            const loanAmtStr = item.loan_amount ? `₹${Number(item.loan_amount).toLocaleString("en-IN")}` : null
+            const productStr = item.product_interest ? item.product_interest.toUpperCase() : null
 
             return (
               <li
                 key={item.id}
-                className={`rounded-lg border p-3 sm:p-3.5 transition ${
-                  isLoan
-                    ? "border-emerald-500/35 bg-[var(--bg-card)] hover:border-emerald-500/60"
-                    : timing?.isOverdue
-                    ? "border-rose-500/35 bg-[var(--bg-card)]"
-                    : "border-[var(--border)] bg-[var(--bg-card)] hover:border-[var(--border-hover)]"
-                }`}
+                className="rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-4 transition hover:border-[var(--border-hover)]"
               >
-                {/* Header Line */}
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-[14px] font-bold text-[var(--text-primary)]">
-                      {displayName}
-                    </span>
-                    {item.lead_name && item.full_spoken_name && item.lead_name !== item.full_spoken_name && (
-                      <span className="text-[11.5px] text-[var(--text-muted)]">({item.lead_name})</span>
-                    )}
-                    {item.lead_phone && (
-                      <span className="text-[12px] font-mono text-[var(--text-secondary)]">
-                        {item.lead_phone}
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    {/* Header info line */}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-[13.5px] font-bold text-[var(--text-primary)]">
+                        {displayName}
                       </span>
-                    )}
-
-                    {/* Compact Category Badge */}
-                    {isLoan && (
-                      <span className="inline-flex items-center gap-1 rounded bg-emerald-500/15 border border-emerald-500/30 px-1.5 py-0.5 text-[10.5px] font-bold text-emerald-400">
-                        <Sparkles size={10} /> LOAN CONFIRMED
-                      </span>
-                    )}
-                    {isCallback && (
+                      {item.lead_phone && (
+                        <span className="text-[12px] text-[var(--text-secondary)] font-mono">
+                          {item.lead_phone}
+                        </span>
+                      )}
                       <span
-                        className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] font-bold ${
-                          timing?.isOverdue
-                            ? "bg-rose-500/15 border border-rose-500/30 text-rose-400"
-                            : "bg-blue-500/15 border border-blue-500/30 text-blue-400"
-                        }`}
+                        className="rounded-md px-1.5 py-px text-[10.5px] font-semibold"
+                        style={{ background: badgeBg, color: badgeColor }}
                       >
-                        <CalendarClock size={10} /> {timing?.badge || "CALLBACK"}
+                        {badgeText}
                       </span>
-                    )}
-                    {isVisit && (
-                      <span className="inline-flex items-center gap-1 rounded bg-purple-500/15 border border-purple-500/30 px-1.5 py-0.5 text-[10.5px] font-bold text-purple-400">
-                        <Building2 size={10} /> OFFICE VISIT
+                      <span className="rounded-md bg-[var(--overlay-soft)] px-1.5 py-px text-[10.5px] font-medium text-[var(--text-secondary)]">
+                        Lead: {leadStatus}
                       </span>
-                    )}
-                    {isEscalation && (
-                      <span className="inline-flex items-center gap-1 rounded bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 text-[10.5px] font-bold text-amber-400">
-                        <AlertTriangle size={10} /> ESCALATION
+                      {productStr && loanAmtStr && (
+                        <span className="rounded-md bg-[var(--overlay-soft)] px-1.5 py-px text-[10.5px] font-medium text-emerald-400">
+                          {productStr} • {loanAmtStr}
+                        </span>
+                      )}
+                      <span className="flex items-center gap-1 text-[11px] text-[var(--text-muted)]">
+                        <Clock size={10.5} /> {timeAgo(item.created_at)}
                       </span>
-                    )}
+                    </div>
 
-                    {/* Key Inline Spec Badges */}
-                    {amount && (
-                      <span className="rounded bg-[var(--overlay-soft)] px-1.5 py-0.5 text-[11px] font-semibold text-emerald-300">
-                        {product} • {amount}
-                      </span>
-                    )}
-                    {location && (
-                      <span className="text-[11px] text-[var(--text-secondary)] flex items-center gap-0.5">
-                        <MapPin size={10.5} className="text-blue-400" /> {location}
-                      </span>
-                    )}
-                    {callDurStr && (
-                      <span className="text-[11px] text-[var(--text-muted)] flex items-center gap-0.5">
-                        <Phone size={10.5} className="text-purple-400" /> {callDurStr}
-                        {item.call_language ? ` (${item.call_language.slice(0, 2).toUpperCase()})` : ""}
-                      </span>
-                    )}
-
-                    <span className="flex items-center gap-1 text-[10.5px] text-[var(--text-muted)] ml-auto sm:ml-0">
-                      <Clock size={10} /> {timeAgo(item.created_at)}
-                    </span>
+                    {/* Clean authentic description box matching website design */}
+                    <p className="mt-2 rounded-lg bg-[var(--overlay-soft)] px-3 py-2 text-[12.5px] italic text-[var(--text-secondary)] leading-relaxed">
+                      “{item.full_description || item.summary || "Customer confirmed interest and requested loan advisor follow-up."}”
+                    </p>
                   </div>
 
-                  {/* Quick Action Buttons */}
-                  <div className="flex flex-shrink-0 items-center gap-1.5">
+                  {/* Actions matching website design */}
+                  <div className="flex flex-shrink-0 flex-wrap items-center gap-1.5 pt-0.5">
                     {canCall && item.lead_id && (
                       <button
                         onClick={() => callLead(item.lead_id)}
                         disabled={busyId === item.id || busyId === item.lead_id}
-                        className="flex h-7 items-center gap-1 rounded-md border border-[var(--border)] px-2 text-[11.5px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--overlay-soft)] disabled:opacity-50 transition"
+                        className="flex h-8 items-center gap-1.5 rounded-lg border border-[var(--border)] px-2.5 text-[12px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--overlay-soft)] disabled:opacity-50 transition"
                       >
-                        <Phone size={11} /> Call
+                        <Phone size={13} /> Call
                       </button>
                     )}
                     {item.lead_id && (
                       <button
                         onClick={() => openChat(item.lead_id)}
-                        className="flex h-7 items-center gap-1 rounded-md border border-[var(--border)] px-2 text-[11.5px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--overlay-soft)] transition"
+                        className="flex h-8 items-center gap-1.5 rounded-lg border border-[var(--border)] px-2.5 text-[12px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--overlay-soft)] transition"
                       >
-                        <MessageCircle size={11} /> WhatsApp
+                        <MessageCircle size={13} /> Open chat
                       </button>
                     )}
                     <button
                       onClick={() => resolve(item)}
                       disabled={busyId === item.id}
-                      className="flex h-7 items-center gap-1 rounded-md px-2.5 text-[11.5px] font-semibold text-white shadow-sm disabled:opacity-50 transition"
-                      style={{
-                        background: isLoan
-                          ? "linear-gradient(135deg, #059669 0%, #10b981 100%)"
-                          : "linear-gradient(135deg, #2563eb 0%, #3b82f6 100%)"
-                      }}
+                      className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12px] font-semibold text-white disabled:opacity-50 transition"
+                      style={{ background: "var(--gradient-brand)" }}
                     >
-                      <CheckCheck size={11.5} />
-                      {isLoan ? "Mark Processed" : "Mark Handled"}
+                      <CheckCheck size={13} /> Mark resolved
                     </button>
                   </div>
-                </div>
-
-                {/* Compact Description (1-2 clear lines) */}
-                <div className="mt-2 text-[12px] leading-snug text-[var(--text-secondary)]">
-                  {item.full_description || item.summary}
-                </div>
-
-                {/* Subtext: Timing or Next Step */}
-                <div className="mt-1.5 flex flex-wrap items-center gap-3 text-[11px] text-[var(--text-muted)]">
-                  {timing?.text && (
-                    <span className="flex items-center gap-1 text-blue-400 font-medium">
-                      <Clock size={11} /> Scheduled: {timing.text}
-                    </span>
-                  )}
-                  {item.next_action && (
-                    <span className="flex items-center gap-1 text-emerald-400/90 font-medium truncate">
-                      <CheckCircle2 size={11} /> Next: {item.next_action}
-                    </span>
-                  )}
                 </div>
               </li>
             )
           })}
         </ul>
       )}
+
+      <p className="mt-4 flex items-center gap-1.5 text-[11.5px] text-[var(--text-muted)]">
+        <ExternalLink size={12} />
+        Resolved escalations stay on the lead's timeline for audit.
+      </p>
     </div>
   )
 }
