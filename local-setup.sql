@@ -700,7 +700,7 @@ ALTER TABLE allowed_emails ADD COLUMN IF NOT EXISTS branch_id UUID REFERENCES br
 
 ALTER TABLE allowed_emails DROP CONSTRAINT IF EXISTS allowed_emails_role_check;
 ALTER TABLE allowed_emails ADD CONSTRAINT allowed_emails_role_check
-  CHECK (role IN ('admin', 'agent', 'viewer', 'developer', 'branch_manager'));
+  CHECK (length(trim(role)) > 0);
 
 CREATE EXTENSION IF NOT EXISTS moddatetime;
 DROP TRIGGER IF EXISTS trg_branches_updated_at ON branches;
