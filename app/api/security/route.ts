@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const { data: settings } = await db.from("security_settings").select("key, enabled")
-  const { data: logs } = await db.from("audit_logs").select("*").order("created_at", { ascending: false }).limit(20)
+  const { data: logs } = await db.from("audit_logs").select("*").order("created_at", { ascending: false })
 
   // The full-access role's own actions are hidden from OTHER people viewing
   // this page — not from that account's own view of its own history. Without

@@ -384,14 +384,15 @@ export default function SecurityView({ role = "admin" }: { role?: Role }) {
         </div>
 
         {/* Audit Log */}
-        <div style={{ background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:12 }}>
+        <div style={{ background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:12, overflow:"hidden" }}>
           <div style={{ padding:"18px 24px",borderBottom:"1px solid var(--border)",fontWeight:600,fontSize:15,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-            <span>Audit Log</span>
+            <span>Audit Log {logs.length > 0 ? `(${logs.length})` : ""}</span>
             <button onClick={load} className="btn-ghost" style={{ height:30,padding:"0 12px",fontSize:12 }}><RotateCcw size={12} strokeWidth={1.9} /> Refresh</button>
           </div>
           {!loading && logs.length === 0 && (
             <div style={{ padding: 24, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>No audit events yet.</div>
           )}
+          <div style={{ maxHeight: 560, overflowY: "auto" }}>
           {logs.map((log) => {
             let meta: any = null
             if (log.metadata) {
@@ -400,11 +401,17 @@ export default function SecurityView({ role = "admin" }: { role?: Role }) {
                 try { meta = JSON.parse(log.metadata) } catch {}
               }
             }
+            const extraDetails = meta && typeof meta === "object"
+              ? Object.entries(meta)
+                  .filter(([k, v]) => v !== null && v !== undefined && v !== "" && !["sentCount", "skippedDnd", "failedCount", "total"].includes(k))
+                  .map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : String(v)}`)
+                  .join(" · ")
+              : ""
 
             return (
               <div key={log.id} style={{ padding:"14px 24px",borderBottom:"1px solid var(--border-light)",display:"flex",alignItems:"center",gap:14 }}>
                 <span style={{ width:30,height:30,borderRadius:8,background:"var(--overlay-hover)",display:"inline-flex",alignItems:"center",justifyContent:"center",color:"var(--text-muted)",flexShrink:0 }}><FileLock2 size={14} strokeWidth={1.8} /></span>
-                <div style={{ flex:1 }}>
+                <div style={{ flex:1, minWidth: 0 }}>
                   <div style={{ fontSize:14,fontWeight:500,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap" }}>
                     <span>{log.action}</span>
                     {meta?.sentCount !== undefined && (
@@ -429,6 +436,11 @@ export default function SecurityView({ role = "admin" }: { role?: Role }) {
                     )}
                   </div>
                   <div style={{ fontSize:12,color:"var(--text-muted)",marginTop:2 }}>{log.performed_by}</div>
+                  {extraDetails && (
+                    <div style={{ fontSize:11,color:"var(--text-secondary)",marginTop:3,wordBreak:"break-word" }}>
+                      {extraDetails}
+                    </div>
+                  )}
                 </div>
                 <div style={{ fontSize:12,color:"var(--text-muted)",whiteSpace:"nowrap",textAlign:"right" }}>
                   <div>{timeAgo(log.created_at)}</div>
@@ -437,6 +449,7 @@ export default function SecurityView({ role = "admin" }: { role?: Role }) {
               </div>
             )
           })}
+          </div>
         </div>
       </div>
 
