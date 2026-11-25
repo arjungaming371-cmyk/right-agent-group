@@ -162,9 +162,10 @@ export const PATCH = withRoute("loans", async (req: NextRequest) => {
     const typeToSync = rawAny.loan_type
 
     if (nameToSync || phoneToSync || amountToSync || typeToSync) {
+      // Never overwrite an existing/uploaded lead name — lead name is final
       await query(
         `UPDATE leads
-         SET name = COALESCE($1, name),
+         SET name = CASE WHEN name IS NULL OR name = '' OR name = 'Customer' THEN COALESCE($1, name) ELSE name END,
              phone = COALESCE($2, phone),
              whatsapp_number = COALESCE($2, whatsapp_number),
              loan_amount = COALESCE($3, loan_amount),

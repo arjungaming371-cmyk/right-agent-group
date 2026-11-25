@@ -23,7 +23,6 @@ export type AttentionItem = {
   category: "loan_confirmed" | "callback" | "branch_visit" | "document_deadline" | "reminder" | "escalation"
   lead_id: string | null
   lead_name: string | null
-  full_spoken_name?: string | null
   lead_phone: string | null
   lead_whatsapp: string | null
   lead_status: string | null
@@ -278,7 +277,7 @@ export default function AttentionView({ role }: { role: Role }) {
               badgeColor = "#a855f7"
             }
 
-            const displayName = item.full_spoken_name || item.lead_name || item.lead_phone || "Unknown lead"
+            const displayName = item.lead_name || item.lead_phone || "Unknown lead"
             const leadStatus = item.lead_status ? (LEAD_STATUS_LABEL[item.lead_status.toLowerCase()] || item.lead_status) : "Qualified"
             const loanAmtStr = item.loan_amount ? `₹${Number(item.loan_amount).toLocaleString("en-IN")}` : null
             const productStr = item.product_interest ? item.product_interest.toUpperCase() : null

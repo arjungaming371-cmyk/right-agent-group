@@ -489,8 +489,12 @@ async function handleInbound(msg: any, profileName: string | null, waBranch: Bra
     const cleanIntro = rawIntro.charAt(0).toUpperCase() + rawIntro.slice(1).toLowerCase()
     const ignoredWords = ["here", "calling", "interested", "looking", "applying", "asking", "fine", "good", "okay", "ready", "new"]
     if (!ignoredWords.includes(cleanIntro.toLowerCase())) {
-      lead.name = cleanIntro
-      query(`UPDATE leads SET name = $1 WHERE id = $2`, [cleanIntro, lead.id]).catch(() => {})
+      // NEVER overwrite an uploaded/existing lead name — uploaded lead names are final
+      const isPlaceholder = !lead.name || lead.name.trim() === "" || lead.name === lead.phone || lead.name.toLowerCase() === "customer"
+      if (isPlaceholder) {
+        lead.name = cleanIntro
+        query(`UPDATE leads SET name = $1 WHERE id = $2`, [cleanIntro, lead.id]).catch(() => {})
+      }
     }
   }
 
