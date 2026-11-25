@@ -757,7 +757,7 @@ INSTRUCTIONS FOR NEW INQUIRY:
   try {
     const aiMentionedForm = !!(aiReply && /\b(sent (the )?(simple )?(application|form)|link on (this )?chat|fill it (when|here)|application link|form link|లింక్ పంపించా|లింక్ పంపిస్తా|form right here)\b/i.test(aiReply))
     const customerRequested = detectApplicationRequest(text)
-    if ((customerRequested || aiMentionedForm) && !(await recentFormLinkSent(lead.id))) {
+    if (customerRequested || (aiMentionedForm && !(await recentFormLinkSent(lead.id)))) {
       const token = await createOneTimeFormToken(lead.id)
       const linkResult = await sendApplicationLinkText(from, lead.name || "there", token, waBranch)
       const linkMessageBody = formLinkMessage(lead.name || "there", token, waBranch?.brandName)

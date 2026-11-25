@@ -231,6 +231,21 @@ SPEAK LIKE A REAL HYDERABAD AGENT (NOT AN IVR):
 //      allows — which is also why this can't be folded into the language
 //      blocks: CALL_LANGUAGE_STYLES.english IS LANGUAGE_STYLES.english, so
 //      anything added there would leak into English calls.
+const WHATSAPP_HUMAN_PERSONA = `You are Priya, a friendly, sharp, real human loan advisor at Right Agent Group, Hyderabad (LS Right Agent Services) chatting with a customer on WhatsApp.
+
+COMPANY FACTS (true & verified):
+- Loans we arrange: Home Loan, Personal Loan, Business Loan, Education Loan, Mortgage Loan, Loan Against Property (LAP), Car/Vehicle Loan, Gold Loan — through 20+ partner banks & NBFCs.
+- Zero advance fees. We NEVER ask for OTP, ATM PIN, or any upfront payment.
+- Branch Office: 4-143 Mallikarjuna Complex, 5th Floor, Gandimaisamma X Road, Medchal District, Hyderabad (above Masters GYM). Open Mon–Sat, 9:30 AM – 6:30 PM.
+
+HOW TO BEHAVE ON WHATSAPP (CRITICAL — ACT LIKE A REAL PERSON, NOT A BOT):
+- Have a genuinely free, natural, human conversation. Do NOT follow a rigid script or sound like a call-center template.
+- Directly answer whatever the customer just said or asked — whether it's about loan status, re-applying with a family co-applicant, rates, documents, visiting the branch, or talking to a manager.
+- If the customer asks for an application link (even if they want to re-apply or try with a co-applicant), gladly say you've shared the link right here in the chat (the system sends it automatically). NEVER refuse to send a link!
+- If the customer asks to visit the branch or meet/talk to a manager, respond naturally and helpfully (confirm branch timings if visiting, or let them know our manager will connect).
+- NEVER repeat the same sentence twice in a conversation, and NEVER end messages with repetitive robot lines like "our loan officer will call you soon" or "do you need any other help?".
+- Keep it warm, conversational, and concise (1–3 natural sentences unless listing rates/docs).`
+
 const WHATSAPP_BREVITY = `
 
 KEEP IT SHORT & TEXT LIKE A REAL HUMAN (WhatsApp):
@@ -368,6 +383,14 @@ async function getSystemPrompt(language: Language, channel: Channel = "whatsapp"
         _scriptCache.set(cacheKey, { prompt, at: Date.now() })
         return prompt
       }
+    }
+
+    // For WhatsApp text chat, use the free, natural human advisor persona
+    // instead of the rigid 8,700-char phone-call script.
+    if (channel === "whatsapp") {
+      const prompt = WHATSAPP_HUMAN_PERSONA + styles[language] + CHANNEL_BREVITY[channel] + await branchContextBlock(branchId)
+      _scriptCache.set(cacheKey, { prompt, at: Date.now() })
+      return prompt
     }
 
     // Single base script first; legacy per-language row as fallback.
@@ -772,10 +795,11 @@ export async function chatWithLLM(
   // chat history pull Priya's reply back into Tenglish/Hinglish.
   const TENGLISH_LEAK_RE = /\b(meeku|naaku|naku|maaku|ma|mee|chala|avtharu|avtundi|kavala|kavali|unnaya|unna|cheyandi|cheyadam|cheptharu|gurinchi|endukante|inka|ippudu|cheppandi|kudaradu|matrame|aayana|chestharu|chestham|matladatharu)\b/i
   if (channel === "whatsapp" && language === "english" && TENGLISH_LEAK_RE.test(reply)) {
+    const recentOnly = messages.slice(-2)
     const corrected = await runChat(
-      messages,
+      recentOnly,
       systemPrompt +
-        "\n\n=== LANGUAGE VIOLATION — REWRITE IN PURE ENGLISH ===\nThe customer wrote in English, but your draft used Telugu/Tenglish words. Rewrite the SAME reply in 100% natural, casual, human-like English (zero Telugu/Tenglish words). Do NOT start with 'Sir,' or end with 'Inkemaina help kavala?' or 'Do you need any other help?'.",
+        "\n\n=== LANGUAGE VIOLATION — REWRITE IN PURE ENGLISH ===\nThe customer wrote in English, but your draft used Telugu/Tenglish words. Rewrite the reply in 100% natural, casual, human-like English (zero Telugu/Tenglish words). Do NOT start with 'Sir,' or end with 'Inkemaina help kavala?' or 'Do you need any other help?'.",
       { numPredict: opts?.numPredict ?? replyTokenBudget(language, channel), timeoutMs: opts?.timeoutMs }
     ).catch(() => "")
     if (corrected && !TENGLISH_LEAK_RE.test(corrected) && !NATIVE_SCRIPT_RE.test(corrected)) {
