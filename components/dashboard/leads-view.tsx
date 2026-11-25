@@ -6,7 +6,7 @@ import {
   Users, Target, IndianRupee, BadgeCheck, Phone, MessageCircle, MessageSquare, RotateCcw,
   Plus, Search, Link2, Check, Download, Upload, Brain, Pin, Sparkles, CheckSquare,
   PhoneCall, Instagram, X, ExternalLink, Clock, CheckCircle2, ArrowRight, Pencil, Landmark, AlertCircle, FileText,
-  ShieldCheck, Zap, Copy
+  ShieldCheck, Zap, Copy, Trash2
 } from "lucide-react"
 import { formatCurrency, timeAgo, formatDateTime } from "@/lib/utils"
 import { pctOf } from "@/lib/maths"
@@ -463,6 +463,10 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
   const [libraryProducts, setLibraryProducts] = useState<string[]>([])
   const allLoanProducts = Array.from(new Set([...COMMON_LOAN_TYPES, ...libraryProducts]))
   const [liveTplStatuses, setLiveTplStatuses] = useState<Record<string, { status: string; category?: string; languages: string[] }>>({})
+  const [quickPrompts, setQuickPrompts] = useState<{ id: string; label: string; text: string }[]>([])
+  const [customizingPrompts, setCustomizingPrompts] = useState(false)
+  const [editingPrompt, setEditingPrompt] = useState<{ id?: string; label: string; text: string } | null>(null)
+  const [savingPrompt, setSavingPrompt] = useState(false)
 
   useEffect(() => {
     if (!showBulkWaModal) return
@@ -472,7 +476,63 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
         if (d?.liveStatuses) setLiveTplStatuses(d.liveStatuses)
       })
       .catch(() => {})
+    fetch("/api/whatsapp/quick-prompts")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (Array.isArray(d?.prompts)) setQuickPrompts(d.prompts)
+      })
+      .catch(() => {})
   }, [showBulkWaModal])
+
+  async function saveQuickPrompt() {
+    if (!editingPrompt) return
+    const label = editingPrompt.label.trim()
+    const text = editingPrompt.text.trim()
+    if (!label || !text) {
+      toast.error("Please enter both prompt title and message")
+      return
+    }
+    setSavingPrompt(true)
+    try {
+      const isEdit = !!editingPrompt.id
+      const res = await fetch("/api/whatsapp/quick-prompts", {
+        method: isEdit ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(isEdit ? { id: editingPrompt.id, label, text } : { label, text }),
+      })
+      const d = await res.json().catch(() => ({}))
+      if (res.ok && d.prompt) {
+        if (isEdit) {
+          setQuickPrompts((prev) => prev.map((p) => (p.id === d.prompt.id ? d.prompt : p)))
+          toast.success(`Updated "${label}"`)
+        } else {
+          setQuickPrompts((prev) => [...prev, d.prompt])
+          toast.success(`Added "${label}"`)
+        }
+        setEditingPrompt(null)
+      } else {
+        toast.error(d.error || "Failed to save prompt")
+      }
+    } catch {
+      toast.error("Network error saving prompt")
+    } finally {
+      setSavingPrompt(false)
+    }
+  }
+
+  async function deleteQuickPrompt(id: string, label: string) {
+    try {
+      const res = await fetch(`/api/whatsapp/quick-prompts?id=${encodeURIComponent(id)}`, { method: "DELETE" })
+      if (res.ok) {
+        setQuickPrompts((prev) => prev.filter((p) => p.id !== id))
+        toast.success(`Deleted "${label}"`)
+      } else {
+        toast.error("Failed to delete prompt")
+      }
+    } catch {
+      toast.error("Network error deleting prompt")
+    }
+  }
 
   // ── Lead Name & Details Editing ──
   const [editingLeadId, setEditingLeadId] = useState<string | null>(null)
@@ -2898,26 +2958,158 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                   <>
                     {/* Quick Template Chips for freeform */}
                     <div>
-                      <label style={{ display: "block", fontSize: 11.5, color: "var(--text-muted)", marginBottom: 6, fontWeight: 500 }}>
-                        Quick Message Prompts ({`{name}`} auto-filled)
-                      </label>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6, gap: 8 }}>
+                        <label style={{ fontSize: 11.5, color: "var(--text-muted)", fontWeight: 500 }}>
+                          Quick Message Prompts ({`{name}`} auto-filled)
+                        </label>
+                        {canEdit && (
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCustomizingPrompts((v) => !v)
+                                setEditingPrompt(null)
+                              }}
+                              style={{
+                                fontSize: 11,
+                                padding: "3px 8px",
+                                borderRadius: 6,
+                                border: customizingPrompts ? "1px solid var(--accent-violet)" : "1px solid var(--border)",
+                                background: customizingPrompts ? "rgba(139,124,255,0.14)" : "var(--bg-secondary)",
+                                color: customizingPrompts ? "var(--accent-violet)" : "var(--text-secondary)",
+                                cursor: "pointer",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 4,
+                                fontWeight: 600,
+                              }}
+                            >
+                              <Pencil size={11} /> {customizingPrompts ? "Done" : "Customize"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingPrompt({ label: "", text: bulkWaMessage || "Hello {name}, " })}
+                              style={{
+                                fontSize: 11,
+                                padding: "3px 8px",
+                                borderRadius: 6,
+                                border: "1px solid rgba(91,124,250,0.4)",
+                                background: "rgba(91,124,250,0.12)",
+                                color: "var(--accent-blue)",
+                                cursor: "pointer",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 4,
+                                fontWeight: 600,
+                              }}
+                            >
+                              <Plus size={11} /> Add
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {editingPrompt && (
+                        <div style={{ background: "var(--bg-secondary)", border: "1px solid var(--accent-blue)", borderRadius: 9, padding: 10, marginBottom: 8, display: "flex", flexDirection: "column", gap: 8 }}>
+                          <div style={{ fontSize: 11.5, fontWeight: 700, color: "var(--text-primary)" }}>
+                            {editingPrompt.id ? "Edit Quick Prompt" : "Add New Quick Prompt"}
+                          </div>
+                          <input
+                            type="text"
+                            value={editingPrompt.label}
+                            onChange={(e) => setEditingPrompt((prev) => prev ? { ...prev, label: e.target.value } : null)}
+                            placeholder="Prompt title (e.g. Home Loan Offer)"
+                            style={{ width: "100%", height: 32, fontSize: 12, padding: "0 9px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)" }}
+                          />
+                          <textarea
+                            value={editingPrompt.text}
+                            onChange={(e) => setEditingPrompt((prev) => prev ? { ...prev, text: e.target.value } : null)}
+                            placeholder="Message text (use {name} for customer name)"
+                            rows={2}
+                            style={{ width: "100%", fontSize: 12, padding: 8, borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)", resize: "vertical" }}
+                          />
+                          <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                            <button
+                              type="button"
+                              onClick={() => setEditingPrompt(null)}
+                              className="btn-ghost"
+                              style={{ height: 28, fontSize: 11.5, padding: "0 10px" }}
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="button"
+                              onClick={saveQuickPrompt}
+                              disabled={savingPrompt}
+                              className="btn-primary"
+                              style={{ height: 28, fontSize: 11.5, padding: "0 12px" }}
+                            >
+                              {savingPrompt ? "Saving…" : "Save Prompt"}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-                        {[
-                          { label: "General Loan Offer", text: "Hello {name}, greetings from Right Agent Group! We provide fast-track approval on Personal, Business, and Home Loans with minimal documentation and attractive interest rates." },
-                          { label: "Application Follow-up", text: "Hello {name}, this is a gentle follow-up regarding your recent loan inquiry with Right Agent Group. Our loan officer is ready to process your file. Please complete your application below." },
-                          { label: "Document Checklist", text: "Hello {name}, to fast-track your loan file approval, please keep your PAN Card, Aadhaar, and 6 months bank statement ready. Our advisor will guide you through instant sanction." },
-                          { label: "Festive Rate Offer", text: "Hello {name}, special festive offer! Avail Home and Business Loans starting from 7.25% p.a. through 20+ partner banks in Hyderabad with minimal documentation." },
-                          { label: "Telugu Offer", text: "నమస్కారం {name} గారు, రైట్ ఏజెంట్ గ్రూప్ నుండి మాట్లాడుతున్నాము. మీకు హోమ్ లోన్ లేదా బిజినెస్ లోన్ తక్కువ వడ్డీతో అవసరమా? మా బ్యాంకింగ్ కౌన్సిలర్ మీకు వెంటనే సహాయం చేస్తారు." },
-                          { label: "Hindi Offer", text: "नमस्ते {name} जी, राइट एजेंट ग्रुप से नमस्कार। यदि आपको होम, पर्सनल या बिजनेस लोन की आवश्यकता है तो सबसे कम ब्याज दरों पर आवेदन करें।" },
-                        ].map((q) => (
-                          <button
-                            key={q.label}
-                            type="button"
-                            onClick={() => setBulkWaMessage(q.text)}
-                            style={{ textAlign: "left", fontSize: 11, padding: "6px 9px", borderRadius: 7, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", cursor: "pointer", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                        {quickPrompts.map((q) => (
+                          <div
+                            key={q.id}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 4,
+                              borderRadius: 7,
+                              border: "1px solid var(--border)",
+                              background: "var(--bg-secondary)",
+                              padding: customizingPrompts ? "3px 6px 3px 9px" : 0,
+                              minWidth: 0,
+                            }}
                           >
-                            {q.label}
-                          </button>
+                            <button
+                              type="button"
+                              onClick={() => setBulkWaMessage(q.text)}
+                              style={{
+                                flex: 1,
+                                textAlign: "left",
+                                fontSize: 11,
+                                padding: customizingPrompts ? "3px 0" : "6px 9px",
+                                borderRadius: 7,
+                                border: "none",
+                                background: "transparent",
+                                color: "var(--text-primary)",
+                                cursor: "pointer",
+                                whiteSpace: "nowrap",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                minWidth: 0,
+                              }}
+                              title={q.text}
+                            >
+                              {q.label}
+                            </button>
+                            {customizingPrompts && canEdit && (
+                              <div style={{ display: "inline-flex", alignItems: "center", gap: 2, flexShrink: 0 }}>
+                                <button
+                                  type="button"
+                                  aria-label={`Edit ${q.label}`}
+                                  onClick={() => setEditingPrompt({ id: q.id, label: q.label, text: q.text })}
+                                  style={{ background: "transparent", border: "none", color: "var(--accent-blue)", cursor: "pointer", padding: 3, display: "inline-flex", alignItems: "center" }}
+                                  title="Edit prompt"
+                                >
+                                  <Pencil size={11} />
+                                </button>
+                                <button
+                                  type="button"
+                                  aria-label={`Delete ${q.label}`}
+                                  onClick={() => deleteQuickPrompt(q.id, q.label)}
+                                  style={{ background: "transparent", border: "none", color: "var(--accent-red)", cursor: "pointer", padding: 3, display: "inline-flex", alignItems: "center" }}
+                                  title="Delete prompt"
+                                >
+                                  <Trash2 size={11} />
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         ))}
                       </div>
                     </div>
