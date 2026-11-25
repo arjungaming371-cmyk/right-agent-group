@@ -14,6 +14,11 @@ export const dynamic = "force-dynamic"
 
 const ROLE_LIST: Role[] = ["admin", "agent", "branch_manager", "developer"]
 
+function normalizePhone(p?: string | null): string {
+  if (!p) return ""
+  return p.replace(/\D/g, "").slice(-10)
+}
+
 function parseCallSummary(raw: any): { fullSpokenName?: string; address?: string; nextAction?: string } {
   if (!raw) return {}
   if (typeof raw === "object") {
@@ -37,35 +42,27 @@ function parseCallSummary(raw: any): { fullSpokenName?: string; address?: string
 
 function buildComprehensiveDescription(item: any): string {
   const parts: string[] = []
-  const name = item.full_spoken_name || item.lead_name || "Lead"
   const product = item.product_interest ? item.product_interest.toUpperCase() : "LOAN"
   const amount = item.loan_amount ? `₹${Number(item.loan_amount).toLocaleString("en-IN")}` : ""
   const location = item.lead_address || item.city || ""
 
   if (item.category === "loan_confirmed") {
-    parts.push(`Customer confirmed requirement for ${product}${amount ? ` of ${amount}` : ""}${location ? ` in ${location}` : ""}.`)
-    if (item.employment_type || item.monthly_income) {
-      parts.push(`Profile: ${item.employment_type || "Applicant"}${item.monthly_income ? ` with monthly income of ₹${Number(item.monthly_income).toLocaleString("en-IN")}` : ""}.`)
-    }
+    parts.push(`Confirmed requirement for ${product}${amount ? ` of ${amount}` : ""}${location ? ` in ${location}` : ""}.`)
     if (item.call_duration) {
       const mins = Math.floor(item.call_duration / 60)
       const secs = item.call_duration % 60
-      parts.push(`Discussed thoroughly on a ${mins > 0 ? `${mins}m ` : ""}${secs}s AI voice call (${item.call_language || "Telugu"}).`)
+      parts.push(`Discussed on a ${mins > 0 ? `${mins}m ` : ""}${secs}s call (${item.call_language || "Telugu"}).`)
     }
-    parts.push(`Official loan application link was delivered to customer's WhatsApp (+${item.lead_whatsapp || item.lead_phone || ""}). Call to verify KYC, college/salary documents, and initiate bank file.`)
+    parts.push(`WhatsApp application link sent. Follow up to collect KYC & bank documents.`)
   } else if (item.category === "callback") {
-    parts.push(`Scheduled callback requested by ${name} for ${product}${amount ? ` (${amount})` : ""}.`)
-    if (item.quote) parts.push(`Customer noted: "${item.quote}".`)
-    parts.push(`Scheduled for follow-up via ${item.channel || "phone"}.`)
+    parts.push(`Callback requested for ${product}${amount ? ` (${amount})` : ""}.`)
+    if (item.quote) parts.push(`Note: "${item.quote}".`)
   } else if (item.category === "branch_visit") {
-    parts.push(`Office visit appointment confirmed for ${name}.`)
-    if (item.location) parts.push(`Branch/Office: ${item.location}.`)
-    if (item.quote) parts.push(`Customer agreed: "${item.quote}".`)
+    parts.push(`Office visit appointment confirmed.`)
+    if (item.location) parts.push(`Branch: ${item.location}.`)
   } else {
-    // Escalation
     parts.push(`Customer requested human assistance during conversation.`)
     if (item.quote) parts.push(`Statement: "${item.quote}".`)
-    if (item.call_duration) parts.push(`Call duration was ${item.call_duration}s.`)
   }
 
   return parts.join(" ")
@@ -168,13 +165,46 @@ export async function GET(req: NextRequest) {
     ).catch(() => ({ rows: [] as any[] }))
 
     const items: any[] = []
-    const seenLeads = new Set<string>()
+    const seenLeadIds = new Set<string>()
+    const seenPhones = new Set<string>()
+
+    function findExisting(leadId?: string | null, phone?: string | null) {
+      const norm = normalizePhone(phone)
+      return items.find(i => {
+        if (leadId && i.lead_id && String(i.lead_id) === String(leadId)) return true
+        if (norm && normalizePhone(i.lead_phone || i.lead_whatsapp) === norm) return true
+        return false
+      })
+    }
+
+    function recordSeen(leadId?: string | null, phone?: string | null) {
+      if (leadId) seenLeadIds.add(String(leadId))
+      const norm = normalizePhone(phone)
+      if (norm) seenPhones.add(norm)
+    }
+
+    function isSeen(leadId?: string | null, phone?: string | null): boolean {
+      if (leadId && seenLeadIds.has(String(leadId))) return true
+      const norm = normalizePhone(phone)
+      if (norm && seenPhones.has(norm)) return true
+      return false
+    }
 
     // Map comm_logs alerts (Deduplicated per lead so loan officers see 1 unified card per lead)
     for (const r of alertsRes.rows) {
-      const leadKey = r.lead_id ? String(r.lead_id) : `lead_phone_${r.lead_phone || r.id}`
-      if (seenLeads.has(leadKey)) continue
-      seenLeads.add(leadKey)
+      if (isSeen(r.lead_id, r.lead_phone)) {
+        const existing = findExisting(r.lead_id, r.lead_phone)
+        if (existing) {
+          if (r.outcome === "loan_confirmed") {
+            existing.category = "loan_confirmed"
+            existing.priority = "critical"
+          }
+          if (r.loan_amount) existing.loan_amount = existing.loan_amount || r.loan_amount
+          if (r.product_interest) existing.product_interest = existing.product_interest || r.product_interest
+        }
+        continue
+      }
+      recordSeen(r.lead_id, r.lead_phone)
 
       const isLoan = r.outcome === "loan_confirmed"
       const parsedAi = parseCallSummary(r.call_ai_summary)
@@ -215,9 +245,17 @@ export async function GET(req: NextRequest) {
 
     // Map loan_applications (if not already surfaced via comm_log)
     for (const la of loanAppsRes.rows) {
-      const leadKey = la.lead_id ? String(la.lead_id) : `app_${la.id}`
-      if (seenLeads.has(leadKey)) continue
-      seenLeads.add(leadKey)
+      if (isSeen(la.lead_id, la.lead_phone)) {
+        const existing = findExisting(la.lead_id, la.lead_phone)
+        if (existing) {
+          existing.category = "loan_confirmed"
+          existing.priority = "critical"
+          if (la.loan_amount) existing.loan_amount = existing.loan_amount || la.loan_amount
+          if (la.product_interest) existing.product_interest = existing.product_interest || la.product_interest
+        }
+        continue
+      }
+      recordSeen(la.lead_id, la.lead_phone)
 
       const parsedAi = parseCallSummary(la.call_ai_summary)
 
@@ -257,6 +295,18 @@ export async function GET(req: NextRequest) {
 
     // Map calendar_events (Callbacks, Office Visits)
     for (const ce of calRes.rows) {
+      if (isSeen(ce.lead_id, ce.lead_phone)) {
+        // Merge event timing into the existing card for this lead
+        const existing = findExisting(ce.lead_id, ce.lead_phone)
+        if (existing) {
+          existing.event_at = existing.event_at || ce.event_at
+          existing.location = existing.location || ce.location
+          existing.channel = existing.channel || ce.channel
+        }
+        continue
+      }
+      recordSeen(ce.lead_id, ce.lead_phone)
+
       const eventTime = new Date(ce.event_at).getTime()
       const isOverdue = !isNaN(eventTime) && eventTime < Date.now()
       const isDueSoon = !isNaN(eventTime) && eventTime < Date.now() + 2 * 3600 * 1000
