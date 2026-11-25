@@ -160,9 +160,11 @@ export const CONTINUATION_INTENT_RE = new RegExp(
   '(?<!no\\s+|no more\\s+|em\\s+|emi\\s+|koi\\s+)(?:doubt|doubts|question|questions)(?!\\s+(?:levu|em levu|levandi|ledu|nahi))|' +
   'oka doubt|oka question|small doubt|last doubt|one last question|last question|actually|wait|adagali|entha|rate|interest|emi|ela|enduku|cheppandi|cheppu|' +
   'clarification|clarify|meeru ippudu|ippudu cheppandi|malli cheppandi|' +
-  'kani|kaani|but|okati|ayithe|aithe|inka|' +
+  'kani|kaani|but|okati|ayithe|aithe|' +
+  'inka(?!(?:\\s+(?:em|emi))?\\s*(?:vaddu|vaddandi|ledu|ledandi|untanu|cheppoddu))|' +
   'what|how|why|when\\s+(?:can|will|do|is|are|did|does|should|would|to)|when\\?|which|can you|tell me|kya|kaise|kitna|lekin|par' +
-  ')\\b|\\?|డౌట్|డౌట్స్|ఒక డౌట్|ఒక ప్రశ్న|చిన్న డౌట్|చివరి డౌట్|ఎంత|ఎలా|ఎందుకు|చెప్పండి|కానీ|కాని|ఇంకా|ఇప్పుడు చెప్పండి',
+  ')\\b|\\?|డౌట్|డౌట్స్|ఒక డౌట్|ఒక ప్రశ్న|చిన్న డౌట్|చివరి డౌట్|ఎంత|ఎలా|ఎందుకు|చెప్పండి|కానీ|కాని|ఇప్పుడు చెప్పండి|' +
+  'ఇంకా(?!(?:\\s*(?:ఏం|ఏమీ))?\\s*(?:వద్దు|లేవు|లేదు|ఉంటాను))',
   'i'
 )
 
@@ -202,16 +204,16 @@ export const AMBIGUOUS_CLOSING_RE = new RegExp(
   '\\b(' +
   'no doubts?|no more doubts?|no questions?|all clear|everything clear|that is all|that\'s all|that is it|that\'s it|' +
   'nothing else|nothing more|no thanks?|no thank you|' +
-  'em ledu|emi ledu|em ledhu|emi ledhu|em ledandi|emi ledandi|inka em ledu|inka emi ledu|inkem vaddu|inka em vaddu|inkem ledu|inkem ledhu|' +
+  'em ledu|emi ledu|em ledhu|emi ledhu|em ledandi|emi ledandi|inka em ledu|inka emi ledu|inkem vaddu|inka em vaddu|inka em vaddandi|inkem vaddandi|em vaddu|em vaddandi|emi vaddu|emi vaddandi|inkem ledu|inkem ledhu|' +
   'doubts? em levu|doubts? emi levu|doubts? levu|doubts? levandi|doubt em ledu|doubt ledu|' +
   'chalu|chalandi|chalu sir|avunu chalu|saripothundi|saripoddi|' +
   'anthe|anthe andi|anthe sir|anthey|' +
   'untanu|untanu sir|untanandi|untanu mari|sare untanu|inka untanu|' +
   'koi doubt nahi|kuch nahi|sab clear hai|bas itna hi|itna hi|ho gaya' +
   ')\\b|' +
-  '^(no|no sir|no madam|ledu|ledu sir|ledandi|ledu andi|nahi|nahi sir|chalu|anthe|untanu|inkem vaddu)[.!? ]*$|' +
-  '^(లేదు|లేదండి|లేదు సర్|ఏం లేదు|ఏమీ లేదు|చాలు|చాలండి|అంతే|ఉంటాను|ఇంకేం వద్దు)[.!? ]*$|' +
-  'ఏం లేదు|ఏమీ లేదు|ఏం లేదండి|ఇంకేం లేదు|ఇంకేం వద్దు|డౌట్స్ లేవు|డౌట్ లేదు|చాలు|చాలండి|అంతే|సరిపోతుంది|అంతా క్లియర్|క్లియర్ అయింది|' +
+  '^(no|no sir|no madam|ledu|ledu sir|ledandi|ledu andi|nahi|nahi sir|chalu|anthe|untanu|inkem vaddu|inkem vaddandi|inka em vaddandi)[.!? ]*$|' +
+  '^(లేదు|లేదండి|లేదు సర్|ఏం లేదు|ఏమీ లేదు|చాలు|చాలండి|అంతే|ఉంటాను|ఇంకేం వద్దు|ఇంకేం వద్దండి|ఇంకా ఏం వద్దు)[.!? ]*$|' +
+  'ఏం లేదు|ఏమీ లేదు|ఏం లేదండి|ఇంకేం లేదు|ఇంకేం వద్దు|ఇంకేం వద్దండి|ఇంకా ఏం వద్దు|ఇంకా ఏం వద్దండి|డౌట్స్ లేవు|డౌట్ లేదు|చాలు|చాలండి|అంతే|సరిపోతుంది|అంతా క్లియర్|క్లియర్ అయింది|' +
   'कोई डाउट नहीं|कुछ नहीं|बस इतना ही|हो गया',
   'i'
 )
