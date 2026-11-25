@@ -78,6 +78,66 @@ function isOldEvent(eventTime: number | null, eventType: string, id: string): bo
   return false
 }
 
+/**
+ * Detect whether an inbound comment or DM sender is our OWN business account.
+ * Meta uses different ID spaces across endpoints and webhooks:
+ * - App-Scoped User ID (e.g. 28501470066151828)
+ * - Instagram-Scoped User ID / IGSID (e.g. 17841437996447189)
+ * - Page/WBA entry ID
+ * - Account username (e.g. arjungaming371, rightagentgroup)
+ * - Outbound comment signature phrases ("Check your DM", "Right Agent Group", etc.)
+ *
+ * Any match indicates an echo/self-comment from Priya or the page itself, which
+ * MUST NEVER trigger an AI reply loop or lead creation.
+ */
+function isSelfInstagramAccount(
+  senderId: string | null | undefined,
+  username?: string | null | undefined,
+  text?: string | null | undefined,
+  igBranch?: BranchInstagramCtx,
+  entryId?: string | null
+): boolean {
+  const normUser = (username || "").toLowerCase().replace(/^@/, "").trim()
+  const selfUsernames = new Set(
+    [
+      "arjungaming371",
+      "rightagentgroup",
+      "right_agent_group",
+      (process.env.INSTAGRAM_USERNAME || "").toLowerCase().replace(/^@/, "").trim(),
+    ].filter(Boolean)
+  )
+
+  if (normUser && selfUsernames.has(normUser)) {
+    return true
+  }
+
+  const sId = String(senderId || "").trim()
+  const selfIds = new Set(
+    [
+      "17841437996447189", // Known IGSID for @arjungaming371
+      "28501470066151828", // App-Scoped ID
+      entryId ? String(entryId).trim() : "",
+      igBranch?.instagramAccountId ? String(igBranch.instagramAccountId).trim() : "",
+      process.env.INSTAGRAM_ACCOUNT_ID ? String(process.env.INSTAGRAM_ACCOUNT_ID).trim() : "",
+      process.env.INSTAGRAM_IGSID ? String(process.env.INSTAGRAM_IGSID).trim() : "",
+    ].filter(Boolean)
+  )
+
+  if (sId && selfIds.has(sId)) {
+    return true
+  }
+
+  // Content signature guard: Priya's outbound comment reply format
+  if (text) {
+    const hasAgentSignature = /(?:check your dm|sent you the complete loan details|loan advisor at right agent group|right agent group|ask any questions directly on whatsapp|wa\.me\/918333993223)/i.test(text)
+    if (hasAgentSignature) {
+      return true
+    }
+  }
+
+  return false
+}
+
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const mode = searchParams.get("hub.mode")
@@ -163,6 +223,11 @@ export async function POST(req: NextRequest) {
       //    drop its siblings (same fix as the WhatsApp webhook).
       for (const msg of entry?.messaging || []) {
         if (msg.message && !msg.message.is_echo) {
+          const sId = msg.sender?.id
+          if (isSelfInstagramAccount(sId, null, msg.message?.text, igBranch, entryId)) {
+            console.info(`[Instagram] Skipping own/echo DM from ${sId} — no loop`)
+            continue
+          }
           try {
             await handleInboundDM(msg, igBranch)
           } catch (e: any) {
@@ -231,6 +296,11 @@ async function handleInboundDM(messaging: any, igBranch: BranchInstagramCtx = nu
   const messageId = messaging.message?.mid
 
   if (!senderId || !text) return
+
+  if (isSelfInstagramAccount(senderId, null, text, igBranch)) {
+    console.info(`[Instagram] Skipping own DM from ${senderId} — no self-reply loop`)
+    return
+  }
 
   // FIX (2026-09-20): atomic claim — concurrent Meta retries can no longer
   // both pass a SELECT and both run the AI pipeline (duplicate DMs).
@@ -540,17 +610,12 @@ async function handleInboundComment(val: any, igBranch: BranchInstagramCtx = nul
 
   if (!commentId || !text || !senderId) return
 
-  // FIX (2026-09-22): NEVER react to the account's OWN comments. Priya's
-  // public reply is itself a new comment on the same post, and Meta delivers
-  // it right back on this webhook — without this guard she replies to her
-  // own replies in an endless chain on every post. The DM path is already
-  // protected by the is_echo check; comments had no equivalent.
-  const selfIds = new Set<string>()
-  if (entryId) selfIds.add(entryId)
-  if (igBranch?.instagramAccountId) selfIds.add(String(igBranch.instagramAccountId))
-  if (process.env.INSTAGRAM_ACCOUNT_ID) selfIds.add(String(process.env.INSTAGRAM_ACCOUNT_ID))
-  if (selfIds.has(String(senderId))) {
-    console.info(`[Instagram] Skipping own/agent comment ${commentId} — no self-reply loop`)
+  // Multi-layered self-reply guard:
+  // 1. Checks entry.id, branch IG account ID, INSTAGRAM_ACCOUNT_ID, INSTAGRAM_IGSID (e.g. 17841437996447189)
+  // 2. Checks username against business handles (arjungaming371, rightagentgroup, etc.)
+  // 3. Checks content for Priya's known outbound signature phrases
+  if (isSelfInstagramAccount(senderId, username, text, igBranch, entryId)) {
+    console.info(`[Instagram] Skipping own/agent comment ${commentId} from @${username} (${senderId}) — no self-reply loop`)
     return
   }
 
