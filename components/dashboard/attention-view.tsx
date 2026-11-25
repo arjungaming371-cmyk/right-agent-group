@@ -18,7 +18,11 @@ import {
   MapPin,
   Banknote,
   ArrowRight,
-  Filter
+  Filter,
+  UserCheck,
+  Info,
+  ChevronDown,
+  ChevronUp
 } from "lucide-react"
 import { SkeletonList } from "../ui/skeleton"
 import { usePolling } from "@/lib/use-poll"
@@ -38,9 +42,11 @@ export type AttentionItem = {
   category: "loan_confirmed" | "callback" | "branch_visit" | "document_deadline" | "reminder" | "escalation"
   lead_id: string | null
   lead_name: string | null
+  full_spoken_name?: string | null
   lead_phone: string | null
   lead_whatsapp: string | null
   lead_status: string | null
+  lead_address?: string | null
   summary: string | null
   quote?: string | null
   action?: string | null
@@ -49,6 +55,12 @@ export type AttentionItem = {
   loan_amount?: number | string | null
   monthly_income?: number | string | null
   employment_type?: string | null
+  city?: string | null
+  call_duration?: number | null
+  call_sentiment?: string | null
+  call_language?: string | null
+  next_action?: string | null
+  full_description?: string | null
   event_at?: string | null
   location?: string | null
   channel?: string | null
@@ -65,6 +77,13 @@ function timeAgo(iso: string): string {
   if (s < 3600) return `${Math.floor(s / 60)}m ago`
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`
   return `${Math.floor(s / 86400)}d ago`
+}
+
+function formatDuration(seconds?: number | null): string {
+  if (!seconds || seconds <= 0) return ""
+  const mins = Math.floor(seconds / 60)
+  const secs = seconds % 60
+  return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`
 }
 
 function formatEventTiming(isoDate?: string | null): { text: string; isOverdue: boolean; isToday: boolean; badge: string } {
@@ -101,33 +120,6 @@ function formatEventTiming(isoDate?: string | null): { text: string; isOverdue: 
   return { text: `${dateStr} at ${timeStr}`, isOverdue: false, isToday: false, badge: `${dateStr}` }
 }
 
-function parseEscalationReason(summary: string | null): { reason: string; quote: string; action: string | null } {
-  const s = summary || ""
-  let reason = "Needs a person"
-  if (s.includes("FRUSTRATED CALLER")) reason = "Frustrated on a call"
-  else if (s.includes("FRUSTRATED WHATSAPP")) reason = "Frustrated on WhatsApp"
-  else if (s.includes("FRUSTRATED INSTAGRAM")) reason = "Frustrated on Instagram"
-  else if (s.includes("ASKED FOR A HUMAN")) reason = "Asked for human agent"
-
-  const saidIdx = s.indexOf('said: "')
-  let quote = ""
-  let action: string | null = null
-  if (saidIdx >= 0) {
-    const after = s.slice(saidIdx + 7)
-    const closeIdx = after.indexOf('"')
-    quote = (closeIdx >= 0 ? after.slice(0, closeIdx) : after).trim()
-    if (closeIdx >= 0) {
-      const tail = after.slice(closeIdx + 1).trim()
-      const dashIdx = tail.lastIndexOf(" — ")
-      action = (dashIdx >= 0 ? tail.slice(dashIdx + 3) : tail).replace(/^-+\s*/, "").trim() || null
-    }
-  } else {
-    quote = s.replace(/^[🟢⚠️📞]\s*[^—]+—\s*/, "").trim()
-  }
-
-  return { reason, quote, action }
-}
-
 const LEAD_STATUS_LABEL: Record<string, string> = {
   new: "New",
   contacted: "Contacted",
@@ -143,6 +135,7 @@ export default function AttentionView({ role }: { role: Role }) {
   const [activeTab, setActiveTab] = useState<AttentionCategory>("all")
   const [busyId, setBusyId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [expandedId, setExpandedId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setError(null)
@@ -237,19 +230,19 @@ export default function AttentionView({ role }: { role: Role }) {
       {/* Header & Stats Banner */}
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="flex flex-wrap items-center gap-2.5 text-[17px] font-bold text-[var(--text-primary)]">
+          <h2 className="flex flex-wrap items-center gap-2.5 text-[18px] font-bold text-[var(--text-primary)]">
             <span className="flex items-center gap-2">
-              <BellRing size={18} className="text-amber-400" />
+              <BellRing size={20} className="text-amber-400" />
               Human Action Center
             </span>
             {counts.all > 0 && (
               <span className="rounded-full bg-amber-500/15 border border-amber-500/30 px-2.5 py-0.5 text-[11.5px] font-bold text-amber-400">
-                {counts.all} waiting
+                {counts.all} active tasks
               </span>
             )}
           </h2>
           <p className="mt-0.5 text-[12.5px] text-[var(--text-secondary)]">
-            All leads requiring human follow-up: confirmed loan applicants, scheduled callbacks, office visits & escalations.
+            Full lead intelligence for confirmed loan applicants, scheduled callbacks, office visits & escalations.
           </p>
         </div>
         <button
@@ -265,53 +258,53 @@ export default function AttentionView({ role }: { role: Role }) {
       <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div
           onClick={() => setActiveTab("loan_confirmed")}
-          className={`cursor-pointer rounded-xl border p-3.5 transition ${
+          className={`cursor-pointer rounded-xl border p-4 transition ${
             activeTab === "loan_confirmed"
-              ? "border-emerald-500/50 bg-emerald-500/10 shadow-sm"
+              ? "border-emerald-500/60 bg-emerald-500/10 shadow-sm ring-1 ring-emerald-500/20"
               : "border-[var(--border)] bg-[var(--bg-card)] hover:border-emerald-500/30"
           }`}
         >
           <div className="flex items-center justify-between">
-            <span className="text-[12px] font-semibold text-emerald-400 flex items-center gap-1.5">
-              <Sparkles size={14} /> Confirmed Loans
+            <span className="text-[12.5px] font-semibold text-emerald-400 flex items-center gap-1.5">
+              <Sparkles size={15} /> Confirmed Loans
             </span>
-            <span className="text-[18px] font-bold text-[var(--text-primary)]">{counts.loans}</span>
+            <span className="text-[20px] font-bold text-[var(--text-primary)]">{counts.loans}</span>
           </div>
-          <p className="mt-1 text-[11px] text-[var(--text-muted)]">Agreed on call or submitted form — ready to process</p>
+          <p className="mt-1 text-[11.5px] text-[var(--text-muted)]">Agreed on call or submitted application — ready to close</p>
         </div>
 
         <div
           onClick={() => setActiveTab("calendar")}
-          className={`cursor-pointer rounded-xl border p-3.5 transition ${
+          className={`cursor-pointer rounded-xl border p-4 transition ${
             activeTab === "calendar"
-              ? "border-blue-500/50 bg-blue-500/10 shadow-sm"
+              ? "border-blue-500/60 bg-blue-500/10 shadow-sm ring-1 ring-blue-500/20"
               : "border-[var(--border)] bg-[var(--bg-card)] hover:border-blue-500/30"
           }`}
         >
           <div className="flex items-center justify-between">
-            <span className="text-[12px] font-semibold text-blue-400 flex items-center gap-1.5">
-              <CalendarClock size={14} /> Callbacks & Visits
+            <span className="text-[12.5px] font-semibold text-blue-400 flex items-center gap-1.5">
+              <CalendarClock size={15} /> Callbacks & Visits
             </span>
-            <span className="text-[18px] font-bold text-[var(--text-primary)]">{counts.callbacks}</span>
+            <span className="text-[20px] font-bold text-[var(--text-primary)]">{counts.callbacks}</span>
           </div>
-          <p className="mt-1 text-[11px] text-[var(--text-muted)]">Scheduled phone callbacks & office appointments</p>
+          <p className="mt-1 text-[11.5px] text-[var(--text-muted)]">Scheduled phone callbacks & office appointments</p>
         </div>
 
         <div
           onClick={() => setActiveTab("escalation")}
-          className={`cursor-pointer rounded-xl border p-3.5 transition ${
+          className={`cursor-pointer rounded-xl border p-4 transition ${
             activeTab === "escalation"
-              ? "border-rose-500/50 bg-rose-500/10 shadow-sm"
+              ? "border-rose-500/60 bg-rose-500/10 shadow-sm ring-1 ring-rose-500/20"
               : "border-[var(--border)] bg-[var(--bg-card)] hover:border-rose-500/30"
           }`}
         >
           <div className="flex items-center justify-between">
-            <span className="text-[12px] font-semibold text-rose-400 flex items-center gap-1.5">
-              <AlertTriangle size={14} /> Escalations
+            <span className="text-[12.5px] font-semibold text-rose-400 flex items-center gap-1.5">
+              <AlertTriangle size={15} /> Escalations
             </span>
-            <span className="text-[18px] font-bold text-[var(--text-primary)]">{counts.escalations}</span>
+            <span className="text-[20px] font-bold text-[var(--text-primary)]">{counts.escalations}</span>
           </div>
-          <p className="mt-1 text-[11px] text-[var(--text-muted)]">Callers who asked for a human or had frustration</p>
+          <p className="mt-1 text-[11.5px] text-[var(--text-muted)]">Callers who asked for a human or had frustration</p>
         </div>
       </div>
 
@@ -319,7 +312,7 @@ export default function AttentionView({ role }: { role: Role }) {
       <div className="mb-4 flex flex-wrap items-center gap-2 border-b border-[var(--border)] pb-2.5">
         <button
           onClick={() => setActiveTab("all")}
-          className={`rounded-lg px-3 py-1.5 text-[12px] font-semibold transition ${
+          className={`rounded-lg px-3.5 py-1.5 text-[12px] font-semibold transition ${
             activeTab === "all"
               ? "bg-[var(--accent-blue)] text-white shadow-sm"
               : "text-[var(--text-secondary)] hover:bg-[var(--overlay-soft)]"
@@ -329,7 +322,7 @@ export default function AttentionView({ role }: { role: Role }) {
         </button>
         <button
           onClick={() => setActiveTab("loan_confirmed")}
-          className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-semibold transition ${
+          className={`flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-[12px] font-semibold transition ${
             activeTab === "loan_confirmed"
               ? "bg-emerald-600 text-white shadow-sm"
               : "text-emerald-400 hover:bg-emerald-500/10"
@@ -339,7 +332,7 @@ export default function AttentionView({ role }: { role: Role }) {
         </button>
         <button
           onClick={() => setActiveTab("calendar")}
-          className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-semibold transition ${
+          className={`flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-[12px] font-semibold transition ${
             activeTab === "calendar"
               ? "bg-blue-600 text-white shadow-sm"
               : "text-blue-400 hover:bg-blue-500/10"
@@ -349,7 +342,7 @@ export default function AttentionView({ role }: { role: Role }) {
         </button>
         <button
           onClick={() => setActiveTab("escalation")}
-          className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-semibold transition ${
+          className={`flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-[12px] font-semibold transition ${
             activeTab === "escalation"
               ? "bg-rose-600 text-white shadow-sm"
               : "text-rose-400 hover:bg-rose-500/10"
@@ -373,7 +366,7 @@ export default function AttentionView({ role }: { role: Role }) {
       ) : filteredItems.length === 0 ? (
         <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-12 text-center">
           <CheckCheck size={32} className="mx-auto mb-3 text-emerald-400" />
-          <div className="text-[14px] font-semibold text-[var(--text-primary)]">
+          <div className="text-[14.5px] font-semibold text-[var(--text-primary)]">
             {activeTab === "all"
               ? "All clear — zero pending human tasks!"
               : activeTab === "loan_confirmed"
@@ -383,151 +376,99 @@ export default function AttentionView({ role }: { role: Role }) {
               : "No active escalations."}
           </div>
           <p className="mx-auto mt-1 max-w-md text-[12px] text-[var(--text-secondary)]">
-            When Priya confirms a loan with a customer, schedules a callback, or detects escalation, it will appear here automatically.
+            When Priya confirms a loan with a customer, schedules a callback, or detects escalation, it will appear here automatically with full customer details.
           </p>
         </div>
       ) : (
-        <ul className="flex flex-col gap-3">
+        <ul className="flex flex-col gap-3.5">
           {filteredItems.map(item => {
             const isLoan = item.category === "loan_confirmed"
             const isVisit = item.category === "branch_visit"
             const isCallback = item.category === "callback"
             const isEscalation = item.category === "escalation"
             const timing = item.event_at ? formatEventTiming(item.event_at) : null
-            const esc = isEscalation ? parseEscalationReason(item.summary) : null
+            const callDurStr = formatDuration(item.call_duration)
+            const isExpanded = expandedId === item.id
+
+            const displayName = item.full_spoken_name || item.lead_name || "Unknown Lead"
+            const product = item.product_interest ? item.product_interest.toUpperCase() : "LOAN"
+            const amount = item.loan_amount ? `₹${Number(item.loan_amount).toLocaleString("en-IN")}` : null
 
             return (
               <li
                 key={item.id}
-                className={`rounded-xl border p-4 transition ${
+                className={`rounded-xl border p-4 sm:p-5 transition ${
                   isLoan
-                    ? "border-emerald-500/35 bg-emerald-950/10 hover:border-emerald-500/60"
+                    ? "border-emerald-500/40 bg-[var(--bg-card)] shadow-sm hover:border-emerald-500/70"
                     : timing?.isOverdue
-                    ? "border-rose-500/35 bg-rose-950/10"
+                    ? "border-rose-500/40 bg-[var(--bg-card)]"
                     : "border-[var(--border)] bg-[var(--bg-card)] hover:border-[var(--border-hover)]"
                 }`}
               >
-                <div className="flex flex-wrap items-start justify-between gap-3">
+                {/* Row 1: Lead Identity & Header Status */}
+                <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--border)] pb-3">
                   <div className="min-w-0 flex-1">
-                    {/* Header Row: Lead Name + Phone + Badge */}
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-[14px] font-bold text-[var(--text-primary)]">
-                        {item.lead_name || item.lead_phone || "Unknown Lead"}
+                      <span className="text-[15.5px] font-bold text-[var(--text-primary)] tracking-tight">
+                        {displayName}
                       </span>
+                      {item.lead_name && item.full_spoken_name && item.lead_name !== item.full_spoken_name && (
+                        <span className="text-[12px] text-[var(--text-muted)]">({item.lead_name})</span>
+                      )}
                       {item.lead_phone && (
-                        <span className="text-[12px] font-mono text-[var(--text-secondary)]">{item.lead_phone}</span>
+                        <span className="text-[12.5px] font-mono font-medium text-[var(--text-secondary)]">
+                          {item.lead_phone}
+                        </span>
                       )}
 
-                      {/* Category Badge */}
+                      {/* Prominent Category Badge */}
                       {isLoan && (
-                        <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 text-[11px] font-bold text-emerald-400">
+                        <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500/15 border border-emerald-500/35 px-2.5 py-0.5 text-[11px] font-bold text-emerald-400">
                           <Sparkles size={11} /> LOAN CONFORMED
                         </span>
                       )}
                       {isCallback && (
                         <span
-                          className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-bold ${
+                          className={`inline-flex items-center gap-1 rounded-md px-2.5 py-0.5 text-[11px] font-bold ${
                             timing?.isOverdue
-                              ? "bg-rose-500/15 border border-rose-500/30 text-rose-400"
-                              : "bg-blue-500/15 border border-blue-500/30 text-blue-400"
+                              ? "bg-rose-500/15 border border-rose-500/35 text-rose-400"
+                              : "bg-blue-500/15 border border-blue-500/35 text-blue-400"
                           }`}
                         >
                           <CalendarClock size={11} /> {timing?.badge || "CALLBACK"}
                         </span>
                       )}
                       {isVisit && (
-                        <span className="inline-flex items-center gap-1 rounded-md bg-purple-500/15 border border-purple-500/30 px-2 py-0.5 text-[11px] font-bold text-purple-400">
+                        <span className="inline-flex items-center gap-1 rounded-md bg-purple-500/15 border border-purple-500/35 px-2.5 py-0.5 text-[11px] font-bold text-purple-400">
                           <Building2 size={11} /> OFFICE VISIT
                         </span>
                       )}
                       {isEscalation && (
-                        <span className="inline-flex items-center gap-1 rounded-md bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 text-[11px] font-bold text-amber-400">
-                          <AlertTriangle size={11} /> {esc?.reason || "ESCALATION"}
+                        <span className="inline-flex items-center gap-1 rounded-md bg-amber-500/15 border border-amber-500/35 px-2.5 py-0.5 text-[11px] font-bold text-amber-400">
+                          <AlertTriangle size={11} /> ESCALATION
                         </span>
                       )}
 
                       {/* Lead Status */}
                       {item.lead_status && (
-                        <span className="rounded-md bg-[var(--overlay-soft)] px-1.5 py-0.5 text-[10.5px] font-medium text-[var(--text-secondary)]">
-                          {LEAD_STATUS_LABEL[item.lead_status.toLowerCase()] || item.lead_status}
+                        <span className="rounded-md bg-[var(--overlay-soft)] px-2 py-0.5 text-[10.5px] font-medium text-[var(--text-secondary)]">
+                          Status: {LEAD_STATUS_LABEL[item.lead_status.toLowerCase()] || item.lead_status}
                         </span>
                       )}
 
-                      <span className="flex items-center gap-1 text-[11px] text-[var(--text-muted)] ml-auto sm:ml-0">
+                      <span className="flex items-center gap-1 text-[11px] text-[var(--text-muted)] ml-auto">
                         <Clock size={11} /> {timeAgo(item.created_at)}
                       </span>
                     </div>
-
-                    {/* Loan Confirmed Details */}
-                    {isLoan && (
-                      <div className="mt-2.5 rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-2.5 text-[12.5px]">
-                        <div className="flex flex-wrap items-center gap-3 text-emerald-300 font-semibold">
-                          <span className="flex items-center gap-1.5">
-                            <Banknote size={14} className="text-emerald-400" />
-                            {item.product_interest || "Loan"}: {item.loan_amount ? "₹" + Number(item.loan_amount).toLocaleString("en-IN") : "Amount Unspecified"}
-                          </span>
-                          {item.monthly_income && (
-                            <span className="text-[11.5px] text-[var(--text-secondary)]">
-                              Income: ₹{Number(item.monthly_income).toLocaleString("en-IN")}/mo
-                            </span>
-                          )}
-                          {item.employment_type && (
-                            <span className="text-[11.5px] text-[var(--text-secondary)]">
-                              Type: {item.employment_type}
-                            </span>
-                          )}
-                        </div>
-                        <p className="mt-1 text-[12px] text-[var(--text-secondary)]">
-                          {item.summary || "Customer agreed to proceed with loan. Application sent on WhatsApp. Follow up to collect documents."}
-                        </p>
-                      </div>
-                    )}
-
-                    {/* Calendar Event Details */}
-                    {(isCallback || isVisit) && (
-                      <div className="mt-2 rounded-lg border border-[var(--border)] bg-[var(--overlay-soft)] p-2.5 text-[12px]">
-                        <div className="flex flex-wrap items-center gap-3 font-semibold text-[var(--text-primary)]">
-                          <span className="flex items-center gap-1.5 text-blue-400">
-                            <Clock size={13} /> Scheduled: {timing?.text}
-                          </span>
-                          {item.location && (
-                            <span className="flex items-center gap-1 text-[var(--text-secondary)]">
-                              <MapPin size={13} /> {item.location}
-                            </span>
-                          )}
-                        </div>
-                        {item.quote && (
-                          <p className="mt-1 italic text-[var(--text-secondary)]">
-                            “{item.quote}”
-                          </p>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Escalation Details */}
-                    {isEscalation && (
-                      <div className="mt-2 text-[12.5px]">
-                        {esc?.quote && (
-                          <p className="rounded-lg bg-[var(--overlay-soft)] px-2.5 py-1.5 italic text-[var(--text-secondary)]">
-                            “{esc.quote.slice(0, 240)}”
-                          </p>
-                        )}
-                        {esc?.action && (
-                          <p className="mt-1 flex items-center gap-1 text-[11.5px] text-emerald-400">
-                            <CheckCircle2 size={12} /> Suggested action: {esc.action}
-                          </p>
-                        )}
-                      </div>
-                    )}
                   </div>
 
-                  {/* Action Buttons */}
-                  <div className="flex flex-shrink-0 flex-wrap items-center gap-1.5 mt-1 sm:mt-0">
+                  {/* Actions Header */}
+                  <div className="flex flex-shrink-0 flex-wrap items-center gap-2">
                     {canCall && item.lead_id && (
                       <button
                         onClick={() => callLead(item.lead_id)}
                         disabled={busyId === item.id || busyId === item.lead_id}
-                        className="flex h-8 items-center gap-1.5 rounded-lg border border-[var(--border)] px-2.5 text-[12px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--overlay-soft)] disabled:opacity-50 transition"
+                        className="flex h-8 items-center gap-1.5 rounded-lg border border-[var(--border)] px-3 text-[12px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--overlay-soft)] disabled:opacity-50 transition"
                       >
                         <Phone size={13} /> Call
                       </button>
@@ -535,15 +476,15 @@ export default function AttentionView({ role }: { role: Role }) {
                     {item.lead_id && (
                       <button
                         onClick={() => openChat(item.lead_id)}
-                        className="flex h-8 items-center gap-1.5 rounded-lg border border-[var(--border)] px-2.5 text-[12px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--overlay-soft)] transition"
+                        className="flex h-8 items-center gap-1.5 rounded-lg border border-[var(--border)] px-3 text-[12px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--overlay-soft)] transition"
                       >
-                        <MessageCircle size={13} /> Open Chat
+                        <MessageCircle size={13} /> WhatsApp
                       </button>
                     )}
                     <button
                       onClick={() => resolve(item)}
                       disabled={busyId === item.id}
-                      className="flex h-8 items-center gap-1.5 rounded-lg px-3 text-[12px] font-semibold text-white shadow-sm disabled:opacity-50 transition"
+                      className="flex h-8 items-center gap-1.5 rounded-lg px-3.5 text-[12px] font-semibold text-white shadow-sm disabled:opacity-50 transition"
                       style={{
                         background: isLoan
                           ? "linear-gradient(135deg, #059669 0%, #10b981 100%)"
@@ -555,15 +496,87 @@ export default function AttentionView({ role }: { role: Role }) {
                     </button>
                   </div>
                 </div>
+
+                {/* Row 2: Comprehensive Specification Badges Grid */}
+                <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4 text-[12px]">
+                  {/* Loan Spec */}
+                  <div className="rounded-lg bg-[var(--overlay-soft)] p-2.5 border border-[var(--border)]">
+                    <span className="text-[10.5px] uppercase font-bold text-[var(--text-muted)] flex items-center gap-1">
+                      <Banknote size={12} className="text-emerald-400" /> Loan Requirement
+                    </span>
+                    <div className="mt-1 font-semibold text-[var(--text-primary)] truncate">
+                      {product} {amount ? `• ${amount}` : ""}
+                    </div>
+                  </div>
+
+                  {/* Location Spec */}
+                  <div className="rounded-lg bg-[var(--overlay-soft)] p-2.5 border border-[var(--border)]">
+                    <span className="text-[10.5px] uppercase font-bold text-[var(--text-muted)] flex items-center gap-1">
+                      <MapPin size={12} className="text-blue-400" /> Location / City
+                    </span>
+                    <div className="mt-1 font-semibold text-[var(--text-primary)] truncate">
+                      {item.lead_address || item.city || item.location || "Hyderabad"}
+                    </div>
+                  </div>
+
+                  {/* Call Intel */}
+                  <div className="rounded-lg bg-[var(--overlay-soft)] p-2.5 border border-[var(--border)]">
+                    <span className="text-[10.5px] uppercase font-bold text-[var(--text-muted)] flex items-center gap-1">
+                      <Phone size={12} className="text-purple-400" /> Call Intel
+                    </span>
+                    <div className="mt-1 font-semibold text-[var(--text-primary)] truncate">
+                      {callDurStr ? `${callDurStr}` : "Direct Contact"}
+                      {item.call_language ? ` • ${item.call_language.toUpperCase()}` : ""}
+                    </div>
+                  </div>
+
+                  {/* Profile / Income */}
+                  <div className="rounded-lg bg-[var(--overlay-soft)] p-2.5 border border-[var(--border)]">
+                    <span className="text-[10.5px] uppercase font-bold text-[var(--text-muted)] flex items-center gap-1">
+                      <UserCheck size={12} className="text-amber-400" /> Employment / Income
+                    </span>
+                    <div className="mt-1 font-semibold text-[var(--text-primary)] truncate">
+                      {item.employment_type || (isLoan ? "Student / Salaried" : "Direct Lead")}
+                      {item.monthly_income ? ` • ₹${Number(item.monthly_income).toLocaleString("en-IN")}` : ""}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Row 3: FULL COMPREHENSIVE LEAD DESCRIPTION PANEL */}
+                <div className="mt-3 rounded-xl border border-emerald-500/25 bg-emerald-500/[0.04] p-3 sm:p-3.5">
+                  <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-emerald-400 mb-1">
+                    <span className="flex items-center gap-1.5">
+                      <Info size={13} /> Full Lead Intelligence & Situation
+                    </span>
+                    {timing?.text && (
+                      <span className="text-[var(--text-muted)] font-normal normal-case">
+                        Scheduled: {timing.text}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[13px] leading-relaxed text-[var(--text-primary)] font-normal">
+                    {item.full_description || item.summary || "Customer confirmed interest and requested loan advisor follow-up."}
+                  </p>
+                </div>
+
+                {/* Row 4: Suggested Next Step / Action */}
+                <div className="mt-2.5 flex items-center justify-between text-[11.5px] text-[var(--text-muted)] px-1">
+                  <div className="flex items-center gap-1.5 text-emerald-400 font-medium">
+                    <CheckCircle2 size={13} className="text-emerald-400 flex-shrink-0" />
+                    <span>
+                      Suggested Next Step: {item.next_action || "Call customer to verify KYC documents, confirm college/company admission, and submit file to partner banks."}
+                    </span>
+                  </div>
+                </div>
               </li>
             )
           })}
         </ul>
       )}
 
-      <p className="mt-5 flex items-center gap-1.5 text-[11.5px] text-[var(--text-muted)]">
+      <p className="mt-6 flex items-center gap-1.5 text-[11.5px] text-[var(--text-muted)]">
         <ExternalLink size={12} />
-        Items marked handled or resolved are safely archived and remain on the lead's history for full audit trail.
+        Items marked processed or handled are safely archived and remain on the lead's history for full audit trail.
       </p>
     </div>
   )

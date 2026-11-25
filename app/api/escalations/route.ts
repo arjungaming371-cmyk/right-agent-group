@@ -14,19 +14,97 @@ export const dynamic = "force-dynamic"
 
 const ROLE_LIST: Role[] = ["admin", "agent", "branch_manager", "developer"]
 
+function parseCallSummary(raw: any): { fullSpokenName?: string; address?: string; nextAction?: string } {
+  if (!raw) return {}
+  if (typeof raw === "object") {
+    return {
+      fullSpokenName: raw.lead_name || undefined,
+      address: raw.address || undefined,
+      nextAction: raw.next_action || undefined,
+    }
+  }
+  try {
+    const parsed = JSON.parse(String(raw))
+    return {
+      fullSpokenName: parsed.lead_name || undefined,
+      address: parsed.address || undefined,
+      nextAction: parsed.next_action || undefined,
+    }
+  } catch {
+    return {}
+  }
+}
+
+function buildComprehensiveDescription(item: any): string {
+  const parts: string[] = []
+  const name = item.full_spoken_name || item.lead_name || "Lead"
+  const product = item.product_interest ? item.product_interest.toUpperCase() : "LOAN"
+  const amount = item.loan_amount ? `₹${Number(item.loan_amount).toLocaleString("en-IN")}` : ""
+  const location = item.lead_address || item.city || ""
+
+  if (item.category === "loan_confirmed") {
+    parts.push(`Customer confirmed requirement for ${product}${amount ? ` of ${amount}` : ""}${location ? ` in ${location}` : ""}.`)
+    if (item.employment_type || item.monthly_income) {
+      parts.push(`Profile: ${item.employment_type || "Applicant"}${item.monthly_income ? ` with monthly income of ₹${Number(item.monthly_income).toLocaleString("en-IN")}` : ""}.`)
+    }
+    if (item.call_duration) {
+      const mins = Math.floor(item.call_duration / 60)
+      const secs = item.call_duration % 60
+      parts.push(`Discussed thoroughly on a ${mins > 0 ? `${mins}m ` : ""}${secs}s AI voice call (${item.call_language || "Telugu"}).`)
+    }
+    parts.push(`Official loan application link was delivered to customer's WhatsApp (+${item.lead_whatsapp || item.lead_phone || ""}). Call to verify KYC, college/salary documents, and initiate bank file.`)
+  } else if (item.category === "callback") {
+    parts.push(`Scheduled callback requested by ${name} for ${product}${amount ? ` (${amount})` : ""}.`)
+    if (item.quote) parts.push(`Customer noted: "${item.quote}".`)
+    parts.push(`Scheduled for follow-up via ${item.channel || "phone"}.`)
+  } else if (item.category === "branch_visit") {
+    parts.push(`Office visit appointment confirmed for ${name}.`)
+    if (item.location) parts.push(`Branch/Office: ${item.location}.`)
+    if (item.quote) parts.push(`Customer agreed: "${item.quote}".`)
+  } else {
+    // Escalation
+    parts.push(`Customer requested human assistance during conversation.`)
+    if (item.quote) parts.push(`Statement: "${item.quote}".`)
+    if (item.call_duration) parts.push(`Call duration was ${item.call_duration}s.`)
+  }
+
+  return parts.join(" ")
+}
+
 export async function GET(req: NextRequest) {
   const session = await requireModuleOrRole(req, "voice", ROLE_LIST)
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
   const branchId = sessionBranchId(session)
 
   try {
-    // 1. Confirmed Loans & Escalations from comm_logs
+    // 1. Confirmed Loans & Escalations from comm_logs joined with leads, last_call, and last_app
     const alertsRes = await query(
       `SELECT c.id, c.lead_id, c.summary, c.outcome, c.created_at,
               l.name AS lead_name, l.phone AS lead_phone, l.whatsapp_number AS lead_whatsapp,
-              l.status AS lead_status, l.product_interest, l.loan_amount
+              l.status AS lead_status, l.address AS lead_address,
+              COALESCE(last_app.loan_type, l.product_interest) AS product_interest,
+              COALESCE(last_app.app_loan_amount, l.loan_amount) AS loan_amount,
+              last_app.monthly_income, last_app.employment_type, last_app.city,
+              last_call.duration AS call_duration,
+              last_call.sentiment AS call_sentiment,
+              last_call.language AS call_language,
+              last_call.ai_summary AS call_ai_summary
          FROM comm_logs c
          LEFT JOIN leads l ON l.id = c.lead_id
+         LEFT JOIN LATERAL (
+           SELECT v.duration, v.sentiment, v.language, v.ai_summary
+             FROM voice_calls v
+            WHERE v.lead_id = l.id
+            ORDER BY v.created_at DESC
+            LIMIT 1
+         ) last_call ON true
+         LEFT JOIN LATERAL (
+           SELECT la.loan_type, la.loan_amount AS app_loan_amount, la.monthly_income, la.employment_type, la.city
+             FROM loan_applications la
+            WHERE la.lead_id = l.id
+            ORDER BY la.submitted_at DESC
+            LIMIT 1
+         ) last_app ON true
         WHERE c.type = 'alert' AND c.outcome IN ('needs_human', 'loan_confirmed')
           AND c.created_at > now() - interval '30 days'
           AND ($1::uuid IS NULL OR l.branch_id = $1::uuid)
@@ -40,9 +118,21 @@ export async function GET(req: NextRequest) {
       `SELECT e.id, e.lead_id, e.title, e.event_type, e.event_at, e.end_at, e.status,
               e.confidence, e.location, e.channel, e.notes, e.raw_quote, e.created_at,
               l.name AS lead_name, l.phone AS lead_phone, l.whatsapp_number AS lead_whatsapp,
-              l.status AS lead_status, l.product_interest, l.loan_amount
+              l.status AS lead_status, l.address AS lead_address,
+              l.product_interest, l.loan_amount,
+              last_call.duration AS call_duration,
+              last_call.sentiment AS call_sentiment,
+              last_call.language AS call_language,
+              last_call.ai_summary AS call_ai_summary
          FROM calendar_events e
          LEFT JOIN leads l ON l.id = e.lead_id
+         LEFT JOIN LATERAL (
+           SELECT v.duration, v.sentiment, v.language, v.ai_summary
+             FROM voice_calls v
+            WHERE v.lead_id = l.id
+            ORDER BY v.created_at DESC
+            LIMIT 1
+         ) last_call ON true
         WHERE e.status IN ('confirmed', 'needs_review', 'rescheduled')
           AND e.event_at >= now() - interval '14 days'
           AND ($1::uuid IS NULL OR e.branch_id = $1::uuid)
@@ -55,8 +145,20 @@ export async function GET(req: NextRequest) {
     const loanAppsRes = await query(
       `SELECT a.id, a.lead_id, a.customer_name AS lead_name, a.phone AS lead_phone,
               a.whatsapp_number AS lead_whatsapp, a.loan_type AS product_interest,
-              a.loan_amount, a.status AS loan_status, a.submitted_at, a.monthly_income, a.employment_type
+              a.loan_amount, a.status AS loan_status, a.submitted_at, a.monthly_income,
+              a.employment_type, a.city, a.address AS lead_address,
+              last_call.duration AS call_duration,
+              last_call.sentiment AS call_sentiment,
+              last_call.language AS call_language,
+              last_call.ai_summary AS call_ai_summary
          FROM loan_applications a
+         LEFT JOIN LATERAL (
+           SELECT v.duration, v.sentiment, v.language, v.ai_summary
+             FROM voice_calls v
+            WHERE v.lead_id = a.lead_id
+            ORDER BY v.created_at DESC
+            LIMIT 1
+         ) last_call ON true
         WHERE a.status IN ('pending', 'submitted')
           AND a.submitted_at > now() - interval '30 days'
           AND ($1::uuid IS NULL OR a.branch_id = $1::uuid)
@@ -66,57 +168,90 @@ export async function GET(req: NextRequest) {
     ).catch(() => ({ rows: [] as any[] }))
 
     const items: any[] = []
-    const seenLeadLoan = new Set<string>()
+    const seenLeads = new Set<string>()
 
-    // Map comm_logs alerts
+    // Map comm_logs alerts (Deduplicated per lead so loan officers see 1 unified card per lead)
     for (const r of alertsRes.rows) {
-      const isLoan = r.outcome === "loan_confirmed"
-      if (isLoan && r.lead_id) seenLeadLoan.add(String(r.lead_id))
+      const leadKey = r.lead_id ? String(r.lead_id) : `lead_phone_${r.lead_phone || r.id}`
+      if (seenLeads.has(leadKey)) continue
+      seenLeads.add(leadKey)
 
-      items.push({
+      const isLoan = r.outcome === "loan_confirmed"
+      const parsedAi = parseCallSummary(r.call_ai_summary)
+
+      const rawItem = {
         id: `comm_${r.id}`,
         raw_id: String(r.id),
         item_source: "comm_log",
         category: isLoan ? "loan_confirmed" : "escalation",
         lead_id: r.lead_id,
         lead_name: r.lead_name,
+        full_spoken_name: parsedAi.fullSpokenName || r.lead_name,
         lead_phone: r.lead_phone,
         lead_whatsapp: r.lead_whatsapp,
         lead_status: r.lead_status,
+        lead_address: r.lead_address || parsedAi.address || null,
         product_interest: r.product_interest,
         loan_amount: r.loan_amount,
+        monthly_income: r.monthly_income,
+        employment_type: r.employment_type,
+        city: r.city,
+        call_duration: r.call_duration,
+        call_sentiment: r.call_sentiment,
+        call_language: r.call_language,
+        next_action: parsedAi.nextAction || null,
         summary: r.summary,
         created_at: r.created_at,
         event_at: null,
         location: null,
         priority: isLoan ? "critical" : "high",
+      }
+
+      items.push({
+        ...rawItem,
+        full_description: buildComprehensiveDescription(rawItem),
       })
     }
 
     // Map loan_applications (if not already surfaced via comm_log)
     for (const la of loanAppsRes.rows) {
-      if (la.lead_id && seenLeadLoan.has(String(la.lead_id))) continue
-      if (la.lead_id) seenLeadLoan.add(String(la.lead_id))
+      const leadKey = la.lead_id ? String(la.lead_id) : `app_${la.id}`
+      if (seenLeads.has(leadKey)) continue
+      seenLeads.add(leadKey)
 
-      items.push({
+      const parsedAi = parseCallSummary(la.call_ai_summary)
+
+      const rawItem = {
         id: `app_${la.id}`,
         raw_id: String(la.id),
         item_source: "loan_application",
         category: "loan_confirmed",
         lead_id: la.lead_id,
         lead_name: la.lead_name,
+        full_spoken_name: parsedAi.fullSpokenName || la.lead_name,
         lead_phone: la.lead_phone,
         lead_whatsapp: la.lead_whatsapp,
         lead_status: "applied",
+        lead_address: la.lead_address || la.city || parsedAi.address || null,
         product_interest: la.product_interest,
         loan_amount: la.loan_amount,
         monthly_income: la.monthly_income,
         employment_type: la.employment_type,
+        city: la.city,
+        call_duration: la.call_duration,
+        call_sentiment: la.call_sentiment,
+        call_language: la.call_language,
+        next_action: parsedAi.nextAction || null,
         summary: `🟢 LOAN APPLICATION SUBMITTED — ${la.product_interest || "Loan"} of ${la.loan_amount ? "₹" + Number(la.loan_amount).toLocaleString("en-IN") : "requested amount"}. Ready for loan officer verification.`,
         created_at: la.submitted_at,
         event_at: null,
         location: null,
         priority: "critical",
+      }
+
+      items.push({
+        ...rawItem,
+        full_description: buildComprehensiveDescription(rawItem),
       })
     }
 
@@ -125,17 +260,20 @@ export async function GET(req: NextRequest) {
       const eventTime = new Date(ce.event_at).getTime()
       const isOverdue = !isNaN(eventTime) && eventTime < Date.now()
       const isDueSoon = !isNaN(eventTime) && eventTime < Date.now() + 2 * 3600 * 1000
+      const parsedAi = parseCallSummary(ce.call_ai_summary)
 
-      items.push({
+      const rawItem = {
         id: `cal_${ce.id}`,
         raw_id: String(ce.id),
         item_source: "calendar_event",
         category: ce.event_type || "callback",
         lead_id: ce.lead_id,
         lead_name: ce.lead_name,
+        full_spoken_name: parsedAi.fullSpokenName || ce.lead_name,
         lead_phone: ce.lead_phone,
         lead_whatsapp: ce.lead_whatsapp,
         lead_status: ce.lead_status,
+        lead_address: ce.lead_address || parsedAi.address || null,
         product_interest: ce.product_interest,
         loan_amount: ce.loan_amount,
         summary: ce.title || (ce.event_type === "branch_visit" ? "Scheduled office visit" : "Scheduled callback"),
@@ -144,8 +282,17 @@ export async function GET(req: NextRequest) {
         location: ce.location,
         channel: ce.channel,
         confidence: ce.confidence,
+        call_duration: ce.call_duration,
+        call_sentiment: ce.call_sentiment,
+        call_language: ce.call_language,
+        next_action: parsedAi.nextAction || null,
         created_at: ce.created_at,
         priority: isOverdue ? "critical" : isDueSoon ? "high" : "medium",
+      }
+
+      items.push({
+        ...rawItem,
+        full_description: buildComprehensiveDescription(rawItem),
       })
     }
 
