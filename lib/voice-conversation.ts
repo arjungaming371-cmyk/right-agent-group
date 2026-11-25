@@ -1013,11 +1013,10 @@ async function completeLeadIfReady(opts: {
   const knownName = existing.data?.name && !PLACEHOLDER_NAME_RE.test(existing.data.name) ? existing.data.name : null
   const effectiveName = extracted.name || knownName
   const effectiveAddress = extracted.address || existing.data?.address || null
-  // WhatsApp-call fallback: even if extraction somehow returned null, the
-  // calling number is definitionally the WhatsApp number on a wacall-*.
-  const effectiveWhatsapp = extracted.whatsapp_number || existing.data?.whatsapp_number || (isWhatsAppCall && callerPhone ? callerPhone : null)
+  const effectiveWhatsapp = extracted.whatsapp_number || existing.data?.whatsapp_number || callerPhone || null
 
-  if (!effectiveName || !effectiveAddress || !effectiveWhatsapp) return false
+  // Address is filled on the online form — do not block link delivery on missing address.
+  if ((!effectiveName && !callerPhone) || !effectiveWhatsapp) return false
 
   try {
     const updates: Record<string, any> = {

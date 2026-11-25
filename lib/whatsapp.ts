@@ -717,18 +717,38 @@ export async function sendApplicationLink(
   }
   const brand = branch?.brandName || defaultBranding()
 
-  const result = await graphPost({
+  const components: any[] = [
+    {
+      type: "body",
+      parameters: [
+        { type: "text", text: name || "there" },
+        { type: "text", text: token },
+      ],
+    },
+  ]
+
+  let result = await graphPost({
     to: number,
     type: "template",
     template: {
       name: FORM_TEMPLATE,
-      language: { code: "en" },
-      components: [
-        { type: "body", parameters: [{ type: "text", text: name || "there" }] },
-        { type: "button", sub_type: "url", index: "0", parameters: [{ type: "text", text: token }] },
-      ],
+      language: { code: "en_US" },
+      components,
     },
   }, branch)
+
+  if (!result.ok) {
+    result = await graphPost({
+      to: number,
+      type: "template",
+      template: {
+        name: FORM_TEMPLATE,
+        language: { code: "en" },
+        components,
+      },
+    }, branch)
+  }
+
   if (result.ok) return { ok: true }
 
   // FALLBACK: if the template isn't approved yet but the customer messaged
@@ -867,15 +887,27 @@ export async function sendCallFollowUp(to: string, name: string, branch?: Branch
   }
   const brand = branch?.brandName || defaultBranding()
 
-  const result = await graphPost({
+  let result = await graphPost({
     to: number,
     type: "template",
     template: {
       name: CALL_FOLLOWUP_TEMPLATE,
-      language: { code: "en" },
+      language: { code: "en_US" },
       components: [{ type: "body", parameters: [{ type: "text", text: name || "there" }] }],
     },
   }, branch)
+
+  if (!result.ok) {
+    result = await graphPost({
+      to: number,
+      type: "template",
+      template: {
+        name: CALL_FOLLOWUP_TEMPLATE,
+        language: { code: "en" },
+        components: [{ type: "body", parameters: [{ type: "text", text: name || "there" }] }],
+      },
+    }, branch)
+  }
   if (result.ok) return { ok: true }
 
   // FALLBACK: only delivers if the customer already has an open 24h session
@@ -916,15 +948,27 @@ export async function sendMissedCallFollowUp(to: string, name: string, branch?: 
   }
   const brand = branch?.brandName || defaultBranding()
 
-  const result = await graphPost({
+  let result = await graphPost({
     to: number,
     type: "template",
     template: {
       name: MISSED_CALL_TEMPLATE,
-      language: { code: "en" },
+      language: { code: "en_US" },
       components: [{ type: "body", parameters: [{ type: "text", text: name || "there" }] }],
     },
   }, branch)
+
+  if (!result.ok) {
+    result = await graphPost({
+      to: number,
+      type: "template",
+      template: {
+        name: MISSED_CALL_TEMPLATE,
+        language: { code: "en" },
+        components: [{ type: "body", parameters: [{ type: "text", text: name || "there" }] }],
+      },
+    }, branch)
+  }
   if (result.ok) return { ok: true }
 
   // Only on a definitive 4xx — see sendApplicationLink's note on double-sends.
