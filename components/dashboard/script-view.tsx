@@ -1,6 +1,6 @@
 "use client"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Lightbulb, Save, RotateCcw, CalendarClock, Timer, RefreshCw, Languages, Sparkles, Check, X, Phone, MessageSquare, Instagram, Info, Wand2, Braces, Eye, Copy, ExternalLink, CheckCircle2 } from "lucide-react"
+import { Lightbulb, Save, RotateCcw, CalendarClock, Timer, RefreshCw, Languages, Sparkles, Check, X, Phone, MessageSquare, Instagram, Info, Wand2, Braces, Eye, Copy, ExternalLink, CheckCircle2, ShieldCheck, Clock, Link2 } from "lucide-react"
 import { formatDateTime } from "@/lib/utils"
 import { extractMergeFields, renderMergeFields, sampleVars } from "@/lib/script-studio"
 import { META_TEMPLATES_CATALOG, MetaTemplateDefinition } from "@/lib/meta-templates"
@@ -672,8 +672,9 @@ export default function ScriptView() {
           <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 12, marginBottom: 14 }}>
             <div>
               <div style={{ fontWeight: 700, fontSize: 16, color: "var(--text-primary)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                <span>🛡️ Official Meta WhatsApp Cloud API Templates</span>
-                <span style={{ fontSize: 11, background: "rgba(45,212,160,0.14)", color: "var(--accent-green)", padding: "2px 8px", borderRadius: 12, fontWeight: 700, whiteSpace: "nowrap" }}>
+                <ShieldCheck size={18} style={{ color: "var(--accent-blue)" }} />
+                <span>Official Meta WhatsApp Cloud API Templates</span>
+                <span style={{ fontSize: 11, background: "rgba(91,124,250,0.14)", color: "var(--accent-blue)", padding: "2px 9px", borderRadius: 12, fontWeight: 700, whiteSpace: "nowrap" }}>
                   {META_TEMPLATES_CATALOG.length} Ready Templates
                 </span>
               </div>
@@ -779,12 +780,12 @@ export default function ScriptView() {
                             <CheckCircle2 size={11} /> Meta Approved
                           </span>
                         ) : liveStatus === "PENDING" ? (
-                          <span style={{ fontSize: 10, color: "var(--accent-yellow)", fontWeight: 700 }}>
-                            ⏳ Pending Review
+                          <span style={{ fontSize: 10, color: "var(--accent-yellow)", fontWeight: 700, display: "flex", alignItems: "center", gap: 3 }}>
+                            <Clock size={11} /> Pending Review
                           </span>
                         ) : liveStatus === "REJECTED" ? (
-                          <span style={{ fontSize: 10, color: "var(--accent-red)", fontWeight: 700 }}>
-                            ❌ Rejected
+                          <span style={{ fontSize: 10, color: "var(--accent-red)", fontWeight: 700, display: "flex", alignItems: "center", gap: 3 }}>
+                            <X size={11} /> Rejected
                           </span>
                         ) : (
                           <span style={{ fontSize: 9.5, color: "var(--text-muted)" }}>{tpl.pricing}</span>
@@ -816,7 +817,7 @@ export default function ScriptView() {
                       <div style={{ whiteSpace: "pre-wrap", color: "var(--text-secondary)" }}>
                         {tpl.body.split(/({{\d+}})/g).map((part, i) =>
                           part.startsWith("{{") ? (
-                            <span key={i} style={{ background: "rgba(45,212,160,0.16)", color: "var(--accent-green)", padding: "0 4px", borderRadius: 4, fontWeight: 700, fontFamily: "monospace" }}>
+                            <span key={i} style={{ background: "rgba(45,212,160,0.16)", color: "var(--accent-green)", padding: "0 2px", borderRadius: 3, fontWeight: 700, fontFamily: "monospace" }}>
                               {part}
                             </span>
                           ) : (
@@ -832,7 +833,7 @@ export default function ScriptView() {
                       {tpl.button && (
                         <div style={{ marginTop: 10, borderTop: "1px solid var(--border-light)", paddingTop: 8, textAlign: "center" }}>
                           <span style={{ fontSize: 11, fontWeight: 600, color: "var(--accent-cyan)", display: "inline-flex", alignItems: "center", gap: 5 }}>
-                            🔗 {tpl.button.text} {tpl.button.type === "URL" ? "↗" : ""}
+                            <Link2 size={12} /> {tpl.button.text} {tpl.button.type === "URL" ? "↗" : ""}
                           </span>
                         </div>
                       )}

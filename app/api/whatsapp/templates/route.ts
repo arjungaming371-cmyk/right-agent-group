@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
   if (token && wabaId) {
     try {
       const controller = new AbortController()
-      const timer = setTimeout(() => controller.abort(), 3500)
+      const timer = setTimeout(() => controller.abort(), 7000)
       const res = await fetch(
         `https://graph.facebook.com/v21.0/${wabaId}/message_templates?limit=50`,
         { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal }

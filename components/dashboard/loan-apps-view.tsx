@@ -11,6 +11,7 @@ import { formatCurrency, timeAgo, formatDateTime } from "@/lib/utils"
 import { usePolling, broadcastCrmSync } from "@/lib/use-poll"
 import { SkeletonList } from "../ui/skeleton"
 import { useToast } from "../ui/toast"
+import CustomSelect from "../ui/custom-select"
 import { COMMON_LOAN_TYPES } from "@/lib/products"
 
 type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
@@ -824,34 +825,34 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
                           </td>
                           <td style={{ padding: "12px 16px" }}>
                             {canEdit ? (
-                              <div style={{ display: "flex", flexDirection: "column", gap: 5, maxWidth: 240 }}>
-                                <select
+                              <div style={{ display: "flex", flexDirection: "column", gap: 5, maxWidth: 230 }}>
+                                <CustomSelect
                                   value={st}
                                   disabled={updatingAppId === app.id}
-                                  onChange={(e) => updateInternalAppStatus(app, e.target.value)}
-                                  style={{
-                                    padding: "4px 8px",
-                                    borderRadius: 6,
-                                    fontSize: 11.5,
-                                    fontWeight: 600,
+                                  onChange={(val) => updateInternalAppStatus(app, val)}
+                                  compact
+                                  title="Update Status (AI voice & WhatsApp bot will answer customer according to this status)"
+                                  triggerStyle={{
                                     background: meta.bg_color,
                                     color: meta.color,
-                                    border: `1px solid ${meta.color}40`,
-                                    cursor: "pointer",
-                                    outline: "none",
-                                    width: "100%",
+                                    borderColor: `${meta.color}45`,
+                                    fontWeight: 600,
                                   }}
-                                  title="Update Status (AI voice & WhatsApp bot will answer customer according to this status)"
-                                >
-                                  {statuses.map((s) => (
-                                    <option key={s.id} value={s.id} style={{ background: "var(--bg-card)", color: "var(--text-primary)" }}>
-                                      {s.icon} {s.label}
-                                    </option>
-                                  ))}
-                                  <option value="__manage__" style={{ background: "var(--bg-card)", color: "var(--accent-violet)", fontWeight: 600 }}>
-                                    ⚙️ + Customize Statuses...
-                                  </option>
-                                </select>
+                                  options={[
+                                    ...statuses.map((s) => ({
+                                      value: s.id,
+                                      label: s.label,
+                                      dotColor: s.color,
+                                    })),
+                                    {
+                                      value: "__manage__",
+                                      label: "Customize Statuses...",
+                                      icon: <Settings2 size={13} />,
+                                      accent: true,
+                                      dividerBefore: true,
+                                    },
+                                  ]}
+                                />
 
                                 {/* Officer Reason / Remarks snippet */}
                                 {app.status_reason && (
@@ -1181,16 +1182,21 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
                 <label style={{ display: "block", fontSize: 12, color: "var(--text-muted)", marginBottom: 4, fontWeight: 500 }}>
                   Loan Type / Category *
                 </label>
-                <select
+                <CustomSelect
                   value={linkFormProduct}
-                  onChange={(e) => setLinkFormProduct(e.target.value)}
-                  style={{ width: "100%", height: 38, fontSize: 13, padding: "0 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)" }}
-                >
-                  {COMMON_LOAN_TYPES.map((t) => (
-                    <option key={t} value={t}>{t}</option>
-                  ))}
-                  <option value="custom">✏️ Other / Custom Loan Type…</option>
-                </select>
+                  onChange={(val) => setLinkFormProduct(val)}
+                  triggerStyle={{ height: 38, fontSize: 13 }}
+                  options={[
+                    ...COMMON_LOAN_TYPES.map((t) => ({ value: t, label: t })),
+                    {
+                      value: "custom",
+                      label: "Other / Custom Loan Type…",
+                      icon: <Pencil size={12} />,
+                      accent: true,
+                      dividerBefore: true,
+                    },
+                  ]}
+                />
 
                 {linkFormProduct === "custom" && (
                   <input

@@ -5,7 +5,8 @@ import { useEffect, useState, useMemo } from "react"
 import {
   Users, Target, IndianRupee, BadgeCheck, Phone, MessageCircle, MessageSquare, RotateCcw,
   Plus, Search, Link2, Check, Download, Upload, Brain, Pin, Sparkles, CheckSquare,
-  PhoneCall, Instagram, X, ExternalLink, Clock, CheckCircle2, ArrowRight, Pencil, Landmark, AlertCircle, FileText
+  PhoneCall, Instagram, X, ExternalLink, Clock, CheckCircle2, ArrowRight, Pencil, Landmark, AlertCircle, FileText,
+  ShieldCheck, Zap, Copy
 } from "lucide-react"
 import { formatCurrency, timeAgo, formatDateTime } from "@/lib/utils"
 import { pctOf } from "@/lib/maths"
@@ -13,6 +14,7 @@ import { usePolling, broadcastCrmSync } from "@/lib/use-poll"
 import { useToast } from "../ui/toast"
 import { useEscapeDismiss } from "../ui/interactive"
 import { Skeleton } from "../ui/skeleton"
+import CustomSelect from "../ui/custom-select"
 import LeadMemoryModal from "./lead-memory-modal"
 import VoiceDictation from "../ui/voice-dictation"
 import { smartFilter } from "@/lib/smart-search"
@@ -2610,19 +2612,26 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
 
       {/* Bulk WhatsApp Campaign Modal */}
       {showBulkWaModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}>
-          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, padding: 26, width: "100%", maxWidth: 540, maxHeight: "90vh", overflowY: "auto" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <div style={{ width: 28, height: 28, borderRadius: "50%", background: "rgba(37,211,102,0.15)", display: "flex", alignItems: "center", justifyContent: "center", color: "#25D366" }}>
-                  <MessageCircle size={16} strokeWidth={2.4} />
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.72)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}>
+          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, width: "100%", maxWidth: 520, maxHeight: "88vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "var(--shadow-soft)" }}>
+            {/* Fixed Modal Header */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 22px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ width: 30, height: 30, borderRadius: 8, background: "rgba(91,124,250,0.14)", border: "1px solid rgba(91,124,250,0.3)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--accent-blue)" }}>
+                  <MessageCircle size={16} strokeWidth={2.2} />
                 </div>
-                <div style={{ fontWeight: 700, fontSize: 16, color: "var(--text-primary)" }}>
-                  Send Bulk WhatsApp Message
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 15, color: "var(--text-primary)", lineHeight: 1.2 }}>
+                    Send Bulk WhatsApp Message
+                  </div>
+                  <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2 }}>
+                    Blasting to <strong style={{ color: "var(--accent-green)" }}>{selectedIds.length} selected lead{selectedIds.length === 1 ? "" : "s"}</strong> via Meta Cloud API
+                  </div>
                 </div>
               </div>
               <button
                 type="button"
+                aria-label="Close modal"
                 onClick={() => {
                   if (!bulkWaBusy) {
                     setBulkWaResult(null)
@@ -2637,12 +2646,12 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
             </div>
 
             {bulkWaResult ? (
-              <div>
-                <div style={{ textAlign: "center", padding: "12px 0 20px" }}>
-                  <div style={{ width: 52, height: 52, borderRadius: "50%", background: "rgba(34,197,94,0.15)", border: "2px solid #22c55e", display: "inline-flex", alignItems: "center", justifyContent: "center", color: "#22c55e", marginBottom: 12 }}>
-                    <CheckCircle2 size={26} strokeWidth={2.4} />
+              <div style={{ padding: "20px 22px", overflowY: "auto", flex: 1 }}>
+                <div style={{ textAlign: "center", padding: "8px 0 18px" }}>
+                  <div style={{ width: 48, height: 48, borderRadius: "50%", background: "rgba(45,212,160,0.14)", border: "2px solid var(--accent-green)", display: "inline-flex", alignItems: "center", justifyContent: "center", color: "var(--accent-green)", marginBottom: 10 }}>
+                    <CheckCircle2 size={24} strokeWidth={2.2} />
                   </div>
-                  <div style={{ fontSize: 17, fontWeight: 700, color: "var(--text-primary)" }}>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)" }}>
                     Bulk WhatsApp Campaign Sent!
                   </div>
                   <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
@@ -2650,25 +2659,25 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                   </div>
                 </div>
 
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 18 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 16 }}>
                   <div style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 8px", textAlign: "center" }}>
                     <div style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500 }}>Delivered</div>
-                    <div style={{ fontSize: 20, fontWeight: 800, color: "#22c55e", marginTop: 4 }}>{bulkWaResult.sentCount}</div>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: "var(--accent-green)", marginTop: 4 }}>{bulkWaResult.sentCount}</div>
                   </div>
                   <div style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 8px", textAlign: "center" }}>
                     <div style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500 }}>Skipped (DND)</div>
-                    <div style={{ fontSize: 20, fontWeight: 800, color: "#eab308", marginTop: 4 }}>{bulkWaResult.skippedDnd}</div>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: "var(--accent-yellow)", marginTop: 4 }}>{bulkWaResult.skippedDnd}</div>
                   </div>
                   <div style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 8px", textAlign: "center" }}>
                     <div style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500 }}>Failed</div>
-                    <div style={{ fontSize: 20, fontWeight: 800, color: bulkWaResult.failedCount > 0 ? "#ef4444" : "var(--text-muted)", marginTop: 4 }}>{bulkWaResult.failedCount}</div>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: bulkWaResult.failedCount > 0 ? "var(--accent-red)" : "var(--text-muted)", marginTop: 4 }}>{bulkWaResult.failedCount}</div>
                   </div>
                 </div>
 
                 {bulkWaResult.errors && bulkWaResult.errors.length > 0 && (
-                  <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 10, padding: "10px 14px", fontSize: 11.5, color: "#f87171", marginBottom: 14 }}>
+                  <div style={{ background: "rgba(251,86,112,0.08)", border: "1px solid rgba(251,86,112,0.25)", borderRadius: 10, padding: "10px 14px", fontSize: 11.5, color: "var(--accent-red)", marginBottom: 14 }}>
                     <div style={{ fontWeight: 700, marginBottom: 4, display: "flex", alignItems: "center", gap: 6 }}>
-                      ⚠️ Meta Rejection Details:
+                      <AlertCircle size={13} /> Meta Rejection Details:
                     </div>
                     {bulkWaResult.errors.map((err, idx) => (
                       <div key={idx} style={{ marginTop: 3, fontFamily: "monospace", fontSize: 11, wordBreak: "break-all" }}>
@@ -2676,22 +2685,21 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                       </div>
                     ))}
                     {bulkWaResult.errors.some((e) => e.includes("132001") || e.includes("does not exist")) && (
-                      <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid rgba(239,68,68,0.2)", fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.5 }}>
-                        💡 <strong>Why this failed:</strong> Meta only sends templates that already exist in your Meta WhatsApp Business Manager.
-                        <br />• <strong>To test immediately:</strong> Pick <code style={{ color: "#22c55e" }}>hello_world</code> (Lang: <code style={{ color: "#22c55e" }}>en_US</code>) — Meta pre-approves this for instant testing!
-                        <br />• <strong>To send custom templates:</strong> Go to <em>Priya&apos;s Script &gt; WhatsApp &amp; Meta Templates</em>, click <em>Copy for Meta Approval</em>, and paste it into your Meta WhatsApp Manager.
+                      <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid rgba(251,86,112,0.2)", fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.5 }}>
+                        For instant delivery right now, choose <code style={{ color: "var(--accent-green)" }}>hello_world</code> (Lang: <code style={{ color: "var(--accent-green)" }}>en_US</code>). Custom templates require Meta approval (usually 1–5 minutes).
                       </div>
                     )}
                     {bulkWaResult.errors.some((e) => e.includes("131030") || e.includes("allowed list")) && (
-                      <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid rgba(239,68,68,0.2)", fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.5 }}>
-                        💡 <strong>Why this failed:</strong> In Meta Sandbox test mode, you can only send messages to phone numbers added to your Meta Developer Console allowed list (e.g. 6301689511).
+                      <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid rgba(251,86,112,0.2)", fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.5 }}>
+                        In Meta Sandbox test mode, you can only send to phone numbers added to your Meta Developer Console allowed list.
                       </div>
                     )}
                   </div>
                 )}
 
-                <div style={{ background: "rgba(37,211,102,0.06)", border: "1px solid rgba(37,211,102,0.2)", borderRadius: 10, padding: "12px 14px", fontSize: 11.5, color: "var(--text-secondary)", marginBottom: 18, lineHeight: 1.6 }}>
-                  🛡️ <strong>Permanent Audit History:</strong> This summary is saved in <strong>Security &gt; Audit Log</strong> for complete compliance tracking. Outbound messages are recorded in each customer&apos;s history and in <strong>WhatsApp Inbox</strong>, where AI responds to replies automatically.
+                <div style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 12px", fontSize: 11.5, color: "var(--text-secondary)", marginBottom: 16, lineHeight: 1.5, display: "flex", alignItems: "flex-start", gap: 8 }}>
+                  <ShieldCheck size={15} style={{ color: "var(--accent-blue)", flexShrink: 0, marginTop: 2 }} />
+                  <span>Saved in <strong>Security &gt; Audit Log</strong>. Outbound messages also appear in each customer&apos;s history and <strong>WhatsApp Inbox</strong>.</span>
                 </div>
 
                 <button
@@ -2708,18 +2716,16 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
               </div>
             ) : (
               <>
-                <div style={{ fontSize: 12.5, color: "var(--text-secondary)", marginBottom: 14 }}>
-                  Blasting to <strong style={{ color: "var(--accent-green)" }}>{selectedIds.length} selected lead{selectedIds.length === 1 ? "" : "s"}</strong> over official Meta WhatsApp Cloud API.
-                </div>
+                <div style={{ padding: "16px 22px", overflowY: "auto", flex: 1, display: "flex", flexDirection: "column", gap: 12 }}>
 
                 {/* Send Mode Selector: Meta Template vs Free-form */}
-                <div style={{ display: "flex", gap: 6, marginBottom: 14, background: "var(--bg-secondary)", padding: 4, borderRadius: 10, border: "1px solid var(--border)" }}>
+                <div style={{ display: "flex", gap: 4, background: "var(--bg-secondary)", padding: 4, borderRadius: 10, border: "1px solid var(--border)" }}>
                   <button
                     type="button"
                     onClick={() => setBulkWaMode("template")}
                     style={{
                       flex: 1,
-                      height: 34,
+                      height: 32,
                       fontSize: 12,
                       fontWeight: 600,
                       borderRadius: 7,
@@ -2734,14 +2740,14 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                       transition: "all 0.15s ease",
                     }}
                   >
-                    🛡️ Meta Approved Template
+                    <ShieldCheck size={14} /> Meta Template
                   </button>
                   <button
                     type="button"
                     onClick={() => setBulkWaMode("text")}
                     style={{
                       flex: 1,
-                      height: 34,
+                      height: 32,
                       fontSize: 12,
                       fontWeight: 600,
                       borderRadius: 7,
@@ -2756,123 +2762,73 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                       transition: "all 0.15s ease",
                     }}
                   >
-                    💬 Free-form Text (24h Window)
+                    <MessageSquare size={14} /> Free-form (24h Window)
                   </button>
                 </div>
 
                 {bulkWaMode === "template" ? (
-                  <div style={{ marginBottom: 14 }}>
-                    <div style={{ background: "rgba(37,211,102,0.06)", border: "1px solid rgba(37,211,102,0.2)", borderRadius: 10, padding: 12, marginBottom: 12, fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.5 }}>
-                      ✅ <strong>Recommended for Cold &amp; Follow-up Leads:</strong> Meta approved templates deliver 100% reliably even if the customer hasn&apos;t messaged you recently. The CRM automatically fills &#123;&#123;1&#125;&#125; with the customer&apos;s name and maps the action button to their one-time application link.
+                  <>
+                    <div style={{ fontSize: 11.5, color: "var(--text-muted)", lineHeight: 1.45 }}>
+                      Auto-fills <code style={{ color: "var(--accent-cyan)" }}>{"{{1}}"}</code> with the customer&apos;s name and maps the button to their one-time application link.
                     </div>
 
-                    <div style={{ marginBottom: 10 }}>
-                      <label style={{ display: "block", fontSize: 11.5, color: "var(--text-muted)", marginBottom: 4, fontWeight: 500 }}>
-                        Meta Template Name
-                      </label>
-                      <input
-                        type="text"
-                        value={bulkWaTemplateName}
-                        onChange={(e) => setBulkWaTemplateName(e.target.value)}
-                        placeholder="e.g. loan_application_form, call_followup, or custom template"
-                        style={{
-                          width: "100%",
-                          height: 36,
-                          padding: "0 10px",
-                          borderRadius: 8,
-                          border: "1px solid var(--border)",
-                          background: "var(--bg-secondary)",
-                          color: "var(--text-primary)",
-                          fontSize: 12.5,
-                        }}
-                      />
-                    </div>
-
-                    {/* Quick suggestion chips from Meta Catalog */}
-                    <div style={{ marginBottom: 12 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                        <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500 }}>Choose Template Preset:</span>
-                        <span style={{ fontSize: 10, color: "var(--accent-green)", background: "rgba(45,212,160,0.14)", padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>
-                          ⚡ hello_world is pre-approved by Meta
+                    <div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                        <label style={{ fontSize: 11.5, color: "var(--text-muted)", fontWeight: 500 }}>
+                          Meta Template
+                        </label>
+                        <span style={{ fontSize: 10.5, color: "var(--accent-green)", display: "inline-flex", alignItems: "center", gap: 4, fontWeight: 600 }}>
+                          <Zap size={11} /> hello_world is pre-approved
                         </span>
                       </div>
-                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                        {META_TEMPLATES_CATALOG.map((p) => {
-                          const isSelected = bulkWaTemplateName === p.name
+                      <CustomSelect
+                        value={bulkWaTemplateName}
+                        onChange={(val) => {
+                          setBulkWaTemplateName(val)
+                          const found = META_TEMPLATES_CATALOG.find((t) => t.name === val)
+                          if (found?.languages[0]?.code) setBulkWaTemplateLang(found.languages[0].code)
+                        }}
+                        options={META_TEMPLATES_CATALOG.map((p) => {
                           const st = liveTplStatuses[p.name]?.status || (p.isPreApproved ? "APPROVED" : undefined)
-                          const isApproved = st === "APPROVED"
-                          return (
-                            <button
-                              key={p.name}
-                              type="button"
-                              onClick={() => {
-                                setBulkWaTemplateName(p.name)
-                                if (p.languages[0]?.code) setBulkWaTemplateLang(p.languages[0].code)
-                              }}
-                              style={{
-                                fontSize: 11,
-                                padding: "4px 9px",
-                                borderRadius: 6,
-                                border: isSelected
-                                  ? "1px solid var(--accent-blue)"
-                                  : isApproved
-                                    ? "1px solid rgba(45,212,160,0.4)"
-                                    : "1px solid var(--border)",
-                                background: isSelected
-                                  ? "rgba(91,124,250,0.16)"
-                                  : isApproved
-                                    ? "rgba(45,212,160,0.08)"
-                                    : "var(--bg-secondary)",
-                                color: isSelected
-                                  ? "var(--accent-blue)"
-                                  : isApproved
-                                    ? "var(--accent-green)"
-                                    : "var(--text-secondary)",
-                                cursor: "pointer",
-                                fontWeight: isSelected ? 700 : 500,
-                              }}
-                            >
-                              {isApproved ? `✅ ${p.name}` : `📄 ${p.name}`}
-                            </button>
-                          )
+                          return {
+                            value: p.name,
+                            label: `${p.name} — ${p.displayName}`,
+                            dotColor: st === "APPROVED" ? "var(--accent-green)" : st === "REJECTED" ? "var(--accent-red)" : "var(--accent-yellow)",
+                          }
                         })}
-                      </div>
+                      />
                     </div>
 
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                       <div>
-                        <label style={{ display: "block", fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
+                        <label style={{ display: "block", fontSize: 11.5, color: "var(--text-muted)", marginBottom: 4, fontWeight: 500 }}>
                           Template Language
                         </label>
-                        <select
+                        <CustomSelect
                           value={bulkWaTemplateLang}
-                          onChange={(e) => setBulkWaTemplateLang(e.target.value)}
-                          style={{ width: "100%", height: 34, fontSize: 12, padding: "0 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)" }}
-                        >
-                          <option value="en_US">English US (en_US)</option>
-                          <option value="en">English (en)</option>
-                          <option value="te">Telugu (te)</option>
-                          <option value="hi">Hindi (hi)</option>
-                        </select>
+                          onChange={(val) => setBulkWaTemplateLang(val)}
+                          options={[
+                            { value: "en_US", label: "English US (en_US)" },
+                            { value: "en", label: "English (en)" },
+                            { value: "te", label: "Telugu (te)" },
+                            { value: "hi", label: "Hindi (hi)" },
+                          ]}
+                        />
                       </div>
 
                       <div>
-                        <label style={{ display: "block", fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
+                        <label style={{ display: "block", fontSize: 11.5, color: "var(--text-muted)", marginBottom: 4, fontWeight: 500 }}>
                           Link Loan Product
                         </label>
-                        <select
+                        <CustomSelect
                           value={bulkWaProduct}
-                          onChange={(e) => setBulkWaProduct(e.target.value)}
-                          style={{ width: "100%", height: 34, fontSize: 12, padding: "0 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)" }}
-                        >
-                          {allLoanProducts.map((t) => (
-                            <option key={t} value={t}>{t}</option>
-                          ))}
-                        </select>
+                          onChange={(val) => setBulkWaProduct(val)}
+                          options={allLoanProducts.map((t) => ({ value: t, label: t }))}
+                        />
                       </div>
                     </div>
 
-                    {/* Live Meta Template Preview & Synced Status (matches Priya's Script) */}
+                    {/* Live Meta Template Preview (Synced with Priya's Script) */}
                     {(() => {
                       const curTpl = META_TEMPLATES_CATALOG.find((t) => t.name === bulkWaTemplateName)
                       if (!curTpl) return null
@@ -2884,26 +2840,27 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                         .replace(/\{\{1\}\}/g, recipientName)
                         .replace(/\{\{2\}\}/g, "5th of this month")
                       return (
-                        <div style={{ marginTop: 12, background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 14px", fontSize: 11.5 }}>
+                        <div style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 12px", fontSize: 11.5 }}>
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                            <span style={{ fontWeight: 700, color: "var(--text-primary)" }}>
-                              📋 {curTpl.displayName}
+                            <span style={{ fontWeight: 700, color: "var(--text-primary)", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                              <FileText size={13} style={{ color: "var(--accent-blue)" }} /> {curTpl.displayName}
                             </span>
                             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                               <span style={{ fontSize: 9.5, padding: "2px 6px", borderRadius: 4, background: curTpl.category === "UTILITY" ? "rgba(91,124,250,0.16)" : "rgba(247,183,49,0.16)", color: curTpl.category === "UTILITY" ? "var(--accent-blue)" : "var(--accent-yellow)", fontWeight: 700 }}>
                                 {curTpl.category}
                               </span>
                               {liveStatus === "APPROVED" ? (
-                                <span style={{ fontSize: 10, color: "var(--accent-green)", fontWeight: 700 }}>✅ Approved</span>
+                                <span style={{ fontSize: 10, color: "var(--accent-green)", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 3 }}>
+                                  <CheckCircle2 size={11} /> Approved
+                                </span>
                               ) : liveStatus === "PENDING" ? (
-                                <span style={{ fontSize: 10, color: "var(--accent-yellow)", fontWeight: 700 }}>⏳ Pending Review</span>
-                              ) : liveStatus === "REJECTED" ? (
-                                <span style={{ fontSize: 10, color: "var(--accent-red)", fontWeight: 700 }}>❌ Rejected</span>
+                                <span style={{ fontSize: 10, color: "var(--accent-yellow)", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 3 }}>
+                                  <Clock size={11} /> Pending Review
+                                </span>
                               ) : null}
                             </div>
                           </div>
 
-                          {/* Theme-aware WhatsApp Preview Bubble */}
                           <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px" }}>
                             {curTpl.header && (
                               <div style={{ fontWeight: 700, fontSize: 11, color: "var(--accent-green)", marginBottom: 5, borderBottom: "1px solid var(--border-light)", paddingBottom: 4 }}>
@@ -2920,103 +2877,55 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                             )}
                             {curTpl.button && (
                               <div style={{ marginTop: 8, borderTop: "1px solid var(--border-light)", paddingTop: 6, textAlign: "center" }}>
-                                <span style={{ fontSize: 11, fontWeight: 600, color: "var(--accent-cyan)" }}>
-                                  🔗 {curTpl.button.text} {curTpl.button.type === "URL" ? "↗" : ""}
+                                <span style={{ fontSize: 11, fontWeight: 600, color: "var(--accent-cyan)", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                                  <Link2 size={11} /> {curTpl.button.text}
                                 </span>
                               </div>
                             )}
                           </div>
 
                           {liveStatus !== "APPROVED" && (
-                            <div style={{ background: "rgba(247,183,49,0.1)", border: "1px solid rgba(247,183,49,0.3)", borderRadius: 6, padding: "6px 10px", margin: "8px 0 0", fontSize: 11, color: "var(--accent-yellow)", lineHeight: 1.4 }}>
-                              ⏳ <strong>Pending Meta Approval:</strong> Meta usually approves within 1–5 minutes. For instant sending right now, select <strong>hello_world</strong>.
+                            <div style={{ marginTop: 8, fontSize: 11, color: "var(--accent-yellow)", display: "flex", alignItems: "center", gap: 6 }}>
+                              <Clock size={12} style={{ flexShrink: 0 }} />
+                              <span>Pending Meta approval (1–5 mins). Select <strong>hello_world</strong> for instant testing.</span>
                             </div>
                           )}
-
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8, paddingTop: 6, borderTop: "1px solid var(--border-light)" }}>
-                            <span style={{ fontSize: 10, color: "var(--text-muted)" }}>
-                              {curTpl.pricing}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (typeof navigator !== "undefined" && navigator.clipboard) {
-                                  navigator.clipboard.writeText(curTpl.copyTextForMeta)
-                                  toast.success(`Copied "${curTpl.name}" format for Meta WhatsApp Manager`)
-                                }
-                              }}
-                              style={{ fontSize: 10.5, color: "var(--accent-cyan)", background: "transparent", border: "none", cursor: "pointer", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 4 }}
-                            >
-                              📋 Copy Format for Meta
-                            </button>
-                          </div>
                         </div>
                       )
                     })()}
-                  </div>
+                  </>
                 ) : (
                   <>
                     {/* Quick Template Chips for freeform */}
-                    <div style={{ marginBottom: 12 }}>
+                    <div>
                       <label style={{ display: "block", fontSize: 11.5, color: "var(--text-muted)", marginBottom: 6, fontWeight: 500 }}>
                         Quick Message Prompts ({`{name}`} auto-filled)
                       </label>
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-                        <button
-                          type="button"
-                          onClick={() => setBulkWaMessage("Hello {name}, greetings from Right Agent Group! We provide fast-track approval on Personal, Business, and Home Loans with minimal documentation and attractive interest rates.")}
-                          style={{ textAlign: "left", fontSize: 11, padding: "6px 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", cursor: "pointer", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
-                          title="General Loan Offer: Hello {name}, greetings from Right Agent Group..."
-                        >
-                          🟢 General Loan Offer
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setBulkWaMessage("Hello {name}, this is a gentle follow-up regarding your recent loan inquiry with Right Agent Group. Our loan officer is ready to process your file. Please complete your application below.")}
-                          style={{ textAlign: "left", fontSize: 11, padding: "6px 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", cursor: "pointer", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
-                          title="Application Follow-up: Hello {name}, this is a gentle follow-up..."
-                        >
-                          📄 Application Follow-up
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setBulkWaMessage("Hello {name}, to fast-track your loan file approval, please keep your PAN Card, Aadhaar, and 6 months bank statement ready. Our advisor will guide you through instant sanction.")}
-                          style={{ textAlign: "left", fontSize: 11, padding: "6px 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", cursor: "pointer", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
-                          title="Document Checklist: Hello {name}, to fast-track your loan file approval..."
-                        >
-                          📋 Document Checklist
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setBulkWaMessage("Hello {name}, special festive offer! Avail Home and Business Loans starting from 7.25% p.a. through 20+ partner banks in Hyderabad with minimal documentation.")}
-                          style={{ textAlign: "left", fontSize: 11, padding: "6px 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", cursor: "pointer", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
-                          title="Festive Rate Offer: Hello {name}, special festive offer! Avail Home and Business Loans..."
-                        >
-                          🎉 Festive Rate Offer
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setBulkWaMessage("నమస్కారం {name} గారు, రైట్ ఏజెంట్ గ్రూప్ నుండి మాట్లాడుతున్నాము. మీకు హోమ్ లోన్ లేదా బిజినెస్ లోన్ తక్కువ వడ్డీతో అవసరమా? మా బ్యాంకింగ్ కౌన్సిలర్ మీకు వెంటనే సహాయం చేస్తారు.")}
-                          style={{ textAlign: "left", fontSize: 11, padding: "6px 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", cursor: "pointer", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
-                          title="Telugu Offer: నమస్కారం {name} గారు..."
-                        >
-                          🇮🇳 Telugu Offer
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setBulkWaMessage("नमस्ते {name} जी, राइट एजेंट ग्रुप से नमस्कार। यदि आपको होम, पर्सनल या बिजनेस लोन की आवश्यकता है तो सबसे कम ब्याज दरों पर आवेदन करें।")}
-                          style={{ textAlign: "left", fontSize: 11, padding: "6px 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", cursor: "pointer", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
-                          title="Hindi Offer: नमस्ते {name} जी, राइट एजेंट ग्रुप से नमस्कार..."
-                        >
-                          🇮🇳 Hindi Offer
-                        </button>
+                        {[
+                          { label: "General Loan Offer", text: "Hello {name}, greetings from Right Agent Group! We provide fast-track approval on Personal, Business, and Home Loans with minimal documentation and attractive interest rates." },
+                          { label: "Application Follow-up", text: "Hello {name}, this is a gentle follow-up regarding your recent loan inquiry with Right Agent Group. Our loan officer is ready to process your file. Please complete your application below." },
+                          { label: "Document Checklist", text: "Hello {name}, to fast-track your loan file approval, please keep your PAN Card, Aadhaar, and 6 months bank statement ready. Our advisor will guide you through instant sanction." },
+                          { label: "Festive Rate Offer", text: "Hello {name}, special festive offer! Avail Home and Business Loans starting from 7.25% p.a. through 20+ partner banks in Hyderabad with minimal documentation." },
+                          { label: "Telugu Offer", text: "నమస్కారం {name} గారు, రైట్ ఏజెంట్ గ్రూప్ నుండి మాట్లాడుతున్నాము. మీకు హోమ్ లోన్ లేదా బిజినెస్ లోన్ తక్కువ వడ్డీతో అవసరమా? మా బ్యాంకింగ్ కౌన్సిలర్ మీకు వెంటనే సహాయం చేస్తారు." },
+                          { label: "Hindi Offer", text: "नमस्ते {name} जी, राइट एजेंट ग्रुप से नमस्कार। यदि आपको होम, पर्सनल या बिजनेस लोन की आवश्यकता है तो सबसे कम ब्याज दरों पर आवेदन करें।" },
+                        ].map((q) => (
+                          <button
+                            key={q.label}
+                            type="button"
+                            onClick={() => setBulkWaMessage(q.text)}
+                            style={{ textAlign: "left", fontSize: 11, padding: "6px 9px", borderRadius: 7, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", cursor: "pointer", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                          >
+                            {q.label}
+                          </button>
+                        ))}
                       </div>
                     </div>
 
                     {/* Message Body Textarea */}
-                    <div style={{ marginBottom: 14 }}>
+                    <div>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                        <label style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 500 }}>
+                        <label style={{ fontSize: 11.5, color: "var(--text-muted)", fontWeight: 500 }}>
                           Message Content *
                         </label>
                         <span style={{ fontSize: 10.5, color: "var(--accent-violet)" }}>Use {`{name}`} for customer&apos;s name</span>
@@ -3025,7 +2934,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                         value={bulkWaMessage}
                         onChange={(e) => setBulkWaMessage(e.target.value)}
                         placeholder="Type your WhatsApp message here..."
-                        rows={4}
+                        rows={3}
                         style={{
                           width: "100%",
                           fontSize: 12.5,
@@ -3040,16 +2949,16 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                     </div>
 
                     {/* Include Link Toggle & Product */}
-                    <div style={{ background: "var(--bg-secondary)", borderRadius: 10, padding: 12, border: "1px solid var(--border)", marginBottom: 16 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: bulkWaIncludeLink ? 10 : 0 }}>
+                    <div style={{ background: "var(--bg-secondary)", borderRadius: 10, padding: 10, border: "1px solid var(--border)" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: bulkWaIncludeLink ? 8 : 0 }}>
                         <input
                           type="checkbox"
                           id="bulkWaIncludeLinkToggle"
                           checked={bulkWaIncludeLink}
                           onChange={(e) => setBulkWaIncludeLink(e.target.checked)}
-                          style={{ width: 16, height: 16, accentColor: "#25D366", cursor: "pointer" }}
+                          style={{ width: 15, height: 15, accentColor: "var(--accent-blue)", cursor: "pointer" }}
                         />
-                        <label htmlFor="bulkWaIncludeLinkToggle" style={{ fontSize: 12.5, color: "var(--text-primary)", cursor: "pointer", fontWeight: 600 }}>
+                        <label htmlFor="bulkWaIncludeLinkToggle" style={{ fontSize: 12, color: "var(--text-primary)", cursor: "pointer", fontWeight: 600 }}>
                           Include Personalized One-Time Application Link
                         </label>
                       </div>
@@ -3059,68 +2968,52 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                           <label style={{ display: "block", fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
                             Link Loan Product (Directs applicant to this form)
                           </label>
-                          <select
+                          <CustomSelect
                             value={bulkWaProduct}
-                            onChange={(e) => setBulkWaProduct(e.target.value)}
-                            style={{ width: "100%", height: 34, fontSize: 12, padding: "0 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)" }}
-                          >
-                            {COMMON_LOAN_TYPES.map((t) => (
-                              <option key={t} value={t}>{t}</option>
-                            ))}
-                          </select>
+                            onChange={(val) => setBulkWaProduct(val)}
+                            compact
+                            options={allLoanProducts.map((t) => ({ value: t, label: t }))}
+                          />
                         </div>
                       )}
                     </div>
                   </>
                 )}
+                </div>
 
-            {/* Compliance Note */}
-            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 16, lineHeight: 1.5 }}>
-              🛡️ DND protection is active. Numbers registered on your DND/suppression list will be skipped automatically to keep your Meta WhatsApp account compliant.
-            </div>
-
-            {/* Buttons */}
-            <div style={{ display: "flex", gap: 10 }}>
-              <button
-                type="button"
-                onClick={() => setShowBulkWaModal(false)}
-                disabled={bulkWaBusy}
-                className="btn-ghost"
-                style={{ flex: 1, height: 40 }}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={sendBulkWaCampaign}
-                disabled={bulkWaBusy || (bulkWaMode === "text" && !bulkWaMessage.trim())}
-                style={{
-                  flex: 1,
-                  height: 40,
-                  borderRadius: 10,
-                  border: "none",
-                  background: "var(--gradient-brand)",
-                  color: "#ffffff",
-                  fontWeight: 700,
-                  fontSize: 13,
-                  cursor: "pointer",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 6,
-                  boxShadow: "0 4px 14px rgba(91,124,250,0.35)",
-                  opacity: bulkWaBusy ? 0.7 : 1,
-                }}
-              >
-                <MessageCircle size={16} strokeWidth={2.4} />
-                {bulkWaBusy ? "Sending…" : `Send to ${selectedIds.length} Lead${selectedIds.length === 1 ? "" : "s"}`}
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  )}
+                {/* Fixed Modal Footer — always visible */}
+                <div style={{ padding: "14px 22px", borderTop: "1px solid var(--border)", background: "var(--bg-card)", flexShrink: 0, display: "flex", flexDirection: "column", gap: 10 }}>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 6 }}>
+                    <ShieldCheck size={13} style={{ color: "var(--accent-blue)", flexShrink: 0 }} />
+                    <span>DND protection active — suppression list numbers are skipped automatically.</span>
+                  </div>
+                  <div style={{ display: "flex", gap: 10 }}>
+                    <button
+                      type="button"
+                      onClick={() => setShowBulkWaModal(false)}
+                      disabled={bulkWaBusy}
+                      className="btn-ghost"
+                      style={{ flex: 1, height: 38 }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={sendBulkWaCampaign}
+                      disabled={bulkWaBusy || (bulkWaMode === "text" && !bulkWaMessage.trim())}
+                      className="btn-primary"
+                      style={{ flex: 1, height: 38 }}
+                    >
+                      <MessageCircle size={15} strokeWidth={2.2} />
+                      {bulkWaBusy ? "Sending…" : `Send to ${selectedIds.length} Lead${selectedIds.length === 1 ? "" : "s"}`}
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {memoryLeadId && (
         <LeadMemoryModal leadId={memoryLeadId} canEdit={canEdit} onClose={() => setMemoryLeadId(null)} />
