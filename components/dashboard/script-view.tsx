@@ -132,6 +132,47 @@ function strField(v: unknown): string {
   return typeof v === "string" ? v : ""
 }
 
+function Field({
+  label,
+  hint,
+  value,
+  onChange,
+  rows = 3,
+}: {
+  label: string
+  hint?: string
+  value: string
+  onChange: (v: string) => void
+  rows?: number
+}) {
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, marginBottom: 4 }}>
+        <div style={{ fontWeight: 600, fontSize: 12.5, color: "var(--text-primary)" }}>{label}</div>
+        {hint && <div style={{ fontSize: 10.5, color: "var(--text-muted)", textAlign: "right" }}>{hint}</div>}
+      </div>
+      <textarea
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        spellCheck={false}
+        rows={rows}
+        style={{
+          width: "100%",
+          background: "var(--bg-card)",
+          border: "1px solid var(--border)",
+          borderRadius: 8,
+          color: "var(--text-primary)",
+          padding: "10px 12px",
+          fontSize: 12.5,
+          fontFamily: "monospace",
+          lineHeight: 1.6,
+          resize: "vertical",
+        }}
+      />
+    </div>
+  )
+}
+
 export default function ScriptView() {
   const [tab, setTab] = useState<Tab>("base")
   const [scripts, setScripts]   = useState<Script[]>([])
@@ -559,28 +600,6 @@ export default function ScriptView() {
   const currentScript = scripts.find(s => s.language === selected)
 
   // ---- shared small UI atoms ----
-
-  function Field({ label, hint, value, onChange, rows = 3 }: { label: string; hint?: string; value: string; onChange: (v: string) => void; rows?: number }) {
-    return (
-      <div>
-        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, marginBottom: 4 }}>
-          <div style={{ fontWeight: 600, fontSize: 12.5, color: "var(--text-primary)" }}>{label}</div>
-          {hint && <div style={{ fontSize: 10.5, color: "var(--text-muted)", textAlign: "right" }}>{hint}</div>}
-        </div>
-        <textarea
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          spellCheck={false}
-          rows={rows}
-          style={{
-            width: "100%", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 8,
-            color: "var(--text-primary)", padding: "10px 12px", fontSize: 12.5, fontFamily: "monospace",
-            lineHeight: 1.6, resize: "vertical",
-          }}
-        />
-      </div>
-    )
-  }
 
   function sectionUpdated(key: string) {
     const row = rowFor(key)
