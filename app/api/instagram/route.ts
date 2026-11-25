@@ -52,6 +52,32 @@ export const dynamic = "force-dynamic"
 //    and stamped on every row — inbound IG rows used to get branch_id NULL,
 //    so branch users saw zero inbound IG conversations.
 
+// Auto-reply only to fresh/upcoming events (created within the last 5 minutes).
+// Webhooks for old past comments or DMs must never trigger automated AI replies.
+const MAX_EVENT_AGE_MS = 5 * 60 * 1000 // 5 minutes
+
+function parseMetaTimestamp(raw: any): number | null {
+  if (!raw) return null
+  const num = typeof raw === "number" ? raw : Number(raw)
+  if (!Number.isNaN(num) && num > 0) {
+    // If < 10 billion, it is Unix timestamp in seconds (e.g. 1732560000)
+    return num < 10_000_000_000 ? num * 1000 : num
+  }
+  const parsed = Date.parse(String(raw))
+  return Number.isNaN(parsed) ? null : parsed
+}
+
+function isOldEvent(eventTime: number | null, eventType: string, id: string): boolean {
+  if (!eventTime) return false
+  const now = Date.now()
+  const ageMs = now - eventTime
+  if (ageMs > MAX_EVENT_AGE_MS) {
+    console.info(`[Instagram] Skipping auto-reply for old ${eventType} ${id} (created ${Math.round(ageMs / 1000)}s ago > 300s limit)`)
+    return true
+  }
+  return false
+}
+
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const mode = searchParams.get("hub.mode")
@@ -315,6 +341,12 @@ async function handleInboundDM(messaging: any, igBranch: BranchInstagramCtx = nu
     }
   }
 
+  // Guard against old DMs: only reply to new/upcoming messages (within the last 5 minutes)
+  const dmTimestamp = parseMetaTimestamp(messaging?.timestamp)
+  if (isOldEvent(dmTimestamp, "DM", messageId || senderId)) {
+    return
+  }
+
   // Trigger Priya AI Response
   try {
     // FIX (2026-09-22): the DM AI received ONLY the current message — zero
@@ -571,6 +603,12 @@ async function handleInboundComment(val: any, igBranch: BranchInstagramCtx = nul
     `UPDATE instagram_messages SET lead_id = $1, content = $2 WHERE comment_id = $3 AND direction = 'inbound'`,
     [leadId, text, commentId]
   )
+
+  // Guard against old comments: only reply to new/upcoming comments (within the last 5 minutes)
+  const commentTimestamp = parseMetaTimestamp(val?.created_time ?? val?.timestamp)
+  if (isOldEvent(commentTimestamp, "Comment", commentId)) {
+    return
+  }
 
   // Trigger Priya AI Response (Public Reply + Private DM Reply)
   try {
