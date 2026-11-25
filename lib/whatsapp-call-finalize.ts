@@ -309,13 +309,31 @@ export async function finalizeWhatsAppCall(opts: {
       const target = lead?.whatsapp_number || lead?.phone || `+${digits}`
       const waBranch = await branchWhatsAppCtx(call?.branch_id || opts.branchIdFromWebhook || null)
       if (outcome === "resolved" && transcript.length > 0) {
-        const result = await sendCallFollowUp(target, lead?.name || "there", waBranch)
+        const { createOneTimeFormToken, sendApplicationLink } = await import("./whatsapp")
+        const token = await createOneTimeFormToken(leadId)
+        const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "https://13.201.0.111.sslip.io").replace(/\/$/, "")
+        const formUrl = `${appUrl}/l/${token}`
+        const result = await sendApplicationLink(target, lead?.name || "there", token, waBranch)
+        if (!result.ok) {
+          await sendCallFollowUp(target, lead?.name || "there", waBranch)
+        }
         await db.from("comm_logs").insert({
           lead_id: leadId,
           type: "whatsapp",
-          summary: result.ok ? "Post-call WhatsApp follow-up sent (WhatsApp voice call)" : `Post-call WhatsApp follow-up failed: ${result.error}`,
+          summary: result.ok
+            ? `Loan application link sent on WhatsApp to ${target}: ${formUrl}`
+            : `Post-call WhatsApp send attempted (${result.error})`,
           outcome: result.ok ? "sent" : "failed",
         }).catch(() => {})
+
+        if (result.ok) {
+          const content = `Hi ${lead?.name || "there"}! Thanks for speaking with Priya from Right Agent Group. Please complete your loan application here: ${formUrl}\n\nWe never ask for OTP, PIN, or any payment. — Right Agent Group`
+          await query(
+            `INSERT INTO whatsapp_messages (lead_id, phone_number, direction, content, status, branch_id)
+             VALUES ($1, $2, 'outbound', $3, 'sent', $4)`,
+            [leadId, target, content, call?.branch_id || null]
+          ).catch(() => {})
+        }
       } else if (outcome === "missed") {
         const result = await sendMissedCallFollowUp(target, lead?.name || "there", waBranch)
         await db.from("comm_logs").insert({

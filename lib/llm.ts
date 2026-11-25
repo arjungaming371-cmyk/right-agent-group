@@ -1004,10 +1004,10 @@ export async function extractLeadInfo(transcriptText: string): Promise<Extracted
           role: "system",
           content:
             "Return ONLY valid JSON, no other text. From the call transcript, extract: " +
-            '"name" (string or null), "address" (string or null, city/area is enough), ' +
+            '"name" (string or null — phrases like "neeku telusuko", "teliyada", "telusa", "cheppanu" mean "you find out / don\'t you know / I won\'t tell" and are NEVER names; extract the actual name like "Ajay Kumar"), "address" (string or null, city/area is enough), ' +
             '"whatsapp_number" (string or null, digits only, include country code if given). ' +
             "whatsapp_number must come from the CUSTOMER's own words — either they said the digits, or they explicitly answered YES to WhatsApp being on the number they are calling from. Priya merely ASKING about the number does NOT count; if the customer has not confirmed, whatsapp_number is null. " +
-            '"complete" (true only if ALL THREE of name, address, whatsapp_number are known), ' +
+            '"complete" (true only if name and whatsapp_number are known), ' +
             '"interested" (true if customer sounds interested/positive, false if clearly not interested, null if unclear).',
         },
         { role: "user", content: transcriptText },

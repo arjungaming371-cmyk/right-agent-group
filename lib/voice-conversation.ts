@@ -70,7 +70,7 @@ export const INBOUND_GREETINGS = DEFAULT_VOICE_OPENERS.inbound
 
 // Inbound/outbound calls may have a placeholder like "Caller 8090" or "Customer"
 // before we know the real name — never greet someone by that placeholder name.
-const PLACEHOLDER_NAME_RE = /^(Caller \d+|Unknown|WA \d+|Customer|Lead|User|Sir|Madam|Client)$/i
+const PLACEHOLDER_NAME_RE = /^(Caller \d+|Unknown|WA \d+|Customer|Lead|User|Sir|Madam|Client|neeku telusuko|telusuko|telusa|cheppanu)$/i
 
 /**
  * Pick the opener for a call: the "{name}" personalized variant when we know
@@ -986,7 +986,8 @@ async function completeLeadIfReady(opts: {
   // FAST PATH: If the lead was already completed (status is no longer 'new') before this call,
   // do not trigger the auto-onboarding completion hangup, and skip the expensive extraction LLM call.
   const existing = await db.from("leads").select("name, address, whatsapp_number, status").eq("id", leadId).single()
-  if (existing.data?.status && existing.data?.status !== "new") return false
+  const aiPromisedLink = /(?:link|లింక్).*(?:పంపిస్త|పంపించ|send|shared|share)/i.test(reply)
+  if (existing.data?.status && existing.data?.status !== "new" && !aiPromisedLink) return false
 
   // FIX (2026-09-20): extraction used to receive the ENTIRE transcript (the
   // main reply is capped at 12 messages, but this LLM call fired on any
@@ -1034,8 +1035,11 @@ async function completeLeadIfReady(opts: {
     // exactly one writer wins: the loser's update matches 0 rows and returns
     // without sending anything. (Postgres evaluates WHERE against the OLD row,
     // so filtering on the same column we're setting is correct.)
-    const claim = await db.from("leads").update(updates).eq("id", leadId).eq("status", "new")
-    if (!claim.data || (Array.isArray(claim.data) && claim.data.length === 0)) {
+    const claimQuery = aiPromisedLink
+      ? db.from("leads").update(updates).eq("id", leadId)
+      : db.from("leads").update(updates).eq("id", leadId).eq("status", "new")
+    const claim = await claimQuery
+    if (!aiPromisedLink && (!claim.data || (Array.isArray(claim.data) && claim.data.length === 0))) {
       console.log(`lead ${leadId} completion race lost — another turn already completed it, skipping duplicate form link/send`)
       return false
     }
@@ -1068,7 +1072,7 @@ async function completeLeadIfReady(opts: {
           console.error("followup_sent flag error (status webhook may double-message):", e instanceof Error ? e.message : e))
       }
       // Surface the exact link in the dashboard's Communication Log.
-      const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "")
+      const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "https://13.201.0.111.sslip.io").replace(/\/$/, "")
       db.from("comm_logs").insert({
         lead_id: leadId,
         type: "whatsapp",
@@ -1077,6 +1081,16 @@ async function completeLeadIfReady(opts: {
           : `Bank application link generated but WhatsApp send FAILED (${result.error}) — share manually: ${appUrl}/l/${token}`,
         outcome: result.ok ? "sent" : "failed",
       }).catch((e) => console.error("comm_log form-link entry error:", e instanceof Error ? e.message : e))
+
+      if (result.ok) {
+        const content = `Hi ${effectiveName || "there"}! Thanks for speaking with Priya from Right Agent Group. Please complete your loan application here: ${appUrl}/l/${token}\n\nWe never ask for OTP, PIN, or any payment. — Right Agent Group`
+        const { query: dbQuery } = await import("./db")
+        dbQuery(
+          `INSERT INTO whatsapp_messages (lead_id, phone_number, direction, content, status, branch_id)
+           VALUES ($1, $2, 'outbound', $3, 'sent', $4)`,
+          [leadId, waNumber, content, branchId || null]
+        ).catch(() => {})
+      }
       // Priya just told the customer "the link is on its way" — if the send
       // actually failed, ping the operator to share it manually before the
       // customer gives up waiting.
