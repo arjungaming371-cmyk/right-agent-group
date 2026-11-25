@@ -36,11 +36,12 @@ export default function CustomSelect({
   compact = false,
 }: CustomSelectProps) {
   const [open, setOpen] = useState(false)
-  const [coords, setCoords] = useState<{ top: number; left: number; width: number; openUp: boolean }>({
+  const [coords, setCoords] = useState<{ top: number; left: number; width: number; openUp: boolean; maxHeight: number }>({
     top: 0,
     left: 0,
     width: 200,
     openUp: false,
+    maxHeight: 250,
   })
   const containerRef = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -50,13 +51,16 @@ export default function CustomSelect({
   function updatePosition() {
     if (!containerRef.current) return
     const rect = containerRef.current.getBoundingClientRect()
-    const spaceBelow = window.innerHeight - rect.bottom
-    const openUp = spaceBelow < 220 && rect.top > 240
+    const spaceBelow = window.innerHeight - rect.bottom - 12
+    const spaceAbove = rect.top - 12
+    const openUp = spaceBelow < 200 && spaceAbove > spaceBelow
+    const maxHeight = Math.min(260, Math.max(120, openUp ? spaceAbove : spaceBelow))
     setCoords({
       top: openUp ? rect.top - 5 : rect.bottom + 5,
       left: menuAlign === "right" ? rect.right : rect.left,
       width: rect.width,
       openUp,
+      maxHeight,
     })
   }
 
@@ -76,7 +80,11 @@ export default function CustomSelect({
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") setOpen(false)
     }
-    function onScrollOrResize() {
+    function onScrollOrResize(e: Event) {
+      // Allow scrolling inside the dropdown menu itself without closing it
+      if (e.type === "scroll" && menuRef.current && (e.target === menuRef.current || menuRef.current.contains(e.target as Node))) {
+        return
+      }
       setOpen(false)
     }
     document.addEventListener("mousedown", onDocClick)
@@ -182,8 +190,9 @@ export default function CustomSelect({
             minWidth: coords.width,
             width: "max-content",
             maxWidth: 290,
-            maxHeight: 250,
+            maxHeight: coords.maxHeight,
             overflowY: "auto",
+            overscrollBehavior: "contain",
             background: "var(--bg-card)",
             border: "1px solid var(--border)",
             borderRadius: 10,
