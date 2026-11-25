@@ -12,6 +12,7 @@ import { ToastProvider } from "../ui/toast"
 import { Skeleton, SkeletonList } from "../ui/skeleton"
 import CommandPalette from "../ui/command-palette"
 import LeadsView    from "./leads-view"
+import AttentionView from "./attention-view"
 
 // Code splitting: every non-default view is loaded on first navigation
 // instead of shipping in the dashboard's initial bundle. LeadsView stays
@@ -79,10 +80,6 @@ const CalendarView = dynamic(() => import("./calendar-view"), {
   loading: () => <ViewFallback label="Calendar" />,
 })
 const ProfileModal = dynamic(() => import("./profile-modal"), { ssr: false })
-const AttentionView = dynamic(() => import("./attention-view"), {
-  ssr: false,
-  loading: () => <ViewFallback label="Needs Human" />,
-})
 
 import { usePolling, setActivePollingView, PollingViewContext } from "@/lib/use-poll"
 
@@ -117,8 +114,8 @@ const NAV_SECTIONS: NavSection[] = [
   {
     title: "Overview",
     items: [
+      { key: "attention", label: "Needs Human",      icon: BellRing,  roles: ["admin", "agent", "viewer", "branch_manager"] },
       { key: "analytics", label: "Analytics",        icon: BarChart3, roles: ["admin", "agent", "viewer", "branch_manager"] },
-      { key: "attention", label: "Needs Human",      icon: BellRing,  roles: ["admin", "agent", "branch_manager"] },
       { key: "leads",     label: "Leads",             icon: Users,     roles: ["admin", "agent", "viewer", "branch_manager"] },
       { key: "loans",     label: "Loan Applications", icon: FileText,  roles: ["admin", "agent", "viewer", "branch_manager"] },
       { key: "queue",     label: "Call Queue",        icon: PhoneCall, roles: ["admin", "agent", "viewer", "branch_manager"] },
@@ -191,7 +188,7 @@ function StatusPill({ icon: Icon, label, ok }: { icon: LucideIcon; label: string
 
 export default function DashboardShell() {
   // Owner-focused default: the console opens on business outcomes, not a list.
-  const [view, setView] = useState<ViewKey>("analytics")
+  const [view, setView] = useState<ViewKey>("attention")
   const [counts, setCounts] = useState({ leads: 0, loans: 0, whatsapp: 0, queue: 0 })
   const [userEmail, setUserEmail] = useState("")
   const [role, setRole] = useState<Role>("viewer") // safest default until the real role loads
@@ -413,7 +410,7 @@ export default function DashboardShell() {
   useEffect(() => {
     const allowed = NAV_SECTIONS.some(s => s.items.some(i => i.key === view && canSee(i.key, i.roles)))
     if (!allowed) {
-      const firstAvailable = visibleSections[0]?.items[0]?.key || "leads"
+      const firstAvailable = visibleSections[0]?.items[0]?.key || "attention"
       setView(firstAvailable)
     }
   }, [role, view, userAllowedModules])
