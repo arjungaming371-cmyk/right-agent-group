@@ -887,15 +887,23 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
   // closure), so it no longer needs its own deps list.
   usePolling(() => load(true), 15000)
 
-  const isQualified = (l: Lead) =>
-    l.status === "qualified" ||
-    l.status === "interested" ||
-    l.status === "form_opened" ||
-    l.status === "approved" ||
-    l.status === "link_sent" ||
-    l.status === "docs_pending" ||
-    l.interested === "interested" ||
-    (Number(l.score) || 0) >= 70
+  const QUALIFIED_STATUSES = new Set([
+    "qualified", "interested", "form_opened", "opened", "form_completed",
+    "applied", "approved", "link_sent", "docs_pending", "pending",
+    "sanctioned", "disbursed",
+  ])
+  const isQualified = (l: Lead) => {
+    const st = String(l.status || "").toLowerCase().trim()
+    const loanSt = String(l.loan_status || "").toLowerCase().trim()
+    if (st === "rejected" || st === "not_interested" || loanSt === "rejected") return false
+    return (
+      QUALIFIED_STATUSES.has(st) ||
+      QUALIFIED_STATUSES.has(loanSt) ||
+      l.interested === "interested" ||
+      l.form_completed ||
+      (Number(l.score) || 0) >= 70
+    )
+  }
 
   const totalLeads = leads.length
   const qualified = leads.filter(isQualified).length
@@ -914,7 +922,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
     return s + (isFinite(amt) && amt > 0 ? amt : 0)
   }, 0)
   const qualifiedPct = pctOf(qualifiedValue, pipelineValue)
-  const interestedCount = leads.filter((l) => l.interested === "interested").length
+  const interestedCount = leads.filter((l) => l.interested === "interested" || isQualified(l)).length
 
   // Instagram prospect metrics:
   const socialDetectedCount = leads.filter((l) => !!l.ig_phone_extracted).length
