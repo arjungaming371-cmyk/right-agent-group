@@ -44,6 +44,7 @@ export type AttentionItem = {
   summary: string | null
   quote?: string | null
   action?: string | null
+  product_interest?: string | null
   loan_type?: string | null
   loan_amount?: number | string | null
   monthly_income?: number | string | null
