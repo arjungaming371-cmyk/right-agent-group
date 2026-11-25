@@ -545,27 +545,29 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
 
       {/* Primary Tab Navigation: Customer Applications vs Loan Type Links */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12, borderBottom: "1px solid var(--border)", paddingBottom: 14 }}>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <button
             type="button"
             onClick={() => setActiveTab("apps")}
             style={{
-              display: "flex",
+              display: "inline-flex",
               alignItems: "center",
               gap: 8,
-              padding: "8px 16px",
-              borderRadius: 8,
+              height: 38,
+              padding: "0 16px",
+              borderRadius: 10,
               fontWeight: 600,
               fontSize: 13,
               cursor: "pointer",
-              border: activeTab === "apps" ? "1px solid var(--accent-violet)" : "1px solid var(--border)",
-              background: activeTab === "apps" ? "rgba(139,124,255,0.12)" : "var(--bg-secondary)",
-              color: activeTab === "apps" ? "var(--accent-violet)" : "var(--text-secondary)",
+              transition: "all 0.15s",
+              border: activeTab === "apps" ? "none" : "1px solid var(--border)",
+              background: activeTab === "apps" ? "var(--gradient-brand)" : "var(--bg-card)",
+              color: activeTab === "apps" ? "#fff" : "var(--text-secondary)",
             }}
           >
             <FileText size={15} strokeWidth={2} />
             Customer Applications
-            <span style={{ fontSize: 11, padding: "1px 7px", borderRadius: 10, background: activeTab === "apps" ? "var(--accent-violet)" : "rgba(255,255,255,0.1)", color: "#fff" }}>
+            <span style={{ fontSize: 11, padding: "1px 7px", borderRadius: 10, background: activeTab === "apps" ? "rgba(255,255,255,0.22)" : "var(--overlay-chip)", color: activeTab === "apps" ? "#fff" : "var(--text-primary)", fontWeight: 700 }}>
               {internalApps.length}
             </span>
           </button>
@@ -574,22 +576,24 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
             type="button"
             onClick={() => setActiveTab("links")}
             style={{
-              display: "flex",
+              display: "inline-flex",
               alignItems: "center",
               gap: 8,
-              padding: "8px 16px",
-              borderRadius: 8,
+              height: 38,
+              padding: "0 16px",
+              borderRadius: 10,
               fontWeight: 600,
               fontSize: 13,
               cursor: "pointer",
-              border: activeTab === "links" ? "1px solid var(--accent-cyan)" : "1px solid var(--border)",
-              background: activeTab === "links" ? "rgba(56,189,248,0.12)" : "var(--bg-secondary)",
-              color: activeTab === "links" ? "var(--accent-cyan)" : "var(--text-secondary)",
+              transition: "all 0.15s",
+              border: activeTab === "links" ? "none" : "1px solid var(--border)",
+              background: activeTab === "links" ? "var(--gradient-brand)" : "var(--bg-card)",
+              color: activeTab === "links" ? "#fff" : "var(--text-secondary)",
             }}
           >
             <Link2 size={15} strokeWidth={2} />
-            Loan Type Links & Routing
-            <span style={{ fontSize: 11, padding: "1px 7px", borderRadius: 10, background: activeTab === "links" ? "var(--accent-cyan)" : "rgba(255,255,255,0.1)", color: "#000", fontWeight: 700 }}>
+            Loan Type Links &amp; Routing
+            <span style={{ fontSize: 11, padding: "1px 7px", borderRadius: 10, background: activeTab === "links" ? "rgba(255,255,255,0.22)" : "var(--overlay-chip)", color: activeTab === "links" ? "#fff" : "var(--text-primary)", fontWeight: 700 }}>
               {links.length}
             </span>
           </button>
@@ -681,7 +685,7 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
                 />
               </div>
 
-              <div style={{ display: "flex", gap: 4, overflowX: "auto", flexWrap: "nowrap", alignItems: "center", paddingBottom: 2 }}>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", paddingBottom: 2 }}>
                 <button
                   type="button"
                   onClick={() => setStatusFilter("all")}

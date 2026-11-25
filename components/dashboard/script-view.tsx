@@ -176,6 +176,16 @@ export default function ScriptView() {
   // WhatsApp Meta Templates viewer state
   const [copiedTpl, setCopiedTpl] = useState<string | null>(null)
   const [tplCategoryFilter, setTplCategoryFilter] = useState<string>("ALL")
+  const [liveTplStatuses, setLiveTplStatuses] = useState<Record<string, { status: string; category?: string; languages: string[] }>>({})
+
+  useEffect(() => {
+    fetch("/api/whatsapp/templates")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d?.liveStatuses) setLiveTplStatuses(d.liveStatuses)
+      })
+      .catch(() => {})
+  }, [])
 
   const rowFor = useCallback((key: string) => scripts.find((s) => s.language === key), [scripts])
 
@@ -661,14 +671,14 @@ export default function ScriptView() {
         <div>
           <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 12, marginBottom: 14 }}>
             <div>
-              <div style={{ fontWeight: 700, fontSize: 16, color: "var(--text-primary)", display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ fontWeight: 700, fontSize: 16, color: "var(--text-primary)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <span>🛡️ Official Meta WhatsApp Cloud API Templates</span>
-                <span style={{ fontSize: 11, background: "rgba(37,211,102,0.15)", color: "#22c55e", padding: "2px 8px", borderRadius: 12, fontWeight: 700, whiteSpace: "nowrap" }}>
+                <span style={{ fontSize: 11, background: "rgba(45,212,160,0.14)", color: "var(--accent-green)", padding: "2px 8px", borderRadius: 12, fontWeight: 700, whiteSpace: "nowrap" }}>
                   {META_TEMPLATES_CATALOG.length} Ready Templates
                 </span>
               </div>
               <div style={{ fontSize: 12.5, color: "var(--text-secondary)", marginTop: 4, maxWidth: 650, lineHeight: 1.5 }}>
-                These are the pre-configured templates for Right Agent Group. Copy the exact text below into your <strong>Meta WhatsApp Manager</strong> for guaranteed 1-minute approval. Once approved on Meta, they deliver 100% reliably to cold and new leads!
+                Pre-configured templates for Right Agent Group. Live approval status is synced directly from your <strong>Meta WhatsApp Business Account</strong>.
               </div>
             </div>
 
@@ -682,15 +692,7 @@ export default function ScriptView() {
                   fontSize: 12,
                   height: 34,
                   padding: "0 14px",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
                   textDecoration: "none",
-                  color: "#25D366",
-                  borderColor: "rgba(37,211,102,0.35)",
-                  background: "rgba(37,211,102,0.08)",
-                  borderRadius: 8,
-                  fontWeight: 600,
                 }}
               >
                 <ExternalLink size={14} /> Open Meta WhatsApp Manager
@@ -699,32 +701,38 @@ export default function ScriptView() {
           </div>
 
           {/* Filter Pills */}
-          <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
-            {["ALL", "UTILITY", "MARKETING"].map((cat) => (
-              <button
-                key={cat}
-                type="button"
-                onClick={() => setTplCategoryFilter(cat)}
-                style={{
-                  fontSize: 11.5,
-                  padding: "4px 12px",
-                  borderRadius: 20,
-                  border: tplCategoryFilter === cat ? "1px solid #25D366" : "1px solid var(--border)",
-                  background: tplCategoryFilter === cat ? "rgba(37,211,102,0.15)" : "var(--bg-secondary)",
-                  color: tplCategoryFilter === cat ? "#22c55e" : "var(--text-secondary)",
-                  cursor: "pointer",
-                  fontWeight: 600,
-                }}
-              >
-                {cat === "ALL" ? `All Templates (${META_TEMPLATES_CATALOG.length})` : `${cat} (${META_TEMPLATES_CATALOG.filter(t => t.category === cat).length})`}
-              </button>
-            ))}
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16 }}>
+            {["ALL", "UTILITY", "MARKETING"].map((cat) => {
+              const active = tplCategoryFilter === cat
+              return (
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => setTplCategoryFilter(cat)}
+                  style={{
+                    fontSize: 11.5,
+                    height: 30,
+                    padding: "0 14px",
+                    borderRadius: 20,
+                    border: active ? "none" : "1px solid var(--border)",
+                    background: active ? "var(--gradient-brand)" : "var(--bg-secondary)",
+                    color: active ? "#fff" : "var(--text-secondary)",
+                    cursor: "pointer",
+                    fontWeight: 600,
+                  }}
+                >
+                  {cat === "ALL" ? `All Templates (${META_TEMPLATES_CATALOG.length})` : `${cat} (${META_TEMPLATES_CATALOG.filter(t => t.category === cat).length})`}
+                </button>
+              )
+            })}
           </div>
 
           {/* Templates Grid */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(380px, 1fr))", gap: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 16 }}>
             {filteredMetaTemplates.map((tpl) => {
               const isCopied = copiedTpl === tpl.name
+              const live = liveTplStatuses[tpl.name]
+              const liveStatus = live?.status || (tpl.isPreApproved ? "APPROVED" : undefined)
               return (
                 <div
                   key={tpl.name}
@@ -752,23 +760,31 @@ export default function ScriptView() {
                         </div>
                       </div>
 
-                      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
                         <span
                           style={{
                             fontSize: 10,
                             padding: "2px 7px",
                             borderRadius: 6,
                             fontWeight: 700,
-                            background: tpl.category === "UTILITY" ? "rgba(59,130,246,0.15)" : "rgba(234,179,8,0.15)",
-                            color: tpl.category === "UTILITY" ? "#60a5fa" : "#facc15",
-                            border: `1px solid ${tpl.category === "UTILITY" ? "rgba(59,130,246,0.3)" : "rgba(234,179,8,0.3)"}`,
+                            background: tpl.category === "UTILITY" ? "rgba(91,124,250,0.14)" : "rgba(247,183,49,0.14)",
+                            color: tpl.category === "UTILITY" ? "var(--accent-blue)" : "var(--accent-yellow)",
+                            border: `1px solid ${tpl.category === "UTILITY" ? "rgba(91,124,250,0.3)" : "rgba(247,183,49,0.3)"}`,
                           }}
                         >
                           {tpl.category}
                         </span>
-                        {tpl.isPreApproved ? (
-                          <span style={{ fontSize: 9.5, color: "#22c55e", fontWeight: 700, display: "flex", alignItems: "center", gap: 3 }}>
-                            <CheckCircle2 size={11} /> Pre-Approved (Test)
+                        {liveStatus === "APPROVED" ? (
+                          <span style={{ fontSize: 10, color: "var(--accent-green)", fontWeight: 700, display: "flex", alignItems: "center", gap: 3 }}>
+                            <CheckCircle2 size={11} /> Meta Approved
+                          </span>
+                        ) : liveStatus === "PENDING" ? (
+                          <span style={{ fontSize: 10, color: "var(--accent-yellow)", fontWeight: 700 }}>
+                            ⏳ Pending Review
+                          </span>
+                        ) : liveStatus === "REJECTED" ? (
+                          <span style={{ fontSize: 10, color: "var(--accent-red)", fontWeight: 700 }}>
+                            ❌ Rejected
                           </span>
                         ) : (
                           <span style={{ fontSize: 9.5, color: "var(--text-muted)" }}>{tpl.pricing}</span>
@@ -780,27 +796,27 @@ export default function ScriptView() {
                       {tpl.description}
                     </p>
 
-                    {/* WhatsApp Mock Bubble */}
+                    {/* WhatsApp Mock Bubble — theme-aware */}
                     <div
                       style={{
-                        background: "rgba(11,20,26,0.85)",
-                        border: "1px solid rgba(255,255,255,0.08)",
+                        background: "var(--bg-card)",
+                        border: "1px solid var(--border)",
                         borderRadius: 10,
                         padding: "12px 14px",
                         fontSize: 12,
                         lineHeight: 1.5,
-                        color: "#e9edef",
+                        color: "var(--text-primary)",
                       }}
                     >
                       {tpl.header && (
-                        <div style={{ fontWeight: 700, fontSize: 11.5, color: "#25D366", marginBottom: 6, borderBottom: "1px solid rgba(255,255,255,0.08)", paddingBottom: 4 }}>
+                        <div style={{ fontWeight: 700, fontSize: 11.5, color: "var(--accent-green)", marginBottom: 6, borderBottom: "1px solid var(--border-light)", paddingBottom: 4 }}>
                           {tpl.header}
                         </div>
                       )}
-                      <div style={{ whiteSpace: "pre-wrap", color: "#d1d5db" }}>
+                      <div style={{ whiteSpace: "pre-wrap", color: "var(--text-secondary)" }}>
                         {tpl.body.split(/({{\d+}})/g).map((part, i) =>
                           part.startsWith("{{") ? (
-                            <span key={i} style={{ background: "rgba(37,211,102,0.25)", color: "#4ade80", padding: "0 4px", borderRadius: 4, fontWeight: 700, fontFamily: "monospace" }}>
+                            <span key={i} style={{ background: "rgba(45,212,160,0.16)", color: "var(--accent-green)", padding: "0 4px", borderRadius: 4, fontWeight: 700, fontFamily: "monospace" }}>
                               {part}
                             </span>
                           ) : (
@@ -809,13 +825,13 @@ export default function ScriptView() {
                         )}
                       </div>
                       {tpl.footer && (
-                        <div style={{ fontSize: 10.5, color: "#9ca3af", marginTop: 8, fontStyle: "italic" }}>
+                        <div style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 8, fontStyle: "italic" }}>
                           {tpl.footer}
                         </div>
                       )}
                       {tpl.button && (
-                        <div style={{ marginTop: 10, borderTop: "1px solid rgba(255,255,255,0.1)", paddingTop: 8, textAlign: "center" }}>
-                          <span style={{ fontSize: 11, fontWeight: 600, color: "#00a884", display: "inline-flex", alignItems: "center", gap: 5 }}>
+                        <div style={{ marginTop: 10, borderTop: "1px solid var(--border-light)", paddingTop: 8, textAlign: "center" }}>
+                          <span style={{ fontSize: 11, fontWeight: 600, color: "var(--accent-cyan)", display: "inline-flex", alignItems: "center", gap: 5 }}>
                             🔗 {tpl.button.text} {tpl.button.type === "URL" ? "↗" : ""}
                           </span>
                         </div>
@@ -826,7 +842,7 @@ export default function ScriptView() {
                   {/* Actions Bar */}
                   <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between", paddingTop: 4 }}>
                     <div style={{ fontSize: 10.5, color: "var(--text-muted)" }}>
-                      Langs: {tpl.languages.map(l => l.code).join(", ")}
+                      Langs: {(live?.languages?.length ? live.languages : tpl.languages.map(l => l.code)).join(", ")}
                     </div>
                     <button
                       type="button"
@@ -837,18 +853,13 @@ export default function ScriptView() {
                           setTimeout(() => setCopiedTpl(null), 2500)
                         }
                       }}
+                      className="btn-ghost"
                       style={{
                         fontSize: 11.5,
-                        padding: "5px 12px",
-                        borderRadius: 6,
-                        border: isCopied ? "1px solid #22c55e" : "1px solid var(--border)",
-                        background: isCopied ? "rgba(34,197,94,0.15)" : "var(--bg-card)",
-                        color: isCopied ? "#22c55e" : "var(--text-primary)",
-                        cursor: "pointer",
-                        fontWeight: 600,
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 5,
+                        height: 30,
+                        padding: "0 12px",
+                        borderColor: isCopied ? "var(--accent-green)" : undefined,
+                        color: isCopied ? "var(--accent-green)" : undefined,
                       }}
                     >
                       {isCopied ? (

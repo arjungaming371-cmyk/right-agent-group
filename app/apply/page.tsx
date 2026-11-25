@@ -154,6 +154,11 @@ export default function ApplyPage() {
           <form onSubmit={handleSubmit}>
             {/* Header */}
             <div style={{ marginBottom: 24 }}>
+              <img
+                src="/logo.png"
+                alt="Right Agent Group"
+                style={{ height: 38, width: "auto", objectFit: "contain", marginBottom: 14 }}
+              />
               <h1
                 style={{
                   fontSize: 22,

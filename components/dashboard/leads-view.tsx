@@ -460,6 +460,17 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
   const [bulkWaTemplateLang, setBulkWaTemplateLang] = useState("en")
   const [libraryProducts, setLibraryProducts] = useState<string[]>([])
   const allLoanProducts = Array.from(new Set([...COMMON_LOAN_TYPES, ...libraryProducts]))
+  const [liveTplStatuses, setLiveTplStatuses] = useState<Record<string, { status: string; category?: string; languages: string[] }>>({})
+
+  useEffect(() => {
+    if (!showBulkWaModal) return
+    fetch("/api/whatsapp/templates")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d?.liveStatuses) setLiveTplStatuses(d.liveStatuses)
+      })
+      .catch(() => {})
+  }, [showBulkWaModal])
 
   // ── Lead Name & Details Editing ──
   const [editingLeadId, setEditingLeadId] = useState<string | null>(null)
@@ -1621,9 +1632,9 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                             </button>
                           </div>
                         ) : (
-                          <div style={{ fontWeight: 600, fontSize: 13, display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap", lineHeight: 1.25 }}>
+                          <div style={{ fontWeight: 600, fontSize: 13, display: "flex", alignItems: "center", gap: 5, flexWrap: "nowrap", minWidth: 0, lineHeight: 1.25 }}>
                             {lead.pinned && <Pin size={11} strokeWidth={2.2} style={{ color: "var(--accent-yellow)", fill: "var(--accent-yellow)", flexShrink: 0 }} />}
-                            <span>{lead.name || "Unknown"}</span>
+                            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={lead.name || "Unknown"}>{lead.name || "Unknown"}</span>
                             {canEdit && (
                               <button
                                 onClick={(e) => {
@@ -1641,6 +1652,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                                   alignItems: "center",
                                   borderRadius: 4,
                                   opacity: 0.65,
+                                  flexShrink: 0,
                                   transition: "opacity 0.15s",
                                 }}
                                 onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
@@ -2780,14 +2792,15 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                     <div style={{ marginBottom: 12 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                         <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500 }}>Choose Template Preset:</span>
-                        <span style={{ fontSize: 10, color: "#22c55e", background: "rgba(34,197,94,0.12)", padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>
+                        <span style={{ fontSize: 10, color: "var(--accent-green)", background: "rgba(45,212,160,0.14)", padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>
                           ⚡ hello_world is pre-approved by Meta
                         </span>
                       </div>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                         {META_TEMPLATES_CATALOG.map((p) => {
                           const isSelected = bulkWaTemplateName === p.name
-                          const isReady = p.name === "hello_world"
+                          const st = liveTplStatuses[p.name]?.status || (p.isPreApproved ? "APPROVED" : undefined)
+                          const isApproved = st === "APPROVED"
                           return (
                             <button
                               key={p.name}
@@ -2801,19 +2814,25 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                                 padding: "4px 9px",
                                 borderRadius: 6,
                                 border: isSelected
-                                  ? (isReady ? "1px solid #22c55e" : "1px solid #38bdf8")
-                                  : (isReady ? "1px solid rgba(34,197,94,0.4)" : "1px solid var(--border)"),
+                                  ? "1px solid var(--accent-blue)"
+                                  : isApproved
+                                    ? "1px solid rgba(45,212,160,0.4)"
+                                    : "1px solid var(--border)",
                                 background: isSelected
-                                  ? (isReady ? "rgba(34,197,94,0.2)" : "rgba(56,189,248,0.18)")
-                                  : (isReady ? "rgba(34,197,94,0.06)" : "var(--bg-secondary)"),
+                                  ? "rgba(91,124,250,0.16)"
+                                  : isApproved
+                                    ? "rgba(45,212,160,0.08)"
+                                    : "var(--bg-secondary)",
                                 color: isSelected
-                                  ? (isReady ? "#4ade80" : "#38bdf8")
-                                  : (isReady ? "#22c55e" : "var(--text-secondary)"),
+                                  ? "var(--accent-blue)"
+                                  : isApproved
+                                    ? "var(--accent-green)"
+                                    : "var(--text-secondary)",
                                 cursor: "pointer",
                                 fontWeight: isSelected ? 700 : 500,
                               }}
                             >
-                              {p.name === "hello_world" ? "🌍 hello_world (Instant Test)" : `📄 ${p.name}`}
+                              {isApproved ? `✅ ${p.name}` : `📄 ${p.name}`}
                             </button>
                           )
                         })}
@@ -2853,33 +2872,68 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                       </div>
                     </div>
 
-                    {/* Live Meta Template Preview & Copy */}
+                    {/* Live Meta Template Preview & Synced Status (matches Priya's Script) */}
                     {(() => {
                       const curTpl = META_TEMPLATES_CATALOG.find((t) => t.name === bulkWaTemplateName)
                       if (!curTpl) return null
+                      const live = liveTplStatuses[curTpl.name]
+                      const liveStatus = live?.status || (curTpl.isPreApproved ? "APPROVED" : undefined)
+                      const previewLead = selectedIds.length === 1 ? leads.find((l) => l.id === selectedIds[0]) : null
+                      const recipientName = previewLead?.name || "Customer"
+                      const renderedBody = curTpl.body
+                        .replace(/\{\{1\}\}/g, recipientName)
+                        .replace(/\{\{2\}\}/g, "5th of this month")
                       return (
-                        <div style={{ marginTop: 12, background: "rgba(0,0,0,0.3)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px", fontSize: 11.5 }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                            <span style={{ fontWeight: 700, color: "var(--accent-green)" }}>
+                        <div style={{ marginTop: 12, background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 14px", fontSize: 11.5 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                            <span style={{ fontWeight: 700, color: "var(--text-primary)" }}>
                               📋 {curTpl.displayName}
                             </span>
-                            <span style={{ fontSize: 9.5, padding: "1px 6px", borderRadius: 4, background: curTpl.category === "UTILITY" ? "rgba(59,130,246,0.2)" : "rgba(234,179,8,0.2)", color: curTpl.category === "UTILITY" ? "#60a5fa" : "#facc15", fontWeight: 700 }}>
-                              {curTpl.category}
-                            </span>
-                          </div>
-                          <div style={{ color: "#d1d5db", lineHeight: 1.45, whiteSpace: "pre-wrap", fontSize: 11, margin: "6px 0" }}>
-                            {curTpl.samplePreview}
-                          </div>
-                          {curTpl.name === "hello_world" ? (
-                            <div style={{ background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.3)", borderRadius: 6, padding: "6px 10px", margin: "8px 0", fontSize: 11, color: "#4ade80", lineHeight: 1.4 }}>
-                              ⚡ <strong>Meta Pre-Approved:</strong> Ready for instant delivery to any WhatsApp number right now.
+                            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <span style={{ fontSize: 9.5, padding: "2px 6px", borderRadius: 4, background: curTpl.category === "UTILITY" ? "rgba(91,124,250,0.16)" : "rgba(247,183,49,0.16)", color: curTpl.category === "UTILITY" ? "var(--accent-blue)" : "var(--accent-yellow)", fontWeight: 700 }}>
+                                {curTpl.category}
+                              </span>
+                              {liveStatus === "APPROVED" ? (
+                                <span style={{ fontSize: 10, color: "var(--accent-green)", fontWeight: 700 }}>✅ Approved</span>
+                              ) : liveStatus === "PENDING" ? (
+                                <span style={{ fontSize: 10, color: "var(--accent-yellow)", fontWeight: 700 }}>⏳ Pending Review</span>
+                              ) : liveStatus === "REJECTED" ? (
+                                <span style={{ fontSize: 10, color: "var(--accent-red)", fontWeight: 700 }}>❌ Rejected</span>
+                              ) : null}
                             </div>
-                          ) : (
-                            <div style={{ background: "rgba(56,189,248,0.08)", border: "1px solid rgba(56,189,248,0.25)", borderRadius: 6, padding: "6px 10px", margin: "8px 0", fontSize: 11, color: "var(--accent-cyan)", lineHeight: 1.4 }}>
-                              🛡️ <strong>Registered on Meta Cloud API:</strong> Auto-fills customer name and maps application button. (Meta reviews take 1-5 mins; use <em>hello_world</em> for immediate tests).
+                          </div>
+
+                          {/* Theme-aware WhatsApp Preview Bubble */}
+                          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px" }}>
+                            {curTpl.header && (
+                              <div style={{ fontWeight: 700, fontSize: 11, color: "var(--accent-green)", marginBottom: 5, borderBottom: "1px solid var(--border-light)", paddingBottom: 4 }}>
+                                {curTpl.header}
+                              </div>
+                            )}
+                            <div style={{ color: "var(--text-secondary)", lineHeight: 1.45, whiteSpace: "pre-wrap", fontSize: 11.5 }}>
+                              {renderedBody}
+                            </div>
+                            {curTpl.footer && (
+                              <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 6, fontStyle: "italic" }}>
+                                {curTpl.footer}
+                              </div>
+                            )}
+                            {curTpl.button && (
+                              <div style={{ marginTop: 8, borderTop: "1px solid var(--border-light)", paddingTop: 6, textAlign: "center" }}>
+                                <span style={{ fontSize: 11, fontWeight: 600, color: "var(--accent-cyan)" }}>
+                                  🔗 {curTpl.button.text} {curTpl.button.type === "URL" ? "↗" : ""}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+
+                          {liveStatus !== "APPROVED" && (
+                            <div style={{ background: "rgba(247,183,49,0.1)", border: "1px solid rgba(247,183,49,0.3)", borderRadius: 6, padding: "6px 10px", margin: "8px 0 0", fontSize: 11, color: "var(--accent-yellow)", lineHeight: 1.4 }}>
+                              ⏳ <strong>Pending Meta Approval:</strong> Meta usually approves within 1–5 minutes. For instant sending right now, select <strong>hello_world</strong>.
                             </div>
                           )}
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8, paddingTop: 6, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8, paddingTop: 6, borderTop: "1px solid var(--border-light)" }}>
                             <span style={{ fontSize: 10, color: "var(--text-muted)" }}>
                               {curTpl.pricing}
                             </span>
@@ -2891,9 +2945,9 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                                   toast.success(`Copied "${curTpl.name}" format for Meta WhatsApp Manager`)
                                 }
                               }}
-                              style={{ fontSize: 10.5, color: "#25D366", background: "transparent", border: "none", cursor: "pointer", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 4 }}
+                              style={{ fontSize: 10.5, color: "var(--accent-cyan)", background: "transparent", border: "none", cursor: "pointer", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 4 }}
                             >
-                              📋 Copy Format for Meta Approval
+                              📋 Copy Format for Meta
                             </button>
                           </div>
                         </div>

@@ -170,7 +170,7 @@ export default function AnalyticsView({ role = "admin" }: { role?: "admin" | "ag
       </div>
 
       {/* Owner outcome tiles — the business picture first */}
-      <div className="grid grid-cols-2 gap-3 md:flex md:flex-wrap md:gap-4">
+      <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
         <StatTile icon={UserPlus} label="New Leads (7d)" value={String(totals.new_leads_7d ?? 0)} tone={CAT.violet} />
         <StatTile icon={Phone} label="AI Calls" value={String(totals.total_calls)} tone={CAT.blue} />
         <StatTile icon={PhoneOutgoing} label="Answered" value={String(totals.connected_calls ?? 0)} tone={CAT.aqua} />
@@ -182,7 +182,7 @@ export default function AnalyticsView({ role = "admin" }: { role?: "admin" | "ag
 
       {/* Detail tiles — every figure here comes straight from the analytics
           payload; connect/resolution rates were computed but never shown. */}
-      <div className="grid grid-cols-2 gap-3 md:flex md:flex-wrap md:gap-4">
+      <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
         <StatTile icon={Users} label="Total Leads" value={String(totals.total_leads)} tone={CAT.violet} />
         <StatTile icon={MessageCircle} label="WhatsApp Messages" value={String(totals.total_messages)} tone={CAT.aqua} />
         <StatTile icon={TrendingUp} label="Lead → Qualified" value={formatPct(rates.conversionRate)} tone={CAT.violet} />
