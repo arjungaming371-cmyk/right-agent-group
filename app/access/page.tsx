@@ -310,7 +310,7 @@ function AccessPageInner() {
 
   return (
     <main style={{ minHeight: "100vh", padding: "0 20px" }}>
-      <div style={{ maxWidth: 880, margin: "0 auto", padding: "36px 0 80px" }}>
+      <div style={{ maxWidth: 1020, margin: "0 auto", padding: "36px 0 80px" }}>
 
         {/* Header */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 28, flexWrap: "wrap", gap: 14 }}>
@@ -378,27 +378,6 @@ function AccessPageInner() {
               <UserPlus size={16} strokeWidth={2} style={{ color: "var(--accent-blue)" }} />
               Add Teammate & Allot Work
             </div>
-            {(myRole === "admin" || myRole === "developer") && (
-              <button
-                type="button"
-                onClick={() => setIsAdminModalOpen(true)}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color: "var(--accent-violet)",
-                  background: "rgba(139, 92, 246, 0.1)",
-                  border: "1px solid rgba(139, 92, 246, 0.3)",
-                  padding: "5px 12px",
-                  borderRadius: 8,
-                  cursor: "pointer",
-                }}
-              >
-                <Shield size={13} strokeWidth={2.2} /> Quick Add Admin
-              </button>
-            )}
           </div>
 
           <form onSubmit={addEmail} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -499,26 +478,13 @@ function AccessPageInner() {
 
 
             {/* Granular Module Allotment Toggle for Add Form */}
-            <div style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 10, padding: "14px 16px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                <div style={{ display: "inline-flex", alignItems: "center", gap: 6, fontWeight: 600, fontSize: 13, color: "var(--text-primary)" }}>
-                  <Layers size={15} style={{ color: "var(--accent-cyan)" }} />
-                  Allot Work Modules & Feature Permissions
-                </div>
-                {newAllowedModules !== null && (
-                  <span style={{ fontSize: 11, background: "rgba(56,189,248,0.15)", border: "1px solid rgba(56,189,248,0.3)", color: "var(--accent-cyan)", padding: "2px 8px", borderRadius: 10, fontWeight: 600 }}>
-                    {newAllowedModules.length} / {ALL_MODULES.length} Selected
-                  </span>
-                )}
-              </div>
-              <ModulePicker
-                selectedKeys={newAllowedModules}
-                onChange={(keys) => setNewAllowedModules(keys)}
-              />
-            </div>
+            <ModulePicker
+              selectedKeys={newAllowedModules}
+              onChange={(keys) => setNewAllowedModules(keys)}
+            />
 
             <div style={{ fontSize: 11.5, color: "var(--text-muted)" }}>
-              Teammates can sign in via Google or Email OTP with their assigned role and module permissions.
+              Teammates can sign in via Google SSO (and 2FA OTP if enabled) with their assigned role and module permissions.
             </div>
           </form>
         </div>

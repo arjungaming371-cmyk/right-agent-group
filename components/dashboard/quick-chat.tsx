@@ -29,11 +29,11 @@ const GREETINGS: Record<UserRole, string> = {
 }
 
 const QUICK_COMMANDS = [
-  { label: "📊 Pipeline Health", query: "Give me an executive summary breakdown of all leads, voice calls, and loan applications." },
-  { label: "📞 Today's Calls", query: "How many calls were placed today and what were the outcomes?" },
-  { label: "🟢 WhatsApp Activity", query: "Summarize today's WhatsApp conversations and active chats." },
-  { label: "🎯 Hot Leads", query: "Show me the top high-scoring leads that need attention." },
-  { label: "✍️ Draft Script", query: "Draft a high-converting calling script for Priya for balance transfer home loans." },
+  { label: "Pipeline Health", query: "Give me an executive summary breakdown of all leads, voice calls, and loan applications." },
+  { label: "Today's Calls", query: "How many calls were placed today and what were the outcomes?" },
+  { label: "WhatsApp Activity", query: "Summarize today's WhatsApp conversations and active chats." },
+  { label: "Hot Leads", query: "Show me the top high-scoring leads that need attention." },
+  { label: "Draft Script", query: "Draft a high-converting calling script for Priya for balance transfer home loans." },
 ]
 
 function timeAgoShort(dateStr: string) {
@@ -585,7 +585,7 @@ export default function QuickChat({ role = "agent", userEmail = "" }: { role?: U
                 value={input}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={e => e.key === "Enter" && send()}
-                placeholder="Ask or command: write scripts, add leads, update KB…"
+                placeholder="Ask or command: scripts, leads, KB…"
                 style={{ flex: 1, fontSize: 13, height: 36 }}
               />
 

@@ -20,7 +20,7 @@ export const ALL_MODULES: ModuleOption[] = [
   { key: "calendar", label: "Calendar", section: "Overview", description: "Follow-up calendar & scheduled callbacks" },
 
   // Engagement
-  { key: "voice", label: "Voice Logs", section: "Engagement", description: "Voice call recordings, transcripts, & durations" },
+  { key: "voice", label: "Voice Logs", section: "Engagement", description: "Voice call recordings, transcripts & durations" },
   { key: "whatsapp", label: "WhatsApp Chat", section: "Engagement", description: "Live customer chat & automated messages" },
   { key: "instagram", label: "Instagram Chat", section: "Engagement", description: "Direct messages & post comment auto-replies" },
 

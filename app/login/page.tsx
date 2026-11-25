@@ -1,7 +1,10 @@
 // Verified login page — Google Sign-In only, restricted to allowlisted emails.
 // Server component: reads ?error= and ?next= from the URL (Next 15 async searchParams).
 import Image from "next/image"
+import { cookies } from "next/headers"
+import { redirect } from "next/navigation"
 import { Phone, MessageCircle, ShieldCheck, Sparkles } from "lucide-react"
+import { SESSION_COOKIE, verifySessionToken } from "@/lib/session-token"
 import OtpForm from "./otp-form"
 
 export const dynamic = "force-dynamic"
@@ -24,6 +27,12 @@ export default async function LoginPage({
   // the landing page.
   const next = params?.next && params.next.startsWith("/") && params.next !== "/" ? params.next : "/dashboard"
   const otpStep = params?.otp === "1"
+
+  const cookieStore = await cookies()
+  const existingSession = await verifySessionToken(cookieStore.get(SESSION_COOKIE)?.value)
+  if (existingSession && !error && !otpStep) {
+    redirect(next)
+  }
 
   return (
     <main

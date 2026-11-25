@@ -153,7 +153,7 @@ const VIEW_TITLES: Record<ViewKey, { title: string; sub: string }> = {
   analytics: { title: "Analytics",         sub: "Performance across calls, leads, and WhatsApp" },
   attention: { title: "Needs Human",        sub: "Customers who asked for a person — or need one" },
   leads:    { title: "Leads",              sub: "Pipeline and qualified prospects" },
-  loans:    { title: "Loan Applications",  sub: "Incoming home & business loan enquiries" },
+  loans:    { title: "Loan Applications",  sub: "Incoming loan enquiries" },
   queue:    { title: "Call Queue",         sub: "Bulk outbound calling — queue, radar, and controls" },
   voice:    { title: "Voice Logs",         sub: "Voice bot call activity and outcomes" },
   whatsapp: { title: "WhatsApp Chat",      sub: "Live customer conversations" },
@@ -640,6 +640,14 @@ export default function DashboardShell() {
           <button
             onClick={() => setPaletteOpen(true)}
             aria-label="Search everything"
+            className="icon-btn md:hidden"
+            title="Search"
+          >
+            <Search size={16} strokeWidth={2} />
+          </button>
+          <button
+            onClick={() => setPaletteOpen(true)}
+            aria-label="Search everything"
             className="hidden h-9 items-center gap-2.5 rounded-[10px] border border-[var(--border)] bg-[var(--bg-secondary)] px-3 text-[13px] text-[var(--text-muted)] transition-colors hover:border-[var(--border)] hover:text-[var(--text-secondary)] md:flex"
             style={{ width: 210 }}
           >
@@ -682,7 +690,7 @@ export default function DashboardShell() {
             data-view-active attribute flip in globals.css. The old
             key={view} remounted everything on every switch: refetch, scroll
             reset, lost form state, and a loading flash each time. */}
-        <main ref={mainRef} className="flex-1 overflow-auto p-3 md:p-6">
+        <main ref={mainRef} className="flex-1 overflow-auto p-3 pb-24 md:p-6 md:pb-24">
           {[...visitedViews].map(k => (
             <PollingViewContext.Provider key={k} value={k}>
               <div

@@ -26,9 +26,9 @@ function hourLabel(h: number) {
 }
 
 const LABELS: Record<string, { label: string; desc: string }> = {
-  two_factor_auth: { label: "Two-Factor Authentication", desc: "Send a one-time 6-digit verification code on sign-in to any email in Team Access (via Email & WhatsApp)." },
-  single_sign_on:  { label: "Single Sign-On (SSO)",        desc: "Google SSO is the only sign-in method — always enforced, allowlisted emails only." },
-  ip_allowlist:    { label: "IP Allowlist",                desc: "Block console access from IPs not in the IP_ALLOWLIST list in .env." },
+  two_factor_auth: { label: "Two-Factor Authentication", desc: "When enabled, sends a one-time 6-digit verification code after sign-in via Email & WhatsApp." },
+  single_sign_on:  { label: "Single Sign-On (SSO)",        desc: "Google SSO is the primary sign-in method — allowlisted emails only." },
+  ip_allowlist:    { label: "IP Allowlist",                desc: "Block console access from IPs not on the configured IP allowlist." },
   call_recording_encryption: { label: "Block Recording Playback Caching", desc: "Recordings are always encrypted at rest by the telephony provider. When this is on, playback is streamed only — never cached to local disk." },
 }
 
@@ -69,6 +69,14 @@ export default function SecurityView({ role = "admin" }: { role?: Role }) {
   // hooks than during the previous render". All hooks now run
   // unconditionally; the denial renders below.
   const accessDenied = role !== "admin" && role !== "developer"
+
+  useEffect(() => {
+    if (!accessDenied) {
+      load()
+      loadCompliance()
+    }
+  }, [accessDenied])
+
   if (accessDenied) {
     return (
       <div style={{ padding: 40, background: "var(--bg-secondary)", borderRadius: 12, border: "1px solid var(--border)", textAlign: "center", color: "var(--accent-red)" }}>
@@ -116,8 +124,6 @@ export default function SecurityView({ role = "admin" }: { role?: Role }) {
       toast.error("Failed to connect to DND endpoint")
     }
   }
-
-  useEffect(() => { load(); loadCompliance() }, [])
 
   function toggleDay(code: string) {
     setCompliance((c) => ({
@@ -404,16 +410,16 @@ export default function SecurityView({ role = "admin" }: { role?: Role }) {
                     {meta?.sentCount !== undefined && (
                       <span style={{ display:"inline-flex",alignItems:"center",gap:6,fontSize:11,fontWeight:600 }}>
                         <span style={{ background:"rgba(34,197,94,0.15)",color:"#22c55e",padding:"2px 8px",borderRadius:5 }}>
-                          ✅ {meta.sentCount} sent
+                          {meta.sentCount} sent
                         </span>
                         {meta.skippedDnd > 0 && (
                           <span style={{ background:"rgba(234,179,8,0.15)",color:"#eab308",padding:"2px 8px",borderRadius:5 }}>
-                            🛡️ {meta.skippedDnd} DND
+                            {meta.skippedDnd} DND
                           </span>
                         )}
                         {meta.failedCount > 0 && (
                           <span style={{ background:"rgba(239,68,68,0.15)",color:"#ef4444",padding:"2px 8px",borderRadius:5 }}>
-                            ❌ {meta.failedCount} failed
+                            {meta.failedCount} failed
                           </span>
                         )}
                         <span style={{ color:"var(--text-muted)",fontSize:10.5 }}>

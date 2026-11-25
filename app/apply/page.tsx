@@ -151,7 +151,7 @@ export default function ApplyPage() {
         }}
       >
         {!submitted ? (
-          <form onSubmit={handleSubmit}>
+          <form onSubmit={handleSubmit} noValidate>
             {/* Header */}
             <div style={{ marginBottom: 24 }}>
               <img
@@ -295,7 +295,7 @@ export default function ApplyPage() {
                 id="app-loan-type"
                 type="text"
                 required
-                placeholder="e.g. Home Loan, Business Loan, Personal Loan, LAP..."
+                placeholder="e.g. Home, Business, Personal Loan…"
                 value={loanType}
                 onChange={(e) => setLoanType(e.target.value)}
                 style={{

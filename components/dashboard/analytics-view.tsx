@@ -175,7 +175,7 @@ export default function AnalyticsView({ role = "admin" }: { role?: "admin" | "ag
         <StatTile icon={Phone} label="AI Calls" value={String(totals.total_calls)} tone={CAT.blue} />
         <StatTile icon={PhoneOutgoing} label="Answered" value={String(totals.connected_calls ?? 0)} tone={CAT.aqua} />
         <StatTile icon={BadgeCheck} label="Qualified" value={String(totals.qualified_leads)} tone={STATUS.good} />
-        <StatTile icon={FileText} label="Applications" value={String(totals.applications ?? 0)} tone={CAT.violet} />
+        <StatTile icon={FileText} label={totals.applications === 1 ? "Application" : "Applications"} value={String(totals.applications ?? 0)} tone={CAT.violet} />
         <StatTile icon={ClipboardList} label="Follow-ups Due" value={String(totals.followups_due ?? 0)} tone={STATUS.serious} />
         <StatTile icon={BellRing} label="Needs Human" value={String(totals.needs_human ?? 0)} tone={STATUS.critical} />
       </div>
@@ -206,9 +206,9 @@ export default function AnalyticsView({ role = "admin" }: { role?: "admin" | "ag
               </defs>
               <CartesianGrid stroke="var(--border-light)" vertical={false} />
               <XAxis dataKey="day" tick={AXIS_STYLE} axisLine={false} tickLine={false} interval={1} />
-              <YAxis tick={AXIS_STYLE} axisLine={false} tickLine={false} allowDecimals={false} width={28} />
+              <YAxis tick={AXIS_STYLE} axisLine={false} tickLine={false} allowDecimals={false} domain={[0, "auto"]} width={28} />
               <Tooltip contentStyle={TOOLTIP_STYLE} labelStyle={{ color: "var(--text-primary)", fontWeight: 600 }} />
-              <Area type="monotone" dataKey="count" name="Calls" stroke={CAT.blue} strokeWidth={2} fill="url(#callsFill)" dot={false} activeDot={{ r: 4 }} />
+              <Area type="linear" dataKey="count" name="Calls" stroke={CAT.blue} strokeWidth={2} fill="url(#callsFill)" dot={false} activeDot={{ r: 4 }} />
             </AreaChart>
           </ResponsiveContainer>
         </div>
@@ -275,10 +275,10 @@ export default function AnalyticsView({ role = "admin" }: { role?: "admin" | "ag
           <div style={{ fontSize: 13.5, fontWeight: 700, marginBottom: 4 }}>Busiest call hours</div>
           <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginBottom: 14 }}>All-time, by hour of day</div>
           <ResponsiveContainer width="100%" height={160}>
-            <BarChart data={hourData} margin={{ left: -20, right: 8 }}>
+            <BarChart data={hourData} margin={{ left: 0, right: 8 }}>
               <CartesianGrid stroke="var(--border-light)" vertical={false} />
               <XAxis dataKey="hour" tick={AXIS_STYLE} axisLine={false} tickLine={false} interval={3} />
-              <YAxis tick={AXIS_STYLE} axisLine={false} tickLine={false} allowDecimals={false} width={24} />
+              <YAxis tick={AXIS_STYLE} axisLine={false} tickLine={false} allowDecimals={false} domain={[0, "auto"]} width={24} />
               <Tooltip contentStyle={TOOLTIP_STYLE} labelStyle={{ color: "var(--text-primary)", fontWeight: 600 }} />
               <Bar dataKey="count" name="Calls" fill={CAT.aqua} radius={[3, 3, 0, 0]} maxBarSize={16} />
             </BarChart>

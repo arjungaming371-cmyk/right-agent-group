@@ -79,14 +79,14 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
 
   // Statuses state (Default + Custom)
   const [statuses, setStatuses] = useState<CustomStatus[]>([
-    { id: "pending", label: "Under Review / Pending", color: "#EAB308", bg_color: "rgba(234,179,8,0.15)", icon: "⏳", category: "pending", is_default: true, sort_order: 1 },
-    { id: "sanctioned", label: "Sanctioned", color: "#38BDF8", bg_color: "rgba(56,189,248,0.15)", icon: "✅", category: "sanctioned", is_default: true, sort_order: 2 },
-    { id: "rejected", label: "Not Sanctioned / Rejected", color: "#EF4444", bg_color: "rgba(239,68,68,0.15)", icon: "❌", category: "rejected", is_default: true, sort_order: 3 },
-    { id: "disbursed", label: "Disbursed", color: "#22C55E", bg_color: "rgba(34,197,94,0.15)", icon: "💰", category: "disbursed", is_default: true, sort_order: 4 },
+    { id: "pending", label: "Under Review / Pending", color: "#EAB308", bg_color: "rgba(234,179,8,0.15)", icon: "", category: "pending", is_default: true, sort_order: 1 },
+    { id: "sanctioned", label: "Sanctioned", color: "#38BDF8", bg_color: "rgba(56,189,248,0.15)", icon: "", category: "sanctioned", is_default: true, sort_order: 2 },
+    { id: "rejected", label: "Not Sanctioned / Rejected", color: "#EF4444", bg_color: "rgba(239,68,68,0.15)", icon: "", category: "rejected", is_default: true, sort_order: 3 },
+    { id: "disbursed", label: "Disbursed", color: "#22C55E", bg_color: "rgba(34,197,94,0.15)", icon: "", category: "disbursed", is_default: true, sort_order: 4 },
   ])
   const [showManageStatusModal, setShowManageStatusModal] = useState(false)
   const [newStatusLabel, setNewStatusLabel] = useState("")
-  const [newStatusIcon, setNewStatusIcon] = useState("📌")
+  const [newStatusIcon, setNewStatusIcon] = useState("")
   const [newStatusColor, setNewStatusColor] = useState("#8B5CF6")
   const [newStatusCategory, setNewStatusCategory] = useState<"pending" | "sanctioned" | "rejected" | "disbursed">("pending")
   const [savingCustomStatus, setSavingCustomStatus] = useState(false)
@@ -100,6 +100,12 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
 
   // History timeline modal state
   const [viewHistoryApp, setViewHistoryApp] = useState<any | null>(null)
+  useEffect(() => {
+    if (!viewHistoryApp) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setViewHistoryApp(null) }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [viewHistoryApp])
 
   // Loan Type Links state
   const [links, setLinks] = useState<LoanLink[]>([])
@@ -172,15 +178,15 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
     const found = statuses.find((s) => s.id === k)
     if (found) return found
     if (/sanctioned|approved/i.test(k)) {
-      return { id: k, label: "Sanctioned", color: "#38BDF8", bg_color: "rgba(56,189,248,0.15)", icon: "✅", category: "sanctioned", is_default: true, sort_order: 2 }
+      return { id: k, label: "Sanctioned", color: "#38BDF8", bg_color: "rgba(56,189,248,0.15)", icon: "", category: "sanctioned", is_default: true, sort_order: 2 }
     }
     if (/rejected|lost/i.test(k)) {
-      return { id: k, label: "Not Sanctioned / Rejected", color: "#EF4444", bg_color: "rgba(239,68,68,0.15)", icon: "❌", category: "rejected", is_default: true, sort_order: 3 }
+      return { id: k, label: "Not Sanctioned / Rejected", color: "#EF4444", bg_color: "rgba(239,68,68,0.15)", icon: "", category: "rejected", is_default: true, sort_order: 3 }
     }
     if (/disbursed/i.test(k)) {
-      return { id: k, label: "Disbursed", color: "#22C55E", bg_color: "rgba(34,197,94,0.15)", icon: "💰", category: "disbursed", is_default: true, sort_order: 4 }
+      return { id: k, label: "Disbursed", color: "#22C55E", bg_color: "rgba(34,197,94,0.15)", icon: "", category: "disbursed", is_default: true, sort_order: 4 }
     }
-    return { id: k, label: k.replace(/_/g, " "), color: "#EAB308", bg_color: "rgba(234,179,8,0.15)", icon: "⏳", category: "pending", is_default: false, sort_order: 99 }
+    return { id: k, label: k.replace(/_/g, " "), color: "#EAB308", bg_color: "rgba(234,179,8,0.15)", icon: "", category: "pending", is_default: false, sort_order: 99 }
   }
 
   // Open the remark & status update modal
@@ -486,7 +492,7 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
 
   const internalStats = useMemo(() => {
     const total = internalApps.length
-    const approved = internalApps.filter((a) => /approved|sanctioned/i.test(a.status || "")).length
+    const approved = internalApps.filter((a) => /approved|sanctioned|disbursed/i.test(a.status || "")).length
     const pending = internalApps.filter((a) => /pending|review|new/i.test(a.status || "")).length
     const disbursed = internalApps.filter((a) => /disbursed/i.test(a.status || "")).length
     const totalVolume = internalApps.reduce((acc, a) => acc + (Number(a.loan_amount) || 0), 0)
@@ -1641,6 +1647,7 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
               </div>
               <button
                 type="button"
+                aria-label="Close"
                 onClick={() => setViewHistoryApp(null)}
                 className="icon-btn"
                 style={{ width: 28, height: 28 }}
