@@ -1038,73 +1038,9 @@ async function completeLeadIfReady(opts: {
     const claimQuery = aiPromisedLink
       ? db.from("leads").update(updates).eq("id", leadId)
       : db.from("leads").update(updates).eq("id", leadId).eq("status", "new")
-    const claim = await claimQuery
-    if (!aiPromisedLink && (!claim.data || (Array.isArray(claim.data) && claim.data.length === 0))) {
-      console.log(`lead ${leadId} completion race lost — another turn already completed it, skipping duplicate form link/send`)
-      return false
-    }
-
-    const { createOneTimeFormToken } = await import("./whatsapp")
-    const token = await createOneTimeFormToken(leadId)
-
-    // FIX (2026-09-26): send to the EFFECTIVE number (extraction → lead row →
-    // caller on WhatsApp calls), not raw extraction — the fallback above can
-    // complete the lead while this line still had null, creating a form link
-    // that was never sent.
-    const waNumber = effectiveWhatsapp
-    // AI KILL SWITCH: the "messages" toggle also stops the AI-decided
-    // application link — the lead is completed (above), only the automated
-    // send is suppressed, and an agent can send the link manually.
-    if (waNumber && !(await isAiPaused("messages", branchId))) {
-      // Per-branch WhatsApp: the link goes out from the BRANCH's WABA number
-      // (branded with the branch's name), or the company number when the
-      // branch has none.
-      const { branchWhatsAppCtx } = await import("./whatsapp")
-      const waBranch = await branchWhatsAppCtx(branchId)
-      const result = await sendApplicationLink(waNumber, effectiveName || "there", token, waBranch)
-      if (!result.ok) console.error("WhatsApp link send failed:", result.error)
-      // Mark this call as already followed-up so the status webhook doesn't
-      // ALSO send the generic post-call WhatsApp message once the call ends.
-      // Only on SUCCESS — if the link send failed, the post-call fallback
-      // template is the customer's only remaining automatic touchpoint.
-      if (callSid && result.ok) {
-        db.from("voice_calls").update({ followup_sent: true }).eq("twilio_call_sid", callSid).catch((e) =>
-          console.error("followup_sent flag error (status webhook may double-message):", e instanceof Error ? e.message : e))
-      }
-      // Surface the exact link in the dashboard's Communication Log.
-      const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "https://13.201.0.111.sslip.io").replace(/\/$/, "")
-      db.from("comm_logs").insert({
-        lead_id: leadId,
-        type: "whatsapp",
-        summary: result.ok
-          ? `Bank application link sent on WhatsApp to ${waNumber}: ${appUrl}/l/${token}`
-          : `Bank application link generated but WhatsApp send FAILED (${result.error}) — share manually: ${appUrl}/l/${token}`,
-        outcome: result.ok ? "sent" : "failed",
-      }).catch((e) => console.error("comm_log form-link entry error:", e instanceof Error ? e.message : e))
-
-      if (result.ok) {
-        const content = `Hi ${effectiveName || "there"}! Thanks for speaking with Priya from Right Agent Group. Please complete your loan application here: ${appUrl}/l/${token}\n\nWe never ask for OTP, PIN, or any payment. — Right Agent Group`
-        const { query: dbQuery } = await import("./db")
-        dbQuery(
-          `INSERT INTO whatsapp_messages (lead_id, phone_number, direction, content, status, branch_id)
-           VALUES ($1, $2, 'outbound', $3, 'sent', $4)`,
-          [leadId, waNumber, content, branchId || null]
-        ).catch(() => {})
-      }
-      // Priya just told the customer "the link is on its way" — if the send
-      // actually failed, ping the operator to share it manually before the
-      // customer gives up waiting.
-      if (!result.ok) {
-        createNotification({
-          type: "whatsapp_message",
-          title: "Form link send FAILED — share manually",
-          body: `${extracted.name || waNumber}: WhatsApp send failed (${result.error}). Link: ${appUrl}/l/${token}`,
-          linkView: "leads",
-        })
-      }
-    }
+    await claimQuery
   } catch (e) {
-    console.error("lead completion error:", e)
+    console.error("lead update error:", e)
   }
   return true
 }
