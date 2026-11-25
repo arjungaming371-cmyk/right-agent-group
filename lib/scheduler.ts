@@ -140,22 +140,13 @@ async function runInstagramCommentScan() {
 
       for (const c of comments) {
         if (!c.id || !c.text) continue
-        const senderId = String(c.from?.id || "")
+        const senderId = c.from?.id || ""
         const username = (c.from?.username || c.username || "").toLowerCase()
-        if (
-          senderId === accountId ||
-          senderId === "17841437996447189" ||
-          username === "arjungaming371" ||
-          username.includes("rightagent")
-        ) {
-          continue
-        }
+        if (senderId === accountId || senderId === "17841437996447189" || username === "arjungaming371") continue
 
-        // Only process fresh comments created within the last 5 minutes — NEVER reply to old comments
-        const commTime = c.timestamp ? new Date(c.timestamp).getTime() : NaN
-        if (isNaN(commTime) || Date.now() - commTime > 5 * 60 * 1000) {
-          continue
-        }
+        // Check comment age: only process fresh comments (within the last 5 minutes)
+        const commTime = c.timestamp ? new Date(c.timestamp).getTime() : 0
+        if (!commTime || isNaN(commTime) || Date.now() - commTime > 5 * 60 * 1000) continue
 
         await fetch(`${appUrl}/api/instagram`, {
           method: "POST",
@@ -175,7 +166,7 @@ async function runInstagramCommentScan() {
                       from: c.from || { id: c.id, username: c.username || "instagram_user" },
                       media: { id: m.id },
                       created_time: c.timestamp,
-                      timestamp: c.timestamp,
+                      timestamp: commTime,
                     },
                   },
                 ],
@@ -226,20 +217,13 @@ async function runInstagramDMScan() {
       const messages = conv.messages?.data || []
       for (const m of messages) {
         if (!m.id || !m.message) continue
-        const senderId = String(m.from?.id || "")
+        const senderId = m.from?.id || ""
         const senderUsername = (m.from?.username || "").toLowerCase()
 
         // Skip our own outbound messages
-        if (
-          senderId === accountId ||
-          senderId === "17841437996447189" ||
-          senderUsername === "arjungaming371" ||
-          senderUsername.includes("rightagent")
-        ) {
-          continue
-        }
+        if (senderId === accountId || senderId === "17841437996447189" || senderUsername === "arjungaming371") continue
 
-        // Only process fresh DMs created within the last 5 minutes — NEVER reply to old DMs
+        // Check if message is fresh (within the last 5 minutes) to avoid replying to old DMs
         const msgTime = new Date(m.created_time).getTime()
         if (isNaN(msgTime) || Date.now() - msgTime > 5 * 60 * 1000) continue
 
