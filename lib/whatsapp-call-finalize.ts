@@ -326,6 +326,14 @@ export async function finalizeWhatsAppCall(opts: {
           outcome: result.ok ? "sent" : "failed",
         }).catch(() => {})
 
+        // Alert: Lead confirmed loan interest on call — flag in Human Attention queue
+        await db.from("comm_logs").insert({
+          lead_id: leadId,
+          type: "alert",
+          summary: `🟢 LOAN CONFORMED ON CALL — Caller confirmed loan interest during call. Application link sent on WhatsApp. Follow up for documentation & bank processing.`,
+          outcome: "loan_confirmed",
+        }).catch(() => {})
+
         if (result.ok) {
           const content = `Hi ${lead?.name || "there"}! Thanks for speaking with Priya from Right Agent Group. Please complete your loan application here: ${formUrl}\n\nWe never ask for OTP, PIN, or any payment. — Right Agent Group`
           await query(

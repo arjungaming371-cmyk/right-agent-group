@@ -85,6 +85,14 @@ export async function POST(req: NextRequest) {
          VALUES ($1, $2, $2, $3, $3, $4, $5, 'pending', now())`,
         [leadId, name, normalizedPhone, loanType, loanAmount]
       )
+      await query(
+        `INSERT INTO comm_logs (lead_id, type, summary, outcome)
+         VALUES ($1, 'alert', $2, 'loan_confirmed')`,
+        [
+          leadId,
+          `🟢 APPLICATION SUBMITTED — Lead confirmed ${loanType || "Loan"} application for ${loanAmount ? "₹" + Number(loanAmount).toLocaleString("en-IN") : "unspecified amount"}. Follow up for KYC & document collection.`
+        ]
+      ).catch(() => {})
     } catch (e: any) {
       console.warn("Could not insert into loan_applications:", e?.message)
     }

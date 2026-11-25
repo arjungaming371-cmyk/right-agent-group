@@ -193,6 +193,13 @@ export async function POST(req: NextRequest) {
               : `Post-call WhatsApp send attempted (${result.error})`,
             outcome: result.ok ? "sent" : "failed",
           })
+          // Alert: Lead confirmed loan interest on call — flag in Human Attention queue
+          await db.from("comm_logs").insert({
+            lead_id: leadId,
+            type: "alert",
+            summary: `🟢 LOAN CONFORMED ON CALL — Caller confirmed loan interest during call. Application link sent on WhatsApp. Follow up for documentation & bank processing.`,
+            outcome: "loan_confirmed",
+          }).catch(() => {})
         } else if (target && outcome === "missed") {
           const result = await sendMissedCallFollowUp(target, lead?.name || "there", waBranch)
           await db.from("comm_logs").insert({

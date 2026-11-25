@@ -122,7 +122,6 @@ const NAV_SECTIONS: NavSection[] = [
       { key: "leads",     label: "Leads",             icon: Users,     roles: ["admin", "agent", "viewer", "branch_manager"] },
       { key: "loans",     label: "Loan Applications", icon: FileText,  roles: ["admin", "agent", "viewer", "branch_manager"] },
       { key: "queue",     label: "Call Queue",        icon: PhoneCall, roles: ["admin", "agent", "viewer", "branch_manager"] },
-      { key: "calendar",  label: "Calendar",          icon: CalendarDays, roles: ["admin", "agent", "viewer", "branch_manager", "developer"] },
     ],
   },
   {
@@ -151,7 +150,7 @@ const NAV_SECTIONS: NavSection[] = [
 
 const VIEW_TITLES: Record<ViewKey, { title: string; sub: string }> = {
   analytics: { title: "Analytics",         sub: "Performance across calls, leads, and WhatsApp" },
-  attention: { title: "Needs Human",        sub: "Customers who asked for a person — or need one" },
+  attention: { title: "Needs Human",        sub: "Confirmed loans, scheduled callbacks, office visits & escalations" },
   leads:    { title: "Leads",              sub: "Pipeline and qualified prospects" },
   loans:    { title: "Loan Applications",  sub: "Incoming loan enquiries" },
   queue:    { title: "Call Queue",         sub: "Bulk outbound calling — queue, radar, and controls" },
@@ -439,7 +438,7 @@ export default function DashboardShell() {
       case "voice":        return <VoiceLogsView role={role} initialSearch={seedSearch?.view === "voice" ? seedSearch.q : undefined} />
       case "whatsapp":     return <WhatsAppView role={role} initialSearch={seedSearch?.view === "whatsapp" ? seedSearch.q : undefined} />
       case "instagram":    return <InstagramView initialSearch={seedSearch?.view === "instagram" ? seedSearch.q : undefined} />
-      case "calendar":     return <CalendarView role={role} />
+      case "calendar":     return <AttentionView role={role} />
       case "security":     return <SecurityView role={role} />
       case "script":       return <ScriptView />
       case "attention":    return <AttentionView role={role} />
