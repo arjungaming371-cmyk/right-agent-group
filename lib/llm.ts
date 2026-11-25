@@ -233,15 +233,16 @@ SPEAK LIKE A REAL HYDERABAD AGENT (NOT AN IVR):
 //      anything added there would leak into English calls.
 const WHATSAPP_BREVITY = `
 
-KEEP IT SHORT (WhatsApp):
-- 1-2 short sentences. This is a chat, not a letter — long messages get ignored.
-- Lead with the answer. No preamble ("Sure sir, let me tell you..."), no sign-off, no repeating their question back.
-- Prefer the simple everyday word over the formal one, in whatever language you are replying in.
-- Short forms are fine here because this is READ, not spoken: EMI, KYC, PAN, ID, docs, a/c, no., approx, min/max, and number shorthand like 5L or 10k.
-- One question per message, at the end. Never stack two asks.
-- KNOW WHAT YOU ARE SPEAKING: scan the conversation AND the context provided below BEFORE asking anything. If the customer already gave a detail in this chat (name, city, loan need, anything — or it is already in the KNOWN FACTS above), NEVER ask for it again — not even as a confirmation question. State it in passing and move on. Ask each question at most once per chat.
-- Skip anything they did not ask for. If the answer is a number, send the number.
-- The REPLY LANGUAGE rule above still wins over everything here. Being brief NEVER means switching to a different language or script.`
+KEEP IT SHORT & TEXT LIKE A REAL HUMAN (WhatsApp):
+- 1-3 short, natural sentences. Text like a real human advisor on WhatsApp — NOT like a scripted call-center robot.
+- Lead directly with the answer to what the customer just asked. No preamble ("Sure sir, let me tell you..."), no restating their question.
+- NEVER repeat boilerplate endings across messages (BAN repeating "our loan officer will call you soon", "Ma loan officer meeku soon contact avtharu", or "do you need any other help? / Inkemaina help kavala?" on every reply). Only mention a callback if the customer asked for a call/manager or a detail genuinely requires officer confirmation.
+- NO "Sir," / "Hi sir!" spam in an ongoing chat: do not start every reply with "Sir," or "Hi sir!" when you are already mid-conversation.
+- STAY ON TOPIC: If the customer mentions something specific (like a branch meeting, a website, or talking to the manager), address THAT naturally and directly instead of forcing an unrelated loan pitch.
+- LANGUAGE MATCHING (CRITICAL): Reply in the EXACT language of the customer's LATEST message (English -> pure English, Telugu/Tenglish -> Tenglish, Hindi -> Hinglish), even if earlier messages in the chat history were in a different language.
+- Prefer simple everyday words. Short forms are fine here because this is READ, not spoken: EMI, KYC, PAN, ID, docs, approx, min/max, 5L, 10k.
+- KNOW WHAT YOU ARE SPEAKING: scan the conversation AND the context provided below BEFORE asking anything. If the customer already gave a detail in this chat (name, city, loan need, anything), NEVER ask for it again.
+- The REPLY LANGUAGE rule above still wins over everything here.`
 
 // NOTE: this block must not contain example sentences in any specific
 // language. An earlier version illustrated the number rule with English
@@ -766,6 +767,20 @@ export async function chatWithLLM(
     // loudly, because a pattern here means the prompt rule needs rethinking.
     console.error(`LANGUAGE: ${language} WhatsApp reply came back in native script twice; sending it anyway`)
     return toTanglish(reply)
+  }
+  // If the customer texted in English on WhatsApp, never let prior Tenglish/Hinglish
+  // chat history pull Priya's reply back into Tenglish/Hinglish.
+  const TENGLISH_LEAK_RE = /\b(meeku|naaku|naku|maaku|ma|mee|chala|avtharu|avtundi|kavala|kavali|unnaya|unna|cheyandi|cheyadam|cheptharu|gurinchi|endukante|inka|ippudu|cheppandi|kudaradu|matrame|aayana|chestharu|chestham|matladatharu)\b/i
+  if (channel === "whatsapp" && language === "english" && TENGLISH_LEAK_RE.test(reply)) {
+    const corrected = await runChat(
+      messages,
+      systemPrompt +
+        "\n\n=== LANGUAGE VIOLATION — REWRITE IN PURE ENGLISH ===\nThe customer wrote in English, but your draft used Telugu/Tenglish words. Rewrite the SAME reply in 100% natural, casual, human-like English (zero Telugu/Tenglish words). Do NOT start with 'Sir,' or end with 'Inkemaina help kavala?' or 'Do you need any other help?'.",
+      { numPredict: opts?.numPredict ?? replyTokenBudget(language, channel), timeoutMs: opts?.timeoutMs }
+    ).catch(() => "")
+    if (corrected && !TENGLISH_LEAK_RE.test(corrected) && !NATIVE_SCRIPT_RE.test(corrected)) {
+      return corrected
+    }
   }
   if (wantsNativeScript(language, channel) && !NATIVE_SCRIPT_RE.test(reply)) {
     // Slip: the call style mandates native script, but the model answered
