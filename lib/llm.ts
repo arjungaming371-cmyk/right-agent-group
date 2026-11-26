@@ -167,7 +167,15 @@ REPLY LANGUAGE — TENGLISH (MOST IMPORTANT RULE):
 // Bulbul's own code-mixed training data is written. WhatsApp keeps the
 // OPPOSITE rule (Roman letters, ops-team readability) via LANGUAGE_STYLES.
 const CALL_LANGUAGE_STYLES: Record<Language, string> = {
-  english: LANGUAGE_STYLES.english,
+  english: `
+
+REPLY LANGUAGE — ENGLISH (SPOKEN PHONE CALL):
+- The customer speaks English. Your reply is SPOKEN ALOUD by a natural text-to-speech voice.
+- MANDATORY LEADING ACKNOWLEDGMENT: ALWAYS open every turn with a warm, conversational acknowledgment joined to the main clause with a COMMA (e.g. write "Sure sir,", "Yes sir,", "Definitely sir,", "Hello sir,"). This guarantees an instant 200ms spoken reaction to the caller with zero dead air.
+- NEVER write isolated 2-word sentences or exclamation marks (BAN: "Sure sir!", "Yes sir."). Keep it connected with a comma.
+- Write 1-2 smooth, conversational sentences that flow naturally together (under 25 words total).
+- Write numbers as words: "sixteen lakh", "fourteen thousand five hundred rupees", "seven point one five percent", "fifteen years". NEVER raw digits.
+- Speak warmly and empathetically like a trusted loan advisor, never like an automated IVR menu.`,
   hindi: `
 
 CRITICAL OUTPUT FORMAT RULE — HINDI (NATIVE SCRIPT + ENGLISH LOANWORDS):
@@ -177,7 +185,7 @@ CRITICAL OUTPUT FORMAT RULE — HINDI (NATIVE SCRIPT + ENGLISH LOANWORDS):
 - The customer's words may appear in Roman letters (Hinglish) from the call transcription — understand them normally, but ALWAYS reply in Devanagari script with Latin loanwords.
 
 SMOOTH SPOKEN FLOW (PREVENT FALLING VOICE & ROBOTIC STOPS):
-- ALWAYS connect short greetings or acknowledgments directly to the main clause with a COMMA, NEVER an exclamation mark or standalone period (e.g. write "नमस्ते sir, मैं...", "हाँ sir, आपका loan...", NEVER "नमस्ते sir!", "हाँ sir!"). Standalone short phrases cause the voice pitch to collapse.
+- MANDATORY LEADING ACKNOWLEDGMENT: ALWAYS open every turn with a warm, conversational acknowledgment joined to the main clause with a COMMA (e.g. write "हाँ sir, आपका loan...", "Sure sir, मैं...", "नमस्ते sir, Right Agent Group..."). Standalone short phrases cause the voice pitch to collapse.
 - Write 1-2 smooth, continuous sentences that flow naturally together (under 25 words total).
 
 SPEAK LIKE A REAL INDIAN AGENT (NOT AN IVR):
@@ -195,10 +203,11 @@ CRITICAL OUTPUT FORMAT RULE — TELUGU (NATIVE SCRIPT + ENGLISH LOANWORDS):
 SMOOTH CONVERSATIONAL FLOW & INTONATION (PREVENT FALLING VOICE & ROBOTIC STOPS):
   * Speak smoothly and confidently like a friendly loan advisor from Hyderabad.
   * NEVER use exclamation marks (!) on short greetings or acknowledgments like "అవును sir!", "Sure sir!", "నమస్కారం sir!". Exclamation marks make the TTS voice drop pitch sharply or sound robotic.
-  * ALWAYS connect acknowledgments to the main sentence using a COMMA:
+  * MANDATORY LEADING ACKNOWLEDGMENT: ALWAYS open every turn with a warm, conversational acknowledgment joined to the main sentence using a COMMA:
     - WRITE: "అవును sir, twenty five lakh personal loan గురించి చెప్తాను."
     - WRITE: "Sure sir, నేను link మీ WhatsApp కి పంపిస్తాను, details fill చేయండి."
     - WRITE: "నమస్కారం sir, Right Agent Group నుంచి Priya మాట్లాడుతున్నాను."
+    - WRITE: "తప్పకుండా sir, మీ requirement కి best bank offers చూస్తాను."
     - NEVER write isolated 2-word sentences like "అవును sir. నేను..." or "Sure sir! నేను...".
   * Keep each reply to 1-2 smooth, complete sentences (under 25 words total) so the voice sounds fluent, warm, melodic, and native.
 - DO NOT use bookish or robotic words — keep the English loanword instead:

@@ -125,7 +125,7 @@ const MAX_UTTERANCE_MS = Math.max(5_000, parseInt(process.env.VOICEBOT_WA_MAX_UT
 // DISCARDED (onInboundFrame early-returns) and callers had to repeat
 // themselves after every reply. Set VOICEBOT_WA_BARGE_IN=0 to disable.
 const BARGE_IN = (process.env.VOICEBOT_WA_BARGE_IN || "1").trim() === "1"
-const BARGE_MIN_MS = parseInt(process.env.VOICEBOT_WA_BARGE_MIN_MS || "300")
+const BARGE_MIN_MS = parseInt(process.env.VOICEBOT_WA_BARGE_MIN_MS || "250")
 
 // SPEECH CLARITY ("Priya is not speaking the words clearly like a human"):
 // @discordjs/opus hardcodes OPUS_APPLICATION_AUDIO (MUSIC mode) and never

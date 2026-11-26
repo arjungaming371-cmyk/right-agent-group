@@ -134,7 +134,7 @@ const DEBUG_DIR = process.env.VOICEBOT_DEBUG_DIR || ""
 // full reply. If Priya interrupts herself, the line echoes — raise
 // VOICEBOT_BARGE_ENERGY until she doesn't, or leave the feature off. Then
 // call again and talk over her; she should stop within ~300ms.
-const BARGE_IN = (process.env.VOICEBOT_BARGE_IN || "0").trim() === "1"
+const BARGE_IN = (process.env.VOICEBOT_BARGE_IN || "1").trim() === "1"
 // Deliberately well above ENERGY_THRESHOLD: a frame only counts as the
 // caller interrupting if it is clearly louder than the level we accept as
 // speech when the line is otherwise quiet. Echo and line noise sit low.
@@ -142,13 +142,13 @@ const BARGE_ENERGY = parseInt(process.env.VOICEBOT_BARGE_ENERGY || String(ENERGY
 // ...and it has to be SUSTAINED. A single loud frame is a cough, a door, or
 // a codec artefact. A third of a second of continuous energy is someone
 // actually talking.
-const BARGE_MIN_MS = parseInt(process.env.VOICEBOT_BARGE_MIN_MS || "300")
+const BARGE_MIN_MS = parseInt(process.env.VOICEBOT_BARGE_MIN_MS || "250")
 // How far ahead of real time we let playback run. Audio already handed to
 // Exotel cannot be recalled, so this is the worst-case overhang the caller
 // still hears after interrupting. With barge-in off it is Infinity, which
 // reproduces the original behaviour exactly: push the whole reply into the
 // socket at once and let Exotel buffer it.
-const PLAYBACK_LEAD_MS = BARGE_IN ? parseInt(process.env.VOICEBOT_PLAYBACK_LEAD_MS || "300") : Infinity
+const PLAYBACK_LEAD_MS = BARGE_IN ? parseInt(process.env.VOICEBOT_PLAYBACK_LEAD_MS || "250") : Infinity
 
 // ---------- Echo probe ----------
 //
