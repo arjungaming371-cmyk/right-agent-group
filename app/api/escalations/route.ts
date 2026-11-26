@@ -41,28 +41,46 @@ function parseCallSummary(raw: any): { fullSpokenName?: string; address?: string
 }
 
 function buildComprehensiveDescription(item: any): string {
+  // If rich AI memory summary exists from the autonomous intelligence engine:
+  if (item.memory_summary && item.memory_summary.trim().length > 25) {
+    const mem = item.memory_summary.trim()
+    if (item.category === "loan_confirmed") {
+      return `🟢 LOAN CONFIRMED ON CALL — ${mem}`
+    } else if (item.category === "callback") {
+      return `📞 CALLBACK REQUESTED — ${mem}`
+    } else if (item.category === "branch_visit") {
+      return `🏢 OFFICE VISIT SCHEDULED — ${mem}`
+    }
+    return mem
+  }
+
   const parts: string[] = []
   const product = item.product_interest ? item.product_interest.toUpperCase() : "LOAN"
   const amount = item.loan_amount ? `₹${Number(item.loan_amount).toLocaleString("en-IN")}` : ""
   const location = item.lead_address || item.city || ""
+  const profile = item.employment_type ? `Occupation/Profile: ${item.employment_type}.` : ""
 
   if (item.category === "loan_confirmed") {
     parts.push(`🟢 LOAN CONFIRMED ON CALL — Caller confirmed requirement for ${product}${amount ? ` of ${amount}` : ""}${location ? ` in ${location}` : ""}.`)
+    if (profile) parts.push(profile)
     if (item.call_duration) {
       const mins = Math.floor(item.call_duration / 60)
       const secs = item.call_duration % 60
-      parts.push(`Discussed on a ${mins > 0 ? `${mins}m ` : ""}${secs}s call (${item.call_language || "Telugu"}).`)
+      parts.push(`Discussed in detail on a ${mins > 0 ? `${mins}m ` : ""}${secs}s call (${item.call_language || "Telugu"}).`)
     }
-    parts.push(`Application link sent on WhatsApp. Follow up for documentation & bank processing.`)
+    parts.push(`Official application link sent on WhatsApp (+${item.lead_whatsapp || item.lead_phone || ""}). Follow up for KYC, college/income documentation & bank file processing.`)
   } else if (item.category === "callback") {
-    parts.push(`Callback requested for ${product}${amount ? ` (${amount})` : ""}.`)
-    if (item.quote) parts.push(`Note: "${item.quote}".`)
+    parts.push(`📞 CALLBACK REQUESTED — Follow-up requested for ${product}${amount ? ` (${amount})` : ""}.`)
+    if (item.quote) parts.push(`Customer note: "${item.quote}".`)
+    if (location) parts.push(`Location: ${location}.`)
   } else if (item.category === "branch_visit") {
-    parts.push(`Office visit appointment confirmed.`)
+    parts.push(`🏢 OFFICE VISIT — In-person appointment requested.`)
     if (item.location) parts.push(`Branch: ${item.location}.`)
+    if (item.quote) parts.push(`Notes: "${item.quote}".`)
   } else {
-    parts.push(`Customer requested human assistance during conversation.`)
+    parts.push(`⚠️ ATTENTION NEEDED — Customer requested human assistance during conversation.`)
     if (item.quote) parts.push(`Statement: "${item.quote}".`)
+    if (item.call_duration) parts.push(`Call duration: ${item.call_duration}s.`)
   }
 
   return parts.join(" ")
@@ -79,15 +97,19 @@ export async function GET(req: NextRequest) {
       `SELECT c.id, c.lead_id, c.summary, c.outcome, c.created_at,
               l.name AS lead_name, l.phone AS lead_phone, l.whatsapp_number AS lead_whatsapp,
               l.status AS lead_status, l.address AS lead_address,
-              COALESCE(last_app.loan_type, l.product_interest) AS product_interest,
-              COALESCE(last_app.app_loan_amount, l.loan_amount) AS loan_amount,
-              last_app.monthly_income, last_app.employment_type, last_app.city,
+              COALESCE(last_app.loan_type, l.product_interest, lm.facts->>'loan_type') AS product_interest,
+              COALESCE(last_app.app_loan_amount, l.loan_amount, (lm.facts->>'loan_amount_needed')::numeric) AS loan_amount,
+              COALESCE(last_app.monthly_income, (lm.facts->>'monthly_income')::numeric) AS monthly_income,
+              COALESCE(last_app.employment_type, lm.facts->>'employment_type') AS employment_type,
+              COALESCE(last_app.city, lm.facts->>'city', l.address) AS city,
+              lm.summary AS memory_summary,
               last_call.duration AS call_duration,
               last_call.sentiment AS call_sentiment,
               last_call.language AS call_language,
               last_call.ai_summary AS call_ai_summary
          FROM comm_logs c
          LEFT JOIN leads l ON l.id = c.lead_id
+         LEFT JOIN lead_memory lm ON lm.lead_id = l.id
          LEFT JOIN LATERAL (
            SELECT v.duration, v.sentiment, v.language, v.ai_summary
              FROM voice_calls v
@@ -116,13 +138,16 @@ export async function GET(req: NextRequest) {
               e.confidence, e.location, e.channel, e.notes, e.raw_quote, e.created_at,
               l.name AS lead_name, l.phone AS lead_phone, l.whatsapp_number AS lead_whatsapp,
               l.status AS lead_status, l.address AS lead_address,
-              l.product_interest, l.loan_amount,
+              COALESCE(l.product_interest, lm.facts->>'loan_type') AS product_interest,
+              COALESCE(l.loan_amount, (lm.facts->>'loan_amount_needed')::numeric) AS loan_amount,
+              lm.summary AS memory_summary,
               last_call.duration AS call_duration,
               last_call.sentiment AS call_sentiment,
               last_call.language AS call_language,
               last_call.ai_summary AS call_ai_summary
          FROM calendar_events e
          LEFT JOIN leads l ON l.id = e.lead_id
+         LEFT JOIN lead_memory lm ON lm.lead_id = l.id
          LEFT JOIN LATERAL (
            SELECT v.duration, v.sentiment, v.language, v.ai_summary
              FROM voice_calls v
@@ -145,11 +170,13 @@ export async function GET(req: NextRequest) {
               a.whatsapp_number AS lead_whatsapp, a.loan_type AS product_interest,
               a.loan_amount, a.status AS loan_status, a.submitted_at, a.monthly_income,
               a.employment_type, a.city, a.address AS lead_address,
+              lm.summary AS memory_summary,
               last_call.duration AS call_duration,
               last_call.sentiment AS call_sentiment,
               last_call.language AS call_language,
               last_call.ai_summary AS call_ai_summary
          FROM loan_applications a
+         LEFT JOIN lead_memory lm ON lm.lead_id = a.lead_id
          LEFT JOIN LATERAL (
            SELECT v.duration, v.sentiment, v.language, v.ai_summary
              FROM voice_calls v
@@ -202,6 +229,10 @@ export async function GET(req: NextRequest) {
           }
           if (r.loan_amount) existing.loan_amount = existing.loan_amount || r.loan_amount
           if (r.product_interest) existing.product_interest = existing.product_interest || r.product_interest
+          if (r.memory_summary) {
+            existing.memory_summary = existing.memory_summary || r.memory_summary
+            existing.full_description = buildComprehensiveDescription(existing)
+          }
         }
         continue
       }
@@ -226,6 +257,7 @@ export async function GET(req: NextRequest) {
         monthly_income: r.monthly_income,
         employment_type: r.employment_type,
         city: r.city,
+        memory_summary: r.memory_summary || null,
         call_duration: r.call_duration,
         call_sentiment: r.call_sentiment,
         call_language: r.call_language,
@@ -252,6 +284,10 @@ export async function GET(req: NextRequest) {
           existing.priority = "critical"
           if (la.loan_amount) existing.loan_amount = existing.loan_amount || la.loan_amount
           if (la.product_interest) existing.product_interest = existing.product_interest || la.product_interest
+          if (la.memory_summary) {
+            existing.memory_summary = existing.memory_summary || la.memory_summary
+            existing.full_description = buildComprehensiveDescription(existing)
+          }
         }
         continue
       }
@@ -275,6 +311,7 @@ export async function GET(req: NextRequest) {
         monthly_income: la.monthly_income,
         employment_type: la.employment_type,
         city: la.city,
+        memory_summary: la.memory_summary || null,
         call_duration: la.call_duration,
         call_sentiment: la.call_sentiment,
         call_language: la.call_language,
@@ -336,6 +373,7 @@ export async function GET(req: NextRequest) {
         next_action: parsedAi.nextAction || null,
         created_at: ce.created_at,
         priority: isOverdue ? "critical" : isDueSoon ? "high" : "medium",
+        memory_summary: ce.memory_summary || null,
       }
 
       items.push({

@@ -40,6 +40,7 @@ export type AttentionItem = {
   call_sentiment?: string | null
   call_language?: string | null
   next_action?: string | null
+  memory_summary?: string | null
   full_description?: string | null
   event_at?: string | null
   location?: string | null
@@ -318,10 +319,12 @@ export default function AttentionView({ role }: { role: Role }) {
                       </span>
                     </div>
 
-                    {/* Clean authentic description box matching website design */}
-                    <p className="mt-2 rounded-lg bg-[var(--overlay-soft)] px-3 py-2 text-[12.5px] italic text-[var(--text-secondary)] leading-relaxed">
-                      “{item.full_description || item.summary || "Customer confirmed interest and requested loan advisor follow-up."}”
-                    </p>
+                    {/* Full Comprehensive Lead Intelligence Briefing for Loan Officer */}
+                    <div className="mt-2.5 rounded-lg bg-[var(--overlay-soft)] p-3 text-[12.5px] leading-relaxed border border-[var(--border)]">
+                      <p className="text-[12.5px] text-[var(--text-primary)] leading-relaxed">
+                        {item.full_description || item.summary || "Customer confirmed interest and requested loan advisor follow-up."}
+                      </p>
+                    </div>
                   </div>
 
                   {/* Actions matching website design */}
