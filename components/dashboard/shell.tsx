@@ -6,7 +6,7 @@ import {
   Users, FileText, Phone, MessageCircle, ShieldCheck,
   ScrollText, LogOut, Mic, BarChart3, UserCog, Search, Menu, X, BookOpen,
   Sparkles, Instagram, PhoneCall, type LucideIcon,
-  BellRing, HeartPulse, CalendarDays,
+  BellRing, HeartPulse, CalendarDays, Landmark,
 } from "lucide-react"
 import { ToastProvider } from "../ui/toast"
 import { Skeleton, SkeletonList } from "../ui/skeleton"
@@ -50,6 +50,10 @@ const ScriptView    = dynamic(() => import("./script-view"), {
 const KnowledgeBaseView = dynamic(() => import("./knowledge-base-view"), {
   ssr: false,
   loading: () => <ViewFallback label="Knowledge Base" />,
+})
+const BankingIntelligenceView = dynamic(() => import("./banking-intelligence-view"), {
+  ssr: false,
+  loading: () => <ViewFallback label="Banking Intelligence" />,
 })
 
 // Floating ops chatbot (Executive Operations Commander) — drag bubble bottom-
@@ -100,7 +104,7 @@ function ViewFallback({ label }: { label: string }) {
 // NOTE 2026-10-03: the Branches & Staff AI console was removed per owner
 // decision — the multi-branch backend (session scoping, per-branch script
 // fallback, usage meters) stays intact, just with no management UI.
-export type ViewKey = "leads" | "loans" | "queue" | "voice" | "whatsapp" | "instagram" | "calendar" | "security" | "script" | "knowledge" | "analytics" | "dev-logs" | "attention"
+export type ViewKey = "leads" | "loans" | "queue" | "voice" | "whatsapp" | "instagram" | "calendar" | "security" | "script" | "knowledge" | "brie" | "analytics" | "dev-logs" | "attention"
 export type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
 
 const ROLE_LABEL: Record<Role, string> = { admin: "Administrator", agent: "Loan Officer", viewer: "Viewer", developer: "Administrator", branch_manager: "Operations Manager" }
@@ -135,6 +139,7 @@ const NAV_SECTIONS: NavSection[] = [
       { key: "security", label: "Security",       icon: ShieldCheck,  roles: ["admin", "developer"] },
       { key: "script",   label: "Priya's Script", icon: ScrollText,   roles: ["admin", "agent", "viewer", "branch_manager"] },
       { key: "knowledge",label: "Knowledge Base", icon: BookOpen,     roles: ["admin", "agent", "viewer", "branch_manager"] },
+      { key: "brie",     label: "Banking Intelligence", icon: Landmark, roles: ["admin", "agent", "viewer", "branch_manager"] },
     ],
   },
   {
@@ -158,6 +163,7 @@ const VIEW_TITLES: Record<ViewKey, { title: string; sub: string }> = {
   security: { title: "Security",           sub: "Access control, compliance policy, and live system health" },
   script:   { title: "Priya's Script",     sub: "View and edit what Priya says on every call" },
   knowledge:{ title: "Knowledge Base",     sub: "Facts Priya can pull into any call or chat, on any turn" },
+  brie:     { title: "Banking Intelligence Engine (BRIE)", sub: "Verified bank rates, RBI guidelines, KFS terms, and lender policy research" },
   "dev-logs": { title: "Activity Logs",   sub: "Your activity, login history, and system events" },
 }
 
@@ -440,6 +446,7 @@ export default function DashboardShell() {
       case "script":       return <ScriptView />
       case "attention":    return <AttentionView role={role} />
       case "knowledge":    return <KnowledgeBaseView role={role} />
+      case "brie":         return <BankingIntelligenceView />
       case "dev-logs":     return role === "developer" ? <DeveloperLogsView userEmail={userEmail} /> : null
       default:             return null
     }

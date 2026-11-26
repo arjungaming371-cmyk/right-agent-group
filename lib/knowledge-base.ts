@@ -27,6 +27,7 @@
 
 import { query } from "./db"
 import { rewriteKnowledgeQuery, canAffordExtraCompletion } from "./llm"
+import { queryBankingKnowledge } from "./brie/rag"
 
 const MAX_SNIPPET = 800 // must fit the longest KB entry whole — clipping mid-entry (e.g. a rate table) makes the model invent the cut-off facts
 const MAX_RESULTS = 3
@@ -124,6 +125,17 @@ function formatHits(hits: KbHit[]): string {
 export async function searchKnowledgeBase(userQuery: string): Promise<string> {
   const q = (userQuery || "").trim()
   if (!looksLikeQuestion(q)) return ""
+
+  // 1. Try BRIE (Banking Research Intelligence Engine) for specific lenders/bank products & charges
+  try {
+    const brieResult = await queryBankingKnowledge({ query: q })
+    if (brieResult.answer_status === "verified" && brieResult.summary_for_ai) {
+      console.log(`🏦 [BRIE hit] matched ${brieResult.institution?.display_name || "Bank"}: "${q}"`)
+      return brieResult.summary_for_ai
+    }
+  } catch (err: any) {
+    console.error("BRIE query failed:", err?.message)
+  }
 
   try {
     const isIndicScript = /[ऀ-ॿఀ-౿]/.test(q)
