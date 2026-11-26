@@ -407,3 +407,15 @@ export async function seedBrieMasterData() {
 
   console.log("✅ [BRIE] Seeding complete: Institutions, Product Taxonomy, Verified Claims, and Regulatory Instruments active.")
 }
+
+if (process.argv[1] && process.argv[1].replace(/\\/g, "/").includes("seed-cohort1")) {
+  seedBrieMasterData()
+    .then(() => {
+      console.log("BRIE seeding finished successfully.")
+      process.exit(0)
+    })
+    .catch((err) => {
+      console.error("BRIE seeding failed:", err)
+      process.exit(1)
+    })
+}
