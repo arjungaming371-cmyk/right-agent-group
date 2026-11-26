@@ -460,7 +460,12 @@ export function parseTranscriptHistory(rawTranscript: unknown): { role: "user" |
     // Cap working set to last 40 turns
     return (transcript as { role?: unknown; text?: unknown }[])
       .slice(-40)
-      .map((t) => ({ role: t.role === "ai" ? ("model" as const) : ("user" as const), content: typeof t.text === "string" ? t.text : "" }))
+      .map((t) => ({
+        role: t.role === "ai" ? ("model" as const) : ("user" as const),
+        content: typeof t.text === "string"
+          ? t.text.replace(/\s*…?\s*\([^)]*interrupted[^)]*\)/gi, "").trim()
+          : ""
+      }))
       .filter((m) => m.content)
   } catch {
     return []

@@ -339,6 +339,7 @@ function normalizeForTts(text) {
   // exists to prevent. English "one minute" (from the number rules below)
   // is correct in every language pair.
   out = out.replace(/&/g, " and ")
+  out = out.replace(/\s*…?\s*\([^)]*interrupted[^)]*\)/gi, "") // strip system stage directions
   out = out.replace(/(\.{2,}|…)/g, ".") // ellipses to single period
   out = out.replace(/!\s+/g, ", ") // soften exclamations to commas to prevent terminal pitch crashes
   out = out.replace(/!+$/g, ".") // end of text exclamation softened to period
