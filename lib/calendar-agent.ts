@@ -882,3 +882,54 @@ export function runCalendarExtractionForCall(callSid: string): void {
     }
   })()
 }
+
+/**
+ * Fire-and-forget background extraction for WhatsApp conversations.
+ * Detects in-person branch visits, callbacks, and document deadlines agreed upon in WhatsApp chat.
+ */
+export function runCalendarExtractionForWhatsApp(leadId: string): void {
+  if (!leadId) return
+  const lock = `wa-cal:${leadId}`
+  if (activeCallLocks.has(lock)) return
+  activeCallLocks.add(lock)
+
+  ;(async () => {
+    try {
+      const res = await query(
+        `SELECT wm.id, wm.direction, wm.content, wm.created_at,
+                l.name as lead_name, l.phone as lead_phone, l.branch_id
+           FROM whatsapp_messages wm
+           LEFT JOIN leads l ON wm.lead_id = l.id
+          WHERE wm.lead_id = $1
+            AND wm.created_at > now() - interval '6 hours'
+          ORDER BY wm.created_at ASC`,
+        [leadId]
+      )
+      if (!res.rows.length || res.rows.length < 2) return
+
+      const text = res.rows
+        .map((m: any) => `${m.direction === "inbound" ? "Customer" : "Priya"}: ${m.content}`)
+        .join("\n")
+      const lastMsg = res.rows[res.rows.length - 1]
+
+      const events = await extractCalendarEventsFromText({
+        conversationText: text,
+        sourceAt: new Date(lastMsg.created_at),
+        sourceType: "whatsapp_message",
+        sourceId: String(lastMsg.id),
+        leadId,
+        leadName: lastMsg.lead_name,
+        leadPhone: lastMsg.lead_phone,
+        branchId: lastMsg.branch_id,
+      })
+
+      for (const ev of events) {
+        await persistCalendarEvent(ev, { dryRun: false, autoSyncQueue: false })
+      }
+    } catch (err: any) {
+      console.error("[calendar-agent] runCalendarExtractionForWhatsApp background error:", err?.message || err)
+    } finally {
+      activeCallLocks.delete(lock)
+    }
+  })()
+}

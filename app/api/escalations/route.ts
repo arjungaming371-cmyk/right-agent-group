@@ -47,9 +47,18 @@ function buildComprehensiveDescription(item: any): string {
     if (item.category === "loan_confirmed") {
       return `🟢 LOAN CONFIRMED ON CALL — ${mem}`
     } else if (item.category === "callback") {
-      return `📞 CALLBACK REQUESTED — ${mem}`
+      const cbDetails = [
+        item.quote ? `Follow-up quote: "${item.quote}".` : (item.notes ? `Notes: ${item.notes}` : ""),
+        `Lead Intel: ${mem}`
+      ].filter(Boolean).join(" ")
+      return `📞 CALLBACK REQUESTED — ${cbDetails}`
     } else if (item.category === "branch_visit") {
-      return `🏢 OFFICE VISIT SCHEDULED — ${mem}`
+      const visitDetails = [
+        item.notes || "Customer confirmed in-person office visit.",
+        item.location ? `Branch Location: ${item.location}.` : "",
+        `Lead Intel: ${mem}`
+      ].filter(Boolean).join(" ")
+      return `🏢 OFFICE VISIT SCHEDULED — ${visitDetails}`
     }
     return mem
   }

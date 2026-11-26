@@ -800,6 +800,14 @@ INSTRUCTIONS FOR NEW INQUIRY:
 
   refreshLeadScore(lead.id).catch(() => {})
 
+  // Autonomous calendar extraction: detects office visits, callbacks, and deadlines from WhatsApp conversation
+  try {
+    const { runCalendarExtractionForWhatsApp } = await import("@/lib/calendar-agent")
+    runCalendarExtractionForWhatsApp(lead.id)
+  } catch (err: any) {
+    console.error("[whatsapp] Calendar extraction trigger error:", err?.message || err)
+  }
+
   // LOAN EDIT REQUESTS: fire-and-forget, after the customer already has
   // their reply — never adds latency, never writes to loan_applications
   // itself, only flags a pending row for staff to approve/reject.
