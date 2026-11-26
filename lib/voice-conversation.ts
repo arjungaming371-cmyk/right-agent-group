@@ -415,16 +415,16 @@ export async function startCall(
   } else if (isNonLoanCustom) {
     if (language === "telugu") {
       greeting = hasName
-        ? `నమస్కారం ${name} garu, Right Agent Group నుంచి ప్రియ మాట్లాడుతున్నాను sir. మాట్లాడటానికి ఒక నిమిషం time ఉందా?`
-        : `నమస్కారం sir, Right Agent Group నుంచి ప్రియ మాట్లాడుతున్నాను. మాట్లాడటానికి ఒక నిమిషం time ఉందా?`
+        ? `నమస్తే ${name} garu, NIAT Admissions నుంచి మాట్లాడుతున్నాను. మాట్లాడటానికి ఒక నిమిషం time ఉందా?`
+        : `నమస్తే sir, NIAT Admissions నుంచి మాట్లాడుతున్నాను. మాట్లాడటానికి ఒక నిమిషం time ఉందా?`
     } else if (language === "hindi") {
       greeting = hasName
-        ? `नमस्ते ${name} जी, Right Agent Group से प्रिया बात कर रही हूँ। क्या आपके पास बात करने के लिए एक मिनट का समय है?`
-        : `नमस्ते sir, Right Agent Group से प्रिया बात कर रही हूँ। क्या आपके पास बात करने के लिए एक मिनट का समय है?`
+        ? `नमस्ते ${name} जी, NIAT Admissions से बात कर रही हूँ। क्या आपके पास बात करने के लिए एक मिनट का समय है?`
+        : `नमस्ते, NIAT Admissions से बात कर रही हूँ। क्या आपके पास बात करने के लिए एक मिनट का समय है?`
     } else {
       greeting = hasName
-        ? `Hello ${name}, this is Priya calling from Right Agent Group. Do you have a minute to speak?`
-        : `Hello sir, this is Priya calling from Right Agent Group. Do you have a minute to speak?`
+        ? `Hello ${name}, this is NIAT Admissions. Do you have a minute to speak?`
+        : `Hello, this is NIAT Admissions. Do you have a minute to speak?`
     }
   } else if (direction === "inbound") {
     greeting = greetingFor(language, "inbound", hasName ? name! : undefined)
@@ -671,7 +671,7 @@ STRICT OPERATIONAL DIRECTIVES:
   if (direction === "inbound") {
     merged = [
       merged,
-      "CALL DIRECTION RULE: THIS IS AN INCOMING / INBOUND CALL. The customer CALLED YOU (Right Agent Group). You ANSWERED their incoming call. NEVER say \"I called you\", \"నేను call చేశాను\", \"call chesaanu\", or \"maine call kiya\" — you did NOT call them, THEY called you. Say \"Right Agent Group ki call chesinanduku thanks\", \"Cheppandi sir, meeku ela help cheyagalanu?\", or \"How can I help you today?\"." ,
+      "CALL DIRECTION RULE: THIS IS AN INCOMING / INBOUND CALL. The customer CALLED YOU (NIAT Admissions). You ANSWERED their incoming call. NEVER say \"I called you\", \"నేను call చేశాను\", \"call chesaanu\", or \"maine call kiya\" — you did NOT call them, THEY called you. Say \"NIAT Admissions ki call chesinanduku thanks\", \"Cheppandi sir, meeku ela help cheyagalanu?\", or \"How can I help you today?\"." ,
     ].filter(Boolean).join("\n\n")
   } else if (direction === "outbound") {
     merged = [
@@ -845,8 +845,8 @@ ${isEmiCollection ? "- Move directly to demanding payment of their overdue loan 
       : instructions
       ? `Acknowledge warmly and state your exact call purpose according to the operator instructions.`
       : direction === "inbound"
-      ? `Acknowledge warmly: "నమస్కారం sir, Right Agent Group కి call చేసినందుకు ధన్యవాదాలు, చెప్పండి sir మీకు ఎలా help చేయగలను?"`
-      : `Acknowledge warmly and state your purpose naturally: "Hello sir, నమస్కారం! Right Agent Group నుంచి మాట్లాడుతున్నాను, మీకు ఏదైనా loan requirement ఉందా sir?"`
+      ? `Acknowledge warmly: "నమస్కారం sir, NIAT Admissions కి call చేసినందుకు ధన్యవాదాలు, చెప్పండి sir మీకు ఎలా help చేయగలను?"`
+      : `Acknowledge warmly and state your purpose naturally: "Hello sir, నమస్కారం! NIAT Admissions నుంచి మాట్లాడుతున్నాను, మీరు technology programmes గురించి చూస్తున్నారా sir?"`
     }
   * When the customer responds with "time undi cheppandi", "aa time undi", "time undi", "cheppandi", "haa cheppandi", or "avunu cheppandi":
     They are saying: "Yes, I have time, go ahead and speak / tell me why you called."

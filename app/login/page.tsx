@@ -10,9 +10,9 @@ import OtpForm from "./otp-form"
 export const dynamic = "force-dynamic"
 
 const FEATURES = [
-  { icon: Phone,         title: "AI Voice Agent",       desc: "Priya calls leads in English, Hinglish & Tenglish" },
-  { icon: MessageCircle, title: "WhatsApp Automation",  desc: "Official Meta Cloud API — instant follow-ups" },
-  { icon: ShieldCheck,   title: "Enterprise Security",  desc: "Signed sessions, audit trail, allowlisted access" },
+  { icon: Phone,         title: "AI Admissions Counsellor", desc: "Calls students & parents in English, Hinglish & Tenglish" },
+  { icon: MessageCircle, title: "WhatsApp Automation",      desc: "Instant brochures, curriculum & NAT links" },
+  { icon: ShieldCheck,   title: "Enterprise Admissions CRM",desc: "Lead pipeline, qualification tracking & audit log" },
 ]
 
 export default async function LoginPage({
@@ -57,25 +57,30 @@ export default async function LoginPage({
 
         {/* Brand */}
         <div className="relative flex items-center gap-3">
-          <Image
-            src="/logo.png"
-            width={180}
-            height={48}
-            alt="Right Agent Group"
-            className="h-12 w-auto object-contain drop-shadow-[0_4px_16px_rgba(56,189,248,0.2)]"
-          />
+          <div className="flex items-center gap-3">
+            <div className="h-11 w-11 rounded-2xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-cyan-400 flex items-center justify-center font-black text-white text-xl shadow-[0_0_25px_rgba(59,130,246,0.5)]">
+              N
+            </div>
+            <div className="flex flex-col">
+              <div className="flex items-center gap-2">
+                <span className="font-extrabold text-[22px] tracking-tight text-white">NIAT</span>
+                <span className="px-2 py-0.5 text-[10px] font-bold rounded bg-blue-500/20 text-blue-400 border border-blue-500/30">ADMISSIONS</span>
+              </div>
+              <span className="text-[11px] text-[#94a3b8] font-medium tracking-wide">NxtWave Innovation in Advanced Technologies</span>
+            </div>
+          </div>
         </div>
 
         {/* Headline */}
         <div className="relative">
           <div
-            className="mb-5 inline-flex items-center gap-2 rounded-full border border-[#8b7cff]/25 bg-[#8b7cff]/10 px-3.5 py-1.5 text-[12px] font-medium text-[#a5b0ff]"
+            className="mb-5 inline-flex items-center gap-2 rounded-full border border-blue-500/25 bg-blue-500/10 px-3.5 py-1.5 text-[12px] font-medium text-blue-400"
           >
             <Sparkles size={12} strokeWidth={2} />
-            AI-powered loan operations
+            AI-powered technology admissions
           </div>
           <h1 className="max-w-[420px] text-[34px] font-bold leading-[1.15] tracking-tight text-white">
-            Every lead answered.{" "}
+            Every inquiry answered.{" "}
             <span
               style={{
                 background: "linear-gradient(135deg, #a5b0ff, #5b7cfa 50%, #38bdf8)",
@@ -84,19 +89,18 @@ export default async function LoginPage({
                 color: "transparent",
               }}
             >
-              Every call handled.
+              Every family guided.
             </span>
           </h1>
           <p className="mt-4 max-w-[400px] text-[14.5px] leading-relaxed text-[#9aa5bd]">
-            Priya — your AI agent — qualifies leads over phone and WhatsApp around the clock,
-            in three languages, and sends application links automatically.
+            NIAT AI Admissions Counsellor interacts with students and parents over phone, WhatsApp, and Instagram around the clock, explaining the 4-year curriculum, NAT assessment, and collaborating universities.
           </p>
 
           {/* Feature list */}
           <div className="mt-10 flex flex-col gap-5">
             {FEATURES.map(({ icon: Icon, title, desc }) => (
               <div key={title} className="flex items-start gap-3.5">
-                <span className="mt-0.5 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[10px] border border-[#8b7cff]/25 bg-[#8b7cff]/10 text-[#a5b0ff]">
+                <span className="mt-0.5 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[10px] border border-blue-500/25 bg-blue-500/10 text-blue-400">
                   <Icon size={16} strokeWidth={1.9} />
                 </span>
                 <div>
@@ -111,7 +115,7 @@ export default async function LoginPage({
         {/* Footer note */}
         <div className="relative space-y-2">
           <div className="text-[11.5px] text-[#64708c]">
-            © {new Date().getFullYear()} Right Agent Group · Hyderabad
+            © {new Date().getFullYear()} NIAT · NxtWave of Innovation in Advanced Technologies
           </div>
         </div>
       </section>

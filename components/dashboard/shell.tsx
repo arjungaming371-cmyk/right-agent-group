@@ -21,7 +21,7 @@ import AttentionView from "./attention-view"
 // "ever opened" flag so the chunk is fetched on first use, not at mount.
 const LoanAppsView = dynamic(() => import("./loan-apps-view"), {
   ssr: false,
-  loading: () => <ViewFallback label="Loan Applications" />,
+  loading: () => <ViewFallback label="Applications" />,
 })
 const QueueView = dynamic(() => import("./queue-view"), {
   ssr: false,
@@ -45,7 +45,7 @@ const SecurityView  = dynamic(() => import("./security-view"), {
 })
 const ScriptView    = dynamic(() => import("./script-view"), {
   ssr: false,
-  loading: () => <ViewFallback label="Priya's Script" />,
+  loading: () => <ViewFallback label="Admissions Script" />,
 })
 const KnowledgeBaseView = dynamic(() => import("./knowledge-base-view"), {
   ssr: false,
@@ -103,7 +103,7 @@ function ViewFallback({ label }: { label: string }) {
 export type ViewKey = "leads" | "loans" | "queue" | "voice" | "whatsapp" | "instagram" | "calendar" | "security" | "script" | "knowledge" | "analytics" | "dev-logs" | "attention"
 export type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
 
-const ROLE_LABEL: Record<Role, string> = { admin: "Administrator", agent: "Loan Officer", viewer: "Viewer", developer: "Administrator", branch_manager: "Operations Manager" }
+const ROLE_LABEL: Record<Role, string> = { admin: "Administrator", agent: "Admissions Counsellor", viewer: "Viewer", developer: "Administrator", branch_manager: "Admissions Director" }
 
 type NavItem = { key: ViewKey; label: string; icon: LucideIcon; roles: Role[] }
 type NavSection = { title: string; items: NavItem[] }
@@ -117,7 +117,7 @@ const NAV_SECTIONS: NavSection[] = [
       { key: "attention", label: "Needs Human",      icon: BellRing,  roles: ["admin", "agent", "viewer", "branch_manager"] },
       { key: "analytics", label: "Analytics",        icon: BarChart3, roles: ["admin", "agent", "viewer", "branch_manager"] },
       { key: "leads",     label: "Leads",             icon: Users,     roles: ["admin", "agent", "viewer", "branch_manager"] },
-      { key: "loans",     label: "Loan Applications", icon: FileText,  roles: ["admin", "agent", "viewer", "branch_manager"] },
+      { key: "loans",     label: "Applications",      icon: FileText,  roles: ["admin", "agent", "viewer", "branch_manager"] },
       { key: "queue",     label: "Call Queue",        icon: PhoneCall, roles: ["admin", "agent", "viewer", "branch_manager"] },
     ],
   },
@@ -132,9 +132,9 @@ const NAV_SECTIONS: NavSection[] = [
   {
     title: "System",
     items: [
-      { key: "security", label: "Security",       icon: ShieldCheck,  roles: ["admin", "developer"] },
-      { key: "script",   label: "Priya's Script", icon: ScrollText,   roles: ["admin", "agent", "viewer", "branch_manager"] },
-      { key: "knowledge",label: "Knowledge Base", icon: BookOpen,     roles: ["admin", "agent", "viewer", "branch_manager"] },
+      { key: "security", label: "Security",          icon: ShieldCheck,  roles: ["admin", "developer"] },
+      { key: "script",   label: "Admissions Script", icon: ScrollText,   roles: ["admin", "agent", "viewer", "branch_manager"] },
+      { key: "knowledge",label: "Knowledge Base",    icon: BookOpen,     roles: ["admin", "agent", "viewer", "branch_manager"] },
     ],
   },
   {
@@ -147,17 +147,17 @@ const NAV_SECTIONS: NavSection[] = [
 
 const VIEW_TITLES: Record<ViewKey, { title: string; sub: string }> = {
   analytics: { title: "Analytics",         sub: "Performance across calls, leads, and WhatsApp" },
-  attention: { title: "Needs Human",        sub: "Confirmed loans, scheduled callbacks, office visits & escalations" },
-  leads:    { title: "Leads",              sub: "Pipeline and qualified prospects" },
-  loans:    { title: "Loan Applications",  sub: "Incoming loan enquiries" },
+  attention: { title: "Needs Human",        sub: "Confirmed admissions, scheduled callbacks, campus visits & escalations" },
+  leads:    { title: "Leads",              sub: "Student pipeline and qualified applicants" },
+  loans:    { title: "Applications",       sub: "Incoming student admission applications" },
   queue:    { title: "Call Queue",         sub: "Bulk outbound calling — queue, radar, and controls" },
   voice:    { title: "Voice Logs",         sub: "Voice bot call activity and outcomes" },
   whatsapp: { title: "WhatsApp Chat",      sub: "Live customer conversations" },
   instagram:{ title: "Instagram Chat",     sub: "Direct messages and post comment auto-replies" },
   calendar: { title: "Calendar",           sub: "Upcoming calls and follow-up callbacks" },
   security: { title: "Security",           sub: "Access control, compliance policy, and live system health" },
-  script:   { title: "Priya's Script",     sub: "View and edit what Priya says on every call" },
-  knowledge:{ title: "Knowledge Base",     sub: "Facts Priya can pull into any call or chat, on any turn" },
+  script:   { title: "Admissions Script",  sub: "View and edit what NIAT AI says on every call" },
+  knowledge:{ title: "Knowledge Base",     sub: "Facts NIAT AI can pull into any call or chat, on any turn" },
   "dev-logs": { title: "Activity Logs",   sub: "Your activity, login history, and system events" },
 }
 
@@ -477,16 +477,21 @@ export default function DashboardShell() {
         <div className="flex h-16 flex-shrink-0 items-center justify-between border-b border-[var(--border-light)] px-4">
           <button
             onClick={() => { setView("analytics"); setMobileNavOpen(false) }}
-            className="flex items-center gap-2.5 min-w-0 flex-1 text-left cursor-pointer hover:opacity-90 transition-opacity"
-            title="Right Agent Group — Operations Console"
+            className="flex items-center gap-2.5 min-w-0 flex-1 text-left cursor-pointer hover:opacity-95 transition-opacity"
+            title="NIAT Admissions — Operations Console"
           >
-            <Image
-              src="/logo.png"
-              width={180}
-              height={48}
-              alt="Right Agent Group"
-              className="h-10 w-auto max-w-[195px] object-contain drop-shadow-[0_2px_8px_rgba(56,189,248,0.15)]"
-            />
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="h-9 w-9 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-cyan-400 flex items-center justify-center font-black text-white text-base shadow-[0_0_15px_rgba(59,130,246,0.4)] flex-shrink-0">
+                N
+              </div>
+              <div className="flex flex-col min-w-0 leading-tight">
+                <div className="flex items-center gap-1.5">
+                  <span className="font-extrabold text-[16px] tracking-tight text-white">NIAT</span>
+                  <span className="px-1.5 py-0.5 text-[8.5px] font-bold rounded bg-blue-500/20 text-blue-400 border border-blue-500/30">ADMISSIONS</span>
+                </div>
+                <span className="text-[10px] text-[var(--text-muted)] font-medium tracking-wide truncate">NxtWave Innovation</span>
+              </div>
+            </div>
           </button>
           <button
             onClick={() => setMobileNavOpen(false)}

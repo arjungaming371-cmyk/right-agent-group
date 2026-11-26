@@ -21,36 +21,37 @@ export const metadata: Metadata = {
   // Title template: child routes set their own title and get the brand suffix
   // automatically ("About — Right Agent Group").
   title: {
-    default: "Right Agent Group — AI Voice & WhatsApp for Lending Teams",
-    template: "%s — Right Agent Group",
+    default: "NIAT Admissions AI — AI Voice & WhatsApp for Technology Admissions",
+    template: "%s — NIAT Admissions",
   },
   description:
-    "Priya, your AI agent, qualifies loan leads over phone, WhatsApp and Instagram in English, Hindi and Telugu — 24/7, with live sentiment, instant follow-ups and a full operations console.",
+    "NIAT AI Admissions Counsellor guides students and parents over phone, WhatsApp and Instagram in English, Hindi and Telugu — 24/7, explaining the 4-year curriculum, NAT assessment, collaborating universities and admission process.",
   keywords: [
-    "AI voice agent",
-    "loan lead qualification",
-    "WhatsApp Business Cloud API",
-    "AI calling agent India",
+    "NIAT",
+    "NxtWave",
+    "AI voice counsellor",
+    "technology admissions",
+    "NAT assessment",
+    "AI admissions agent India",
     "Telugu AI voice",
-    "lead pipeline automation",
-    "Right Agent Group",
+    "B.Tech admissions",
   ],
-  applicationName: "Right Agent Group",
-  authors: [{ name: "Right Agent Group" }],
+  applicationName: "NIAT Admissions",
+  authors: [{ name: "NIAT Admissions" }],
   openGraph: {
     type: "website",
-    siteName: "Right Agent Group",
+    siteName: "NIAT Admissions",
     locale: "en_IN",
     url: SITE_URL,
-    title: "Right Agent Group — AI Voice & WhatsApp for Lending Teams",
+    title: "NIAT Admissions AI — Intelligent Technology Admissions Counsellor",
     description:
-      "Every lead answered. Every call handled. Priya — your AI agent — works phone, WhatsApp and Instagram around the clock, in English, Hindi and Telugu.",
+      "Every inquiry answered. Every call handled. NIAT AI Admissions Counsellor guides students and parents over phone, WhatsApp and Instagram in English, Hindi and Telugu.",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Right Agent Group — AI Voice & WhatsApp for Lending Teams",
+    title: "NIAT Admissions AI — Technology Admissions Counsellor",
     description:
-      "Every lead answered. Every call handled. AI voice + WhatsApp + Instagram, one operations console.",
+      "Every inquiry answered. Every call handled. AI voice + WhatsApp + Instagram admissions console.",
   },
   robots: {
     index: true,

@@ -256,11 +256,11 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
 
   const DEFAULT_PRESETS: AgendaPreset[] = [
     { id: "p1", label: "Standard intro", text: "" },
-    { id: "p2", label: "New enquiry — send link", text: "Reference what they enquired about, offer to send the official application link, and book a callback." },
-    { id: "p3", label: "Balance transfer offer", text: "Introduce our balance-transfer offer and ask if their current EMI feels heavy. Don't pitch personal loans." },
-    { id: "p4", label: "Top-up on existing loan", text: "Ask if they need extra liquidity or renovation funds with an instant pre-approved top-up on their existing loan." },
-    { id: "p5", label: "Documents pending", text: "Politely follow up regarding pending documents needed to proceed with their loan submission." },
-    { id: "p6", label: "Old lead — still looking?", text: "Re-engage regarding their earlier loan enquiry with today's current competitive bank interest rates." },
+    { id: "p2", label: "New enquiry — send link", text: "Introduce NIAT undergraduate technology admissions, explain the practical learning model alongside the B.Tech degree, and offer to share the official details on WhatsApp." },
+    { id: "p3", label: "NAT entrance guidance", text: "Explain the NxtWave Assessment Test (NAT) format: 90-minute online test, problem solving & maths, no negative marking, and help them take the entrance step." },
+    { id: "p4", label: "Hyderabad campus guidance", text: "Introduce collaborating Hyderabad universities (Chaitanya, Aurora, SMR), modern labs, campus transport and hostel options." },
+    { id: "p5", label: "Parent discussion follow-up", text: "Address parent priorities: UGC degree validity, academic quality, fee transparency, hostel safety, and arrange 1-on-1 counselling." },
+    { id: "p6", label: "12th / MPC eligibility check", text: "Check intermediate completion year, stream (MPC / other), and reassure that prior coding experience is not required." },
   ]
 
   const [presets, setPresets] = useState<AgendaPreset[]>(DEFAULT_PRESETS)
@@ -1291,7 +1291,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                   onChange={(e) => setLoanTypeFilter(e.target.value)}
                   style={{ height: 34, padding: "0 26px 0 10px", fontSize: 12.5, width: 150, borderRadius: 8, background: "var(--bg-secondary)", color: "var(--text-primary)", border: "1px solid var(--border)", lineHeight: "32px" }}
                 >
-                  <option value="all">All Loan Types</option>
+                  <option value="all">All Programs</option>
                   {LOAN_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
                 </select>
                 <select
@@ -1380,7 +1380,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                       <input type="checkbox" checked={allSelected} onChange={toggleAll} title="Select all shown leads" style={{ width: 14, height: 14, cursor: "pointer", accentColor: "var(--accent-violet)" }} />
                     )}
                   </th>
-                  {["LEAD", "SCORE", "ADDRESS", "LOAN TYPE", "VALUE", "STATUS", "FORM", "CALLS", "UPDATED", "ACTIONS"].map((h) => (
+                  {["LEAD", "SCORE", "ADDRESS", "PROGRAM", "BUDGET / VALUE", "STATUS", "FORM", "CALLS", "UPDATED", "ACTIONS"].map((h) => (
                     <th key={h} style={{
                       padding: "10px 12px",
                       textAlign: h === "CALLS" ? "center" : "left",
@@ -2325,7 +2325,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
               )
             })}
             <div style={{ marginBottom: 12 }}>
-              <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Loan Type (Optional)</label>
+              <label style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4, display: "block" }}>Program Interest (Optional)</label>
               <select value={form.product_interest} onChange={(e) => setForm({ ...form, product_interest: e.target.value })}>
                 <option value="">-- None / Blank (General Inquiry) --</option>
                 {PRODUCT_GROUPS.map((g) => (

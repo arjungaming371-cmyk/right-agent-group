@@ -29,7 +29,7 @@ const RISK_COLOR: Record<string, string> = { low: "var(--accent-green)", medium:
 // automatically replies in English, Roman-script Hinglish, or Tenglish
 // depending on what the customer speaks (language rules live in code).
 const LANG_LABELS: Record<string, { label: string; short: string; desc: string }> = {
-  base: { label: "Universal Script", short: "ALL", desc: "One script for all languages — Priya auto-switches between English, Hinglish, and Tenglish" },
+  base: { label: "Universal Script", short: "ALL", desc: "One script for all languages — NIAT AI auto-switches between English, Hinglish, and Tenglish" },
 }
 
 // Script Manager tabs — Base + the per-channel editable scripts
@@ -37,7 +37,7 @@ const LANG_LABELS: Record<string, { label: string; short: string; desc: string }
 type Tab = "base" | "voice" | "whatsapp" | "instagram"
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode; desc: string }[] = [
-  { id: "base", label: "Base Script", icon: <Languages size={14} strokeWidth={2} />, desc: "Priya's core persona, rules & qualification flow (all channels)" },
+  { id: "base", label: "Base Script", icon: <Languages size={14} strokeWidth={2} />, desc: "NIAT AI core persona, admissions rules & counselling flow (all channels)" },
   { id: "voice", label: "Voice Calls", icon: <Phone size={14} strokeWidth={2} />, desc: "Spoken openers & closings for Phone + WhatsApp calls (English, Hindi, Telugu)" },
   { id: "whatsapp", label: "WhatsApp", icon: <MessageSquare size={14} strokeWidth={2} />, desc: "24-hour fallback texts (when the customer messaged us first)" },
   { id: "instagram", label: "Instagram", icon: <Instagram size={14} strokeWidth={2} />, desc: "DM persona & public comment reply prompts" },
@@ -1074,10 +1074,10 @@ export default function ScriptView() {
             </span>
             <div>
               <div style={{ fontWeight: 700, fontSize: 15 }}>
-                Priya's Script — {LANG_LABELS[selected]?.label}
+                NIAT AI Admissions Script — {LANG_LABELS[selected]?.label}
               </div>
               <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                The exact instruction Priya follows on every call and WhatsApp chat — she auto-switches language to match the customer
+                The exact instruction NIAT AI follows on every call and WhatsApp chat — auto-switches language to match the student or parent
               </div>
             </div>
           </div>

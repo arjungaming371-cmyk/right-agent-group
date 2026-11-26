@@ -28,10 +28,10 @@ export default function GlobalError({ error, reset }: { error: Error & { digest?
       minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
       gap: 16, padding: 24, textAlign: "center", background: "var(--bg-primary, #0a0e1a)", color: "var(--text-primary, var(--text-primary))",
     }}>
-      <div style={{ fontSize: 40, fontWeight: 700 }}>R</div>
+      <div style={{ fontSize: 40, fontWeight: 700 }}>N</div>
       <div style={{ fontSize: 18, fontWeight: 600 }}>Something went wrong</div>
       <div style={{ fontSize: 13, color: "var(--text-muted, var(--text-secondary))", maxWidth: 420 }}>
-        Right Agent Group hit an unexpected error. Try again, and if it keeps happening, contact your administrator.
+        NIAT Admissions hit an unexpected error. Try again, and if it keeps happening, contact your administrator.
       </div>
       {error?.digest && (
         <div style={{ fontSize: 11, fontFamily: "var(--font-mono, monospace)", color: "var(--text-muted)" }}>

@@ -41,7 +41,7 @@ export const META_TEMPLATES_CATALOG: MetaTemplateDefinition[] = [
   },
   {
     name: "loan_application_form",
-    displayName: "Loan Application Form Link",
+    displayName: "NIAT Admissions Application Form Link",
     category: "UTILITY",
     pricing: "Utility (~₹0.115/msg)",
     languages: [
@@ -50,30 +50,30 @@ export const META_TEMPLATES_CATALOG: MetaTemplateDefinition[] = [
       { code: "te", label: "Telugu (te)" },
       { code: "hi", label: "Hindi (hi)" },
     ],
-    header: "Right Agent Group - Loan Services",
-    body: "Hello {{1}}, thank you for choosing Right Agent Group. Your online loan application link is ready. Please click the button below to complete your basic details and submit your application in just 2 minutes.",
-    bodyVariables: ["Customer Name"],
-    footer: "100% Secure • No Advance Fees • 20+ Banks",
+    header: "NIAT Admissions - Technology Programmes",
+    body: "Hello {{1}}, thank you for inquiring about NIAT. Your online admissions application link is ready. Please click the button below to review programme options and submit your details in just 2 minutes.",
+    bodyVariables: ["Student Name"],
+    footer: "NIAT • NxtWave Innovation in Advanced Technologies",
     button: {
       type: "URL",
       text: "Complete Application",
       urlType: "DYNAMIC",
       exampleUrl: "https://13.201.0.111.sslip.io/l/{{1}}",
     },
-    description: "Utility template to send one-time secure loan application links to leads. The CRM dynamically maps {{1}} to customer name and button URL to their personalized application token.",
-    samplePreview: "Hello Rajesh,\n\nThank you for choosing Right Agent Group. Your online loan application link is ready. Please click the button below to complete your basic details and submit your application in just 2 minutes.\n\n[Button: Complete Application]",
+    description: "Utility template to send one-time secure admissions application links to leads. The CRM dynamically maps {{1}} to student name and button URL to their personalized application token.",
+    samplePreview: "Hello Rajesh,\n\nThank you for inquiring about NIAT. Your online admissions application link is ready. Please click the button below to review programme options and submit your details in just 2 minutes.\n\n[Button: Complete Application]",
     copyTextForMeta: `Template Name: loan_application_form
 Category: Utility
 Language: English (en)
 
 Header (Text):
-Right Agent Group - Loan Services
+NIAT Admissions - Technology Programmes
 
 Body:
-Hello {{1}}, thank you for choosing Right Agent Group. Your online loan application link is ready. Please click the button below to complete your basic details and submit your application in just 2 minutes.
+Hello {{1}}, thank you for inquiring about NIAT. Your online admissions application link is ready. Please click the button below to review programme options and submit your details in just 2 minutes.
 
 Footer:
-100% Secure • No Advance Fees • 20+ Banks
+NIAT • NxtWave Innovation in Advanced Technologies
 
 Button (URL - Dynamic):
 Button Text: Complete Application
@@ -82,7 +82,7 @@ Website URL: https://13.201.0.111.sslip.io/l/{{1}}`,
   },
   {
     name: "call_followup",
-    displayName: "Call Follow-up & Loan Summary",
+    displayName: "Call Follow-up & Admissions Summary",
     category: "UTILITY",
     pricing: "Utility (~₹0.115/msg)",
     languages: [
@@ -91,13 +91,13 @@ Website URL: https://13.201.0.111.sslip.io/l/{{1}}`,
       { code: "te", label: "Telugu (te)" },
       { code: "hi", label: "Hindi (hi)" },
     ],
-    header: "Loan Discussion Summary",
-    body: "Hello {{1}}, thank you for speaking with our loan advisor regarding your loan inquiry. As discussed, our 20+ partner banks offer competitive interest rates starting at 8.5% p.a. with fast-track processing. Click below if you would like to proceed with your application.",
-    bodyVariables: ["Customer Name"],
-    footer: "Right Agent Group • Banking Assistance",
+    header: "Admissions Discussion Summary",
+    body: "Hello {{1}}, thank you for speaking with our admissions counsellor regarding NIAT undergraduate technology programmes. Along with the university B.Tech degree, our practical curriculum covers AI, robotics and real-world projects. Click below to explore the official programme.",
+    bodyVariables: ["Student Name"],
+    footer: "NIAT Admissions • NxtWave Innovation",
     button: {
       type: "URL",
-      text: "View Loan Details",
+      text: "View Programme Details",
       urlType: "STATIC",
       exampleUrl: "https://13.201.0.111.sslip.io/apply",
     },

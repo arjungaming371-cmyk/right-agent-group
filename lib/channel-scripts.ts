@@ -95,80 +95,85 @@ export type VoiceOpeners = Record<
 >
 
 export const DEFAULT_VOICE_OPENERS: VoiceOpeners = {
-  // AI + recording disclosure (2026-11-13). Spoken FIRST, before any greeting,
-  // on every call. Deliberately a fixed server-side line and NOT model
-  // generated: a compliance statement has to be exact every single time.
   disclosure: {
     english:
-      "Hello, this is Priya, an AI assistant calling from Right Agent Group. This call is recorded for quality and training.",
+      "Hi, I'm NIAT's AI Admissions Assistant. This call is being recorded for quality purposes. May I continue?",
     hindi:
-      "नमस्ते, मैं Priya हूँ, Right Agent Group से एक AI assistant. यह call quality और training के लिए record हो रही है.",
+      "नमस्ते, मैं NIAT का AI Admissions Assistant हूँ। यह कॉल रिकॉर्ड की जा रही है। क्या हम बात जारी रख सकते हैं?",
     telugu:
-      "నమస్కారం, నేను Priya, Right Agent Group నుంచి AI assistant మాట్లాడుతున్నాను. ఈ call quality మరియు training కోసం record అవుతుంది.",
+      "నమస్తే, నేను NIAT AI Admissions Assistant ని. ఈ కాల్ రికార్డ్ అవుతోంది. మనం మాట్లాడవచ్చా?",
   },
   disclosureWithName: {
     english:
-      "Hello {name}, this is Priya, an AI assistant calling from Right Agent Group. This call is recorded for quality and training.",
+      "Hi {name}, I'm NIAT's AI Admissions Assistant. This call is being recorded for quality purposes. May I continue?",
     hindi:
-      "नमस्ते {name} ji, मैं Priya हूँ, Right Agent Group से एक AI assistant. यह call quality और training के लिए record हो रही है.",
+      "नमस्ते {name}, मैं NIAT का AI Admissions Assistant हूँ। यह कॉल रिकॉर्ड की जा रही है। क्या हम बात जारी रख सकते हैं?",
     telugu:
-      "నమస్కారం {name} garu, నేను Priya, Right Agent Group నుంచి AI assistant మాట్లాడుతున్నాను. ఈ call quality మరియు training కోసం record అవుతుంది.",
+      "నమస్తే {name}, నేను NIAT AI Admissions Assistant ని. ఈ కాల్ రికార్డ్ అవుతోంది. మనం మాట్లాడవచ్చా?",
   },
   cold: {
     english:
-      "Hello, good morning! This is Priya calling from Right Agent Group, Hyderabad — we help people get loans from over 20 banks without the running around. Do you have a minute? I'd love to know if you have any loan or financial need right now.",
-    // Native script + Latin loanwords (2026-09-30, native-speech pipeline):
-    // these lines are SPOKEN by Bulbul v3, which reads తెలుగు/देवनागरी with
-    // native phonemes — Roman-letter openers sounded foreign next to the
-    // now-native-script replies.
+      "Hi! I'm calling from NIAT Admissions. Are you exploring college options after 12th?",
     hindi:
-      "नमस्ते, good morning! मैं Priya बोल रही हूँ Right Agent Group, Hyderabad से — हम twenty plus banks से loan दिलवाने में मदद करते हैं. एक मिनट है आपके पास? बताइए, आपको कोई loan की ज़रूरत है क्या अभी?",
+      "नमस्ते! मैं NIAT Admissions से बोल रही हूँ। क्या आप 12वीं के बाद college options देख रहे हैं?",
     telugu:
-      "నమస్కారం sir, Right Agent Group, Hyderabad నుంచి Priya మాట్లాడుతున్నాను — మేము twenty plus banks తో మీకు best loan help చేస్తాం. ఒక మినిట్ time ఉందా sir, మీకేమైనా loan requirement ఉందా?",
+      "హలో! నేను NIAT Admissions నుండి మాట్లాడుతున్నాను. మీరు 12th తర్వాత college options చూస్తున్నారా?",
   },
   coldWithName: {
-    english: `Hello {name}! This is Priya calling from Right Agent Group, Hyderabad — we help people get loans from over 20 banks without the running around. Do you have a minute? I'd love to know if you have any loan need right now.`,
-    hindi: `नमस्ते {name} ji! मैं Priya बोल रही हूँ Right Agent Group, Hyderabad से — हम twenty plus banks से loan दिलवाने में मदद करते हैं. एक मिनट है आपके पास? बताइए, आपको कोई loan की ज़रूरत है क्या अभी?`,
-    telugu: `నమస్కారం {name} garu, Right Agent Group, Hyderabad నుంచి Priya మాట్లాడుతున్నాను sir — మేము twenty plus banks తో మీకు best loan help చేస్తాం. ఒక మినిట్ time ఉందా sir, మీకేమైనా loan requirement ఉందా?`,
+    english:
+      "Hi {name}! I'm calling from NIAT Admissions. Are you interested in technology-focused programmes?",
+    hindi:
+      "नमस्ते {name}! मैं NIAT Admissions से बोल रही हूँ। क्या आप technology programmes में interested हैं?",
+    telugu:
+      "హాయ్ {name}! నేను NIAT Admissions నుండి మాట్లాడుతున్నాను. మీకు technology programmes పై ఆసక్తి ఉందా?",
   },
   returning: {
     english:
-      "Hello again! This is Priya from Right Agent Group, following up on your loan interest — do you have a minute?",
+      "Hi! I'm following up on your NIAT enquiry. Have you had a chance to discuss it with your family?",
     hindi:
-      "नमस्ते! मैं Priya, Right Agent Group से, फिर से call कर रही हूँ आपके loan interest के बारे में follow-up के लिए — एक मिनट है क्या?",
+      "नमस्ते! आपकी NIAT enquiry के बारे में दोबारा कॉल किया है। क्या आपने परिवार से बात की?",
     telugu:
-      "నమస్కారం sir, Right Agent Group నుంచి Priya మాట్లాడుతున్నాను. మీ loan గురించి follow-up చేస్తున్నాను, ఒక మినిట్ time ఉందా sir?",
+      "హలో! మీ NIAT enquiry గురించి మళ్లీ కాల్ చేశాను. మీ కుటుంబ సభ్యులతో మాట్లాడారా?",
   },
   returningWithName: {
-    english: `Hello {name}! Priya here again from Right Agent Group. Just following up on our last conversation about your loan — do you have a moment?`,
-    hindi: `नमस्ते {name} ji! मैं Priya, Right Agent Group से, फिर से call कर रही हूँ आपके loan के बारे में follow-up के लिए. एक मिनट है क्या?`,
-    telugu: `నమస్కారం {name} garu, Right Agent Group నుంచి Priya మాట్లాడుతున్నాను sir. మీ loan గురించి follow-up చేద్దామని call చేశాను, ఒక మినిట్ time ఉందా sir?`,
+    english:
+      "Hi {name}! Just following up on your NIAT enquiry. Do you have any questions?",
+    hindi:
+      "नमस्ते {name}! आपकी NIAT enquiry के बारे में follow-up कर रही हूँ। कोई सवाल है?",
+    telugu:
+      "హాయ్ {name}! మీ NIAT enquiry గురించి follow-up చేస్తున్నాను. ఏమైనా సందేహాలున్నాయా?",
   },
   inbound: {
     english:
-      "Hello! Thank you for calling Right Agent Group, Hyderabad. This is Priya, how can I help you today?",
+      "Welcome to NIAT Admissions! I'm your AI assistant. How can I help you?",
     hindi:
-      "नमस्ते! Right Agent Group, Hyderabad को call करने के लिए thanks sir. मैं Priya बोल रही हूँ, बताइए मैं आपकी क्या मदद कर सकती हूँ?",
+      "NIAT Admissions में आपका स्वागत है! मैं आपकी AI Assistant हूँ। कैसे मदद कर सकती हूँ?",
     telugu:
-      "నమస్కారం sir, Right Agent Group నుంచి Priya మాట్లాడుతున్నాను. చెప్పండి, మీకు ఎలా help చేయగలను?",
+      "NIAT Admissions కి స్వాగతం! నేను మీ AI Assistant ని. మీకు ఎలా సహాయం చేయగలను?",
   },
   inboundWithName: {
-    english: `Hello {name}! Thank you for calling Right Agent Group, Hyderabad. This is Priya, how can I help you today?`,
-    hindi: `नमस्ते {name} ji! Right Agent Group, Hyderabad को call करने के लिए thanks. मैं Priya बोल रही हूँ, बताइए मैं आपकी क्या मदद कर सकती हूँ?`,
-    telugu: `నమస్కారం {name} garu, Right Agent Group నుంచి Priya మాట్లాడుతున్నాను sir. చెప్పండి, మీకు ఎలా help చేయగలను?`,
+    english:
+      "Hi {name}! Welcome to NIAT Admissions. What information are you looking for?",
+    hindi:
+      "नमस्ते {name}! NIAT Admissions में आपका स्वागत है। आपको क्या जानकारी चाहिए?",
+    telugu:
+      "నమస్తే {name}! NIAT Admissions కి స్వాగతం. మీకు ఏ సమాచారం కావాలి?",
   },
   whatsappCallback: {
     english:
-      "Hello! This is Priya from Right Agent Group, Hyderabad — you had reached out to us on WhatsApp earlier, so I'm calling you back. Do you have a minute? I'd love to know what you were looking for.",
+      "Hi! I'm calling from NIAT about your WhatsApp enquiry. Is this a good time to talk?",
     hindi:
-      "नमस्ते! मैं Priya बोल रही हूँ Right Agent Group, Hyderabad से — आपने पहले हमें WhatsApp पे reach out किया था, तो मैं आपको call back कर रही हूँ. एक मिनट है? बताइए, आपको क्या चाहिए था?",
+      "नमस्ते! आपकी WhatsApp enquiry के बारे में NIAT से कॉल कर रही हूँ। क्या अभी बात कर सकते हैं?",
     telugu:
-      "నమస్కారం sir, Right Agent Group నుంచి Priya మాట్లాడుతున్నాను — మీరు ఇంతకుముందు మా WhatsApp లో contact అయ్యారు కాబట్టి call back చేస్తున్నాను. One minute time ఉందా sir?",
+      "హలో! మీ WhatsApp enquiry గురించి NIAT నుండి కాల్ చేస్తున్నాను. ఇప్పుడు మాట్లాడవచ్చా?",
   },
   whatsappCallbackWithName: {
-    english: `Hello {name}! Priya here from Right Agent Group — you had reached out to us on WhatsApp earlier, so I'm calling you back. Do you have a minute?`,
-    hindi: `नमस्ते {name} ji! मैं Priya, Right Agent Group से — आपने पहले हमें WhatsApp पे contact किया था, तो मैं call back कर रही हूँ. एक मिनट है क्या?`,
-    telugu: `నమస్కారం {name} garu, Right Agent Group నుంచి Priya మాట్లాడుతున్నాను sir — మీరు ఇంతకుముందు మా WhatsApp లో contact అయ్యారు కాబట్టి call back చేస్తున్నాను. కొంచెం time ఉందా sir?`,
+    english:
+      "Hi {name}! I'm calling about your NIAT WhatsApp enquiry. How can I help you?",
+    hindi:
+      "नमस्ते {name}! आपकी NIAT WhatsApp enquiry के बारे में कॉल कर रही हूँ। कैसे मदद कर सकती हूँ?",
+    telugu:
+      "హాయ్ {name}! మీ NIAT WhatsApp enquiry గురించి కాల్ చేస్తున్నాను. ఎలా సహాయం చేయగలను?",
   },
 }
 
@@ -179,28 +184,30 @@ export type VoiceClosings = Record<
 
 export const DEFAULT_VOICE_CLOSINGS: VoiceClosings = {
   qualified: {
-    english: "Thank you! I'm sending a simple loan application on your WhatsApp right now — just fill it in, and our loan officer will personally consult you after that. Have a great day!",
-    hindi: "Thank you sir! मैं अभी आपके WhatsApp पे एक simple loan application भेज रही हूँ — बस उसको fill कर दीजिएगा, उसके बाद हमारे loan officer आपसे personally बात करके consult करेंगे. आपका दिन शुभ हो!",
-    telugu: "Thank you sir, నేను మీ WhatsApp కి simple loan application link పంపిస్తున్నాను, fill చేయండి. మా loan officer మీకు call చేసి discuss చేస్తారు. Have a great day sir, bye!",
+    english:
+      "Thanks, {name}! I'll share the official NIAT details and application link on WhatsApp. Our admissions team can guide you further.",
+    hindi:
+      "धन्यवाद, {name}! मैं आपको NIAT की official details और application link WhatsApp पर भेज दूँगी। हमारी admissions team आगे मदद करेगी।",
+    telugu:
+      "ధన్యవాదాలు, {name}! NIAT official details మరియు application link మీ WhatsApp కి పంపిస్తాను. మా admissions team మీకు మరింత సహాయం చేస్తుంది.",
   },
   goodbye: {
-    english: "Thank you for your time! Have a great day. Goodbye!",
-    hindi: "आपके समय के लिए thank you! आपका दिन शुभ हो. नमस्ते!",
-    telugu: "Thank you so much sir, have a great day, bye!",
+    english: "Thank you for speaking with NIAT. Have a great day. Goodbye!",
+    hindi: "NIAT से बात करने के लिए धन्यवाद। आपका दिन शुभ हो। अलविदा!",
+    telugu: "NIAT తో మాట్లాడినందుకు ధన్యవాదాలు. మీ రోజు సంతోషంగా గడవాలి. బై!",
   },
   retry: {
-    // Neutral repeat-request, NOT a name re-ask: this line can fire MID-CALL
-    // (transient LLM failure on any turn), when the name was already given
-    // and re-asking it is both awkward and forbidden by the anti-repetition
-    // rules. Just ask them to repeat the last thing they said.
-    english: "Sorry sir, I couldn't hear that clearly — could you please say that again?",
-    hindi: "Sorry sir, मुझे ठीक से सुनाई नहीं दिया — कृपया वो दोबारा बताइए.",
-    telugu: "Sorry sir, నాకు సరిగ్గా వినిపించలేదు — దయచేసి మళ్ళీ చెప్పగలరా?",
+    english: "Sorry, I missed that. Could you please repeat?",
+    hindi: "माफ़ कीजिए, मैं समझ नहीं पाई। क्या आप दोबारा बता सकते हैं?",
+    telugu: "క్షమించండి, నాకు సరిగ్గా అర్థం కాలేదు. మరోసారి చెప్పగలరా?",
   },
   rateLimit: {
-    english: "Sorry sir, we're having a brief network issue on our end. I'll have someone call you back in a few minutes to continue — thank you for your patience!",
-    hindi: "Sorry sir, हमारी तरफ से थोड़ी network problem आ रही है. कुछ मिनट में हम आपको वापस call करेंगे — thank you sir!",
-    telugu: "Sorry sir, కొంచెం network issue వచ్చింది. మేము two minutes లో మళ్ళీ call చేస్తాము — thank you sir!",
+    english:
+      "Sorry, we're experiencing a technical issue. Please try again later. Thank you!",
+    hindi:
+      "माफ़ कीजिए, अभी technical issue है। कृपया थोड़ी देर बाद संपर्क करें। धन्यवाद!",
+    telugu:
+      "క్షమించండి, ప్రస్తుతం technical issue ఉంది. కొద్దిసేపటి తర్వాత మళ్లీ ప్రయత్నించండి. ధన్యవాదాలు!",
   },
 }
 
@@ -210,9 +217,9 @@ export type WhatsAppFallbacks = Record<
 >
 
 export const DEFAULT_WHATSAPP_FALLBACKS: WhatsAppFallbacks = {
-  formLink: `Hi {name}! Thanks for speaking with Priya from {brand}. Please complete your loan application here: {link}\n\nWe never ask for OTP, PIN, or any payment. — {brand}`,
-  callFollowup: `Hi {name}! Thanks for speaking with Priya from {brand}. Feel free to message us here anytime with questions.\n\nWe never ask for OTP, PIN, or any payment. — {brand}`,
-  missedCall: `Hi {name}! We tried calling you from {brand} about a loan offer but couldn't reach you. Reply here or call us back anytime.\n\nWe never ask for OTP, PIN, or any payment. — {brand}`,
+  formLink: `Hi {name}! Thanks for speaking with NIAT Admissions. Please complete your admissions enquiry here: {link}\n\nOfficial NIAT Admissions Assistance. — NIAT`,
+  callFollowup: `Hi {name}! Thanks for speaking with NIAT Admissions. Feel free to message us here anytime with questions about courses, campuses, or NAT.\n\n— NIAT Admissions`,
+  missedCall: `Hi {name}! We tried calling you from NIAT Admissions regarding technology programmes after 12th. Reply here or call us back anytime.\n\n— NIAT Admissions`,
 }
 
 export type InstagramCommentScripts = {

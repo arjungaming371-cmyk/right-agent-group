@@ -6,28 +6,28 @@ export const dynamic = "force-dynamic"
 
 const DEFAULT_PROMPTS = [
   {
-    label: "General Loan Offer",
-    text: "Hello {name}, greetings from Right Agent Group! We provide fast-track approval on Personal, Business, and Home Loans with minimal documentation and attractive interest rates.",
+    label: "Technology Programmes Overview",
+    text: "Hello {name}, greetings from NIAT Admissions! We offer cutting-edge technology upskilling in AI, Machine Learning, and Robotics alongside your UGC-recognized B.Tech degree.",
   },
   {
-    label: "Application Follow-up",
-    text: "Hello {name}, this is a gentle follow-up regarding your recent loan inquiry with Right Agent Group. Our loan officer is ready to process your file. Please complete your application below.",
+    label: "NAT Assessment Invitation",
+    text: "Hello {name}, this is regarding your NIAT technology enquiry. The NxtWave Assessment Test (NAT) evaluates problem solving and learnability. No prior coding is required — would you like to take the entrance test?",
   },
   {
-    label: "Document Checklist",
-    text: "Hello {name}, to fast-track your loan file approval, please keep your PAN Card, Aadhaar, and 6 months bank statement ready. Our advisor will guide you through instant sanction.",
+    label: "Collaborating Campuses Guide",
+    text: "Hello {name}, NIAT programmes are available across 35+ collaborating institutions, including Chaitanya, Aurora, and SMR universities in Hyderabad. Would you like campus and hostel details?",
   },
   {
-    label: "Festive Rate Offer",
-    text: "Hello {name}, special festive offer! Avail Home and Business Loans starting from 7.25% p.a. through 20+ partner banks in Hyderabad with minimal documentation.",
+    label: "Parent Counselling Follow-up",
+    text: "Hello {name}, choosing a 4-year undergraduate college is a major family decision. Would you and your parents like a 1-on-1 career counselling session to understand degree validity and career opportunities?",
   },
   {
-    label: "Telugu Offer",
-    text: "నమస్కారం {name} గారు, రైట్ ఏజెంట్ గ్రూప్ నుండి మాట్లాడుతున్నాము. మీకు హోమ్ లోన్ లేదా బిజినెస్ లోన్ తక్కువ వడ్డీతో అవసరమా? మా బ్యాంకింగ్ కౌన్సిలర్ మీకు వెంటనే సహాయం చేస్తారు.",
+    label: "Telugu Admissions Guidance",
+    text: "నమస్కారం {name} గారు, NIAT అడ్మిషన్స్ నుండి మాట్లాడుతున్నాము. ఇంటర్మీడియట్ తర్వాత AI, రోబోటిక్స్ మరియు సాఫ్ట్‌వేర్ రంగాలలో అండర్‌గ్రాడ్యుయేట్ ప్రోగ్రామ్స్ గురించి సమాచారం కావాలా?",
   },
   {
-    label: "Hindi Offer",
-    text: "नमस्ते {name} जी, राइट एजेंट ग्रुप से नमस्कार। यदि आपको होम, पर्सनल या बिजनेस लोन की आवश्यकता है तो सबसे कम ब्याज दरों पर आवेदन करें।",
+    label: "Hindi Admissions Guidance",
+    text: "नमस्ते {name} जी, NIAT Admissions से नमस्कार। 12वीं के बाद AI, डेटा साइंस और रोबोटिक्स में टेक्नोलॉजी प्रोग्राम्स की जानकारी के लिए हम आपकी पूरी मदद कर सकते हैं।",
   },
 ]
 

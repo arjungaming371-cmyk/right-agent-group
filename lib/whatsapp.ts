@@ -100,7 +100,7 @@ function credsFor(branch?: BranchWhatsAppCtx): { token: string; phoneId: string;
 }
 
 function defaultBranding(): string {
-  return process.env.NEXT_PUBLIC_ORG_NAME || "Right Agent Group"
+  return process.env.NEXT_PUBLIC_ORG_NAME || "NIAT Admissions"
 }
 
 // ---- VOICE CALLS (WhatsApp Business Calling API) ----
@@ -795,10 +795,10 @@ export async function createOneTimeFormToken(leadId: string, preferredProduct?: 
     let product = preferredProduct
     if (!product) {
       const leadRes = await query(`SELECT product_interest FROM leads WHERE id = $1 LIMIT 1`, [leadId])
-      product = leadRes.rows?.[0]?.product_interest || "Home Loan"
+      product = leadRes.rows?.[0]?.product_interest || "B.Tech Computer Science & AI"
     }
     await query(
-      `INSERT INTO link_sends (token, lead_id, bank, product, status) VALUES ($1, $2, 'Right Agent Group', $3, 'sent')`,
+      `INSERT INTO link_sends (token, lead_id, bank, product, status) VALUES ($1, $2, 'NIAT Admissions', $3, 'sent')`,
       [token, leadId, product]
     )
   } catch (e: any) {

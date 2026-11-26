@@ -47,20 +47,20 @@ const STATUS_COLOR_PRESETS = [
 ]
 
 const QUICK_REJECTION_REASONS = [
-  "Low CIBIL score (below 650)",
-  "Salary below minimum criteria (< ₹25,000/mo)",
-  "Existing EMIs exceed 50% of monthly income",
-  "Incomplete documents / salary slips not provided",
-  "Past loan default or write-off in CIBIL report",
-  "Company not in bank approved category list",
+  "Did not appear / qualify for NAT entrance assessment",
+  "Intermediate criteria not met (< 60% in 12th / non-PCM for mandated campus)",
+  "Opted for different stream or local non-collaborating college",
+  "Parent declined admission fee or hostel arrangements",
+  "Unable to contact after repeated follow-up calls",
+  "Duplicate or invalid contact details",
 ]
 
 const QUICK_PENDING_REASONS = [
-  "3 months bank statements pending from customer",
-  "Address / KYC verification in progress",
-  "Waiting for bank underwriter review",
-  "Customer requested call back tomorrow",
-  "Co-applicant documents requested",
+  "12th marks memo / intermediate certificate pending",
+  "NAT online assessment scheduled",
+  "Parent counselling discussion in progress",
+  "Campus visit & lab tour scheduled",
+  "Collaborating university branch selection under review",
 ]
 
 export default function LoanAppsView({ role, initialSearch }: { role: Role; initialSearch?: string }) {
@@ -573,7 +573,7 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
             }}
           >
             <FileText size={15} strokeWidth={2} />
-            Customer Applications
+            Student Applications
             <span style={{ fontSize: 11, padding: "1px 7px", borderRadius: 10, background: activeTab === "apps" ? "rgba(255,255,255,0.22)" : "var(--overlay-chip)", color: activeTab === "apps" ? "#fff" : "var(--text-primary)", fontWeight: 700 }}>
               {internalApps.length}
             </span>
@@ -599,7 +599,7 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
             }}
           >
             <Link2 size={15} strokeWidth={2} />
-            Loan Type Links &amp; Routing
+            Program Links &amp; Routing
             <span style={{ fontSize: 11, padding: "1px 7px", borderRadius: 10, background: activeTab === "links" ? "rgba(255,255,255,0.22)" : "var(--overlay-chip)", color: activeTab === "links" ? "#fff" : "var(--text-primary)", fontWeight: 700 }}>
               {links.length}
             </span>
@@ -614,21 +614,21 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
             style={{ display: "flex", alignItems: "center", gap: 6, height: 36, padding: "0 14px", fontSize: 12.5 }}
           >
             <Plus size={15} strokeWidth={2.2} />
-            Add Loan Link
+            Add Program Link
           </button>
         )}
       </div>
 
       {/* ======================================================== */}
-      {/* TAB 1: CUSTOMER APPLICATIONS */}
+      {/* TAB 1: STUDENT APPLICATIONS */}
       {/* ======================================================== */}
       {activeTab === "apps" && (
         <>
-          {/* Top Banner & Financial Metrics */}
+          {/* Top Banner & Admissions Metrics */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14 }}>
             <div className="card" style={{ padding: "16px 20px" }}>
               <div style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 500, marginBottom: 4 }}>
-                Customer Applications
+                Student Applications
               </div>
               <div style={{ fontSize: 24, fontWeight: 700, color: "var(--text-primary)" }}>
                 {internalStats.total}
@@ -640,7 +640,7 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
 
             <div className="card" style={{ padding: "16px 20px" }}>
               <div style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 500, marginBottom: 4 }}>
-                Approved / Sanctioned
+                Approved / Qualified
               </div>
               <div style={{ fontSize: 24, fontWeight: 700, color: "var(--accent-green)" }}>
                 {internalStats.approved}
@@ -649,31 +649,31 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
                 </span>
               </div>
               <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
-                Verified & credit eligible
+                Verified & eligible for admission
               </div>
             </div>
 
             <div className="card" style={{ padding: "16px 20px" }}>
               <div style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 500, marginBottom: 4 }}>
-                Under Review / In Progress
+                Under Review / Counselling
               </div>
               <div style={{ fontSize: 24, fontWeight: 700, color: "var(--accent-violet)" }}>
                 {internalStats.pending}
               </div>
               <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
-                {internalStats.approved} ready for bank login
+                {internalStats.approved} ready for university login
               </div>
             </div>
 
             <div className="card" style={{ padding: "16px 20px", background: "linear-gradient(145deg, rgba(34,197,94,0.06), rgba(34,197,94,0.02))", borderColor: "rgba(34,197,94,0.25)" }}>
               <div style={{ fontSize: 12, color: "var(--accent-green)", fontWeight: 600, marginBottom: 4, display: "flex", alignItems: "center", gap: 6 }}>
-                <DollarSign size={13} strokeWidth={2.2} /> Pipeline / Approved Volume
+                <DollarSign size={13} strokeWidth={2.2} /> Admissions Pipeline
               </div>
               <div style={{ fontSize: 22, fontWeight: 700, color: "var(--text-primary)" }}>
                 {formatCurrency(internalStats.approvedVolume)}
               </div>
               <div style={{ fontSize: 11.5, color: "var(--accent-green)", marginTop: 4, fontWeight: 500 }}>
-                Est. DSA Payout: ~{formatCurrency(Math.round(internalStats.approvedVolume * 0.015))}
+                Est. Enrolment Volume
               </div>
             </div>
           </div>
@@ -787,9 +787,9 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
             ) : filteredApps.length === 0 ? (
               <div style={{ padding: 48, textAlign: "center", color: "var(--text-muted)" }}>
                 <Landmark size={36} strokeWidth={1.5} style={{ margin: "0 auto 12px", opacity: 0.4 }} />
-                <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>No customer loan applications found</div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>No student applications found</div>
                 <div style={{ fontSize: 12, marginTop: 4 }}>
-                  Applications submitted by customers on Right Agent Group forms will appear here.
+                  Applications submitted by prospective students on NIAT forms will appear here.
                 </div>
               </div>
             ) : (
@@ -797,9 +797,9 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
                 <table style={{ width: "100%", minWidth: 1040, borderCollapse: "collapse", textAlign: "left", fontSize: 12.5 }}>
                   <thead>
                     <tr style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-muted)", fontSize: 11.5, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                      <th style={{ padding: "10px 16px" }}>Applicant & Contact</th>
-                      <th style={{ padding: "10px 16px" }}>Loan Type & City</th>
-                      <th style={{ padding: "10px 16px" }}>Requested Amount</th>
+                      <th style={{ padding: "10px 16px" }}>Applicant &amp; Contact</th>
+                      <th style={{ padding: "10px 16px" }}>Program &amp; Campus</th>
+                      <th style={{ padding: "10px 16px" }}>Target / Budget</th>
                       <th style={{ padding: "10px 16px" }}>Submitted</th>
                       <th style={{ padding: "10px 16px" }}>Status & Officer Remarks</th>
                       <th style={{ padding: "10px 16px", textAlign: "right" }}>Actions</th>

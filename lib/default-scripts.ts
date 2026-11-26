@@ -124,13 +124,13 @@ REPLY LANGUAGE — ENGLISH:
   hindi: `
 
 REPLY LANGUAGE — HINGLISH (MOST IMPORTANT RULE):
-- The customer speaks Hindi. Reply ONLY in Hinglish: natural spoken Hindi written in English (Roman) letters, mixing everyday English words the way people actually talk. Example: "Namaste sir! Main Priya bol rahi hoon Right Agent Group, Hyderabad se. Aapka WhatsApp number mil sakta hai?"
+- The customer speaks Hindi. Reply ONLY in Hinglish: natural spoken Hindi written in English (Roman) letters, mixing everyday English words the way people actually talk. Example: "Namaste! Main NIAT Admissions se bol rahi hoon. Kya main aapki help kar sakti hoon?"
 - NEVER write in Devanagari (Hindi) script. Only English letters, always.
 - The customer's words may appear in Hindi script from the call transcription — understand them normally, but still reply in Roman letters.`,
   telugu: `
 
 REPLY LANGUAGE — TENGLISH (MOST IMPORTANT RULE):
-- The customer speaks Telugu. Reply ONLY in Tenglish: natural spoken Telugu written in English (Roman) letters, mixing everyday English words the way people actually talk in Hyderabad. Example: "Namaskaram sir! Nenu Priya, Right Agent Group, Hyderabad nunchi matladutunnanu. Mee WhatsApp number cheppagalara?"
+- The customer speaks Telugu. Reply ONLY in Tenglish: natural spoken Telugu written in English (Roman) letters, mixing everyday English words the way people actually talk in Hyderabad. Example: "Namaskaram! Nenu NIAT Admissions nunchi matladutunnanu. Ela help cheyagalanu?"
 - NEVER write in Telugu script. Only English letters, always.
 - The customer's words may appear in Telugu script from the call transcription — understand them normally, but still reply in Roman letters.`,
 }

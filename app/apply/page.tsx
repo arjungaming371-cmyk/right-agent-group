@@ -6,6 +6,7 @@ import {
   Loader2,
   Lock,
   MessageCircle,
+  GraduationCap,
 } from "lucide-react"
 
 const LANGUAGES = [
@@ -17,8 +18,8 @@ const LANGUAGES = [
 export default function ApplyPage() {
   const [name, setName] = useState("")
   const [phone, setPhone] = useState("")
-  const [loanType, setLoanType] = useState("")
-  const [loanAmount, setLoanAmount] = useState("")
+  const [loanType, setLoanType] = useState("") // Program / Technology Interest
+  const [loanAmount, setLoanAmount] = useState("") // 12th Stream & Year
   const [language, setLanguage] = useState("telugu")
   const [website, setWebsite] = useState("") // honeypot
   const [loading, setLoading] = useState(false)
@@ -31,8 +32,8 @@ export default function ApplyPage() {
       const p = new URLSearchParams(window.location.search)
       if (p.get("name")) setName(p.get("name") || "")
       if (p.get("phone")) setPhone(p.get("phone") || "")
-      if (p.get("type")) setLoanType(p.get("type") || "")
-      if (p.get("amount")) setLoanAmount(p.get("amount") || "")
+      if (p.get("type") || p.get("program")) setLoanType(p.get("type") || p.get("program") || "")
+      if (p.get("amount") || p.get("stream")) setLoanAmount(p.get("amount") || p.get("stream") || "")
     }
   }, [])
 
@@ -50,8 +51,8 @@ export default function ApplyPage() {
 
     const cleanName = name.trim()
     const cleanPhone = sanitizeDigits(phone)
-    const cleanLoanType = loanType.trim()
-    const cleanLoanAmount = loanAmount.trim()
+    const cleanProgram = loanType.trim()
+    const cleanStream = loanAmount.trim()
 
     if (!cleanName) {
       setErrorMsg("Please enter your full name.")
@@ -63,13 +64,8 @@ export default function ApplyPage() {
       return
     }
 
-    if (!cleanLoanType) {
-      setErrorMsg("Please enter your required loan type.")
-      return
-    }
-
-    if (!cleanLoanAmount) {
-      setErrorMsg("Please enter your estimated loan amount.")
+    if (!cleanProgram) {
+      setErrorMsg("Please enter your preferred technology program.")
       return
     }
 
@@ -82,8 +78,8 @@ export default function ApplyPage() {
         body: JSON.stringify({
           name: cleanName,
           phone: `+91${cleanPhone}`,
-          loanType: cleanLoanType,
-          loanAmount: cleanLoanAmount,
+          loanType: cleanProgram,
+          loanAmount: cleanStream || "12th Student",
           language,
           website,
         }),
@@ -127,14 +123,14 @@ export default function ApplyPage() {
           transform: "translate(-50%, -20%)",
           width: 700,
           height: 600,
-          background: "radial-gradient(circle, rgba(91,124,250,0.12) 0%, transparent 70%)",
+          background: "radial-gradient(circle, rgba(59,130,246,0.14) 0%, transparent 70%)",
           filter: "blur(90px)",
           pointerEvents: "none",
           zIndex: 0,
         }}
       />
 
-      {/* The Exact Form Card */}
+      {/* Form Card */}
       <div
         style={{
           width: "100%",
@@ -154,11 +150,18 @@ export default function ApplyPage() {
           <form onSubmit={handleSubmit} noValidate>
             {/* Header */}
             <div style={{ marginBottom: 24 }}>
-              <img
-                src="/logo.png"
-                alt="Right Agent Group"
-                style={{ height: 38, width: "auto", objectFit: "contain", marginBottom: 14 }}
-              />
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+                <div style={{ width: 38, height: 38, borderRadius: 10, background: "linear-gradient(135deg, #2563eb, #06b6d4)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900, color: "#fff", fontSize: 18, boxShadow: "0 0 16px rgba(37,99,235,0.4)" }}>
+                  N
+                </div>
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ fontSize: 17, fontWeight: 800, letterSpacing: "-0.01em", color: "#fff" }}>NIAT</span>
+                    <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "rgba(59,130,246,0.2)", color: "#60a5fa", border: "1px solid rgba(59,130,246,0.3)" }}>ADMISSIONS</span>
+                  </div>
+                  <div style={{ fontSize: 10.5, color: "#94a3b8" }}>NxtWave Innovation in Advanced Technologies</div>
+                </div>
+              </div>
               <h1
                 style={{
                   fontSize: 22,
@@ -168,10 +171,10 @@ export default function ApplyPage() {
                   letterSpacing: "-0.01em",
                 }}
               >
-                Quick Pre-Qualification Form
+                Undergraduate Admissions Enquiry
               </h1>
               <p style={{ fontSize: 13, color: "#8b96ad", margin: 0, lineHeight: 1.5 }}>
-                Enter your details below — Priya will dial your phone right away.
+                Enter your details below — our AI Admissions Counsellor will call you right away.
               </p>
             </div>
 
@@ -232,7 +235,7 @@ export default function ApplyPage() {
                     marginBottom: 7,
                   }}
                 >
-                  Mobile Number (WhatsApp) <span style={{ color: "#fb5670" }}>*</span>
+                  Mobile Number <span style={{ color: "#fb5670" }}>*</span>
                 </label>
                 <div style={{ display: "flex", gap: 8 }}>
                   <div
@@ -244,7 +247,7 @@ export default function ApplyPage() {
                       background: "rgba(5, 7, 12, 0.75)",
                       color: "#9aa5bd",
                       fontSize: 13,
-                      fontWeight: 700,
+                      fontWeight: 600,
                       display: "flex",
                       alignItems: "center",
                       whiteSpace: "nowrap",
@@ -277,10 +280,10 @@ export default function ApplyPage() {
               </div>
             </div>
 
-            {/* Loan Type Input (Free Text) */}
+            {/* Program / Specialization */}
             <div style={{ marginBottom: 20 }}>
               <label
-                htmlFor="app-loan-type"
+                htmlFor="app-program"
                 style={{
                   display: "block",
                   fontSize: 12.5,
@@ -289,13 +292,13 @@ export default function ApplyPage() {
                   marginBottom: 7,
                 }}
               >
-                Loan Type <span style={{ color: "#fb5670" }}>*</span>
+                Preferred Technology Program <span style={{ color: "#fb5670" }}>*</span>
               </label>
               <input
-                id="app-loan-type"
+                id="app-program"
                 type="text"
                 required
-                placeholder="e.g. Home, Business, Personal Loan…"
+                placeholder="e.g. B.Tech Computer Science & AI, Data Science, Robotics…"
                 value={loanType}
                 onChange={(e) => setLoanType(e.target.value)}
                 style={{
@@ -313,10 +316,10 @@ export default function ApplyPage() {
               />
             </div>
 
-            {/* Estimated Loan Amount Input (Free Text / Value) */}
+            {/* 12th Stream & Year */}
             <div style={{ marginBottom: 20 }}>
               <label
-                htmlFor="app-loan-amount"
+                htmlFor="app-stream"
                 style={{
                   display: "block",
                   fontSize: 12.5,
@@ -325,7 +328,7 @@ export default function ApplyPage() {
                   marginBottom: 7,
                 }}
               >
-                Estimated Loan Amount <span style={{ color: "#fb5670" }}>*</span>
+                12th Intermediate Stream &amp; Year
               </label>
               <div style={{ display: "flex", gap: 8 }}>
                 <div
@@ -335,7 +338,7 @@ export default function ApplyPage() {
                     borderRadius: 10,
                     border: "1px solid #1c2437",
                     background: "rgba(5, 7, 12, 0.75)",
-                    color: "#2dd4a0",
+                    color: "#60a5fa",
                     fontSize: 14,
                     fontWeight: 700,
                     display: "flex",
@@ -343,13 +346,12 @@ export default function ApplyPage() {
                     whiteSpace: "nowrap",
                   }}
                 >
-                  ₹
+                  <GraduationCap size={16} />
                 </div>
                 <input
-                  id="app-loan-amount"
+                  id="app-stream"
                   type="text"
-                  required
-                  placeholder="e.g. 25,00,000 or 25 Lakhs"
+                  placeholder="e.g. MPC (2024 / 2025 / 2026), CBSE, BiPC"
                   value={loanAmount}
                   onChange={(e) => setLoanAmount(e.target.value)}
                   style={{
@@ -368,7 +370,7 @@ export default function ApplyPage() {
               </div>
             </div>
 
-            {/* Language for Priya's Call */}
+            {/* Preferred Call Language */}
             <div style={{ marginBottom: 24 }}>
               <label
                 style={{
@@ -376,30 +378,28 @@ export default function ApplyPage() {
                   fontSize: 12.5,
                   fontWeight: 600,
                   color: "#cbd5e1",
-                  marginBottom: 8,
+                  marginBottom: 9,
                 }}
               >
-                Language for Priya&apos;s Call
+                Preferred Call Language
               </label>
-              <div style={{ display: "flex", gap: 8 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
                 {LANGUAGES.map((l) => {
-                  const isSelected = language === l.id
+                  const sel = language === l.id
                   return (
                     <button
                       key={l.id}
                       type="button"
                       onClick={() => setLanguage(l.id)}
                       style={{
-                        flex: 1,
-                        padding: "9px 8px",
+                        height: 40,
                         borderRadius: 10,
-                        border: isSelected ? "1.5px solid #a5b0ff" : "1px solid #1c2437",
-                        background: isSelected ? "rgba(165, 176, 255, 0.14)" : "rgba(5, 7, 12, 0.6)",
-                        color: isSelected ? "#ffffff" : "#9aa5bd",
+                        border: sel ? "1px solid #3b82f6" : "1px solid #1c2437",
+                        background: sel ? "rgba(59, 130, 246, 0.15)" : "rgba(5, 7, 12, 0.75)",
+                        color: sel ? "#60a5fa" : "#9aa5bd",
                         fontSize: 12.5,
-                        fontWeight: 600,
+                        fontWeight: sel ? 700 : 500,
                         cursor: "pointer",
-                        textAlign: "center",
                         transition: "all 0.15s ease",
                       }}
                     >
@@ -410,7 +410,7 @@ export default function ApplyPage() {
               </div>
             </div>
 
-            {/* Honeypot field for bot spam suppression */}
+            {/* Honeypot field for bot spam prevention */}
             <div style={{ display: "none" }} aria-hidden="true">
               <input
                 type="text"
@@ -438,7 +438,7 @@ export default function ApplyPage() {
               </p>
             )}
 
-            {/* Big Action Button */}
+            {/* Action Button */}
             <button
               type="submit"
               disabled={loading}
@@ -446,7 +446,7 @@ export default function ApplyPage() {
                 width: "100%",
                 height: 48,
                 borderRadius: 12,
-                background: "linear-gradient(135deg, #5b7cfa 0%, #38bdf8 100%)",
+                background: "linear-gradient(135deg, #2563eb 0%, #06b6d4 100%)",
                 border: "none",
                 color: "#ffffff",
                 fontSize: 14.5,
@@ -456,19 +456,19 @@ export default function ApplyPage() {
                 alignItems: "center",
                 justifyContent: "center",
                 gap: 8,
-                boxShadow: "0 4px 18px -4px rgba(91, 124, 250, 0.5)",
+                boxShadow: "0 4px 18px -4px rgba(37, 99, 235, 0.5)",
                 transition: "all 0.15s ease",
               }}
             >
               {loading ? (
                 <>
                   <Loader2 size={16} className="animate-spin" />
-                  <span>Connecting to Priya…</span>
+                  <span>Connecting with Admissions AI…</span>
                 </>
               ) : (
                 <>
                   <PhoneCall size={16} />
-                  <span>Call Me Now with Priya (Free)</span>
+                  <span>Connect with Admissions AI (Free)</span>
                 </>
               )}
             </button>
@@ -487,7 +487,7 @@ export default function ApplyPage() {
               }}
             >
               <Lock size={12} />
-              We never charge any upfront fees or ask for OTPs/PINs. 100% confidential.
+              Official NIAT counselling support. No spam, 100% confidential.
             </p>
           </form>
         ) : (
@@ -498,25 +498,25 @@ export default function ApplyPage() {
                 width: 64,
                 height: 64,
                 borderRadius: "50%",
-                background: "rgba(45, 212, 160, 0.14)",
-                border: "2px solid #2dd4a0",
-                boxShadow: "0 0 30px rgba(45, 212, 160, 0.35)",
+                background: "rgba(59, 130, 246, 0.14)",
+                border: "2px solid #3b82f6",
+                boxShadow: "0 0 30px rgba(59, 130, 246, 0.35)",
                 margin: "0 auto 16px",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
               }}
             >
-              <PhoneCall size={28} color="#2dd4a0" />
+              <PhoneCall size={28} color="#60a5fa" />
             </div>
 
             <h2 style={{ fontSize: 22, fontWeight: 700, color: "#fff", margin: "0 0 8px" }}>
-              Priya is Calling You Now!
+              Our AI Admissions Counsellor is Calling You!
             </h2>
 
             <p style={{ fontSize: 13.5, color: "#9aa5bd", lineHeight: 1.6, margin: "0 0 20px" }}>
-              Please keep your phone handy. Our AI Loan Advisor Priya is placing an outbound call to{" "}
-              <strong style={{ color: "#2dd4a0", fontFamily: "monospace" }}>{submittedPhone}</strong> right now to explain your {loanType} options.
+              Please keep your phone handy. Our AI Admissions Counsellor is placing a call to{" "}
+              <strong style={{ color: "#60a5fa", fontFamily: "monospace" }}>{submittedPhone}</strong> right now to explain your {loanType} options and collaborating universities.
             </p>
 
             <div
@@ -533,13 +533,13 @@ export default function ApplyPage() {
               }}
             >
               <div style={{ color: "#fff", fontWeight: 700, marginBottom: 4 }}>Next Steps:</div>
-              <div>• Answer Priya&apos;s call to discuss your {loanType} requirements ({loanAmount})</div>
-              <div>• Receive your official loan quote and rate chart directly on WhatsApp</div>
-              <div>• No physical bank visits — digital pre-approval through our DSA desk</div>
+              <div>• Answer the call to explore undergraduate tech programmes and campus options</div>
+              <div>• Receive the official NIAT curriculum and NAT guide directly on WhatsApp</div>
+              <div>• 1-on-1 guidance on UGC-recognized collaborating institutions &amp; eligibility</div>
             </div>
 
             <a
-              href="https://wa.me/916301689511?text=Hi%20Right%20Agent%20Group,%20I%20just%20submitted%20my%20loan%20enquiry"
+              href="https://wa.me/916301689511?text=Hi%20NIAT,%20I%20just%20submitted%20my%20admissions%20enquiry"
               target="_blank"
               rel="noopener noreferrer"
               style={{

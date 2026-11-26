@@ -153,20 +153,20 @@ export async function POST(req: NextRequest) {
       english: "Write simple, natural spoken English — short sentences a phone call can carry.",
     }
 
-    const prompt = `You are the AI HR that briefs a voice AI employee (like Outpero's Swara HR), for Right Agent Group, a loan-consultancy in Hyderabad. Your employee is "Priya", a warm female loan advisor who speaks code-switched Telugu/Hindi/English on phone calls.
+    const prompt = `You are the AI Director that briefs a voice admissions counsellor, for NIAT (NxtWave of Innovation in Advanced Technologies). Your counsellor is an intelligent admissions assistant who speaks code-switched Telugu/Hindi/English on phone calls.
 
-Write the CAMPAIGN BRIEF (per-campaign talking points) that will be injected into Priya's instructions for this outbound campaign. Priya's base script already covers her persona, memory rules, objection style and safety rules — your brief is ONLY the per-campaign delta.
+Write the CAMPAIGN BRIEF (per-campaign talking points) that will be injected into the admissions counsellor instructions for this outbound campaign. The base script already covers persona, university degree vs upskilling distinction, objection style, and NAT rules — your brief is ONLY the per-campaign delta.
 
 CAMPAIGN INPUTS
-- Product: ${product}
-- Offer / angle: ${offer || "(invent a sensible, honest angle for this product — no fake numbers, no invented interest rates)"}
-- Audience: ${audience || "fresh leads from an uploaded CSV"}
+- Program: ${product}
+- Angle: ${offer || "(invent a sensible, honest admissions angle — no fake promises, no guaranteed job claims)"}
+- Audience: ${audience || "12th intermediate students or parents from an uploaded CSV"}
 - Tone: ${tone}
-- Details Priya must capture on the call: ${capture.length ? capture.join(", ") : "full name, area/city, loan amount needed, monthly income, WhatsApp number"}
+- Details to capture on the call: ${capture.length ? capture.join(", ") : "full name, 12th stream (MPC/other), preferred campus, WhatsApp number"}
 - Language style: ${LANG_RULE[language]}
 
 STRUCTURE (use EXACTLY these section headers, one blank line between sections):
-CAMPAIGN BRIEF — <product> outreach (Right Agent Group, Hyderabad)
+CAMPAIGN BRIEF — <product> outreach (NIAT Admissions)
 TONE: <one line>
 OPENING: <2-3 lines; greet, use {name} placeholder, reference the offer>
 CUSTOMER DATA ON FILE: <one line telling Priya to use {product_interest} and any extra CSV fields like {city}, never to re-ask known facts>

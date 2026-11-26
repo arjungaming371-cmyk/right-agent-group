@@ -102,7 +102,7 @@ export async function POST(req: NextRequest) {
     let callError: string | null = null
 
     try {
-      const instructions = `Lead ${name} submitted an instant callback request on Instagram/Meta Ad for ${loanType} of ${loanAmount ? "₹" + loanAmount.toLocaleString("en-IN") : "suitable amount"}. Greet them warmly in ${language}, confirm their requirement, explain that Right Agent Group compares 20+ top banks with zero advance fees, and qualify their document readiness.`
+      const instructions = `Lead ${name} submitted an admissions enquiry for ${loanType} (${loanAmount || "Undergraduate"}). Greet them warmly in ${language}, confirm their technology interests, explain NIAT industry upskilling alongside the collaborating university B.Tech degree, and qualify their interest in the NAT assessment and career counselling.`
 
       const callResult = await makeCall(normalizedPhone, leadId, language, instructions)
       callSid = callResult?.sid || null
@@ -116,7 +116,7 @@ export async function POST(req: NextRequest) {
 
         await query(
           `INSERT INTO comm_logs (lead_id, type, summary, outcome)
-           VALUES ($1, 'call', 'Instant Speed-to-Lead AI Call dispatched to Priya for Instagram Ad lead', 'pending')`,
+           VALUES ($1, 'call', 'Instant Speed-to-Lead AI Admissions Call dispatched', 'pending')`,
           [leadId]
         )
       }
@@ -125,8 +125,8 @@ export async function POST(req: NextRequest) {
       console.warn("Fast lead auto-call warning (non-fatal):", callError)
     }
 
-    // 3. Send Instant WhatsApp Welcome & Rate Card (non-blocking)
-    const waText = `Namaste ${name}! 🙏\n\nThank you for submitting your loan enquiry via our Instagram Ad with *Right Agent Group*.\n\n📞 Our Senior AI Loan Advisor *Priya* is reaching out to discuss your *${loanType}* options.\n\nWe work with 20+ top banks and NBFCs across Hyderabad with *0 advance fees* to get you the lowest interest rates.\n\n💬 If you have any questions or prefer chatting on WhatsApp, simply reply directly to this message!\n\nHead Office: Gandimaisamma, Hyderabad\nHelpline: +91 8333997227 | WhatsApp: +91 8333993223`
+    // 3. Send Instant WhatsApp Welcome & Program Info (non-blocking)
+    const waText = `Namaste ${name}! 🙏\n\nThank you for reaching out to *NIAT Admissions* (NxtWave Innovation in Advanced Technologies).\n\n📞 Our AI Admissions Counsellor is placing a call to discuss your *${loanType}* options and collaborating university campuses.\n\nAlong with your university degree, NIAT provides an industry-ready learning journey in AI, Data Science, and Robotics with 50+ real-world projects.\n\n💬 If you have any questions or prefer chatting here, reply directly to this message!\n\nOfficial Website: https://www.niatindia.com/`
 
     sendWhatsAppText(normalizedPhone, waText).catch((e) => {
       console.warn("Fast lead WhatsApp welcome error (non-fatal):", e?.message || e)

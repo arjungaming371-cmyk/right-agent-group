@@ -106,9 +106,9 @@ export function sarvamPresets(): VoiceOption[] {
 // ---------- Preview sample lines (the audition script) ----------
 
 export const SAMPLE_LINES: Record<VoiceLanguage, string> = {
-  telugu: "Namaskaram! Nenu Priya, Right Agent Group nunni matladutunnanu. Mee loan gurinchi cheppandi.",
-  hindi: "Namaste! Main Right Agent Group ki or se bol rahi hoon. Aapke loan ke baare mein bataiye.",
-  english: "Namaskar! This is Priya from Right Agent Group. How may I help you with your loan today?",
+  telugu: "Namaskaram! Nenu NIAT Admissions Assistant ni. Technology programmes gurinchi matladavachaa?",
+  hindi: "Namaste! Main NIAT Admissions Assistant bol rahi hoon. Kya hum baat kar sakte hain?",
+  english: "Hello! I am NIAT Admissions AI Assistant. Are you exploring technology programmes after twelfth?",
 }
 
 const SARVAM_LOCALES: Record<VoiceLanguage, string> = { english: "en-IN", hindi: "hi-IN", telugu: "te-IN" }
