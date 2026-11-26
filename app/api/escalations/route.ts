@@ -82,6 +82,15 @@ export async function GET(req: NextRequest) {
         WHERE c.type = 'alert' AND c.outcome IN ('needs_human', 'loan_confirmed')
           AND c.created_at > now() - interval '30 days'
           AND ($1::uuid IS NULL OR l.branch_id = $1::uuid)
+          AND NOT EXISTS (
+            SELECT 1 FROM comm_logs r
+             WHERE r.lead_id = c.lead_id
+               AND (
+                 r.outcome IN ('needs_human_resolved', 'loan_confirmed_resolved')
+                 OR (r.type = 'system' AND r.outcome = 'resolved')
+               )
+               AND r.created_at >= c.created_at
+          )
         ORDER BY c.created_at DESC
         LIMIT 100`,
       [branchId]
@@ -416,6 +425,21 @@ export async function POST(req: NextRequest) {
             `Resolved (${session.email || "Staff"}): ${res.rows[0]?.title || "Appointment"}${noteText ? ` — Note: ${noteText}` : ""}`
           ]
         ).catch(() => {})
+
+        // Cascade resolve any open comm_logs alerts for this lead so older calls do not resurrect
+        await query(
+          `UPDATE comm_logs
+              SET outcome = CASE
+                    WHEN outcome = 'needs_human' THEN 'needs_human_resolved'
+                    WHEN outcome = 'loan_confirmed' THEN 'loan_confirmed_resolved'
+                    ELSE outcome || '_resolved'
+                  END,
+                  summary = CASE WHEN $2 <> '' THEN summary || ' | Resolved Note: ' || $2 ELSE summary END
+            WHERE lead_id = $1
+              AND type = 'alert'
+              AND outcome IN ('needs_human', 'loan_confirmed')`,
+          [leadId, noteText]
+        ).catch(() => {})
       }
 
       const fullDesc = cRow ? buildComprehensiveDescription({
@@ -541,14 +565,43 @@ export async function POST(req: NextRequest) {
     )
     if ((res.rowCount ?? 0) === 0) return NextResponse.json({ error: "already resolved" }, { status: 409 })
 
-    if (row.lead_id && noteText) {
+    if (row.lead_id) {
+      if (noteText) {
+        await query(
+          `INSERT INTO comm_logs (lead_id, type, summary, outcome)
+           VALUES ($1, 'system', $2, 'resolved')`,
+          [
+            row.lead_id,
+            `Escalation resolved (${session.email || "Staff"}) — Note: ${noteText}`
+          ]
+        ).catch(() => {})
+      }
+
+      // Cascade resolve any other open comm_logs alerts for this lead so older calls do not resurrect
       await query(
-        `INSERT INTO comm_logs (lead_id, type, summary, outcome)
-         VALUES ($1, 'system', $2, 'resolved')`,
-        [
-          row.lead_id,
-          `Escalation resolved (${session.email || "Staff"}) — Note: ${noteText}`
-        ]
+        `UPDATE comm_logs
+            SET outcome = CASE
+                  WHEN outcome = 'needs_human' THEN 'needs_human_resolved'
+                  WHEN outcome = 'loan_confirmed' THEN 'loan_confirmed_resolved'
+                  ELSE outcome || '_resolved'
+                END,
+                summary = CASE WHEN $2 <> '' THEN summary || ' | Resolved Note: ' || $2 ELSE summary END
+          WHERE lead_id = $1
+            AND type = 'alert'
+            AND outcome IN ('needs_human', 'loan_confirmed')`,
+        [row.lead_id, noteText]
+      ).catch(() => {})
+
+      // Mark any open appointments / callbacks for this lead as completed
+      await query(
+        `UPDATE calendar_events
+            SET status = 'completed',
+                notes = CASE WHEN $2 <> '' THEN COALESCE(notes || E'\n[Resolution Note]: ', '') || $2 ELSE notes END,
+                updated_at = now()
+          WHERE lead_id = $1
+            AND status IN ('confirmed', 'needs_review', 'rescheduled')
+            AND event_type IN ('callback', 'branch_visit')`,
+        [row.lead_id, noteText]
       ).catch(() => {})
     }
 
