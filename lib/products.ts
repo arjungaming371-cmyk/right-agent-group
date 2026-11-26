@@ -1,47 +1,70 @@
-// NIAT Academic Programs & Campuses Catalog
-// Used by the public admissions form, lead management, and filters.
+// Product catalog of Right Agent Group, taken from rightagentgroup.com
+// (/loan, /insurances, /realestate — spelling normalized). Grouped the same
+// way the site groups them. Used by the public application form and the
+// dashboard lead forms/filters; `product_interest` on a lead holds one of
+// these strings, so renaming an entry only affects new leads.
 export const PRODUCT_GROUPS: { label: string; products: string[] }[] = [
   {
-    label: "Undergraduate Technology Programs",
+    label: "Loans",
     products: [
-      "B.Tech Computer Science & AI",
-      "B.Tech Artificial Intelligence & Machine Learning",
-      "B.Tech Data Science",
-      "B.Tech Robotics & Autonomous Systems",
-      "B.Tech Computer Science & Engineering",
-      "B.Tech Electronics & Intelligent Hardware",
-      "Industry 5.0 Upskilling Programme",
+      "Home Loan",
+      "Personal Loan",
+      "Business Loan",
+      "Education Loan",
+      "Student Loan",
+      "Mortgage Loan",
+      "Loan Against Property",
+      "Gold Loan",
+      "Four Wheeler Loan",
+      "Vehicle Loan",
+      "House Renovation Loan",
+      "Home Extension Loan",
+      "Home Loan Balance Transfer",
+      "Top Up Loan",
+      "Home Loan Takeover Top Up",
+      "Self Construction Loan",
+      "Commercial Plot Loan",
+      "Commercial Buildings Loan",
+      "Residential Plot / Land Loan",
+      "Apartment Flat Loan",
+      "Independent House Loan",
+      "Home Loan for Pensioners",
+      "Home Loan for NRI",
     ],
   },
   {
-    label: "Collaborating Hyderabad Campuses",
+    label: "Insurance",
     products: [
-      "Chaitanya Deemed University (Hyderabad)",
-      "Aurora Deemed University (Hyderabad)",
-      "SMR University (Hyderabad)",
-      "Collaborating Campuses (15+ Cities)",
+      "Health Insurance",
+      "Term Life Insurance",
+      "Accident Insurance",
+      "Travel Insurance",
+      "Corporate Insurance",
+      "Savings Plan",
+      "Retirement Plan",
+      "Unit Linked Insurance (ULIP)",
+      "Child Education Plan",
+      "Endowment Plan",
+      "Money Back Income Plan",
+      "Wealth Creation Plan",
+      "Protection Plan",
     ],
   },
   {
-    label: "Admissions & Assessments",
-    products: [
-      "NAT Entrance Assessment (₹1,200)",
-      "1-on-1 Career Counselling Session",
-      "Campus Visit & Lab Tour",
-    ],
+    label: "Real Estate",
+    products: ["Property Purchase (Real Estate)", "Property Sale (Real Estate)"],
   },
 ]
 
 export const COMMON_LOAN_TYPES = [
-  "B.Tech Computer Science & AI",
-  "B.Tech Artificial Intelligence & Machine Learning",
-  "B.Tech Data Science",
-  "B.Tech Robotics & Autonomous Systems",
-  "B.Tech Computer Science & Engineering",
-  "Chaitanya Deemed University",
-  "Aurora Deemed University",
-  "SMR University",
-  "NAT Entrance Assessment",
+  "Home Loan",
+  "Personal Loan",
+  "Business Loan",
+  "Loan Against Property",
+  "Education Loan",
+  "Car Loan",
+  "Mortgage Loan",
+  "Gold Loan",
 ]
 
 export const LOAN_TYPES = PRODUCT_GROUPS.flatMap((g) => g.products)

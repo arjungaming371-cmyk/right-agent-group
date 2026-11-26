@@ -383,7 +383,7 @@ export async function finalizeWhatsAppCall(opts: {
           }).catch(() => {})
 
           if (result.ok) {
-            const content = `Hi ${lead?.name || "there"}! Thanks for speaking with NIAT Admissions. Please complete your admissions enquiry here: ${formUrl}\n\nOfficial NIAT Admissions Assistance. — NIAT`
+            const content = `Hi ${lead?.name || "there"}! Thanks for speaking with Priya from Right Agent Group. Please complete your loan application here: ${formUrl}\n\nWe never ask for OTP, PIN, or any payment. — Right Agent Group`
             await query(
               `INSERT INTO whatsapp_messages (lead_id, phone_number, direction, content, status, branch_id)
                VALUES ($1, $2, 'outbound', $3, 'sent', $4)`,
@@ -403,7 +403,7 @@ export async function finalizeWhatsAppCall(opts: {
           }).catch(() => {})
 
           if (result.ok) {
-            const content = `Hi ${lead?.name || "there"}! Thanks for speaking with NIAT Admissions. Feel free to message us here anytime with questions about technology courses, campuses, or NAT.\n\n— NIAT Admissions`
+            const content = `Hi ${lead?.name || "there"}! Thanks for speaking with Priya from Right Agent Group. Feel free to message us here anytime with questions.\n\nWe never ask for OTP, PIN, or any payment. — Right Agent Group`
             await query(
               `INSERT INTO whatsapp_messages (lead_id, phone_number, direction, content, status, branch_id)
                VALUES ($1, $2, 'outbound', $3, 'sent', $4)`,

@@ -275,101 +275,101 @@ export function buildCampaignScript(input: CampaignBriefInput): string {
   const lang = input.language
 
   if (lang === "telugu") {
-    return `CAMPAIGN BRIEF — ${product} outreach (NIAT Admissions)
+    return `CAMPAIGN BRIEF — ${product} outreach (Right Agent Group, Hyderabad)
 ${audience ? `AUDIENCE: ${audience}. ` : ""}${toneLine(input.tone)}
 
 OPENING (use the customer's data — never interrogate):
-"Namaskaram {name} garu! Nenu NIAT Admissions nunchi matladutunnanu."
+"Namaskaram {name} garu! Nenu Priya, Right Agent Group, Hyderabad nunchi matladutunnanu."
 Reference WHY you are calling right now: ${offer}.
 CUSTOMER DATA ON FILE: {product_interest}${buildLeadBriefHintTelugu()} — use it naturally, NEVER re-ask what you already know.
 
 DISCOVERY (ONE question, then listen):
-Ask about their current technology & education interests — 12th complete aiyyindha? AI or coding interest undha?
+Ask about their current ${product} situation — bank chesara? EMI heavy ga undha? Ippudu need em undhi?
 
-PITCH (value-oriented, honest):
-Explain ${offer} in ONE breath: "Collaborating university degree tho paatu, practical AI and technology upskilling provide chestunnam."
-Connect it to what they told you — their ambitions, their questions.
+PITCH (pain-relief, not features):
+Explain ${offer} in ONE breath: "Meme 20+ banks tho pan cheyyam — meeru bank to bank run avvakunda, best offer mem istham."
+Connect it to what they told you — their words, their problem.
 
 DETAILS TO CAPTURE (one at a time, each as its own clear question):
 ${capture.map((c, i) => `${i + 1}) ${c}`).join("\n")}
 
 READBACK (MANDATORY before closing):
-Once details are done, confirm everything in ONE short sentence and wait for "yes" — clean notes.
+Once details are done, confirm everything in ONE short sentence and wait for "yes" — Outpero-style perfect notes.
 
 CLOSE:
-"Thank you sir — nenu official NIAT curriculum and NAT details WhatsApp ki pampistunnanu. Maa admissions team meeku guidance istaru."
-Then share details and end the call warmly.
+"Thank you sir — nenu ippude meeku simple loan application WhatsApp pampistunnanu, fill cheyandi. Maa loan officer meeku personally call chesi final rate cheptharu."
+Then send the form and end the call warmly.
 
 HARD RULES (never break):
-- Never invent tuition fees or hostel costs.
-- Never guarantee jobs, 100% placement, or specific salaries.
-- Never claim NIAT is a standalone degree-awarding university.
-- 2 clear NOs → respect it, offer the WhatsApp brochure, leave a respectful impression.`
+- No OTP, PIN, card number or payment questions. Ever.
+- Never guarantee approval — "very good chances" at most.
+- Never invent rates or figures — only what the knowledge context gives.
+- 2 clear NOs → respect it, offer the WhatsApp details, leave a good impression.`
   }
 
   if (lang === "hindi") {
-    return `CAMPAIGN BRIEF — ${product} outreach (NIAT Admissions)
+    return `CAMPAIGN BRIEF — ${product} outreach (Right Agent Group, Hyderabad)
 ${audience ? `AUDIENCE: ${audience}. ` : ""}${toneLine(input.tone)}
 
 OPENING (use the customer's data — never interrogate):
-"Namaste {name} ji! Main NIAT Admissions se bol rahi hoon."
+"Namaste {name} ji! Main Priya bol rahi hoon Right Agent Group, Hyderabad se."
 Reference WHY you are calling right now: ${offer}.
 CUSTOMER DATA ON FILE: {product_interest}${buildLeadBriefHintHindi()} — use it naturally, NEVER re-ask what you already know.
 
 DISCOVERY (ONE question, then listen):
-Ask about their current education & tech interest — "12th ke baad technology programmes dekh rahe hain kya?"
+Ask about their current ${product} situation — "Abhi loan kisi bank se chal raha hai, ya naya plan kar rahe hain?"
 
-PITCH (value-oriented, honest):
-Explain ${offer} in ONE breath: "Collaborating university degree ke saath-saath practical AI and tech upskilling provide karte hain."
-Connect it to what they told you — their ambitions, their questions.
+PITCH (pain-relief, not features):
+Explain ${offer} in ONE breath: "Hum 20+ banks ke saath kaam karte hain — aapko bank-bank bhaagne nahi padega, best offer hum laake dete hain."
+Connect it to what they told you — their words, their problem.
 
 DETAILS TO CAPTURE (one at a time, each as its own clear question):
 ${capture.map((c, i) => `${i + 1}) ${c}`).join("\n")}
 
 READBACK (MANDATORY before closing):
-Once details are done, confirm everything in ONE short sentence and wait for "yes" — clean notes.
+Once details are done, confirm everything in ONE short sentence and wait for "yes" — perfect notes, every time.
 
 CLOSE:
-"Thank you — main abhi aapke WhatsApp pe official NIAT brochure aur NAT information bhej rahi hoon. Hamari admissions team aage guide karegi."
-Then share details and end the call warmly.
+"Thank you sir — main abhi aapke WhatsApp pe simple loan application bhej rahi hoon, fill kar dijiyega. Hamare loan officer personally call karke final rate batayenge."
+Then send the form and end the call warmly.
 
 HARD RULES (never break):
-- Never invent tuition fees or hostel costs.
-- Never guarantee jobs, 100% placement, or specific salaries.
-- Never claim NIAT is a standalone degree-awarding university.
-- 2 clear NOs → respect it, offer the WhatsApp brochure, leave a respectful impression.`
+- No OTP, PIN, card number or payment questions. Ever.
+- Never guarantee approval — "very good chances" at most.
+- Never invent rates or figures — only what the knowledge context gives.
+- 2 clear NOs → respect it, offer the WhatsApp details, leave a good impression.`
   }
 
-  return `CAMPAIGN BRIEF — ${product} outreach (NIAT Admissions)
+  return `CAMPAIGN BRIEF — ${product} outreach (Right Agent Group, Hyderabad)
 ${audience ? `AUDIENCE: ${audience}. ` : ""}${toneLine(input.tone)}
 
 OPENING (use the customer's data — never interrogate):
-"Hello {name}! This is calling from NIAT Admissions."
+"Hello {name}! This is Priya from Right Agent Group, Hyderabad."
 Reference WHY you are calling right now: ${offer}.
 CUSTOMER DATA ON FILE: {product_interest}${buildLeadBriefHintEnglish()} — use it naturally, NEVER re-ask what you already know.
 
 DISCOVERY (ONE question, then listen):
-Ask about their current studies — "Are you exploring technology programmes after twelfth?"
+Ask about their current ${product} situation — "Are you running a loan with any bank right now, or planning something new?"
 
-PITCH (value-oriented, honest):
-Explain ${offer} in ONE breath: "Along with the university degree, students build practical industry skills and real-world projects in AI and software."
-Connect it to what they told you — their ambitions, their questions.
+PITCH (pain-relief, not features):
+Explain ${offer} in ONE breath: "We work with 20+ banks — you don't run bank to bank, we bring the best offer to you."
+Connect it to what they told you — their words, their problem.
 
 DETAILS TO CAPTURE (one at a time, each as its own clear question):
 ${capture.map((c, i) => `${i + 1}) ${c}`).join("\n")}
 
 READBACK (MANDATORY before closing):
-Once details are done, confirm everything in ONE short sentence and wait for "yes" — clean notes.
+Once details are done, confirm everything in ONE short sentence and wait for "yes" — perfect notes, every time.
 
 CLOSE:
-"Thank you! I'm sharing the official NIAT curriculum and NAT assessment guide on your WhatsApp right now — our admissions team will guide you further."
-Then share details and end the call warmly.
+"Thank you! I'm sending a simple loan application on your WhatsApp right now — our loan officer will personally confirm the final details with you."
+Then send the form and end the call warmly.
 
 HARD RULES (never break):
-- Never invent tuition fees or hostel costs.
-- Never guarantee jobs, 100% placement, or specific salaries.
-- Never claim NIAT is a standalone degree-awarding university.
-- 2 clear NOs → respect it, offer the WhatsApp brochure, leave a respectful impression.`
+- No OTP, PIN, card number or payment questions. Ever.
+- Never guarantee approval — "very good chances" at most.
+- Never invent rates or figures — only what the knowledge context gives.
+- 2 clear NOs → respect it, offer the WhatsApp details, leave a good impression.`
 }
 
 function buildLeadBriefHintTelugu(): string {
