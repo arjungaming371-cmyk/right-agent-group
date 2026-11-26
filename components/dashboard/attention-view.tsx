@@ -1,7 +1,6 @@
 "use client"
 import { useCallback, useEffect, useState, useMemo } from "react"
 import {
-  Phone,
   CheckCheck,
   MessageCircle,
   RefreshCw,
@@ -117,24 +116,6 @@ export default function AttentionView({ role }: { role: Role }) {
     }
   }
 
-  async function callLead(leadId: string | null) {
-    if (!leadId) return
-    setBusyId(leadId)
-    try {
-      const res = await fetch("/api/calls/dial", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ leadId, channel: "auto" }),
-      })
-      const d = await res.json().catch(() => ({}))
-      if (!res.ok) setError(d.error || "Call could not be placed.")
-    } catch {
-      setError("Call could not be placed.")
-    } finally {
-      setBusyId(null)
-    }
-  }
-
   function openChat(leadId: string | null) {
     if (!leadId || typeof window === "undefined") return
     window.dispatchEvent(new CustomEvent("rag:lead-focus", { detail: { leadId, view: "whatsapp" } }))
@@ -159,8 +140,6 @@ export default function AttentionView({ role }: { role: Role }) {
     if (activeTab === "escalation") return items.filter(i => i.category === "escalation")
     return items
   }, [items, activeTab])
-
-  const canCall = role === "admin" || role === "agent" || role === "branch_manager" || role === "developer"
 
   return (
     <div className="mx-auto max-w-4xl pb-8">
@@ -329,15 +308,6 @@ export default function AttentionView({ role }: { role: Role }) {
 
                   {/* Actions matching website design */}
                   <div className="flex flex-shrink-0 flex-wrap items-center gap-1.5 pt-0.5">
-                    {canCall && item.lead_id && (
-                      <button
-                        onClick={() => callLead(item.lead_id)}
-                        disabled={busyId === item.id || busyId === item.lead_id}
-                        className="flex h-8 items-center gap-1.5 rounded-lg border border-[var(--border)] px-2.5 text-[12px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--overlay-soft)] disabled:opacity-50 transition"
-                      >
-                        <Phone size={13} /> Call
-                      </button>
-                    )}
                     {item.lead_id && (
                       <button
                         onClick={() => openChat(item.lead_id)}
