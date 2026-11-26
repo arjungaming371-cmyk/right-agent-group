@@ -8,6 +8,7 @@ import { searchKnowledgeBase } from "./knowledge-base"
 import { buildEmiInstruction, buildEligibilityInstruction, buildPrepaymentInstruction, buildRateInstruction, detectLoanType } from "./finance"
 import { detectFrustration, flagFrustratedCall, detectHumanRequest, flagHumanRequested, OPERATOR_REPLY_INSTRUCTION } from "./frustration"
 import { extractCallFacts, formatInCallFactsBlock } from "./call-facts"
+import { analyzeVoiceSpeech } from "./voice-intent"
 import { createNotification } from "./notifications"
 import { maybeProposeLoanEdit } from "./loan-edit-requests"
 import { isAiPaused } from "./ai-pause"
@@ -130,13 +131,14 @@ export const DND_INTENT_RE = new RegExp(
     // English
     `\\b(?:please\\s+)?(?:don't|do not|never|stop)\\s+(?:call|contact|ring|message|reach)\\b`,
     `\\b(?:please\\s+)?(?:remove|delete|take off)\\s+(?:my\\s+)?(?:number|contact|phone|details|me)\\b`,
-    `\\b(?:unsubscribe|put me on (?:the )?do not call|don't call me again|stop calling me|do not call again|never call me again|take me off your list)\\b`,
+    `\\b(?:unsubscribe|put me on (?:the )?(?:dnd|do not call)|add (?:this number )?to (?:the )?(?:dnd|do not call list)|don't call me again|stop calling me|do not call again|never call me again|take me off your list)\\b`,
+    `\\b(?:dnd|d\\.n\\.d)\\b.*\\b(?:pettandi|daal do|kardo|kariye|rakho|list)\\b|\\b(?:dnd|d\\.n\\.d)\\s*(?:me|lo|mein)\\b`,
     // Telugu
     `\\b(?:call|calls|phone)\\s+(?:cheyyakandi|cheyoddu|cheyyoddu|cheyakandi|cheyavaddu|vaddu)(?:\\s+andi)?\\b`,
     `\\b(?:malli|inkosari)\\s+(?:call|phone)\\s+(?:cheyyakandi|cheyoddu|cheyyoddu|cheyakandi)\\b`,
     `\\b(?:naaku\\s+calls?\\s+vaddu|calls?\\s+vaddu|malli\\s+(?:call\\s+)?vaddu)\\b`,
     `\\b(?:number|na number)\\s+(?:remove|delete|teeseyandi|theeseyandi)\\s*(?:cheyyandi)?\\b`,
-    `కాల్ చేయకండి|కాల్స్ వద్దు|మళ్లీ కాల్ చేయకండి|నెంబర్ తీసేయండి|కాల్ చేయొద్దు|నాకు కాల్స్ వద్దు|ఫోన్ చేయకండి|నా నెంబర్ తీసేయండి|ఫోన్ చేయొద్దు`,
+    `కాల్ చేయకండి|కాల్స్ వద్దు|మళ్లీ కాల్ చేయకండి|నెంబర్ తీసేయండి|కాల్ చేయొద్దు|కాల్ చేయవద్దు|కాల్స్ చేయవద్దు|ఇంకెప్పుడూ కాల్ చేయవద్దు|డిలీట్ చేయండి|నాకు కాల్స్ వద్దు|ఫోన్ చేయకండి|నా నెంబర్ తీసేయండి|ఫోన్ చేయొద్దు`,
     // Hindi
     `\\b(?:call|phone)\\s+(?:mat|nahi)\\s+(?:karo|karna|kariye)\\b`,
     `\\b(?:dobara|phir|kabhi)\\s+call\\s+mat\\s+(?:karo|karna|kariye)\\b`,
@@ -148,8 +150,9 @@ export const DND_INTENT_RE = new RegExp(
 )
 
 export function detectDndIntent(speech: string): boolean {
-  if (!speech || speech.length > 300) return false
-  return DND_INTENT_RE.test(speech)
+  if (!speech) return false
+  const safeText = speech.trim().slice(0, 4000)
+  return DND_INTENT_RE.test(safeText)
 }
 
 // 2. CONTINUATION / QUESTION MARKERS:
@@ -172,7 +175,7 @@ export const CONTINUATION_INTENT_RE = new RegExp(
 // When the caller explicitly tells Priya to cut or disconnect the call.
 export const CALL_DISCONNECT_RE = new RegExp(
   '\\b(' +
-  '(?:calls?|phone|callulu)\\s+(?:cut\\s+cheyandi|cut\\s+cheyyandi|cut\\s+chey|cut\\s+chesta|cut\\s+chestha|cut\\s+chestunna|cut\\s+cheyoddu|pettandi|pettestunna|pettestha|pettesthunna|disconnect\\s+cheyandi|disconnect\\s+kandi)|' +
+  '(?:calls?|phone|callulu)\\s+(?:cut\\s+cheyandi|cut\\s+cheyyandi|cut\\s+chey|cut\\s+chesta|cut\\s+chestha|cut\\s+chestunna|pettandi|pettestunna|pettestha|pettesthunna|disconnect\\s+cheyandi|disconnect\\s+kandi)|' +
   'cut\\s+(?:the\\s+)?(?:call|calls|phone)|cut\\s+(?:call|calls|phone)|' +
   'disconnect\\s+(?:the\\s+)?(?:call|calls|phone)|hang\\s*up|end\\s+(?:the\\s+)?call|' +
   '(?:call|calls|phone)\\s+(?:kaat\\s+do|kat\\s+do|cut\\s+karo|cut\\s+kardo|rakho|rakh\\s+do|kaatna)' +
@@ -181,6 +184,28 @@ export const CALL_DISCONNECT_RE = new RegExp(
   'कॉल काट दो|कॉल कट करो|फोन काट दो|फोन रखो|कॉल कट कर दो',
   'i'
 )
+
+// Negative disconnect markers — when caller specifically asks NOT to hang up or cut the call.
+// "cut cheyoddu", "phone cut cheyoddu", "don't hang up", "do not disconnect", "call mat kaatna"
+export const NEGATIVE_DISCONNECT_RE = new RegExp(
+  '\\b(' +
+  '(?:calls?|phone|callulu)?\\s*(?:cut|disconnect|hang\\s*up)?\\s*(?:cheyoddu|cheyoddandi|cheyyoddu|cheyakandi|cheyavaddu|mat\\s+karna|mat\\s+karo|mat\\s+kariye|don\'t|do\\s+not|never)|' +
+  '(?:don\'t|do\\s+not|never)\\s+(?:cut|disconnect|hang\\s*up|end)\\s+(?:the\\s+)?(?:call|calls|phone)?|' +
+  '(?:cut|disconnect|hang\\s*up)\\s+(?:cheyoddu|cheyoddandi|cheyyoddu|cheyakandi|cheyavaddu)|' +
+  '(?:call|calls|phone)\\s+(?:mat\\s+kaato|mat\\s+kaatna|mat\\s+rakho|mat\\s+rakhna|cut\\s+mat\\s+karo|cut\\s+mat\\s+karna)|' +
+  'mat\\s+(?:kaato|kaatna|rakho|rakhna)' +
+  ')\\b|' +
+  'కాల్ కట్ చేయొద్దు|కట్ చేయొద్దు|కట్ చేయకండి|కాల్ కట్ చేయకండి|ఫోన్ కట్ చేయొద్దు|ఫోన్ పెట్టొద్దు|పెట్టొద్దు|కట్ చేయవద్దు|' +
+  'कॉल मत काटो|फोन मत काटो|कॉल मत काटना|फोन मत रखना|कट मत करो|कट मत करना',
+  'i'
+)
+
+export function isCallDisconnectIntent(speech: string): boolean {
+  if (!speech) return false
+  const safeText = speech.trim().slice(0, 4000)
+  if (NEGATIVE_DISCONNECT_RE.test(safeText)) return false
+  return CALL_DISCONNECT_RE.test(safeText)
+}
 
 // 3. UNAMBIGUOUS GOODBYES:
 // Explicit sign-offs that cannot be mistaken for mid-conversation fillers.
@@ -233,43 +258,87 @@ async function handleDndOptOut(
   callerPhone: string | null | undefined,
   language: Language
 ): Promise<string> {
-  try {
-    let phone = callerPhone
-    if (!phone && leadId) {
+  let persisted = false
+  let phone = callerPhone
+
+  if (!phone && leadId) {
+    try {
       const res = await db.from("leads").select("phone").eq("id", leadId).single()
       phone = res.data?.phone || null
+    } catch (e: any) {
+      console.error("handleDndOptOut phone lookup error:", e?.message)
     }
-    if (phone) {
-      const digits = String(phone).replace(/\D/g, "").slice(-10)
-      if (digits.length === 10) {
-        await query(
-          `INSERT INTO dnd_suppression (phone, reason, source, added_by)
-           VALUES ($1, 'Customer requested DND on call', 'voice_call', 'priya_voice')
-           ON CONFLICT (phone) DO NOTHING`,
-          [`+91${digits}`]
-        ).catch(() => {})
+  }
+
+  if (phone) {
+    const digits = String(phone).replace(/\D/g, "").slice(-10)
+    if (digits.length === 10) {
+      const normalizedPhone = `+91${digits}`
+      // Retry persistence up to 3 attempts with exponential backoff
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          await query(
+            `INSERT INTO dnd_suppression (phone, reason, source, added_by)
+             VALUES ($1, 'Customer requested DND on call', 'voice_call', 'priya_voice')
+             ON CONFLICT (phone) DO UPDATE SET updated_at = NOW()`,
+            [normalizedPhone]
+          )
+          persisted = true
+          break
+        } catch (dbErr: any) {
+          console.error(`DND persistence attempt ${attempt}/3 failed for ${normalizedPhone}:`, dbErr?.message)
+          if (attempt < 3) await new Promise((r) => setTimeout(r, 150 * attempt))
+        }
       }
     }
-    if (leadId) {
-      await db.from("leads").update({ status: "lost" }).eq("id", leadId).catch(() => {})
+  }
+
+  // Update lead and immediately cease automated outreach
+  if (leadId) {
+    try {
+      await db.from("leads").update({ status: "lost", dnd: true }).eq("id", leadId)
       await db.from("lead_memory").upsert(
         {
           lead_id: leadId,
           stage: "do_not_call",
-          summary: "Customer requested Do Not Call during voice call. Cease outreach.",
+          summary: "Customer requested Do Not Call during voice call. Immediate suppression enforced.",
         },
         { onConflict: "lead_id" }
-      ).catch(() => {})
+      )
       await db.from("comm_logs").insert({
         lead_id: leadId,
         type: "dnd_request",
-        summary: "Customer opted out via voice call (DND enforced)",
-        outcome: "suppressed",
-      }).catch(() => {})
+        summary: persisted
+          ? "Customer opted out via voice call (DND verified in database)"
+          : "Customer requested DND (DATABASE PERSISTENCE FAILED - OPERATOR ACTION REQUIRED)",
+        outcome: persisted ? "suppressed" : "escalated",
+      })
+    } catch (leadErr: any) {
+      console.error("handleDndOptOut lead status update error:", leadErr?.message)
     }
-  } catch (err: any) {
-    console.error("handleDndOptOut error:", err.message)
   }
+
+  // If DB persistence failed, escalate to human operator immediately
+  if (!persisted) {
+    try {
+      await query(
+        `INSERT INTO escalations (lead_id, call_sid, reason, details, severity)
+         VALUES ($1, $2, 'dnd_persistence_failed', $3, 'critical')`,
+        [leadId, callSid, `Failed to persist DND suppression for phone ${phone || "unknown"}. Manual suppression required immediately.`]
+      )
+    } catch (escErr: any) {
+      console.error("handleDndOptOut escalation insert error:", escErr?.message)
+    }
+
+    // Never falsely claim the number was added to the DND list if database write failed!
+    const honestApologies: Record<Language, string> = {
+      telugu: "క్షమించండి sir, మీ రిక్వెస్ట్ మేము నోట్ చేసుకున్నాము. ఇకపై మీకు మా టీమ్ నుంచి calls రాకుండా వెంటనే చర్యలు తీసుకుంటాము. Thank you.",
+      english: "We sincerely apologize sir. I have urgently flagged your request to stop calls so our team suppresses your number from all outreach. Thank you, goodbye.",
+      hindi: "माफ़ कीजिए sir, मैंने आपकी request दर्ज कर ली है ताकि आगे से आपको कोई call न आए। धन्यवाद, good day.",
+    }
+    return honestApologies[language] || honestApologies.english
+  }
+
   const apologies: Record<Language, string> = {
     telugu: "క్షమించండి sir, ఇకపై మీకు మా నుండి ఎలాంటి calls రావు. Thank you, have a good day.",
     english: "We sincerely apologize sir. Your number has been added to our Do Not Call list and you will not receive any more calls from us. Thank you, goodbye.",
@@ -296,22 +365,26 @@ const VOICEMAIL_RE =
  * NEVER overwrites a manually-set callback: an operator's explicit booking
  * outranks a regex parse. Best-effort — a failed write must not block hangup.
  */
-async function scheduleSpeechCallback(
+export async function scheduleSpeechCallback(
   leadId: string,
   callSid: string | null,
   reschedule: RescheduleMatch
-): Promise<void> {
+): Promise<boolean> {
   try {
     const existing = await query(`SELECT callback_note FROM leads WHERE id = $1 LIMIT 1`, [leadId])
     const existingNote = String(existing.rows[0]?.callback_note || "")
     if (existingNote && !existingNote.startsWith("Auto-scheduled")) {
       console.log(`📅 reschedule skipped: lead ${leadId} has a manual callback (${existingNote.slice(0, 60)})`)
-      return
+      return false
     }
-    await query(
+    const updateRes = await query(
       `UPDATE leads SET callback_at = $1, callback_note = $2 WHERE id = $3`,
       [reschedule.whenIso, reschedule.note, leadId]
     )
+    if ((updateRes.rowCount || 0) === 0) {
+      console.error(`📅 reschedule update failed for lead ${leadId}`)
+      return false
+    }
     await db.from("comm_logs").insert({
       lead_id: leadId,
       type: "note",
@@ -319,8 +392,10 @@ async function scheduleSpeechCallback(
       outcome: "pending",
     }).catch(() => {})
     console.log(`📅 reschedule: lead=${leadId} → ${reschedule.whenIso} (${reschedule.desc.english})`)
+    return true
   } catch (e) {
     console.error("scheduleSpeechCallback error:", e instanceof Error ? e.message : e)
+    return false
   }
 }
 
@@ -727,6 +802,81 @@ STRICT OPERATIONAL DIRECTIVES:
   const inCallFactsBlock = formatInCallFactsBlock(inCallFacts)
   if (inCallFactsBlock) merged = [merged, inCallFactsBlock].filter(Boolean).join("\n\n")
 
+  // VOICE INTENT & OBJECTION INTELLIGENCE
+  const semantic = analyzeVoiceSpeech(speech)
+  if (semantic.intent === "wait_hold_request") {
+    merged = [
+      merged,
+      `=== CALLER ASKED TO HOLD / WAIT ===
+- The caller asked to wait or hold on ("oka nimisham", "one second", "rukiye", "wait", "hold on").
+- Respond in 1 brief, courteous sentence confirming you are on the line and waiting:
+  * If speaking Telugu: "తప్పకుండా sir, నేను లైన్ లోనే ఉంటాను, మీరు తీరిగ్గా మాట్లాడండి."
+  * If speaking Hindi: "ज़रूर sir, मैं लाइन पर हूँ, आप आराम से समय लीजिए।"
+  * If speaking English: "Sure sir, I am on the line, please take your time."
+- Then STOP speaking immediately and patiently wait for them.`,
+    ].filter(Boolean).join("\n\n")
+  } else if (semantic.intent === "repeat_request") {
+    merged = [
+      merged,
+      `=== CALLER ASKED TO REPEAT ===
+- The caller asked you to repeat what you just said ("malli cheppandi", "phir se boliye", "pardon", "can you repeat", "didn't hear").
+- Rephrase your previous point simply and clearly in 1 short sentence. DO NOT repeat the entire greeting or long pitch.`,
+    ].filter(Boolean).join("\n\n")
+  } else if (semantic.intent === "product_correction" && semantic.productCorrection?.corrected) {
+    merged = [
+      merged,
+      `=== CUSTOMER PRODUCT CORRECTION ===
+- Customer explicitly corrected their loan product preference to: ${semantic.productCorrection.corrected.replace(/_/g, " ")}.
+- Immediately acknowledge their corrected requirement naturally without arguing or defending your previous statement.
+- Transition directly into their requested loan: ${semantic.productCorrection.corrected.replace(/_/g, " ")}.`,
+    ].filter(Boolean).join("\n\n")
+  } else if (semantic.intent === "objection" && semantic.objectionType) {
+    let objectionGuidance = ""
+    switch (semantic.objectionType) {
+      case "high_interest_rate":
+        objectionGuidance = `OBJECTION HANDLING — HIGH INTEREST RATE CONCERN:
+- Transparently explain that as an authorized partner for 20+ top banks and NBFCs, Right Agent Group compares rates across all institutions to secure the lowest possible ROI based on their credit profile and current bank offers.
+- No high-pressure sales pitch. Offer to check which specific bank provides the lowest rate for their profile.`
+        break
+      case "processing_fee":
+        objectionGuidance = `OBJECTION HANDLING — PROCESSING CHARGES CONCERN:
+- Explain that processing charges are determined directly by the sanctioning bank's official schedule, and many partner banks currently offer zero or nominal fee waivers during ongoing seasonal schemes.`
+        break
+      case "existing_loan":
+        objectionGuidance = `OBJECTION HANDLING — ALREADY HAS EXISTING LOAN / EMI:
+- Reassure them that having existing loans is common; banks evaluate eligibility based on FOIR (Fixed Obligation to Income Ratio), and options like balance transfer or top-up can actually reduce their overall EMI burden.`
+        break
+      case "documentation_difficulty":
+        objectionGuidance = `OBJECTION HANDLING — DIFFICULT OR MISSING DOCUMENTATION:
+- Reassure the caller that we partner with digital, paperless lenders where basic KYC (PAN and Aadhaar) and banking statements are sufficient, and our team assists through the entire paperless process.`
+        break
+      case "trust_identity":
+        objectionGuidance = `OBJECTION HANDLING — TRUST & VERIFICATION / WHO ARE YOU:
+- Warmly and professionally state who Right Agent Group is: an authorized financial loan distribution partner with 20+ leading banks, located at Mallikarjuna Complex, 5th Floor, Gandimaisamma X Road, Medchal Hyderabad.
+- We never ask for upfront payment or OTPs.`
+        break
+      case "timing_busy":
+        objectionGuidance = `OBJECTION HANDLING — BUSY / BAD TIMING:
+- Respect their time immediately! Do not keep talking or pitching. Offer a short, convenient callback: "Sure sir, I completely understand you are busy. When would be a convenient time for our team to call you back?"`
+        break
+      case "family_consultation":
+        objectionGuidance = `OBJECTION HANDLING — NEED TO CONSULT SPOUSE / PARENTS / FAMILY:
+- Respect this completely: consulting family is very sensible.
+- Offer: "తప్పకుండా sir, ఇంట్లో మాట్లాడి నిర్ణయం తీసుకోండి. మీ reference కోసం ప్రాథమిక వివరాలు WhatsApp లో పంపమంటారా?"`
+        break
+      case "general_reluctance":
+        objectionGuidance = `OBJECTION HANDLING — GENERAL RELUCTANCE / HESITATION:
+- Respect their hesitation warmly without being pushy: "No problem sir, we are here to help whenever you need financial assistance. Have a wonderful day!"`
+        break
+    }
+    if (objectionGuidance) {
+      merged = [
+        merged,
+        `=== LIVE OBJECTION GUIDANCE ===\n${objectionGuidance}\n- Strict rule: EMPATHIZE, EXPLAIN TRANSPARENTLY, DO NOT PRESSURE OR ARGUE!`,
+      ].filter(Boolean).join("\n\n")
+    }
+  }
+
   if (leadId && (inCallFacts.name || inCallFacts.area || inCallFacts.loanAmount)) {
     const liveUpdates: Record<string, any> = {}
     if (inCallFacts.name) liveUpdates.name = inCallFacts.name
@@ -1123,9 +1273,16 @@ export async function handleTurn(opts: {
     if (leadId && history.length > 0) {
       const reschedule = buildReschedule(speech, language)
       if (reschedule) {
-        await scheduleSpeechCallback(leadId, callSid, reschedule)
-        updateTranscriptAsync(callSid, speech, reschedule.confirm)
-        return { text: reschedule.confirm, hangup: true }
+        const persisted = await scheduleSpeechCallback(leadId, callSid, reschedule)
+        const confirmMsg = persisted
+          ? reschedule.confirm
+          : (language === "telugu"
+              ? `నేను ${reschedule.desc.telugu} కోసం మీ సమయాన్ని నోట్ చేసుకున్నాను. మా టీమ్ మిమ్మల్ని సంప్రదిస్తుంది. ధన్యవాదాలు!`
+              : language === "hindi"
+              ? `मैंने ${reschedule.desc.hindi} के लिए आपका समय नोट कर लिया है। हमारी टीम आपसे संपर्क करेगी। धन्यवाद!`
+              : `I have noted your preferred callback time for ${reschedule.desc.english}. Our team will reach out accordingly. Thank you!`)
+        updateTranscriptAsync(callSid, speech, confirmMsg)
+        return { text: confirmMsg, hangup: true }
       }
     }
 
@@ -1146,7 +1303,7 @@ export async function handleTurn(opts: {
     }
 
     // 5. UNAMBIGUOUS GOODBYE OR DISCONNECT COMMAND: Clear sign-off without contrast/continuation
-    if (history.length > 0 && (UNAMBIGUOUS_GOODBYE_RE.test(speech) || CALL_DISCONNECT_RE.test(speech))) {
+    if (history.length > 0 && (UNAMBIGUOUS_GOODBYE_RE.test(speech) || isCallDisconnectIntent(speech))) {
       const reply = getVoiceClosingsSnapshot().goodbye[language]
       updateTranscriptAsync(callSid, speech, reply)
       if (callSid) {
@@ -1234,7 +1391,7 @@ export async function handleTurn(opts: {
   // Same guard as the early bye-check above: without history.length > 0 a
   // pickup utterance like "sare andi" / "ok andi" matched here AFTER Priya's
   // first reply and hung the call up immediately.
-  const isCustomerDisconnect = CALL_DISCONNECT_RE.test(speech)
+  const isCustomerDisconnect = isCallDisconnectIntent(speech)
   const isCustomerEnding = isCustomerDisconnect || (history.length > 0 && !hasContinuation && (UNAMBIGUOUS_GOODBYE_RE.test(speech) || (AMBIGUOUS_CLOSING_RE.test((speech || "").trim()) && isAfterDoubtInquiry(history))))
   const isCustomerActive = /\b(bank|loan|rate|interest|emi|lakh|address|office|document|sbi|hdfc|icici|kavali|cheppandi|enduku|ela|details|doubt|process)\b/i.test(speech)
   const isPriyaEnding = !hasContinuation && !isCustomerActive && GOODBYE_RE.test(reply) && (history.length >= 2 || isCustomerDisconnect)
@@ -1306,9 +1463,16 @@ export async function handleTurnStream(
     if (leadId && history.length > 0) {
       const reschedule = buildReschedule(speech, language)
       if (reschedule) {
-        await scheduleSpeechCallback(leadId, callSid, reschedule)
-        updateTranscriptAsync(callSid, speech, reschedule.confirm)
-        onSentence(reschedule.confirm)
+        const persisted = await scheduleSpeechCallback(leadId, callSid, reschedule)
+        const confirmMsg = persisted
+          ? reschedule.confirm
+          : (language === "telugu"
+              ? `నేను ${reschedule.desc.telugu} కోసం మీ సమయాన్ని నోట్ చేసుకున్నాను. మా టీమ్ మిమ్మల్ని సంప్రదిస్తుంది. ధన్యవాదాలు!`
+              : language === "hindi"
+              ? `मैंने ${reschedule.desc.hindi} के लिए आपका समय नोट कर लिया है। हमारी टीम आपसे संपर्क करेगी। धन्यवाद!`
+              : `I have noted your preferred callback time for ${reschedule.desc.english}. Our team will reach out accordingly. Thank you!`)
+        updateTranscriptAsync(callSid, speech, confirmMsg)
+        onSentence(confirmMsg)
         return { hangup: true }
       }
     }
@@ -1331,7 +1495,7 @@ export async function handleTurnStream(
     }
 
     // 5. UNAMBIGUOUS GOODBYE OR DISCONNECT COMMAND
-    if (history.length > 0 && (UNAMBIGUOUS_GOODBYE_RE.test(speech) || CALL_DISCONNECT_RE.test(speech))) {
+    if (history.length > 0 && (UNAMBIGUOUS_GOODBYE_RE.test(speech) || isCallDisconnectIntent(speech))) {
       const reply = getVoiceClosingsSnapshot().goodbye[language]
       updateTranscriptAsync(callSid, speech, reply)
       onSentence(reply)

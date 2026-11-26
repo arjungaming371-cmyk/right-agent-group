@@ -122,23 +122,15 @@ const DEBUG_DIR = process.env.VOICEBOT_DEBUG_DIR || ""
 
 // ---------- Barge-in (interrupting Priya mid-sentence) ----------
 //
-// OFF BY DEFAULT, deliberately. Whether this works at all depends on
-// something that cannot be determined from code: how much of our own
-// outbound audio Exotel echoes back into the inbound media stream on a real
-// phone line. If it echoes, Priya hears herself, decides the caller is
-// talking, and cuts herself off — every call, every sentence. That failure
-// is far worse than the half-duplex behaviour it replaces, so it does not
-// get switched on until someone has made a real call with it.
-//
-// To validate: set VOICEBOT_BARGE_IN=1, call in, and stay SILENT through a
-// full reply. If Priya interrupts herself, the line echoes — raise
-// VOICEBOT_BARGE_ENERGY until she doesn't, or leave the feature off. Then
-// call again and talk over her; she should stop within ~300ms.
+// In production, barge-in defaults to ENABLED (VOICEBOT_BARGE_IN=1) for natural
+// real-time human turn-taking and conversational flow. If a specific trunk or
+// PSTN line exhibits excessive carrier echo, it can be disabled via
+// VOICEBOT_BARGE_IN=0 or the energy threshold tuned with VOICEBOT_BARGE_ENERGY.
 const BARGE_IN = (process.env.VOICEBOT_BARGE_IN || "1").trim() === "1"
 // Threshold tuned for natural interruption: ~360 catches normal speaking volume without false echoes
 const BARGE_ENERGY = parseInt(process.env.VOICEBOT_BARGE_ENERGY || "360")
-// 160ms (~8 frames) is fast enough to cut Priya off mid-syllable without waiting
-const BARGE_MIN_MS = parseInt(process.env.VOICEBOT_BARGE_MIN_MS || "160")
+// 300ms (~15 frames) standard duration to confirm genuine human speech rather than line noise
+const BARGE_MIN_MS = parseInt(process.env.VOICEBOT_BARGE_MIN_MS || "300")
 // How far ahead of real time we let playback run. Audio already handed to
 // Exotel cannot be recalled, so this is the worst-case overhang the caller
 // still hears after interrupting.
@@ -949,12 +941,20 @@ class CallSession {
         this.bargeBuffer.push(frame)
         if (this.bargeMs >= BARGE_MIN_MS) this.interrupt()
       } else {
-        // Allow up to 2 grace frames (~40ms) for consonant micro-dips or natural syllabic breaks
-        this.bargeSilenceFrames = (this.bargeSilenceFrames || 0) + 1
-        if (this.bargeSilenceFrames > 2) {
+        // If speech was not yet sustained (less than 60ms / ~3 frames), isolated loud blips
+        // followed by quiet are line clicks/noise and reset immediately.
+        if (this.bargeMs < 60) {
           this.bargeMs = 0
           this.bargeBuffer = []
           this.bargeSilenceFrames = 0
+        } else {
+          // Allow up to 2 grace frames (~40ms) for consonant micro-dips or natural syllabic breaks
+          this.bargeSilenceFrames = (this.bargeSilenceFrames || 0) + 1
+          if (this.bargeSilenceFrames > 2) {
+            this.bargeMs = 0
+            this.bargeBuffer = []
+            this.bargeSilenceFrames = 0
+          }
         }
       }
       return

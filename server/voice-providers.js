@@ -329,6 +329,12 @@ function normalizeNumbersToEnglishWords(text) {
 function normalizeForTts(text) {
   if (!text) return text
   let out = String(text)
+  out = out.replace(/https?:\/\/\S+/gi, "") // strip raw URLs
+  out = out.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1") // markdown links -> anchor text only
+  out = out.replace(/\[(?:VERIFIED|SOURCE|CITATION|RBI|BANK|NOTE)[^\]]*\]/gi, "") // strip citations / verification markers
+  out = out.replace(/\[\d+\]/g, "") // strip numbered footnote citations
+  out = out.replace(/^[\s•\*\-]+/gm, "") // strip bullet points
+  out = out.replace(/\n[\s•\*\-]+/g, "\n")
   out = out.replace(/\*\*([^*]+)\*\*/g, "$1") // **markdown bold** leaking from the WhatsApp rules
   out = out.replace(/\*([^*]+)\*/g, "$1") // *single-asterisk* bold too
   out = out.replace(/\p{Extended_Pictographic}/gu, "") // emoji is never spoken
@@ -354,6 +360,16 @@ function normalizeForTts(text) {
   out = out.replace(/\bNBFCs\b/g, "N B F C s")
   out = out.replace(/\bDND\b/g, "D N D")
   out = out.replace(/\bLAP\b/g, "Loan Against Property")
+  out = out.replace(/\bCIBIL\b/g, "Cibil")
+  out = out.replace(/\bAPR\b/g, "A P R")
+  out = out.replace(/\bGST\b/g, "G S T")
+  out = out.replace(/\bITR\b/g, "I T R")
+  out = out.replace(/\bPAN\b/g, "Pan")
+  out = out.replace(/\bSBI\b/g, "S B I")
+  out = out.replace(/\bHDFC\b/g, "H D F C")
+  out = out.replace(/\bICICI\b/g, "I C I C I")
+  out = out.replace(/\bPNB\b/g, "P N B")
+  out = out.replace(/\bBOB\b/g, "B O B")
 
   out = out.replace(/\brupees\s+rupees\b/gi, "rupees") // prevent duplicate rupees
   out = out.replace(/రూపాయలు\s+రూపాయలు/g, "రూపాయలు")

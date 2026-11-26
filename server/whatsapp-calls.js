@@ -1092,12 +1092,18 @@ class WhatsAppCallSession {
         this.bargeBuffer.push(pcm16k)
         if (this.bargeMs >= BARGE_MIN_MS) this.interrupt()
       } else {
-        // Allow up to 2 grace frames (~40ms) for consonant micro-dips or natural syllabic breaks
-        this.bargeSilenceFrames = (this.bargeSilenceFrames || 0) + 1
-        if (this.bargeSilenceFrames > 2) {
+        if (this.bargeMs < 60) {
           this.bargeMs = 0
           this.bargeBuffer = []
           this.bargeSilenceFrames = 0
+        } else {
+          // Allow up to 2 grace frames (~40ms) for consonant micro-dips or natural syllabic breaks
+          this.bargeSilenceFrames = (this.bargeSilenceFrames || 0) + 1
+          if (this.bargeSilenceFrames > 2) {
+            this.bargeMs = 0
+            this.bargeBuffer = []
+            this.bargeSilenceFrames = 0
+          }
         }
       }
       return
