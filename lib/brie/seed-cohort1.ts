@@ -1,7 +1,37 @@
 // Banking Research Intelligence Engine (BRIE) — Cohort 1 & Master Seed Data
 // Includes complete verified vertical slices for SBI, HDFC Bank, and Bajaj Finance
 
+import crypto from "crypto"
 import { query } from "@/lib/db"
+
+async function ensureSourceDocVersion(institutionId: string, name: string, url: string, domain: string): Promise<string> {
+  const regRes = await query(
+    `INSERT INTO source_registry (institution_id, source_name, source_url, source_type, authority_level, allowed_domain)
+     VALUES ($1, $2, $3, 'schedule_of_charges', 'lender_primary', $4)
+     ON CONFLICT (source_url) DO UPDATE SET last_checked_at = NOW()
+     RETURNING id`,
+    [institutionId, name, url, domain]
+  )
+  const regId = regRes.rows[0].id
+
+  const docRes = await query(
+    `INSERT INTO source_documents (source_id, institution_id, document_title, document_type, content_type)
+     VALUES ($1, $2, $3, 'rates_and_charges', 'text/html')
+     RETURNING id`,
+    [regId, institutionId, name]
+  )
+  const docId = docRes.rows[0].id
+
+  const hash = crypto.createHash("sha256").update(url + name).digest("hex")
+  const verRes = await query(
+    `INSERT INTO document_versions (document_id, version_number, sha256, storage_uri, extraction_status, approval_status)
+     VALUES ($1, 1, $2, $3, 'extracted', 'approved')
+     ON CONFLICT (document_id, version_number) DO UPDATE SET approval_status = 'approved'
+     RETURNING id`,
+    [docId, hash, url]
+  )
+  return verRes.rows[0].id
+}
 
 export async function seedBrieMasterData() {
   console.log("🌱 [BRIE] Seeding Master Taxonomy, Institutions, and Cohort 1 Knowledge...")
@@ -145,6 +175,8 @@ export async function seedBrieMasterData() {
       }
     ]
 
+    const sbiDocVerId = await ensureSourceDocVersion(sbiId, "SBI Schedule of Charges & Rates", "https://sbi.co.in/web/personal-banking/loans/home-loans/charges", "sbi.co.in")
+
     for (const c of sbiHlClaims) {
       const claimRes = await query(
         `INSERT INTO knowledge_claims (institution_id, product_id, claim_type, field_key, value_json, explanation, conditions, exceptions, risk_level, verification_status)
@@ -154,8 +186,8 @@ export async function seedBrieMasterData() {
       )
       await query(
         `INSERT INTO claim_evidence (claim_id, document_version_id, page_number, section_heading, exact_excerpt, source_url)
-         SELECT $1, gen_random_uuid(), 1, 'Schedule of Charges & Interest Rate Card', $2, $3`,
-        [claimRes.rows[0].id, c.expl, c.url]
+         VALUES ($1, $2, 1, 'Schedule of Charges & Interest Rate Card', $3, $4)`,
+        [claimRes.rows[0].id, sbiDocVerId, c.expl, c.url]
       )
     }
 
@@ -239,6 +271,8 @@ export async function seedBrieMasterData() {
       }
     ]
 
+    const hdfcDocVerId = await ensureSourceDocVersion(hdfcId, "HDFC MITC & Fees Schedule", "https://www.hdfcbank.com/personal/borrow/popular-loans/personal-loan/rates-fees", "hdfcbank.com")
+
     for (const c of hdfcPlClaims) {
       const claimRes = await query(
         `INSERT INTO knowledge_claims (institution_id, product_id, claim_type, field_key, value_json, explanation, conditions, exceptions, risk_level, verification_status)
@@ -248,8 +282,8 @@ export async function seedBrieMasterData() {
       )
       await query(
         `INSERT INTO claim_evidence (claim_id, document_version_id, page_number, section_heading, exact_excerpt, source_url)
-         SELECT $1, gen_random_uuid(), 1, 'HDFC MITC & Fees Schedule', $2, $3`,
-        [claimRes.rows[0].id, c.expl, c.url]
+         VALUES ($1, $2, 1, 'HDFC MITC & Fees Schedule', $3, $4)`,
+        [claimRes.rows[0].id, hdfcDocVerId, c.expl, c.url]
       )
     }
 
@@ -333,6 +367,8 @@ export async function seedBrieMasterData() {
       }
     ]
 
+    const bajajDocVerId = await ensureSourceDocVersion(bajajId, "Bajaj Finserv Schedule of Charges", "https://www.bajajfinserv.in/personal-loan-fees-and-charges", "bajajfinserv.in")
+
     for (const c of bajajClaims) {
       const claimRes = await query(
         `INSERT INTO knowledge_claims (institution_id, product_id, claim_type, field_key, value_json, explanation, conditions, exceptions, risk_level, verification_status)
@@ -342,8 +378,8 @@ export async function seedBrieMasterData() {
       )
       await query(
         `INSERT INTO claim_evidence (claim_id, document_version_id, page_number, section_heading, exact_excerpt, source_url)
-         SELECT $1, gen_random_uuid(), 1, 'Bajaj Finserv Schedule of Charges', $2, $3`,
-        [claimRes.rows[0].id, c.expl, c.url]
+         VALUES ($1, $2, 1, 'Bajaj Finserv Schedule of Charges', $3, $4)`,
+        [claimRes.rows[0].id, bajajDocVerId, c.expl, c.url]
       )
     }
 

@@ -159,7 +159,7 @@ CREATE TABLE IF NOT EXISTS knowledge_claims (
 CREATE TABLE IF NOT EXISTS claim_evidence (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     claim_id UUID NOT NULL REFERENCES knowledge_claims(id) ON DELETE CASCADE,
-    document_version_id UUID NOT NULL REFERENCES document_versions(id) ON DELETE CASCADE,
+    document_version_id UUID REFERENCES document_versions(id) ON DELETE CASCADE,
     page_number INTEGER,
     section_heading TEXT,
     exact_excerpt TEXT NOT NULL,
