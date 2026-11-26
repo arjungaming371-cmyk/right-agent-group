@@ -1,6 +1,7 @@
 "use client"
 import { useCallback, useEffect, useState, useMemo } from "react"
 import {
+  Calendar,
   CheckCheck,
   MessageCircle,
   RefreshCw,
@@ -57,6 +58,21 @@ function timeAgo(iso: string): string {
   if (s < 3600) return `${Math.floor(s / 60)}m ago`
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`
   return `${Math.floor(s / 86400)}d ago`
+}
+
+function formatScheduledTime(dateStr?: string | null): string {
+  if (!dateStr) return ""
+  const d = new Date(dateStr)
+  if (isNaN(d.getTime())) return ""
+  return d.toLocaleString("en-IN", {
+    timeZone: "Asia/Kolkata",
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  })
 }
 
 const LEAD_STATUS_LABEL: Record<string, string> = {
@@ -293,9 +309,15 @@ export default function AttentionView({ role }: { role: Role }) {
                           {productStr} • {loanAmtStr}
                         </span>
                       )}
-                      <span className="flex items-center gap-1 text-[11px] text-[var(--text-muted)]">
-                        <Clock size={10.5} /> {timeAgo(item.created_at)}
-                      </span>
+                      {item.event_at ? (
+                        <span className="flex items-center gap-1 text-[11px] font-semibold text-purple-400">
+                          <Calendar size={11} /> Scheduled: {formatScheduledTime(item.event_at)}
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1 text-[11px] text-[var(--text-muted)]">
+                          <Clock size={10.5} /> {timeAgo(item.created_at)}
+                        </span>
+                      )}
                     </div>
 
                     {/* Full Comprehensive Lead Intelligence Briefing for Loan Officer */}

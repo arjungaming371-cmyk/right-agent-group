@@ -227,17 +227,68 @@ export async function GET(req: NextRequest) {
       return false
     }
 
-    // Map comm_logs alerts (Deduplicated per lead so loan officers see 1 unified card per lead)
+    // 1. Map calendar_events FIRST (Active upcoming office visits & callbacks take highest actionable priority)
+    for (const ce of calRes.rows) {
+      if (isSeen(ce.lead_id, ce.lead_phone)) {
+        continue
+      }
+      recordSeen(ce.lead_id, ce.lead_phone)
+
+      const eventTime = new Date(ce.event_at).getTime()
+      const isOverdue = !isNaN(eventTime) && eventTime < Date.now()
+      const isDueSoon = !isNaN(eventTime) && eventTime < Date.now() + 2 * 3600 * 1000
+      const parsedAi = parseCallSummary(ce.call_ai_summary)
+
+      const rawItem = {
+        id: `cal_${ce.id}`,
+        raw_id: String(ce.id),
+        item_source: "calendar_event",
+        category: ce.event_type || "callback",
+        lead_id: ce.lead_id,
+        lead_name: ce.lead_name,
+        lead_phone: ce.lead_phone,
+        lead_whatsapp: ce.lead_whatsapp,
+        lead_status: ce.lead_status,
+        lead_address: ce.lead_address || parsedAi.address || null,
+        product_interest: ce.product_interest,
+        loan_amount: ce.loan_amount,
+        summary: ce.title || (ce.event_type === "branch_visit" ? "Scheduled office visit" : "Scheduled callback"),
+        quote: ce.raw_quote || ce.notes || null,
+        notes: ce.notes || null,
+        event_at: ce.event_at,
+        location: ce.location,
+        channel: ce.channel,
+        confidence: ce.confidence,
+        call_duration: ce.call_duration,
+        call_sentiment: ce.call_sentiment,
+        call_language: ce.call_language,
+        next_action: parsedAi.nextAction || null,
+        created_at: ce.created_at,
+        priority: isOverdue ? "critical" : isDueSoon ? "high" : "critical",
+        memory_summary: ce.memory_summary || null,
+      }
+
+      items.push({
+        ...rawItem,
+        full_description: buildComprehensiveDescription(rawItem),
+      })
+    }
+
+    // 2. Map comm_logs alerts (Deduplicated per lead: merges intel into active appointment or surfaces confirmed loans)
     for (const r of alertsRes.rows) {
       if (isSeen(r.lead_id, r.lead_phone)) {
         const existing = findExisting(r.lead_id, r.lead_phone)
         if (existing) {
-          if (r.outcome === "loan_confirmed") {
+          // If existing is already an active calendar appointment (visit/callback), preserve its category
+          if (r.outcome === "loan_confirmed" && existing.category === "escalation") {
             existing.category = "loan_confirmed"
             existing.priority = "critical"
           }
           if (r.loan_amount) existing.loan_amount = existing.loan_amount || r.loan_amount
           if (r.product_interest) existing.product_interest = existing.product_interest || r.product_interest
+          if (r.call_duration) existing.call_duration = existing.call_duration || r.call_duration
+          if (r.call_language) existing.call_language = existing.call_language || r.call_language
+          if (r.call_sentiment) existing.call_sentiment = existing.call_sentiment || r.call_sentiment
           if (r.memory_summary) {
             existing.memory_summary = existing.memory_summary || r.memory_summary
             existing.full_description = buildComprehensiveDescription(existing)
@@ -284,13 +335,15 @@ export async function GET(req: NextRequest) {
       })
     }
 
-    // Map loan_applications (if not already surfaced via comm_log)
+    // 3. Map loan_applications (if not already surfaced)
     for (const la of loanAppsRes.rows) {
       if (isSeen(la.lead_id, la.lead_phone)) {
         const existing = findExisting(la.lead_id, la.lead_phone)
         if (existing) {
-          existing.category = "loan_confirmed"
-          existing.priority = "critical"
+          if (existing.category === "escalation") {
+            existing.category = "loan_confirmed"
+            existing.priority = "critical"
+          }
           if (la.loan_amount) existing.loan_amount = existing.loan_amount || la.loan_amount
           if (la.product_interest) existing.product_interest = existing.product_interest || la.product_interest
           if (la.memory_summary) {
@@ -330,59 +383,6 @@ export async function GET(req: NextRequest) {
         event_at: null,
         location: null,
         priority: "critical",
-      }
-
-      items.push({
-        ...rawItem,
-        full_description: buildComprehensiveDescription(rawItem),
-      })
-    }
-
-    // Map calendar_events (Callbacks, Office Visits)
-    for (const ce of calRes.rows) {
-      if (isSeen(ce.lead_id, ce.lead_phone)) {
-        // Merge event timing into the existing card for this lead
-        const existing = findExisting(ce.lead_id, ce.lead_phone)
-        if (existing) {
-          existing.event_at = existing.event_at || ce.event_at
-          existing.location = existing.location || ce.location
-          existing.channel = existing.channel || ce.channel
-        }
-        continue
-      }
-      recordSeen(ce.lead_id, ce.lead_phone)
-
-      const eventTime = new Date(ce.event_at).getTime()
-      const isOverdue = !isNaN(eventTime) && eventTime < Date.now()
-      const isDueSoon = !isNaN(eventTime) && eventTime < Date.now() + 2 * 3600 * 1000
-      const parsedAi = parseCallSummary(ce.call_ai_summary)
-
-      const rawItem = {
-        id: `cal_${ce.id}`,
-        raw_id: String(ce.id),
-        item_source: "calendar_event",
-        category: ce.event_type || "callback",
-        lead_id: ce.lead_id,
-        lead_name: ce.lead_name,
-        lead_phone: ce.lead_phone,
-        lead_whatsapp: ce.lead_whatsapp,
-        lead_status: ce.lead_status,
-        lead_address: ce.lead_address || parsedAi.address || null,
-        product_interest: ce.product_interest,
-        loan_amount: ce.loan_amount,
-        summary: ce.title || (ce.event_type === "branch_visit" ? "Scheduled office visit" : "Scheduled callback"),
-        quote: ce.raw_quote || ce.notes || null,
-        event_at: ce.event_at,
-        location: ce.location,
-        channel: ce.channel,
-        confidence: ce.confidence,
-        call_duration: ce.call_duration,
-        call_sentiment: ce.call_sentiment,
-        call_language: ce.call_language,
-        next_action: parsedAi.nextAction || null,
-        created_at: ce.created_at,
-        priority: isOverdue ? "critical" : isDueSoon ? "high" : "medium",
-        memory_summary: ce.memory_summary || null,
       }
 
       items.push({
