@@ -275,6 +275,14 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
   const [queueShowSavePreset, setQueueShowSavePreset] = useState(false)
   const [queueSavePresetName, setQueueSavePresetName] = useState("")
 
+  const [showPresetModal, setShowPresetModal] = useState(false)
+  const [presetModalMode, setPresetModalMode] = useState<"create" | "edit">("create")
+  const [presetEditId, setPresetEditId] = useState<string | null>(null)
+  const [presetFormName, setPresetFormName] = useState("")
+  const [presetFormText, setPresetFormText] = useState("")
+  const [presetSaving, setPresetSaving] = useState(false)
+  const [presetModalContext, setPresetModalContext] = useState<"queue" | "upload">("queue")
+
   async function loadPresets() {
     try {
       const res = await fetch("/api/agenda-presets")
@@ -302,6 +310,104 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
     const match = presets.find((p) => p.label === lbl)
     if (match) {
       setQueueTalkingPoints(match.text)
+    }
+  }
+
+  async function handleCreatePreset(label: string, text: string, context: "queue" | "upload" = "queue") {
+    if (!label.trim()) {
+      toast.error("Please enter a preset name")
+      return
+    }
+    setPresetSaving(true)
+    try {
+      const res = await fetch("/api/agenda-presets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ label: label.trim(), text: text.trim() }),
+      })
+      const d = await res.json()
+      if (res.ok) {
+        toast.success(`Preset "${label}" created`)
+        setShowPresetModal(false)
+        await loadPresets()
+        if (context === "queue") {
+          setQueueAgendaPreset(label.trim())
+          setQueueTalkingPoints(text.trim())
+        } else {
+          setUploadAgendaPreset(label.trim())
+          setUploadTalkingPoints(text.trim())
+        }
+      } else {
+        toast.error(d.error || "Failed to create preset")
+      }
+    } catch {
+      toast.error("Failed to create preset")
+    } finally {
+      setPresetSaving(false)
+    }
+  }
+
+  async function handleUpdatePreset(id: string, label: string, text: string, context: "queue" | "upload" = "queue") {
+    if (!label.trim()) {
+      toast.error("Please enter a preset name")
+      return
+    }
+    setPresetSaving(true)
+    try {
+      const res = await fetch("/api/agenda-presets", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, label: label.trim(), text: text.trim() }),
+      })
+      const d = await res.json()
+      if (res.ok) {
+        toast.success(`Preset "${label}" updated`)
+        setShowPresetModal(false)
+        await loadPresets()
+        if (context === "queue") {
+          setQueueAgendaPreset(label.trim())
+          setQueueTalkingPoints(text.trim())
+        } else {
+          setUploadAgendaPreset(label.trim())
+          setUploadTalkingPoints(text.trim())
+        }
+      } else {
+        toast.error(d.error || "Failed to update preset")
+      }
+    } catch {
+      toast.error("Failed to update preset")
+    } finally {
+      setPresetSaving(false)
+    }
+  }
+
+  async function handleDeletePreset(id: string, label: string, context: "queue" | "upload" = "queue") {
+    if (!window.confirm(`Are you sure you want to delete preset "${label}"?`)) return
+    try {
+      const res = await fetch(`/api/agenda-presets?id=${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      })
+      if (res.ok) {
+        toast.success(`Preset "${label}" deleted`)
+        const remaining = presets.filter((p) => p.id !== id)
+        setPresets(remaining)
+        const fallback = remaining[0]?.label || "Custom brief"
+        const fallbackText = remaining[0]?.text || ""
+        if (context === "queue" || queueAgendaPreset === label) {
+          setQueueAgendaPreset(fallback)
+          setQueueTalkingPoints(fallbackText)
+        }
+        if (context === "upload" || uploadAgendaPreset === label) {
+          setUploadAgendaPreset(fallback)
+          setUploadTalkingPoints(fallbackText)
+        }
+        await loadPresets()
+      } else {
+        const d = await res.json()
+        toast.error(d.error || "Failed to delete preset")
+      }
+    } catch {
+      toast.error("Failed to delete preset")
     }
   }
 
@@ -1887,20 +1993,103 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
 
             {/* What should Priya talk about? — Agenda picker */}
             <div style={{ marginBottom: 14, padding: "12px 14px", borderRadius: 10, background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6, flexWrap: "wrap", gap: 6 }}>
                 <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>
                   What should Priya talk about?
                 </label>
-                <select
-                  value={queueAgendaPreset}
-                  onChange={(e) => onSelectQueuePreset(e.target.value)}
-                  style={{ fontSize: 11.5, padding: "3px 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)" }}
-                >
-                  {presets.map((p) => (
-                    <option key={p.id} value={p.label}>{p.label}</option>
-                  ))}
-                  <option value="Custom brief">Custom brief</option>
-                </select>
+                <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                  <select
+                    value={queueAgendaPreset}
+                    onChange={(e) => onSelectQueuePreset(e.target.value)}
+                    style={{ fontSize: 11.5, padding: "3px 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)", maxWidth: 175 }}
+                  >
+                    {presets.map((p) => (
+                      <option key={p.id} value={p.label}>{p.label}</option>
+                    ))}
+                    <option value="Custom brief">Custom brief</option>
+                  </select>
+
+                  <button
+                    type="button"
+                    title="Add new talking point preset"
+                    onClick={() => {
+                      setPresetModalMode("create")
+                      setPresetModalContext("queue")
+                      setPresetEditId(null)
+                      setPresetFormName("")
+                      setPresetFormText(queueTalkingPoints || "")
+                      setShowPresetModal(true)
+                    }}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 3,
+                      fontSize: 11,
+                      padding: "3px 7px",
+                      borderRadius: 6,
+                      border: "1px solid rgba(139,124,255,0.4)",
+                      background: "rgba(139,124,255,0.12)",
+                      color: "var(--accent-violet)",
+                      cursor: "pointer",
+                      fontWeight: 600,
+                    }}
+                  >
+                    <Plus size={11} /> Add
+                  </button>
+
+                  {(() => {
+                    const matched = queueAgendaPreset !== "Custom brief" ? presets.find((p) => p.label === queueAgendaPreset) : null
+                    if (!matched) return null
+                    return (
+                      <>
+                        <button
+                          type="button"
+                          title={`Edit "${matched.label}"`}
+                          onClick={() => {
+                            setPresetModalMode("edit")
+                            setPresetModalContext("queue")
+                            setPresetEditId(matched.id)
+                            setPresetFormName(matched.label)
+                            setPresetFormText(queueTalkingPoints || matched.text || "")
+                            setShowPresetModal(true)
+                          }}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 2,
+                            fontSize: 11,
+                            padding: "3px 6px",
+                            borderRadius: 6,
+                            border: "1px solid var(--border)",
+                            background: "var(--bg-card)",
+                            color: "var(--text-secondary)",
+                            cursor: "pointer",
+                          }}
+                        >
+                          <Pencil size={11} /> Edit
+                        </button>
+                        <button
+                          type="button"
+                          title={`Delete "${matched.label}"`}
+                          onClick={() => handleDeletePreset(matched.id, matched.label, "queue")}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            fontSize: 11,
+                            padding: "3px 6px",
+                            borderRadius: 6,
+                            border: "1px solid rgba(239,68,68,0.3)",
+                            background: "rgba(239,68,68,0.08)",
+                            color: "var(--accent-red)",
+                            cursor: "pointer",
+                          }}
+                        >
+                          <Trash2 size={11} />
+                        </button>
+                      </>
+                    )
+                  })()}
+                </div>
               </div>
 
               <textarea
@@ -2294,20 +2483,103 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
 
                     {uploadDestination === "queue" && (
                       <div style={{ marginTop: 6, padding: "12px 14px", borderRadius: 10, background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6, flexWrap: "wrap", gap: 6 }}>
                           <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>
                             What should Priya talk about?
                           </label>
-                          <select
-                            value={uploadAgendaPreset}
-                            onChange={(e) => onSelectUploadPreset(e.target.value)}
-                            style={{ fontSize: 11.5, padding: "3px 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)" }}
-                          >
-                            {presets.map((p) => (
-                              <option key={p.id} value={p.label}>{p.label}</option>
-                            ))}
-                            <option value="Custom brief">Custom brief</option>
-                          </select>
+                          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                            <select
+                              value={uploadAgendaPreset}
+                              onChange={(e) => onSelectUploadPreset(e.target.value)}
+                              style={{ fontSize: 11.5, padding: "3px 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)", maxWidth: 175 }}
+                            >
+                              {presets.map((p) => (
+                                <option key={p.id} value={p.label}>{p.label}</option>
+                              ))}
+                              <option value="Custom brief">Custom brief</option>
+                            </select>
+
+                            <button
+                              type="button"
+                              title="Add new talking point preset"
+                              onClick={() => {
+                                setPresetModalMode("create")
+                                setPresetModalContext("upload")
+                                setPresetEditId(null)
+                                setPresetFormName("")
+                                setPresetFormText(uploadTalkingPoints || "")
+                                setShowPresetModal(true)
+                              }}
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 3,
+                                fontSize: 11,
+                                padding: "3px 7px",
+                                borderRadius: 6,
+                                border: "1px solid rgba(139,124,255,0.4)",
+                                background: "rgba(139,124,255,0.12)",
+                                color: "var(--accent-violet)",
+                                cursor: "pointer",
+                                fontWeight: 600,
+                              }}
+                            >
+                              <Plus size={11} /> Add
+                            </button>
+
+                            {(() => {
+                              const matched = uploadAgendaPreset !== "Custom brief" ? presets.find((p) => p.label === uploadAgendaPreset) : null
+                              if (!matched) return null
+                              return (
+                                <>
+                                  <button
+                                    type="button"
+                                    title={`Edit "${matched.label}"`}
+                                    onClick={() => {
+                                      setPresetModalMode("edit")
+                                      setPresetModalContext("upload")
+                                      setPresetEditId(matched.id)
+                                      setPresetFormName(matched.label)
+                                      setPresetFormText(uploadTalkingPoints || matched.text || "")
+                                      setShowPresetModal(true)
+                                    }}
+                                    style={{
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: 2,
+                                      fontSize: 11,
+                                      padding: "3px 6px",
+                                      borderRadius: 6,
+                                      border: "1px solid var(--border)",
+                                      background: "var(--bg-card)",
+                                      color: "var(--text-secondary)",
+                                      cursor: "pointer",
+                                    }}
+                                  >
+                                    <Pencil size={11} /> Edit
+                                  </button>
+                                  <button
+                                    type="button"
+                                    title={`Delete "${matched.label}"`}
+                                    onClick={() => handleDeletePreset(matched.id, matched.label, "upload")}
+                                    style={{
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      fontSize: 11,
+                                      padding: "3px 6px",
+                                      borderRadius: 6,
+                                      border: "1px solid rgba(239,68,68,0.3)",
+                                      background: "rgba(239,68,68,0.08)",
+                                      color: "var(--accent-red)",
+                                      cursor: "pointer",
+                                    }}
+                                  >
+                                    <Trash2 size={11} />
+                                  </button>
+                                </>
+                              )
+                            })()}
+                          </div>
                         </div>
 
                         <textarea
@@ -3217,6 +3489,135 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Preset Customization Modal (Add / Edit) */}
+      {showPresetModal && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.75)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1100,
+          }}
+          onClick={() => !presetSaving && setShowPresetModal(false)}
+        >
+          <div
+            style={{
+              background: "var(--bg-card)",
+              border: "1px solid var(--border)",
+              borderRadius: 14,
+              padding: 24,
+              width: "min(460px, calc(100vw - 32px))",
+              boxShadow: "0 20px 40px rgba(0,0,0,0.5)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+              <div style={{ fontWeight: 700, fontSize: 15, color: "var(--text-primary)" }}>
+                {presetModalMode === "create" ? "Add New Talking Point Preset" : "Edit Talking Point Preset"}
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPresetModal(false)}
+                disabled={presetSaving}
+                style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", padding: 2 }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 5 }}>
+                Preset Name / Label
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. Loan Pre-approval Offer"
+                value={presetFormName}
+                onChange={(e) => setPresetFormName(e.target.value)}
+                maxLength={60}
+                style={{
+                  width: "100%",
+                  fontSize: 13,
+                  padding: "8px 10px",
+                  borderRadius: 8,
+                  border: "1px solid var(--border)",
+                  background: "var(--bg-secondary)",
+                  color: "var(--text-primary)",
+                }}
+              />
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 5 }}>
+                Talking Points / Opening Script
+              </label>
+              <textarea
+                rows={4}
+                maxLength={1000}
+                placeholder="What Priya should pitch or ask during the call..."
+                value={presetFormText}
+                onChange={(e) => setPresetFormText(e.target.value)}
+                style={{
+                  width: "100%",
+                  fontSize: 12.5,
+                  lineHeight: 1.45,
+                  padding: "8px 10px",
+                  borderRadius: 8,
+                  border: "1px solid var(--border)",
+                  background: "var(--bg-secondary)",
+                  color: "var(--text-primary)",
+                  resize: "vertical",
+                }}
+              />
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4, fontStyle: "italic" }}>
+                Priya will adapt this into natural conversation in the customer&apos;s chosen language.
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                onClick={() => setShowPresetModal(false)}
+                disabled={presetSaving}
+                style={{
+                  padding: "7px 14px",
+                  fontSize: 12,
+                  background: "transparent",
+                  border: "1px solid var(--border)",
+                  borderRadius: 7,
+                  color: "var(--text-secondary)",
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (presetModalMode === "create") {
+                    handleCreatePreset(presetFormName, presetFormText, presetModalContext)
+                  } else if (presetEditId) {
+                    handleUpdatePreset(presetEditId, presetFormName, presetFormText, presetModalContext)
+                  }
+                }}
+                disabled={!presetFormName.trim() || presetSaving}
+                className="btn-primary"
+                style={{
+                  padding: "7px 16px",
+                  fontSize: 12,
+                  height: "auto",
+                }}
+              >
+                {presetSaving ? "Saving..." : presetModalMode === "create" ? "Create Preset" : "Save Changes"}
+              </button>
+            </div>
           </div>
         </div>
       )}
