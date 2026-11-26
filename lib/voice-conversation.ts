@@ -800,7 +800,8 @@ STRICT OPERATIONAL DIRECTIVES:
 - This caller has NOT submitted any official loan application yet. They only inquired about a loan.
 - STRICT BAN: NEVER say or claim "మీ application already మా దగ్గర ఉంది sir" (we already have your application) or "already in our system"!
 - STRICT BAN: NEVER ask them to provide documents (PAN, Aadhaar) over the phone — all documents are submitted when they fill the official application!
-- Acknowledge their loan requirement warmly. Ask if they would like the official application link sent to their WhatsApp, or if they would prefer to visit our Gandimaisamma office directly to complete the application in person.`,
+- Acknowledge their loan requirement warmly. Ask if they would like the official application link sent to their WhatsApp, or if they would prefer to visit our Gandimaisamma office directly to complete the application in person.
+- STRICT SCRIPT RULE: Only send or promise the application link if the customer explicitly agrees ("ఆ పంపించండి", "pampandi", "yes", "sure", "ok"). If the customer says no, vaddu, not now, or does not ask for it, DO NOT send or promise any loan application link — simply provide information and follow the standard post-call script!`,
     ].filter(Boolean).join("\n\n")
   }
 

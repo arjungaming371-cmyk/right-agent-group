@@ -94,6 +94,50 @@ type VoiceCallRow = {
   ai_summary: string | null
 }
 
+/**
+ * Detects whether the customer explicitly requested or agreed to receive the loan application link during the call.
+ * If customer did NOT ask or agree, Priya follows the script and sends the standard post-call follow-up instead.
+ */
+export function shouldSendApplicationLink(transcript: any[]): boolean {
+  if (!Array.isArray(transcript) || transcript.length === 0) return false
+
+  // 1. Check if customer explicitly asked for the link on their own:
+  const customerAsked = transcript.some(t => {
+    if (t.role !== "customer" && t.role !== "user") return false
+    const text = String(t.text || "").toLowerCase()
+    return /(?:link|application|form|లింక్).*(?:pamp|send|share|kavali|ivvandi)|(?:pampandi|send.*link|share.*link|apply.*chey)/i.test(text)
+  })
+  if (customerAsked) return true
+
+  // 2. Find turns where Priya offered or mentioned sending the link:
+  const aiOfferedIndices: number[] = []
+  transcript.forEach((t, idx) => {
+    if (t.role === "ai" || t.role === "assistant" || t.role === "model") {
+      const text = String(t.text || "").toLowerCase()
+      if (/(?:link|లింక్|application|form).*(?:పంపిస్త|పంపించ|send|share|whatsapp)/i.test(text)) {
+        aiOfferedIndices.push(idx)
+      }
+    }
+  })
+
+  // 3. Check if customer agreed after Priya offered the link:
+  for (const idx of aiOfferedIndices) {
+    const nextTurns = transcript.slice(idx + 1, idx + 3)
+    for (const nt of nextTurns) {
+      if (nt.role === "customer" || nt.role === "user") {
+        const text = String(nt.text || "").toLowerCase()
+        const agreed = /\b(?:pampandi|pampinchandi|send|share|yes|ha|aa|sare|sure|okay|ok|avunu|kandi|chudam|teesukunta|cheppandi)\b/i.test(text)
+        const declined = /\b(?:vaddu|vaddandi|ledu|ledandi|dont|do not|no|not now|tarvata)\b/i.test(text)
+        if (agreed && !declined) {
+          return true
+        }
+      }
+    }
+  }
+
+  return false
+}
+
 export async function finalizeWhatsAppCall(opts: {
   callSid: string
   callId: string
@@ -309,38 +353,63 @@ export async function finalizeWhatsAppCall(opts: {
       const target = lead?.whatsapp_number || lead?.phone || `+${digits}`
       const waBranch = await branchWhatsAppCtx(call?.branch_id || opts.branchIdFromWebhook || null)
       if (outcome === "resolved" && transcript.length > 0) {
-        const { createOneTimeFormToken, sendApplicationLink } = await import("./whatsapp")
-        const token = await createOneTimeFormToken(leadId)
-        const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "https://13.201.0.111.sslip.io").replace(/\/$/, "")
-        const formUrl = `${appUrl}/l/${token}`
-        const result = await sendApplicationLink(target, lead?.name || "there", token, waBranch)
-        if (!result.ok) {
-          await sendCallFollowUp(target, lead?.name || "there", waBranch)
-        }
-        await db.from("comm_logs").insert({
-          lead_id: leadId,
-          type: "whatsapp",
-          summary: result.ok
-            ? `Loan application link sent on WhatsApp to ${target}: ${formUrl}`
-            : `Post-call WhatsApp send attempted (${result.error})`,
-          outcome: result.ok ? "sent" : "failed",
-        }).catch(() => {})
+        const wantsApplication = shouldSendApplicationLink(transcript)
 
-        // Alert: Lead confirmed loan interest on call — flag in Human Attention queue
-        await db.from("comm_logs").insert({
-          lead_id: leadId,
-          type: "alert",
-          summary: `🟢 LOAN CONFORMED ON CALL — Caller confirmed loan interest during call. Application link sent on WhatsApp. Follow up for documentation & bank processing.`,
-          outcome: "loan_confirmed",
-        }).catch(() => {})
+        if (wantsApplication) {
+          // Customer asked for / confirmed loan application link
+          const { createOneTimeFormToken, sendApplicationLink } = await import("./whatsapp")
+          const token = await createOneTimeFormToken(leadId)
+          const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "https://13.201.0.111.sslip.io").replace(/\/$/, "")
+          const formUrl = `${appUrl}/l/${token}`
+          const result = await sendApplicationLink(target, lead?.name || "there", token, waBranch)
+          if (!result.ok) {
+            await sendCallFollowUp(target, lead?.name || "there", waBranch)
+          }
+          await db.from("comm_logs").insert({
+            lead_id: leadId,
+            type: "whatsapp",
+            summary: result.ok
+              ? `Loan application link sent on WhatsApp to ${target}: ${formUrl}`
+              : `Post-call WhatsApp send attempted (${result.error})`,
+            outcome: result.ok ? "sent" : "failed",
+          }).catch(() => {})
 
-        if (result.ok) {
-          const content = `Hi ${lead?.name || "there"}! Thanks for speaking with Priya from Right Agent Group. Please complete your loan application here: ${formUrl}\n\nWe never ask for OTP, PIN, or any payment. — Right Agent Group`
-          await query(
-            `INSERT INTO whatsapp_messages (lead_id, phone_number, direction, content, status, branch_id)
-             VALUES ($1, $2, 'outbound', $3, 'sent', $4)`,
-            [leadId, target, content, call?.branch_id || null]
-          ).catch(() => {})
+          // Alert: Lead confirmed loan interest on call — flag in Human Attention queue
+          await db.from("comm_logs").insert({
+            lead_id: leadId,
+            type: "alert",
+            summary: `🟢 LOAN CONFIRMED ON CALL — Caller confirmed loan interest during call. Application link sent on WhatsApp. Follow up for documentation & bank processing.`,
+            outcome: "loan_confirmed",
+          }).catch(() => {})
+
+          if (result.ok) {
+            const content = `Hi ${lead?.name || "there"}! Thanks for speaking with Priya from Right Agent Group. Please complete your loan application here: ${formUrl}\n\nWe never ask for OTP, PIN, or any payment. — Right Agent Group`
+            await query(
+              `INSERT INTO whatsapp_messages (lead_id, phone_number, direction, content, status, branch_id)
+               VALUES ($1, $2, 'outbound', $3, 'sent', $4)`,
+              [leadId, target, content, call?.branch_id || null]
+            ).catch(() => {})
+          }
+        } else {
+          // Script Post-call follow-up: Customer did NOT ask for application link
+          const result = await sendCallFollowUp(target, lead?.name || "there", waBranch)
+          await db.from("comm_logs").insert({
+            lead_id: leadId,
+            type: "whatsapp",
+            summary: result.ok
+              ? `Post-call follow-up sent on WhatsApp to ${target}`
+              : `Post-call WhatsApp send attempted (${result.error})`,
+            outcome: result.ok ? "sent" : "failed",
+          }).catch(() => {})
+
+          if (result.ok) {
+            const content = `Hi ${lead?.name || "there"}! Thanks for speaking with Priya from Right Agent Group. Feel free to message us here anytime with questions.\n\nWe never ask for OTP, PIN, or any payment. — Right Agent Group`
+            await query(
+              `INSERT INTO whatsapp_messages (lead_id, phone_number, direction, content, status, branch_id)
+               VALUES ($1, $2, 'outbound', $3, 'sent', $4)`,
+              [leadId, target, content, call?.branch_id || null]
+            ).catch(() => {})
+          }
         }
       } else if (outcome === "missed") {
         const result = await sendMissedCallFollowUp(target, lead?.name || "there", waBranch)
