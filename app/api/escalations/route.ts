@@ -3,6 +3,7 @@ import { query } from "@/lib/db"
 import { requireModuleOrRole, type Role } from "@/lib/auth"
 import { sessionBranchId } from "@/lib/branches"
 import { logAudit } from "@/lib/audit"
+import { buildComprehensiveDescription } from "@/lib/escalations-helper"
 
 export const dynamic = "force-dynamic"
 
@@ -38,61 +39,6 @@ function parseCallSummary(raw: any): { fullSpokenName?: string; address?: string
   } catch {
     return {}
   }
-}
-
-function buildComprehensiveDescription(item: any): string {
-  // If rich AI memory summary exists from the autonomous intelligence engine:
-  if (item.memory_summary && item.memory_summary.trim().length > 25) {
-    const mem = item.memory_summary.trim()
-    if (item.category === "loan_confirmed") {
-      return `🟢 LOAN CONFIRMED ON CALL — ${mem}`
-    } else if (item.category === "callback") {
-      const cbDetails = [
-        item.quote ? `Follow-up quote: "${item.quote}".` : (item.notes ? `Notes: ${item.notes}` : ""),
-        `Lead Intel: ${mem}`
-      ].filter(Boolean).join(" ")
-      return `📞 CALLBACK REQUESTED — ${cbDetails}`
-    } else if (item.category === "branch_visit") {
-      const visitDetails = [
-        item.notes || "Customer confirmed in-person office visit.",
-        item.location ? `Branch Location: ${item.location}.` : "",
-        `Lead Intel: ${mem}`
-      ].filter(Boolean).join(" ")
-      return `🏢 OFFICE VISIT SCHEDULED — ${visitDetails}`
-    }
-    return mem
-  }
-
-  const parts: string[] = []
-  const product = item.product_interest ? item.product_interest.toUpperCase() : "LOAN"
-  const amount = item.loan_amount ? `₹${Number(item.loan_amount).toLocaleString("en-IN")}` : ""
-  const location = item.lead_address || item.city || ""
-  const profile = item.employment_type ? `Occupation/Profile: ${item.employment_type}.` : ""
-
-  if (item.category === "loan_confirmed") {
-    parts.push(`🟢 LOAN CONFIRMED ON CALL — Caller confirmed requirement for ${product}${amount ? ` of ${amount}` : ""}${location ? ` in ${location}` : ""}.`)
-    if (profile) parts.push(profile)
-    if (item.call_duration) {
-      const mins = Math.floor(item.call_duration / 60)
-      const secs = item.call_duration % 60
-      parts.push(`Discussed in detail on a ${mins > 0 ? `${mins}m ` : ""}${secs}s call (${item.call_language || "Telugu"}).`)
-    }
-    parts.push(`Follow up with customer for KYC, college/income documentation & bank file processing.`)
-  } else if (item.category === "callback") {
-    parts.push(`📞 CALLBACK REQUESTED — Follow-up requested for ${product}${amount ? ` (${amount})` : ""}.`)
-    if (item.quote) parts.push(`Customer note: "${item.quote}".`)
-    if (location) parts.push(`Location: ${location}.`)
-  } else if (item.category === "branch_visit") {
-    parts.push(`🏢 OFFICE VISIT — In-person appointment requested.`)
-    if (item.location) parts.push(`Branch: ${item.location}.`)
-    if (item.quote) parts.push(`Notes: "${item.quote}".`)
-  } else {
-    parts.push(`⚠️ ATTENTION NEEDED — Customer requested human assistance during conversation.`)
-    if (item.quote) parts.push(`Statement: "${item.quote}".`)
-    if (item.call_duration) parts.push(`Call duration: ${item.call_duration}s.`)
-  }
-
-  return parts.join(" ")
 }
 
 export async function GET(req: NextRequest) {
@@ -435,6 +381,18 @@ export async function POST(req: NextRequest) {
     // 1. Resolve Calendar Event
     if (targetId.startsWith("cal_") || body.itemSource === "calendar_event") {
       const calId = targetId.replace(/^cal_/, "")
+      const calInfo = await query(
+        `SELECT e.id, e.title, e.event_type, e.event_at, e.location, e.raw_quote, e.notes,
+                l.id AS lead_id, l.name AS lead_name, l.phone AS lead_phone, l.product_interest, l.loan_amount, l.address AS lead_address,
+                lm.summary AS memory_summary
+           FROM calendar_events e
+           LEFT JOIN leads l ON l.id = e.lead_id
+           LEFT JOIN lead_memory lm ON lm.lead_id = l.id
+          WHERE e.id = $1`,
+        [calId]
+      )
+      const cRow = calInfo.rows[0]
+
       const res = await query(
         `UPDATE calendar_events
             SET status = 'completed',
@@ -459,13 +417,50 @@ export async function POST(req: NextRequest) {
           ]
         ).catch(() => {})
       }
-      logAudit("calendar event resolved", session.email, { calId, notes: noteText })
+
+      const fullDesc = cRow ? buildComprehensiveDescription({
+        category: cRow.event_type,
+        memory_summary: cRow.memory_summary,
+        quote: cRow.raw_quote || cRow.notes,
+        notes: cRow.notes,
+        location: cRow.location,
+        product_interest: cRow.product_interest,
+        loan_amount: cRow.loan_amount,
+        lead_address: cRow.lead_address,
+      }) : (cRow?.title || "Calendar event resolved")
+
+      logAudit("calendar event resolved", session.email, {
+        calId,
+        leadId: cRow?.lead_id,
+        leadName: cRow?.lead_name,
+        leadPhone: cRow?.lead_phone,
+        category: cRow?.event_type === "branch_visit" ? "Office Visit" : "Callback",
+        productInterest: cRow?.product_interest || "Loan",
+        loanAmount: cRow?.loan_amount,
+        location: cRow?.location,
+        eventAt: cRow?.event_at,
+        originalSummary: fullDesc,
+        fullDescription: fullDesc,
+        resolutionNotes: noteText,
+        notes: noteText,
+      })
       return NextResponse.json({ ok: true })
     }
 
     // 2. Resolve Loan Application
     if (targetId.startsWith("app_") || body.itemSource === "loan_application") {
       const appId = targetId.replace(/^app_/, "")
+      const appInfo = await query(
+        `SELECT a.id, a.customer_name, a.phone, a.loan_type, a.loan_amount, a.employment_type, a.monthly_income, a.city,
+                l.id AS lead_id, l.name AS lead_name, l.phone AS lead_phone, lm.summary AS memory_summary
+           FROM loan_applications a
+           LEFT JOIN leads l ON l.id = a.lead_id
+           LEFT JOIN lead_memory lm ON lm.lead_id = l.id
+          WHERE a.id = $1`,
+        [appId]
+      )
+      const aRow = appInfo.rows[0]
+
       const res = await query(
         `UPDATE loan_applications
             SET status = 'in_review'
@@ -488,14 +483,44 @@ export async function POST(req: NextRequest) {
           ]
         ).catch(() => {})
       }
-      logAudit("loan application marked in_review", session.email, { appId, notes: noteText })
+
+      const fullDesc = aRow
+        ? `Loan application submitted for ${aRow.loan_type || "loan"} of ₹${Number(aRow.loan_amount || 0).toLocaleString("en-IN")}${aRow.city ? ` in ${aRow.city}` : ""}. Monthly income: ₹${Number(aRow.monthly_income || 0).toLocaleString("en-IN")} (${aRow.employment_type || "salaried"}).`
+        : "Loan Application"
+
+      logAudit("loan application marked in_review", session.email, {
+        appId,
+        leadId: aRow?.lead_id,
+        leadName: aRow?.customer_name || aRow?.lead_name,
+        leadPhone: aRow?.phone || aRow?.lead_phone,
+        category: "Loan Application",
+        productInterest: aRow?.loan_type || "Loan",
+        loanAmount: aRow?.loan_amount,
+        city: aRow?.city,
+        employmentType: aRow?.employment_type,
+        monthlyIncome: aRow?.monthly_income,
+        originalSummary: fullDesc,
+        fullDescription: fullDesc,
+        resolutionNotes: noteText,
+        notes: noteText,
+      })
       return NextResponse.json({ ok: true })
     }
 
     // 3. Default comm_log resolution
     const commId = targetId.replace(/^comm_/, "")
     const owner = await query(
-      `SELECT l.branch_id, c.outcome, c.lead_id, c.summary FROM comm_logs c LEFT JOIN leads l ON l.id = c.lead_id WHERE c.id = $1 AND c.type = 'alert' LIMIT 1`,
+      `SELECT c.id, c.outcome, c.summary, c.lead_id,
+              l.name AS lead_name, l.phone AS lead_phone, l.product_interest, l.loan_amount, l.address AS lead_address, l.branch_id,
+              lm.summary AS memory_summary,
+              last_call.duration AS call_duration, last_call.language AS call_language
+         FROM comm_logs c
+         LEFT JOIN leads l ON l.id = c.lead_id
+         LEFT JOIN lead_memory lm ON lm.lead_id = l.id
+         LEFT JOIN LATERAL (
+           SELECT v.duration, v.language FROM voice_calls v WHERE v.lead_id = l.id ORDER BY v.created_at DESC LIMIT 1
+         ) last_call ON true
+        WHERE c.id = $1 AND c.type = 'alert' LIMIT 1`,
       [commId]
     )
     const row = owner.rows[0]
@@ -527,7 +552,31 @@ export async function POST(req: NextRequest) {
       ).catch(() => {})
     }
 
-    logAudit("attention item resolved", session.email, { commId, notes: noteText })
+    const fullDesc = buildComprehensiveDescription({
+      category: row.outcome === "loan_confirmed" ? "loan_confirmed" : "needs_human",
+      memory_summary: row.memory_summary,
+      product_interest: row.product_interest,
+      loan_amount: row.loan_amount,
+      lead_address: row.lead_address,
+      call_duration: row.call_duration,
+      call_language: row.call_language,
+      quote: row.summary,
+    }) || row.summary
+
+    logAudit("attention item resolved", session.email, {
+      commId,
+      leadId: row.lead_id,
+      leadName: row.lead_name,
+      leadPhone: row.lead_phone,
+      category: row.outcome === "loan_confirmed" ? "Loan Confirmed" : "Escalation",
+      productInterest: row.product_interest || "Loan",
+      loanAmount: row.loan_amount,
+      location: row.lead_address,
+      originalSummary: fullDesc,
+      fullDescription: fullDesc,
+      resolutionNotes: noteText,
+      notes: noteText,
+    })
     return NextResponse.json({ ok: true })
   } catch (e: any) {
     console.error("escalations POST failed:", e?.message)

@@ -12,7 +12,15 @@ import {
   HeartPulse,
   ChevronRight,
   Copy,
-  Check
+  Check,
+  CheckCircle2,
+  Phone,
+  Calendar,
+  MapPin,
+  MessageSquare,
+  User,
+  Building,
+  FileText
 } from "lucide-react"
 import { SkeletonList } from "../ui/skeleton"
 import { useToast } from "../ui/toast"
@@ -423,6 +431,15 @@ export default function SecurityView({ role = "admin" }: { role?: Role }) {
                   .join(" · ")
               : ""
 
+            const isResolution = log.action.includes("resolved") || log.action.includes("review")
+            const hasLead = Boolean(meta?.leadName || meta?.name)
+            const leadDisplay = meta?.leadName || meta?.name || ""
+            const phoneDisplay = meta?.leadPhone || meta?.phone || ""
+            const catDisplay = meta?.category || (log.action.includes("calendar") ? "Appointment" : log.action.includes("loan") ? "Loan" : "")
+            const productDisplay = meta?.productInterest || meta?.product || ""
+            const amountDisplay = meta?.loanAmount ? `₹${Number(meta.loanAmount).toLocaleString("en-IN")}` : ""
+            const noteText = meta?.resolutionNotes || meta?.notes
+
             return (
               <div
                 key={log.id}
@@ -430,10 +447,22 @@ export default function SecurityView({ role = "admin" }: { role?: Role }) {
                 className="hover:bg-[var(--overlay-soft)] transition cursor-pointer"
                 style={{ padding:"14px 24px",borderBottom:"1px solid var(--border-light)",display:"flex",alignItems:"center",gap:14 }}
               >
-                <span style={{ width:30,height:30,borderRadius:8,background:"var(--overlay-hover)",display:"inline-flex",alignItems:"center",justifyContent:"center",color:"var(--text-muted)",flexShrink:0 }}><FileLock2 size={14} strokeWidth={1.8} /></span>
+                <span style={{ width:32,height:32,borderRadius:8,background: isResolution ? "rgba(34,197,94,0.12)" : "var(--overlay-hover)",display:"inline-flex",alignItems:"center",justifyContent:"center",color: isResolution ? "#22c55e" : "var(--text-muted)",flexShrink:0 }}>
+                  {isResolution ? <CheckCircle2 size={16} strokeWidth={2} /> : <FileLock2 size={15} strokeWidth={1.8} />}
+                </span>
                 <div style={{ flex:1, minWidth: 0 }}>
                   <div style={{ fontSize:14,fontWeight:500,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap" }}>
                     <span className="capitalize">{log.action}</span>
+                    {catDisplay && (
+                      <span style={{ background:"rgba(168,85,247,0.15)",color:"#c084fc",padding:"2px 8px",borderRadius:5,fontSize:11,fontWeight:600 }}>
+                        {catDisplay}
+                      </span>
+                    )}
+                    {productDisplay && (
+                      <span style={{ background:"rgba(34,197,94,0.15)",color:"#22c55e",padding:"2px 8px",borderRadius:5,fontSize:11,fontWeight:600 }}>
+                        {productDisplay.toUpperCase()}{amountDisplay ? ` • ${amountDisplay}` : ""}
+                      </span>
+                    )}
                     {meta?.sentCount !== undefined && (
                       <span style={{ display:"inline-flex",alignItems:"center",gap:6,fontSize:11,fontWeight:600 }}>
                         <span style={{ background:"rgba(34,197,94,0.15)",color:"#22c55e",padding:"2px 8px",borderRadius:5 }}>
@@ -456,9 +485,15 @@ export default function SecurityView({ role = "admin" }: { role?: Role }) {
                     )}
                   </div>
                   <div style={{ fontSize:12,color:"var(--text-muted)",marginTop:2 }}>{log.performed_by}</div>
-                  {extraDetails && (
-                    <div style={{ fontSize:11,color:"var(--text-secondary)",marginTop:3,wordBreak:"break-word" }}>
-                      {extraDetails}
+                  {hasLead && (
+                    <div style={{ fontSize:12,color:"var(--text-primary)",marginTop:3,fontWeight:500,display:"flex",alignItems:"center",gap:6 }}>
+                      <span>👤 {leadDisplay}</span>
+                      {phoneDisplay && <span style={{ color:"var(--text-muted)",fontSize:11 }}>({phoneDisplay})</span>}
+                    </div>
+                  )}
+                  {noteText && (
+                    <div style={{ fontSize:11.5,color:"#22c55e",marginTop:3,fontWeight:500 }}>
+                      📝 Resolution Note: &ldquo;{noteText}&rdquo;
                     </div>
                   )}
                 </div>
@@ -502,135 +537,238 @@ export default function SecurityView({ role = "admin" }: { role?: Role }) {
       </div>
 
       {/* Audit Log Details Modal */}
-      {selectedLog && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ background: "rgba(0,0,0,0.72)", backdropFilter: "blur(4px)" }}
-          onClick={() => setSelectedLog(null)}
-        >
+      {selectedLog && (() => {
+        const meta = selectedLog.metadata && typeof selectedLog.metadata === "object" ? selectedLog.metadata : {}
+        const isResolution = selectedLog.action.includes("resolved") || selectedLog.action.includes("review")
+        const hasLead = Boolean(meta.leadName || meta.name || meta.leadPhone || meta.phone || meta.fullDescription || meta.originalSummary || meta.calId || meta.commId || meta.loanAppId)
+        const leadName = meta.leadName || meta.name || "Customer"
+        const phone = meta.leadPhone || meta.phone || ""
+        const category = meta.category || (selectedLog.action.includes("calendar") ? "Office Visit" : selectedLog.action.includes("loan") ? "Loan Confirmed" : "Escalation")
+        const product = meta.productInterest || meta.product || "Education Loan"
+        const amount = meta.loanAmount ? `₹${Number(meta.loanAmount).toLocaleString("en-IN")}` : ""
+        const notes = meta.resolutionNotes || meta.notes || ""
+        const fullStory = meta.fullDescription || meta.originalSummary || ""
+        const location = meta.location || ""
+        const eventAt = meta.eventAt ? formatDateTime(meta.eventAt) : ""
+        const initials = leadName.split(" ").filter(Boolean).map((p: string) => p[0]).slice(0, 2).join("").toUpperCase() || "CU"
+
+        return (
           <div
-            className="w-full max-w-xl rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] p-5 shadow-2xl transition max-h-[90vh] flex flex-col"
-            onClick={e => e.stopPropagation()}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(6px)" }}
+            onClick={() => setSelectedLog(null)}
           >
-            {/* Modal Header */}
-            <div className="flex items-start justify-between border-b border-[var(--border)] pb-3.5">
-              <div className="flex items-center gap-2.5">
-                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--overlay-hover)] text-emerald-400">
-                  <FileLock2 size={16} />
-                </span>
-                <div>
-                  <h3 className="text-[15px] font-semibold text-[var(--text-primary)]">Audit Event Details</h3>
-                  <p className="text-[11px] text-[var(--text-muted)] font-mono">{selectedLog.id}</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setSelectedLog(null)}
-                className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--overlay-soft)] transition"
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            {/* Modal Body */}
-            <div className="flex-1 overflow-y-auto py-4 space-y-4 pr-1">
-              {/* Event Attributes Grid */}
-              <div className="grid grid-cols-2 gap-2.5 text-[12px]">
-                <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-surface)] p-3">
-                  <div className="text-[10.5px] uppercase tracking-wider text-[var(--text-muted)] font-medium">Action</div>
-                  <div className="mt-1 font-semibold text-[var(--text-primary)] font-mono text-[12.5px] capitalize">
-                    {selectedLog.action}
+            <div
+              className="w-full max-w-2xl rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] p-6 shadow-2xl transition max-h-[90vh] flex flex-col"
+              onClick={e => e.stopPropagation()}
+            >
+              {/* Modal Top Header */}
+              <div className="flex items-start justify-between border-b border-[var(--border)] pb-4">
+                <div className="flex items-center gap-3">
+                  <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                    {isResolution ? <CheckCircle2 size={18} strokeWidth={2.2} /> : <FileLock2 size={18} />}
+                  </span>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-[16px] font-bold text-[var(--text-primary)] capitalize">
+                        {selectedLog.action}
+                      </h3>
+                      <span className="rounded-md bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-400 border border-emerald-500/30">
+                        Audit Log
+                      </span>
+                    </div>
+                    <p className="text-[12px] text-[var(--text-muted)] mt-0.5 flex items-center gap-1.5">
+                      <span>Recorded by <strong className="text-[var(--text-secondary)]">{selectedLog.performed_by}</strong></span>
+                      <span>•</span>
+                      <span>{timeAgo(selectedLog.created_at)}</span>
+                    </p>
                   </div>
                 </div>
-                <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-surface)] p-3">
-                  <div className="text-[10.5px] uppercase tracking-wider text-[var(--text-muted)] font-medium">Performed By</div>
-                  <div className="mt-1 font-semibold text-[var(--text-primary)] truncate" title={selectedLog.performed_by}>
-                    {selectedLog.performed_by || "System / Automated"}
-                  </div>
-                </div>
-                <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-surface)] p-3">
-                  <div className="text-[10.5px] uppercase tracking-wider text-[var(--text-muted)] font-medium">Timestamp</div>
-                  <div className="mt-1 font-medium text-[var(--text-primary)]">
-                    {formatDateTime(selectedLog.created_at)}
-                  </div>
-                  <div className="text-[10.5px] text-[var(--text-muted)] mt-0.5">{timeAgo(selectedLog.created_at)}</div>
-                </div>
-                <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-surface)] p-3">
-                  <div className="text-[10.5px] uppercase tracking-wider text-[var(--text-muted)] font-medium">IP Address / Host</div>
-                  <div className="mt-1 font-mono text-[var(--text-secondary)]">
-                    {selectedLog.metadata?.ip || selectedLog.metadata?.ip_address || "Internal Gateway"}
-                  </div>
-                </div>
+                <button
+                  onClick={() => setSelectedLog(null)}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--overlay-soft)] transition"
+                >
+                  <X size={18} />
+                </button>
               </div>
 
-              {/* Special highlight for Resolution Notes */}
-              {selectedLog.metadata && (selectedLog.metadata.notes || selectedLog.metadata.resolutionNotes) && (
-                <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3.5">
-                  <div className="text-[11px] font-semibold text-emerald-400 uppercase tracking-wide flex items-center gap-1.5">
-                    <Check size={13} /> Resolution Notes Added
-                  </div>
-                  <div className="mt-1.5 text-[12.5px] text-[var(--text-primary)] leading-relaxed font-medium">
-                    &ldquo;{String(selectedLog.metadata.notes || selectedLog.metadata.resolutionNotes)}&rdquo;
-                  </div>
-                </div>
-              )}
-
-              {/* Parsed Metadata Badges */}
-              {selectedLog.metadata && Object.keys(selectedLog.metadata).length > 0 && (
-                <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-surface)] p-3.5">
-                  <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-2.5">
-                    Event Parameters
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {Object.entries(selectedLog.metadata).map(([k, v]) => {
-                      if (k === "notes" || k === "resolutionNotes" || k === "ip" || k === "ip_address") return null
-                      const strVal = typeof v === "object" ? JSON.stringify(v) : String(v)
-                      return (
-                        <div key={k} className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg-card)] px-2.5 py-1 text-[11.5px]">
-                          <span className="text-[var(--text-muted)] font-mono">{k}:</span>
-                          <span className="font-semibold text-[var(--text-primary)] font-mono">{strVal}</span>
+              {/* Modal Body */}
+              <div className="flex-1 overflow-y-auto py-5 space-y-5 pr-1">
+                {hasLead ? (
+                  <>
+                    {/* 1. Need Human Header Bar */}
+                    <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-surface)] p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500/30 to-teal-500/20 text-emerald-300 font-bold text-sm border border-emerald-500/30">
+                            {initials}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[15px] font-bold text-[var(--text-primary)]">{leadName}</span>
+                              {phone && (
+                                <span className="inline-flex items-center gap-1 text-[12px] text-[var(--text-muted)] font-mono">
+                                  <Phone size={11} /> {phone}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2 mt-1">
+                              {/* Category Badge */}
+                              {category === "Office Visit" && (
+                                <span className="rounded-full bg-purple-500/20 border border-purple-500/40 px-2.5 py-0.5 text-[11px] font-bold text-purple-300 flex items-center gap-1">
+                                  🏢 Office Visit
+                                </span>
+                              )}
+                              {category === "Loan Confirmed" && (
+                                <span className="rounded-full bg-emerald-500/20 border border-emerald-500/40 px-2.5 py-0.5 text-[11px] font-bold text-emerald-300 flex items-center gap-1">
+                                  🟢 Loan Confirmed
+                                </span>
+                              )}
+                              {category === "Callback" && (
+                                <span className="rounded-full bg-blue-500/20 border border-blue-500/40 px-2.5 py-0.5 text-[11px] font-bold text-blue-300 flex items-center gap-1">
+                                  📞 Callback
+                                </span>
+                              )}
+                              {category === "Loan Application" && (
+                                <span className="rounded-full bg-indigo-500/20 border border-indigo-500/40 px-2.5 py-0.5 text-[11px] font-bold text-indigo-300 flex items-center gap-1">
+                                  📄 Loan Application
+                                </span>
+                              )}
+                              {category === "Escalation" && (
+                                <span className="rounded-full bg-amber-500/20 border border-amber-500/40 px-2.5 py-0.5 text-[11px] font-bold text-amber-300 flex items-center gap-1">
+                                  ⚠️ Escalation
+                                </span>
+                              )}
+                              {/* Product & Loan Amount Badge */}
+                              <span className="rounded-full bg-emerald-500/15 border border-emerald-500/30 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-400">
+                                {product.toUpperCase()}{amount ? ` • ${amount}` : ""}
+                              </span>
+                            </div>
+                          </div>
                         </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
 
-              {/* Full Raw Metadata Payload with Copy Button */}
-              <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-surface)] p-3.5">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-                    Raw Event JSON
+                        {/* Event Time / Location if applicable */}
+                        {(eventAt || location) && (
+                          <div className="text-right text-[12px] text-[var(--text-muted)] space-y-0.5">
+                            {eventAt && (
+                              <div className="flex items-center justify-end gap-1 font-medium text-purple-300">
+                                <Calendar size={12} /> {eventAt}
+                              </div>
+                            )}
+                            {location && (
+                              <div className="flex items-center justify-end gap-1 text-[11px] text-[var(--text-secondary)] max-w-xs truncate" title={location}>
+                                <MapPin size={11} /> {location}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* 2. Original Request & Conversation Intel (Need Human Context) */}
+                    <div>
+                      <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)] flex items-center gap-1.5 mb-2">
+                        <MessageSquare size={13} className="text-blue-400" /> Original Request & Customer Context (From Need Human)
+                      </div>
+                      <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-surface)] p-4 text-[13px] leading-relaxed text-[var(--text-primary)] shadow-sm">
+                        {fullStory || "Caller requested human assistance or confirmed requirement during conversation."}
+                      </div>
+                    </div>
+
+                    {/* 3. What Was Resolved & Written Notes */}
+                    <div>
+                      <div className="text-[11px] font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5 mb-2">
+                        <CheckCircle2 size={14} /> What Was Resolved & Officer Notes
+                      </div>
+                      <div className="rounded-xl border border-emerald-500/35 bg-gradient-to-b from-emerald-500/10 to-transparent p-4.5 space-y-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-emerald-500/20 pb-2.5 text-[12px]">
+                          <div>
+                            <span className="text-[var(--text-muted)]">Resolved by: </span>
+                            <span className="font-semibold text-[var(--text-primary)]">{selectedLog.performed_by}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 text-[var(--text-muted)]">
+                            <Clock size={12} />
+                            <span>{formatDateTime(selectedLog.created_at)}</span>
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="text-[11px] font-bold text-emerald-400 uppercase tracking-wide">
+                            Loan Officer Written Notes:
+                          </div>
+                          <div className="mt-2 rounded-xl border border-emerald-500/30 bg-[var(--bg-card)] p-3.5 text-[13.5px] font-medium text-[var(--text-primary)] leading-relaxed shadow-sm">
+                            &ldquo;{notes || "Marked resolved without additional notes."}&rdquo;
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  /* Non-lead system action card */
+                  <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-surface)] p-4 space-y-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[14px] font-bold text-[var(--text-primary)] capitalize">{selectedLog.action}</span>
+                    </div>
+
+                    {meta?.sentCount !== undefined ? (
+                      <div>
+                        <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)] mb-2">Campaign Broadcast Results</div>
+                        <div className="grid grid-cols-2 gap-2 text-[12px]">
+                          <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-2.5">
+                            <div className="text-[10.5px] text-[var(--text-muted)]">Messages Sent</div>
+                            <div className="text-[16px] font-bold text-emerald-400">{meta.sentCount}</div>
+                          </div>
+                          <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-2.5">
+                            <div className="text-[10.5px] text-[var(--text-muted)]">Total Targeted</div>
+                            <div className="text-[16px] font-bold text-[var(--text-primary)]">{meta.total}</div>
+                          </div>
+                          <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-2.5">
+                            <div className="text-[10.5px] text-[var(--text-muted)]">Skipped DND</div>
+                            <div className="text-[16px] font-bold text-amber-400">{meta.skippedDnd || 0}</div>
+                          </div>
+                          <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-2.5">
+                            <div className="text-[10.5px] text-[var(--text-muted)]">Failed</div>
+                            <div className="text-[16px] font-bold text-rose-400">{meta.failedCount || 0}</div>
+                          </div>
+                        </div>
+                      </div>
+                    ) : meta?.email ? (
+                      <div className="space-y-1.5 text-[12.5px]">
+                        <div><strong className="text-[var(--text-muted)]">User Email:</strong> <span className="font-semibold text-[var(--text-primary)]">{meta.email}</span></div>
+                        {meta.role && <div><strong className="text-[var(--text-muted)]">Assigned Role:</strong> <span className="capitalize text-emerald-400 font-semibold">{meta.role}</span></div>}
+                      </div>
+                    ) : (
+                      <div className="text-[13px] text-[var(--text-secondary)]">
+                        Action performed successfully by <strong className="text-[var(--text-primary)]">{selectedLog.performed_by}</strong> on {formatDateTime(selectedLog.created_at)}.
+                      </div>
+                    )}
                   </div>
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(JSON.stringify(selectedLog, null, 2))
-                      setCopied(true)
-                      setTimeout(() => setCopied(false), 2000)
-                    }}
-                    className="inline-flex items-center gap-1 text-[11px] font-medium text-[var(--text-secondary)] hover:text-emerald-400 transition"
-                  >
-                    {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
-                    {copied ? "Copied!" : "Copy JSON"}
-                  </button>
-                </div>
-                <pre className="max-h-48 overflow-auto rounded-lg bg-[var(--bg-card)] p-3 text-[11px] font-mono text-[var(--text-secondary)] leading-relaxed border border-[var(--border)]">
-                  {JSON.stringify(selectedLog, null, 2)}
-                </pre>
+                )}
+
+                {/* Collapsed Technical JSON Payload (Only visible if explicitly opened) */}
+                <details className="mt-4 border-t border-[var(--border)] pt-3 text-[11px] text-[var(--text-muted)] cursor-pointer">
+                  <summary className="select-none font-medium hover:text-[var(--text-primary)] transition">
+                    Technical Event Payload (Developer Details)
+                  </summary>
+                  <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-[var(--bg-surface)] p-3 text-[10.5px] font-mono text-[var(--text-secondary)] border border-[var(--border)]">
+                    {JSON.stringify(selectedLog, null, 2)}
+                  </pre>
+                </details>
               </div>
-            </div>
 
-            {/* Modal Footer */}
-            <div className="mt-2 border-t border-[var(--border)] pt-3 flex justify-end">
-              <button
-                onClick={() => setSelectedLog(null)}
-                className="h-8 rounded-lg border border-[var(--border)] px-4 text-[12px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--overlay-soft)] transition"
-              >
-                Close
-              </button>
+              {/* Modal Footer */}
+              <div className="mt-3 border-t border-[var(--border)] pt-3 flex justify-end">
+                <button
+                  onClick={() => setSelectedLog(null)}
+                  className="h-8.5 rounded-lg border border-[var(--border)] px-5 text-[12px] font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--overlay-soft)] transition"
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
     </div>
   )
 }
