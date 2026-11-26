@@ -68,7 +68,7 @@ function buildComprehensiveDescription(item: any): string {
       const secs = item.call_duration % 60
       parts.push(`Discussed in detail on a ${mins > 0 ? `${mins}m ` : ""}${secs}s call (${item.call_language || "Telugu"}).`)
     }
-    parts.push(`Official application link sent on WhatsApp (+${item.lead_whatsapp || item.lead_phone || ""}). Follow up for KYC, college/income documentation & bank file processing.`)
+    parts.push(`Follow up with customer for KYC, college/income documentation & bank file processing.`)
   } else if (item.category === "callback") {
     parts.push(`📞 CALLBACK REQUESTED — Follow-up requested for ${product}${amount ? ` (${amount})` : ""}.`)
     if (item.quote) parts.push(`Customer note: "${item.quote}".`)
