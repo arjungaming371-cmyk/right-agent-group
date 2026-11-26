@@ -759,9 +759,11 @@ INSTRUCTIONS FOR NEW INQUIRY:
   // chat request), they already hold a live one-time link — don't mint and
   // message a fresh token on every ask.
   try {
-    const aiMentionedForm = !!(aiReply && /\b(sent (the )?(simple )?(application|form)|link on (this )?chat|fill it (when|here)|application link|form link|లింక్ పంపించా|లింక్ పంపిస్తా|form right here)\b/i.test(aiReply))
     const customerRequested = detectApplicationRequest(text)
-    if (customerRequested || (aiMentionedForm && !(await recentFormLinkSent(lead.id)))) {
+    // Do NOT send the application link when Priya is merely mentioning it or offering options (e.g. "if you'd like the application link or visit branch").
+    // Only send if the customer explicitly requested it, or if AI explicitly states it has sent/shared it right now.
+    const aiExplicitlySending = !!(aiReply && /\b(I have sent (the )?(application|form) link|sending you the (application|form) link|sharing the (application|form) link with you|లింక్ పంపించా)\b/i.test(aiReply))
+    if (customerRequested || (aiExplicitlySending && !(await recentFormLinkSent(lead.id)))) {
       const token = await createOneTimeFormToken(lead.id)
       const linkResult = await sendApplicationLinkText(from, lead.name || "there", token, waBranch)
       const linkMessageBody = formLinkMessage(lead.name || "there", token, waBranch?.brandName)

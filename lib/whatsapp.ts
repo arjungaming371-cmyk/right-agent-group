@@ -851,7 +851,7 @@ export async function recentFormLinkSent(leadId: string, hours = 6): Promise<boo
       `SELECT 1 FROM comm_logs
          WHERE lead_id = $1
            AND outcome IN ('sent', 'pending')
-           AND summary ILIKE '%form link%'
+           AND (summary ILIKE '%form link%' OR summary ILIKE '%application link%')
            AND created_at > now() - ($2 || ' hours')::interval
          LIMIT 1`,
       [leadId, String(hours)]
