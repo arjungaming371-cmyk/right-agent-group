@@ -1,6 +1,19 @@
 "use client"
 import { useEffect, useState } from "react"
-import { ShieldCheck, AlertTriangle, RotateCcw, FileLock2, PhoneOff, Clock, X, Plus, HeartPulse } from "lucide-react"
+import {
+  ShieldCheck,
+  AlertTriangle,
+  RotateCcw,
+  FileLock2,
+  PhoneOff,
+  Clock,
+  X,
+  Plus,
+  HeartPulse,
+  ChevronRight,
+  Copy,
+  Check
+} from "lucide-react"
 import { SkeletonList } from "../ui/skeleton"
 import { useToast } from "../ui/toast"
 import { formatDateTime } from "@/lib/utils"
@@ -62,6 +75,8 @@ export default function SecurityView({ role = "admin" }: { role?: Role }) {
   const [showDndList, setShowDndList] = useState(false)
   const [dndPaste, setDndPaste] = useState("")
   const [addingDnd, setAddingDnd] = useState(false)
+  const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null)
+  const [copied, setCopied] = useState(false)
 
   // RULES OF HOOKS: this guard used to early-return BEFORE the useState
   // block — if the `role` prop ever changed across renders of a mounted
@@ -409,11 +424,16 @@ export default function SecurityView({ role = "admin" }: { role?: Role }) {
               : ""
 
             return (
-              <div key={log.id} style={{ padding:"14px 24px",borderBottom:"1px solid var(--border-light)",display:"flex",alignItems:"center",gap:14 }}>
+              <div
+                key={log.id}
+                onClick={() => setSelectedLog(log)}
+                className="hover:bg-[var(--overlay-soft)] transition cursor-pointer"
+                style={{ padding:"14px 24px",borderBottom:"1px solid var(--border-light)",display:"flex",alignItems:"center",gap:14 }}
+              >
                 <span style={{ width:30,height:30,borderRadius:8,background:"var(--overlay-hover)",display:"inline-flex",alignItems:"center",justifyContent:"center",color:"var(--text-muted)",flexShrink:0 }}><FileLock2 size={14} strokeWidth={1.8} /></span>
                 <div style={{ flex:1, minWidth: 0 }}>
                   <div style={{ fontSize:14,fontWeight:500,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap" }}>
-                    <span>{log.action}</span>
+                    <span className="capitalize">{log.action}</span>
                     {meta?.sentCount !== undefined && (
                       <span style={{ display:"inline-flex",alignItems:"center",gap:6,fontSize:11,fontWeight:600 }}>
                         <span style={{ background:"rgba(34,197,94,0.15)",color:"#22c55e",padding:"2px 8px",borderRadius:5 }}>
@@ -442,9 +462,12 @@ export default function SecurityView({ role = "admin" }: { role?: Role }) {
                     </div>
                   )}
                 </div>
-                <div style={{ fontSize:12,color:"var(--text-muted)",whiteSpace:"nowrap",textAlign:"right" }}>
-                  <div>{timeAgo(log.created_at)}</div>
-                  <div style={{ fontSize:10.5 }}>{formatDateTime(log.created_at)}</div>
+                <div style={{ fontSize:12,color:"var(--text-muted)",whiteSpace:"nowrap",textAlign:"right",display:"flex",alignItems:"center",gap:8 }}>
+                  <div>
+                    <div>{timeAgo(log.created_at)}</div>
+                    <div style={{ fontSize:10.5 }}>{formatDateTime(log.created_at)}</div>
+                  </div>
+                  <ChevronRight size={15} style={{ color:"var(--text-muted)", opacity: 0.6 }} />
                 </div>
               </div>
             )
@@ -477,6 +500,137 @@ export default function SecurityView({ role = "admin" }: { role?: Role }) {
           <SystemHealthView compact />
         </div>
       </div>
+
+      {/* Audit Log Details Modal */}
+      {selectedLog && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.72)", backdropFilter: "blur(4px)" }}
+          onClick={() => setSelectedLog(null)}
+        >
+          <div
+            className="w-full max-w-xl rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] p-5 shadow-2xl transition max-h-[90vh] flex flex-col"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="flex items-start justify-between border-b border-[var(--border)] pb-3.5">
+              <div className="flex items-center gap-2.5">
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--overlay-hover)] text-emerald-400">
+                  <FileLock2 size={16} />
+                </span>
+                <div>
+                  <h3 className="text-[15px] font-semibold text-[var(--text-primary)]">Audit Event Details</h3>
+                  <p className="text-[11px] text-[var(--text-muted)] font-mono">{selectedLog.id}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedLog(null)}
+                className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--overlay-soft)] transition"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="flex-1 overflow-y-auto py-4 space-y-4 pr-1">
+              {/* Event Attributes Grid */}
+              <div className="grid grid-cols-2 gap-2.5 text-[12px]">
+                <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-surface)] p-3">
+                  <div className="text-[10.5px] uppercase tracking-wider text-[var(--text-muted)] font-medium">Action</div>
+                  <div className="mt-1 font-semibold text-[var(--text-primary)] font-mono text-[12.5px] capitalize">
+                    {selectedLog.action}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-surface)] p-3">
+                  <div className="text-[10.5px] uppercase tracking-wider text-[var(--text-muted)] font-medium">Performed By</div>
+                  <div className="mt-1 font-semibold text-[var(--text-primary)] truncate" title={selectedLog.performed_by}>
+                    {selectedLog.performed_by || "System / Automated"}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-surface)] p-3">
+                  <div className="text-[10.5px] uppercase tracking-wider text-[var(--text-muted)] font-medium">Timestamp</div>
+                  <div className="mt-1 font-medium text-[var(--text-primary)]">
+                    {formatDateTime(selectedLog.created_at)}
+                  </div>
+                  <div className="text-[10.5px] text-[var(--text-muted)] mt-0.5">{timeAgo(selectedLog.created_at)}</div>
+                </div>
+                <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-surface)] p-3">
+                  <div className="text-[10.5px] uppercase tracking-wider text-[var(--text-muted)] font-medium">IP Address / Host</div>
+                  <div className="mt-1 font-mono text-[var(--text-secondary)]">
+                    {selectedLog.metadata?.ip || selectedLog.metadata?.ip_address || "Internal Gateway"}
+                  </div>
+                </div>
+              </div>
+
+              {/* Special highlight for Resolution Notes */}
+              {selectedLog.metadata && (selectedLog.metadata.notes || selectedLog.metadata.resolutionNotes) && (
+                <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3.5">
+                  <div className="text-[11px] font-semibold text-emerald-400 uppercase tracking-wide flex items-center gap-1.5">
+                    <Check size={13} /> Resolution Notes Added
+                  </div>
+                  <div className="mt-1.5 text-[12.5px] text-[var(--text-primary)] leading-relaxed font-medium">
+                    &ldquo;{String(selectedLog.metadata.notes || selectedLog.metadata.resolutionNotes)}&rdquo;
+                  </div>
+                </div>
+              )}
+
+              {/* Parsed Metadata Badges */}
+              {selectedLog.metadata && Object.keys(selectedLog.metadata).length > 0 && (
+                <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-surface)] p-3.5">
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-2.5">
+                    Event Parameters
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {Object.entries(selectedLog.metadata).map(([k, v]) => {
+                      if (k === "notes" || k === "resolutionNotes" || k === "ip" || k === "ip_address") return null
+                      const strVal = typeof v === "object" ? JSON.stringify(v) : String(v)
+                      return (
+                        <div key={k} className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg-card)] px-2.5 py-1 text-[11.5px]">
+                          <span className="text-[var(--text-muted)] font-mono">{k}:</span>
+                          <span className="font-semibold text-[var(--text-primary)] font-mono">{strVal}</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Full Raw Metadata Payload with Copy Button */}
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-surface)] p-3.5">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                    Raw Event JSON
+                  </div>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(JSON.stringify(selectedLog, null, 2))
+                      setCopied(true)
+                      setTimeout(() => setCopied(false), 2000)
+                    }}
+                    className="inline-flex items-center gap-1 text-[11px] font-medium text-[var(--text-secondary)] hover:text-emerald-400 transition"
+                  >
+                    {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                    {copied ? "Copied!" : "Copy JSON"}
+                  </button>
+                </div>
+                <pre className="max-h-48 overflow-auto rounded-lg bg-[var(--bg-card)] p-3 text-[11px] font-mono text-[var(--text-secondary)] leading-relaxed border border-[var(--border)]">
+                  {JSON.stringify(selectedLog, null, 2)}
+                </pre>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="mt-2 border-t border-[var(--border)] pt-3 flex justify-end">
+              <button
+                onClick={() => setSelectedLog(null)}
+                className="h-8 rounded-lg border border-[var(--border)] px-4 text-[12px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--overlay-soft)] transition"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
