@@ -423,8 +423,10 @@ export async function POST(req: NextRequest) {
     id?: string
     itemSource?: string
     action?: string
+    notes?: string
   }
   const targetId = String(body.id || body.logId || "").trim()
+  const noteText = String(body.notes || "").trim()
   if (!targetId) {
     return NextResponse.json({ error: "id required" }, { status: 400 })
   }
@@ -435,15 +437,29 @@ export async function POST(req: NextRequest) {
       const calId = targetId.replace(/^cal_/, "")
       const res = await query(
         `UPDATE calendar_events
-            SET status = 'completed', updated_at = now()
+            SET status = 'completed',
+                notes = CASE WHEN $3 <> '' THEN COALESCE(notes || E'\n[Resolution Note]: ', '') || $3 ELSE notes END,
+                updated_at = now()
           WHERE id = $1
-            AND ($2::uuid IS NULL OR branch_id = $2::uuid)`,
-        [calId, branchId]
+            AND ($2::uuid IS NULL OR branch_id = $2::uuid)
+          RETURNING lead_id, title`,
+        [calId, branchId, noteText]
       )
       if ((res.rowCount ?? 0) === 0) {
         return NextResponse.json({ error: "not found or already resolved" }, { status: 404 })
       }
-      logAudit("calendar event resolved", session.email, { calId })
+      const leadId = res.rows[0]?.lead_id
+      if (leadId) {
+        await query(
+          `INSERT INTO comm_logs (lead_id, type, summary, outcome)
+           VALUES ($1, 'system', $2, 'resolved')`,
+          [
+            leadId,
+            `Resolved (${session.email || "Staff"}): ${res.rows[0]?.title || "Appointment"}${noteText ? ` — Note: ${noteText}` : ""}`
+          ]
+        ).catch(() => {})
+      }
+      logAudit("calendar event resolved", session.email, { calId, notes: noteText })
       return NextResponse.json({ ok: true })
     }
 
@@ -454,20 +470,32 @@ export async function POST(req: NextRequest) {
         `UPDATE loan_applications
             SET status = 'in_review'
           WHERE id = $1
-            AND ($2::uuid IS NULL OR branch_id = $2::uuid)`,
+            AND ($2::uuid IS NULL OR branch_id = $2::uuid)
+          RETURNING lead_id, product_interest`,
         [appId, branchId]
       )
       if ((res.rowCount ?? 0) === 0) {
         return NextResponse.json({ error: "not found or already resolved" }, { status: 404 })
       }
-      logAudit("loan application marked in_review", session.email, { appId })
+      const leadId = res.rows[0]?.lead_id
+      if (leadId) {
+        await query(
+          `INSERT INTO comm_logs (lead_id, type, summary, outcome)
+           VALUES ($1, 'system', $2, 'resolved')`,
+          [
+            leadId,
+            `Loan application marked in-review (${session.email || "Staff"})${noteText ? ` — Note: ${noteText}` : ""}`
+          ]
+        ).catch(() => {})
+      }
+      logAudit("loan application marked in_review", session.email, { appId, notes: noteText })
       return NextResponse.json({ ok: true })
     }
 
     // 3. Default comm_log resolution
     const commId = targetId.replace(/^comm_/, "")
     const owner = await query(
-      `SELECT l.branch_id, c.outcome FROM comm_logs c LEFT JOIN leads l ON l.id = c.lead_id WHERE c.id = $1 AND c.type = 'alert' LIMIT 1`,
+      `SELECT l.branch_id, c.outcome, c.lead_id, c.summary FROM comm_logs c LEFT JOIN leads l ON l.id = c.lead_id WHERE c.id = $1 AND c.type = 'alert' LIMIT 1`,
       [commId]
     )
     const row = owner.rows[0]
@@ -480,12 +508,26 @@ export async function POST(req: NextRequest) {
     const nextOutcome = currentOutcome.endsWith("_resolved") ? currentOutcome : `${currentOutcome}_resolved`
 
     const res = await query(
-      `UPDATE comm_logs SET outcome = $2 WHERE id = $1`,
-      [commId, nextOutcome]
+      `UPDATE comm_logs
+          SET outcome = $2,
+              summary = CASE WHEN $3 <> '' THEN summary || ' | Resolved Note: ' || $3 ELSE summary END
+        WHERE id = $1`,
+      [commId, nextOutcome, noteText]
     )
     if ((res.rowCount ?? 0) === 0) return NextResponse.json({ error: "already resolved" }, { status: 409 })
 
-    logAudit("attention item resolved", session.email, { commId })
+    if (row.lead_id && noteText) {
+      await query(
+        `INSERT INTO comm_logs (lead_id, type, summary, outcome)
+         VALUES ($1, 'system', $2, 'resolved')`,
+        [
+          row.lead_id,
+          `Escalation resolved (${session.email || "Staff"}) — Note: ${noteText}`
+        ]
+      ).catch(() => {})
+    }
+
+    logAudit("attention item resolved", session.email, { commId, notes: noteText })
     return NextResponse.json({ ok: true })
   } catch (e: any) {
     console.error("escalations POST failed:", e?.message)

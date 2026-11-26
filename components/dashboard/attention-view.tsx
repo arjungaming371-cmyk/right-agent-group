@@ -90,6 +90,9 @@ export default function AttentionView({ role }: { role: Role }) {
   const [activeTab, setActiveTab] = useState<AttentionCategory>("all")
   const [busyId, setBusyId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [resolvingItem, setResolvingItem] = useState<AttentionItem | null>(null)
+  const [resolutionNotes, setResolutionNotes] = useState("")
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   const load = useCallback(async () => {
     setError(null)
@@ -108,26 +111,35 @@ export default function AttentionView({ role }: { role: Role }) {
   useEffect(() => { load() }, [load])
   usePolling(load, 12000)
 
-  async function resolve(item: AttentionItem) {
-    setBusyId(item.id)
+  async function handleConfirmResolve() {
+    if (!resolvingItem) return
+    const notes = resolutionNotes.trim()
+    if (!notes) return
+
+    setIsSubmitting(true)
+    setBusyId(resolvingItem.id)
     try {
       const res = await fetch("/api/escalations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          id: item.id,
-          rawId: item.raw_id,
-          itemSource: item.item_source,
+          id: resolvingItem.id,
+          rawId: resolvingItem.raw_id,
+          itemSource: resolvingItem.item_source,
+          notes,
         }),
       })
       if (res.ok) {
-        setItems(prev => (prev ? prev.filter(i => i.id !== item.id) : prev))
+        setItems(prev => (prev ? prev.filter(i => i.id !== resolvingItem.id) : prev))
+        setResolvingItem(null)
+        setResolutionNotes("")
       } else {
         setError("Could not resolve — it may already be handled.")
       }
     } catch {
       setError("Could not resolve. Please try again.")
     } finally {
+      setIsSubmitting(false)
       setBusyId(null)
     }
   }
@@ -339,7 +351,10 @@ export default function AttentionView({ role }: { role: Role }) {
                       </button>
                     )}
                     <button
-                      onClick={() => resolve(item)}
+                      onClick={() => {
+                        setResolvingItem(item)
+                        setResolutionNotes("")
+                      }}
                       disabled={busyId === item.id}
                       className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12px] font-semibold text-white disabled:opacity-50 transition"
                       style={{ background: "var(--gradient-brand)" }}
@@ -352,6 +367,81 @@ export default function AttentionView({ role }: { role: Role }) {
             )
           })}
         </ul>
+      )}
+
+      {/* Resolution Notes Modal Dialog */}
+      {resolvingItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+          <div className="w-full max-w-md rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] p-5 shadow-2xl">
+            <div className="flex items-center justify-between pb-3 border-b border-[var(--border)]">
+              <div className="flex items-center gap-2">
+                <CheckCheck size={17} className="text-emerald-400" />
+                <h3 className="text-[14.5px] font-bold text-[var(--text-primary)]">
+                  Resolve & Add Notes
+                </h3>
+              </div>
+              <button
+                onClick={() => { setResolvingItem(null); setResolutionNotes("") }}
+                disabled={isSubmitting}
+                className="text-[var(--text-muted)] hover:text-[var(--text-primary)] text-[17px] leading-none transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="mt-3.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[12.5px] font-medium text-[var(--text-primary)]">
+                  Lead: {resolvingItem.lead_name || resolvingItem.lead_phone}
+                </span>
+                {resolvingItem.lead_phone && (
+                  <span className="text-[11.5px] font-mono text-[var(--text-secondary)]">
+                    {resolvingItem.lead_phone}
+                  </span>
+                )}
+              </div>
+              <p className="mt-1 text-[11.5px] text-[var(--text-muted)]">
+                Add resolution notes for the audit trail. These notes will stay on the lead's history.
+              </p>
+
+              <textarea
+                value={resolutionNotes}
+                onChange={e => setResolutionNotes(e.target.value)}
+                placeholder="Enter what was discussed or done (e.g. Spoke to customer, KYC verified / Confirmed appointment time)..."
+                rows={3}
+                disabled={isSubmitting}
+                className="mt-3 w-full rounded-xl border border-[var(--border)] bg-[var(--bg-surface)] p-3 text-[12.5px] text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 leading-relaxed resize-none transition"
+                autoFocus
+              />
+            </div>
+
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button
+                onClick={() => { setResolvingItem(null); setResolutionNotes("") }}
+                disabled={isSubmitting}
+                className="h-8 rounded-lg border border-[var(--border)] px-3 text-[12px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--overlay-soft)] transition disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmResolve}
+                disabled={isSubmitting || !resolutionNotes.trim()}
+                className="flex h-8 items-center gap-1.5 rounded-lg px-3.5 text-[12px] font-semibold text-white shadow-sm disabled:opacity-50 transition"
+                style={{ background: "linear-gradient(135deg, #059669 0%, #10b981 100%)" }}
+              >
+                {isSubmitting ? (
+                  <>
+                    <RefreshCw size={12} className="animate-spin" /> Resolving...
+                  </>
+                ) : (
+                  <>
+                    <CheckCheck size={13} /> Confirm & Resolve
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       <p className="mt-4 flex items-center gap-1.5 text-[11.5px] text-[var(--text-muted)]">
