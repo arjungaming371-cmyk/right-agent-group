@@ -121,9 +121,7 @@ export async function POST(req: NextRequest) {
       }
       const template = typeof body.template === "string" ? body.template.trim() : ""
       if (!template) return NextResponse.json({ error: "template is required" }, { status: 400 })
-      if (template.length > MAX_TEMPLATE) {
-        return NextResponse.json({ error: `template too long (max ${MAX_TEMPLATE} characters)` }, { status: 400 })
-      }
+      // Unlimited template length allowed
       await query(
         `INSERT INTO ai_scripts (language, content, updated_at, updated_by)
          VALUES ($1, $2, now(), $3)

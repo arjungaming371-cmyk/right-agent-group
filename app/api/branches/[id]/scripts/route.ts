@@ -73,7 +73,7 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
     const language = String(body?.language || "")
     if (!LANGUAGES.includes(language)) return NextResponse.json({ error: `language must be one of ${LANGUAGES.join(", ")}` }, { status: 400 })
     const content = typeof body?.content === "string" ? body.content.trim() : ""
-    if (content.length > 20000) return NextResponse.json({ error: "script too long (max 20,000 chars)" }, { status: 400 })
+    // Unlimited script length allowed
     const employeeId = body?.employeeId ? String(body.employeeId) : null
     if (employeeId) {
       const known = await query(`SELECT 1 FROM ai_employees WHERE id = $1`, [employeeId])
