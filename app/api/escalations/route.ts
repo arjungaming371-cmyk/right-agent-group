@@ -225,11 +225,19 @@ export async function GET(req: NextRequest) {
       const key = getLeadKey(ce.lead_id, ce.lead_phone)
       const lead = getOrCreateLeadRecord(key, ce.lead_id, ce.lead_name, ce.lead_phone, ce.lead_whatsapp, ce.lead_status, ce.location || ce.lead_address)
 
-      const eventTime = ce.event_at ? new Date(ce.event_at).getTime() : NaN
+      const isTentative = ce.status === "needs_review" || ce.confidence !== "high" ||
+        /open invitation|without confirming|did not commit|tentative/i.test(ce.notes || "") ||
+        /open invitation|without confirming|did not commit|tentative/i.test(ce.review_reason || "")
+
+      let taskType = ce.event_type || "callback"
+      if (isTentative && (taskType === "branch_visit" || !taskType)) {
+        taskType = "proposed_visit"
+      }
+
+      const eventTime = !isTentative && ce.event_at ? new Date(ce.event_at).getTime() : NaN
       const isOverdue = !isNaN(eventTime) && eventTime < Date.now()
       const isDueSoon = !isNaN(eventTime) && eventTime < Date.now() + 2 * 3600 * 1000
 
-      let taskType = ce.event_type || "callback"
       let taskPriority: "critical" | "high" | "medium" | "low" = "medium"
 
       if (taskType === "branch_visit") {
@@ -248,7 +256,7 @@ export async function GET(req: NextRequest) {
         type: taskType,
         title: ce.title || (taskType === "branch_visit" ? "Confirmed Office Visit" : taskType === "proposed_visit" ? "Proposed Office Visit" : "Scheduled Callback"),
         status: ce.status,
-        due_at: ce.event_at,
+        due_at: isTentative ? null : ce.event_at,
         created_at: ce.created_at,
         source: "calendar_event",
         source_id: String(ce.id),
@@ -265,8 +273,8 @@ export async function GET(req: NextRequest) {
       else if (taskPriority === "high" && lead.priority !== "critical") lead.priority = "high"
 
       if (taskType === "branch_visit") lead.category = "branch_visit"
-      else if (taskType === "callback" && lead.category !== "branch_visit" && lead.category !== "loan_confirmed") lead.category = "callback"
-      else if (taskType === "proposed_visit" && lead.category === "escalation") lead.category = "proposed_visit"
+      else if (taskType === "proposed_visit") lead.category = "proposed_visit"
+      else if (taskType === "callback" && lead.category !== "branch_visit" && lead.category !== "loan_confirmed" && lead.category !== "proposed_visit") lead.category = "callback"
 
       if (ce.product_interest) lead.financial.product_interest = ce.product_interest
       if (ce.loan_amount) lead.financial.loan_amount = ce.loan_amount

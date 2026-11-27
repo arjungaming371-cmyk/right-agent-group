@@ -1,5 +1,5 @@
 "use client"
-import React, { useCallback, useEffect, useState, useMemo } from "react"
+import React, { useCallback, useEffect, useState, useMemo, useRef } from "react"
 import {
   CheckCheck,
   ChevronLeft,
@@ -13,12 +13,11 @@ import {
   RefreshCw,
   Search,
   Sparkles,
-  ShieldCheck,
-  FileText,
-  AlertTriangle,
   X,
   ChevronDown,
   ChevronUp,
+  ArrowUpDown,
+  Check,
 } from "lucide-react"
 import { SkeletonList } from "../ui/skeleton"
 import { usePolling } from "@/lib/use-poll"
@@ -104,7 +103,6 @@ type SortField = "priority" | "newest" | "due_at" | "loan_amount"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // OBJECT-ORIENTED DOMAIN MODEL: LeadIntelligenceProfile
-// Encapsulates entity parsing, classification rules, and intelligence extraction
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface ExtractedIntelligence {
@@ -206,16 +204,6 @@ export class LeadIntelligenceProfile {
   public getRawSummary(): string {
     return this.rawSummary
   }
-
-  public hasStructuredInsights(): boolean {
-    return Boolean(
-      this.entities.purpose ||
-      this.entities.collateral ||
-      this.entities.cibilScore ||
-      this.entities.roadblocks.length > 0 ||
-      this.entities.advisorGuidance
-    )
-  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -244,8 +232,10 @@ function formatAppointmentTime(dateStr?: string | null): string {
   const d = new Date(dateStr)
   if (isNaN(d.getTime())) return "Tentative"
   const now = new Date()
-  const diff = d.getTime() - now.getTime()
-  const days = Math.floor(diff / 86400000)
+
+  // Compare in Asia/Kolkata timezone
+  const dString = d.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }) // YYYY-MM-DD
+  const nowString = now.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" })
 
   const timeStr = d.toLocaleTimeString("en-IN", {
     timeZone: "Asia/Kolkata",
@@ -254,10 +244,16 @@ function formatAppointmentTime(dateStr?: string | null): string {
     hour12: true,
   })
 
-  if (days === 0) return `Today, ${timeStr}`
-  if (days === 1) return `Tomorrow, ${timeStr}`
-  if (days === -1) return `Yesterday, ${timeStr}`
-  if (days < 0) return `${Math.abs(days)}d ago`
+  if (dString === nowString) return `Today, ${timeStr}`
+
+  // Calculate day difference
+  const dMidnight = new Date(dString).getTime()
+  const nowMidnight = new Date(nowString).getTime()
+  const dayDiff = Math.round((dMidnight - nowMidnight) / 86400000)
+
+  if (dayDiff === 1) return `Tomorrow, ${timeStr}`
+  if (dayDiff === -1) return `Yesterday, ${timeStr}`
+  if (dayDiff < -1) return `${Math.abs(dayDiff)}d ago`
 
   return (
     d.toLocaleDateString("en-IN", {
@@ -286,6 +282,15 @@ const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
 }
 
 function deriveNextAction(lead: ActionCenterLead): string {
+  // If it's a proposed visit or unconfirmed branch visit without specific time, it MUST be "Confirm appointment"
+  if (
+    lead.category === "proposed_visit" ||
+    lead.tasks.some(t => t.type === "proposed_visit" || (t.type === "branch_visit" && !t.due_at))
+  ) {
+    return "Confirm appointment"
+  }
+
+  // If there's an actual scheduled task with due_at
   const dueTasks = lead.tasks.filter(t => t.due_at)
   if (dueTasks.length > 0) {
     const nearest = dueTasks.sort(
@@ -293,17 +298,19 @@ function deriveNextAction(lead: ActionCenterLead): string {
     )[0]
     return formatAppointmentTime(nearest.due_at)
   }
+
+  if (lead.category === "loan_confirmed") return "Review application"
+  if (lead.category === "branch_visit") return "Confirm appointment"
+  if (lead.category === "callback") return "Schedule call"
+  if (lead.category === "escalation") return "Human assistance"
+  if (lead.category === "interested_lead") return "Share application"
+
   if (lead.recommended_actions.length > 0) {
     const action = lead.recommended_actions[0]
     if (action.length > 30) return action.slice(0, 28) + "…"
     return action
   }
-  if (lead.category === "loan_confirmed") return "Review application"
-  if (lead.category === "branch_visit") return "Confirm appointment"
-  if (lead.category === "proposed_visit") return "Confirm date"
-  if (lead.category === "callback") return "Schedule call"
-  if (lead.category === "escalation") return "Human assistance"
-  if (lead.category === "interested_lead") return "Share application"
+
   return "Follow up"
 }
 
@@ -313,6 +320,13 @@ const TABS: { key: CategoryFilter; label: string }[] = [
   { key: "callback",        label: "Callbacks" },
   { key: "branch_visit",    label: "Visits" },
   { key: "escalation",      label: "Escalations" },
+]
+
+const SORT_OPTIONS: { key: SortField; label: string }[] = [
+  { key: "priority",    label: "Priority" },
+  { key: "due_at",      label: "Due date" },
+  { key: "loan_amount", label: "Loan amount" },
+  { key: "newest",      label: "Newest" },
 ]
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -332,6 +346,8 @@ export default function AttentionView({ role }: { role: Role }) {
   const [channel, setChannel] = useState<string>("all")
   const [sortField, setSortField] = useState<SortField>("priority")
   const [showFilters, setShowFilters] = useState(false)
+  const [showSortMenu, setShowSortMenu] = useState(false)
+  const sortRef = useRef<HTMLDivElement>(null)
 
   // Pagination
   const [page, setPage] = useState(1)
@@ -339,13 +355,22 @@ export default function AttentionView({ role }: { role: Role }) {
 
   // Detail Drawer & Resolution State
   const [selectedLead, setSelectedLead] = useState<ActionCenterLead | null>(null)
-  const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set())
   const [resolvingLead, setResolvingLead] = useState<ActionCenterLead | null>(null)
-  const [isBulkResolving, setIsBulkResolving] = useState(false)
   const [resolutionNotes, setResolutionNotes] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [activeDrawerTab, setActiveDrawerTab] = useState<"overview" | "timeline">("overview")
   const [showFullAiBrief, setShowFullAiBrief] = useState(false)
+
+  // Dismiss sort popover on click outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (sortRef.current && !sortRef.current.contains(event.target as Node)) {
+        setShowSortMenu(false)
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside)
+    return () => document.removeEventListener("mousedown", handleClickOutside)
+  }, [])
 
   // ── Data Fetching ──
 
@@ -433,24 +458,6 @@ export default function AttentionView({ role }: { role: Role }) {
     return filteredLeads.slice(start, start + pageSize)
   }, [filteredLeads, page, pageSize])
 
-  // ── Selection ──
-
-  const toggleSelectAll = () => {
-    if (selectedLeadIds.size === paginatedLeads.length) {
-      setSelectedLeadIds(new Set())
-    } else {
-      setSelectedLeadIds(new Set(paginatedLeads.map(l => l.id)))
-    }
-  }
-
-  const toggleSelectLead = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation()
-    const next = new Set(selectedLeadIds)
-    if (next.has(id)) next.delete(id)
-    else next.add(id)
-    setSelectedLeadIds(next)
-  }
-
   // ── Resolve ──
 
   async function handleResolveSubmit() {
@@ -458,9 +465,7 @@ export default function AttentionView({ role }: { role: Role }) {
     if (!notes) return
     setIsSubmitting(true)
 
-    const idsToResolve = isBulkResolving
-      ? Array.from(selectedLeadIds)
-      : resolvingLead ? [resolvingLead.id] : []
+    const idsToResolve = resolvingLead ? [resolvingLead.id] : []
 
     try {
       const res = await fetch("/api/escalations", {
@@ -471,13 +476,11 @@ export default function AttentionView({ role }: { role: Role }) {
 
       if (res.ok) {
         setLeads(prev => (prev ? prev.filter(l => !idsToResolve.includes(l.id)) : prev))
-        setSelectedLeadIds(new Set())
         setResolvingLead(null)
-        setIsBulkResolving(false)
         setResolutionNotes("")
         if (selectedLead && idsToResolve.includes(selectedLead.id)) setSelectedLead(null)
       } else {
-        setError("Could not resolve item(s). Please try again.")
+        setError("Could not resolve item. Please try again.")
       }
     } catch {
       setError("Network error while resolving item.")
@@ -520,17 +523,27 @@ export default function AttentionView({ role }: { role: Role }) {
     document.body.removeChild(link)
   }
 
-  // ── Computed Metrics ──
+  // ── Computed Metrics (Accurate Due Today & Visits) ──
 
   const dueToday = useMemo(() => {
     if (!leads) return 0
-    const todayStart = new Date(); todayStart.setHours(0,0,0,0)
-    const todayEnd = new Date(); todayEnd.setHours(23,59,59,999)
-    return leads.filter(l => l.tasks.some(t => {
-      if (!t.due_at) return false
-      const d = new Date(t.due_at)
-      return d >= todayStart && d <= todayEnd
-    })).length
+    const now = new Date()
+    const todayYMD = now.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" })
+
+    return leads.filter(l => {
+      // 1. Explicitly scheduled for today in IST
+      const hasScheduledToday = l.tasks.some(t => {
+        if (!t.due_at) return false
+        const d = new Date(t.due_at)
+        const dYMD = d.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" })
+        return dYMD === todayYMD
+      })
+      if (hasScheduledToday) return true
+
+      // 2. Or is an active proposed visit / escalation needing action today
+      const createdYMD = new Date(l.created_at).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" })
+      return createdYMD === todayYMD || l.category === "proposed_visit" || l.category === "escalation"
+    }).length
   }, [leads])
 
   const officeVisits = (counts.visits || 0) + (counts.proposed_visits || 0)
@@ -552,30 +565,31 @@ export default function AttentionView({ role }: { role: Role }) {
   return (
     <div className="relative min-h-[calc(100vh-80px)]">
 
-      {/* ── TOP UTILITY ROW (Single non-duplicate header) ── */}
-      <div className="mb-3.5 flex items-center justify-between">
-        <div className="text-[12.5px] text-[var(--text-muted)] font-medium">
-          Manage and prioritize customer follow-ups
-        </div>
-        <div className="flex items-center gap-2">
+      {/* ── HEADER ROW (Needs Human + Top-Right Export & Refresh Buttons) ── */}
+      <div className="mb-4 flex items-center justify-between">
+        <h1 className="text-[17px] font-semibold text-[var(--text-primary)] tracking-tight">
+          Needs Human
+        </h1>
+        <div className="flex items-center gap-1.5">
           <button
             onClick={exportToCsv}
-            className="flex h-8 items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg-card)] px-3 text-[12px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-card-hover)] transition shadow-sm"
+            title="Export to CSV"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--overlay-hover)] transition cursor-pointer"
           >
-            <Download size={13} /> Export
+            <Download size={15} />
           </button>
           <button
             onClick={load}
             disabled={isLoading}
-            className="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--bg-card)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-card-hover)] transition disabled:opacity-40 shadow-sm"
-            title="Refresh leads"
+            title="Refresh"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--overlay-hover)] transition cursor-pointer disabled:opacity-40"
           >
-            <RefreshCw size={13} className={isLoading ? "animate-spin" : ""} />
+            <RefreshCw size={14} className={isLoading ? "animate-spin" : ""} />
           </button>
         </div>
       </div>
 
-      {/* ── COMPACT STATUS COUNTERS ── */}
+      {/* ── 4 COMPACT STATUS COUNTERS ── */}
       <div className="mb-4 grid grid-cols-4 gap-3">
         {[
           { label: "Pending actions", value: counts.all || 0 },
@@ -583,25 +597,25 @@ export default function AttentionView({ role }: { role: Role }) {
           { label: "Office visits", value: officeVisits },
           { label: "Escalations", value: escalationCount },
         ].map(metric => (
-          <div key={metric.label} className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] px-3.5 py-2.5 shadow-sm">
+          <div key={metric.label} className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] px-3.5 py-2.5">
             <div className="text-[11.5px] text-[var(--text-muted)] font-medium">{metric.label}</div>
             <div className="mt-0.5 text-[22px] font-semibold text-[var(--text-primary)] leading-tight tracking-tight">{metric.value}</div>
           </div>
         ))}
       </div>
 
-      {/* ── CATEGORY TABS ── */}
-      <div className="mb-4 flex items-center gap-0 border-b border-[var(--border)]">
+      {/* ── CATEGORY TABS (Nicely spaced horizontal tabs) ── */}
+      <div className="mb-4 flex items-center gap-6 border-b border-[var(--border)]">
         {TABS.map(tab => {
           const isActive = category === tab.key
           return (
             <button
               key={tab.key}
               onClick={() => { setCategory(tab.key); setPage(1) }}
-              className={`relative px-3.5 py-2 text-[13px] font-medium transition cursor-pointer ${
+              className={`relative pb-2.5 text-[13px] transition cursor-pointer ${
                 isActive
-                  ? "text-[var(--text-primary)]"
-                  : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                  ? "text-[var(--text-primary)] font-semibold"
+                  : "text-[var(--text-muted)] hover:text-[var(--text-secondary)] font-normal"
               }`}
             >
               {tab.label}
@@ -613,30 +627,32 @@ export default function AttentionView({ role }: { role: Role }) {
         })}
       </div>
 
-      {/* ── SEARCH + FILTERS ROW ── */}
-      <div className="mb-4 flex items-center gap-2.5">
+      {/* ── TOOLBAR (Wide Search + Compact Filters + Compact Sort Button) ── */}
+      <div className="mb-4 flex items-center gap-2">
+        {/* Full-width Search Bar */}
         <div className="relative flex-1">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
+          <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
           <input
             type="text"
             value={search}
             onChange={e => { setSearch(e.target.value); setPage(1) }}
-            placeholder="Search customers..."
-            className="h-9 w-full rounded-lg border border-[var(--border)] bg-[var(--bg-card)] pl-9 pr-8 text-[13px] text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-blue)] transition shadow-sm"
+            placeholder="Search by name or phone..."
+            className="h-9 w-full rounded-lg border border-[var(--border)] bg-[var(--bg-card)] pl-9 pr-8 text-[12.5px] text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--border-hover)] transition"
           />
           {search && (
             <button
               onClick={() => setSearch("")}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer"
             >
               <X size={12} />
             </button>
           )}
         </div>
 
+        {/* Compact Filters Button */}
         <button
           onClick={() => setShowFilters(!showFilters)}
-          className={`flex h-9 items-center gap-1.5 rounded-lg border px-3 text-[12.5px] font-medium transition cursor-pointer ${
+          className={`flex h-9 items-center gap-1.5 rounded-lg border px-3 text-[12px] font-medium transition cursor-pointer ${
             showFilters || priority !== "all" || channel !== "all"
               ? "border-[var(--accent-blue)] text-[var(--accent-blue)] bg-[var(--accent-blue)]/5"
               : "border-[var(--border)] text-[var(--text-secondary)] bg-[var(--bg-card)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-card-hover)]"
@@ -645,17 +661,46 @@ export default function AttentionView({ role }: { role: Role }) {
           <Filter size={13} /> Filters
         </button>
 
-        <select
-          value={sortField}
-          onChange={e => setSortField(e.target.value as SortField)}
-          className="h-9 rounded-lg border border-[var(--border)] bg-[var(--bg-card)] px-2.5 text-[12.5px] font-medium text-[var(--text-secondary)] focus:outline-none cursor-pointer appearance-none pr-7 shadow-sm"
-          style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M7 15l5 5 5-5'/%3E%3Cpath d='M7 9l5-5 5 5'/%3E%3C/svg%3E\")", backgroundRepeat: "no-repeat", backgroundPosition: "right 8px center" }}
-        >
-          <option value="priority">Priority</option>
-          <option value="due_at">Due date</option>
-          <option value="loan_amount">Loan amount</option>
-          <option value="newest">Newest</option>
-        </select>
+        {/* Compact Sort Popover Button (Replaces oversized dropdown) */}
+        <div className="relative" ref={sortRef}>
+          <button
+            onClick={() => setShowSortMenu(!showSortMenu)}
+            className={`flex h-9 items-center gap-1.5 rounded-lg border px-3 text-[12px] font-medium transition cursor-pointer ${
+              showSortMenu
+                ? "border-[var(--accent-blue)] text-[var(--accent-blue)] bg-[var(--accent-blue)]/5"
+                : "border-[var(--border)] text-[var(--text-secondary)] bg-[var(--bg-card)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-card-hover)]"
+            }`}
+          >
+            <ArrowUpDown size={13} /> Sort
+          </button>
+
+          {showSortMenu && (
+            <div className="absolute right-0 top-10 z-40 w-44 rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-1 shadow-2xl animate-in fade-in duration-100">
+              <div className="px-2.5 py-1.5 text-[10.5px] font-bold text-[var(--text-muted)] uppercase tracking-wider border-b border-[var(--border)]">
+                Sort Leads By
+              </div>
+              <div className="py-1">
+                {SORT_OPTIONS.map(opt => (
+                  <button
+                    key={opt.key}
+                    onClick={() => {
+                      setSortField(opt.key)
+                      setShowSortMenu(false)
+                    }}
+                    className={`flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-[12px] text-left transition cursor-pointer ${
+                      sortField === opt.key
+                        ? "bg-[var(--accent-blue)]/15 text-[var(--accent-blue)] font-semibold"
+                        : "text-[var(--text-secondary)] hover:bg-[var(--overlay-hover)] hover:text-[var(--text-primary)]"
+                    }`}
+                  >
+                    <span>{opt.label}</span>
+                    {sortField === opt.key && <Check size={13} />}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ── FILTER PANEL (collapsible) ── */}
@@ -696,29 +741,6 @@ export default function AttentionView({ role }: { role: Role }) {
         </div>
       )}
 
-      {/* ── BULK ACTIONS BAR ── */}
-      {selectedLeadIds.size > 0 && (
-        <div className="mb-3 flex items-center justify-between rounded-lg border border-[var(--accent-blue)]/30 bg-[var(--accent-blue)]/5 px-4 py-2 animate-in fade-in duration-100">
-          <span className="text-[12.5px] font-medium text-[var(--text-primary)]">
-            {selectedLeadIds.size} selected
-          </span>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => { setIsBulkResolving(true); setResolvingLead(null); setResolutionNotes("") }}
-              className="flex h-7 items-center gap-1 rounded-md bg-emerald-600 px-2.5 text-[11.5px] font-semibold text-white hover:bg-emerald-500 transition cursor-pointer"
-            >
-              <CheckCheck size={12} /> Mark resolved
-            </button>
-            <button
-              onClick={() => setSelectedLeadIds(new Set())}
-              className="text-[11.5px] text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer"
-            >
-              Deselect
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* ── ERROR ── */}
       {error && (
         <div className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3.5 py-2 text-[12.5px] text-amber-400 flex items-center justify-between">
@@ -745,25 +767,15 @@ export default function AttentionView({ role }: { role: Role }) {
           <table className="w-full text-left">
             <thead>
               <tr className="border-b border-[var(--border)] text-[11.5px] font-medium text-[var(--text-muted)] bg-[var(--bg-secondary)]/50">
-                <th className="py-2.5 pl-3 pr-1 w-9">
-                  <input
-                    type="checkbox"
-                    checked={selectedLeadIds.size > 0 && selectedLeadIds.size === paginatedLeads.length}
-                    onChange={toggleSelectAll}
-                    className="h-3.5 w-3.5 rounded border-[var(--border)] bg-transparent accent-[var(--accent-blue)] cursor-pointer"
-                  />
-                </th>
-                <th className="py-2.5 px-3 font-medium">Customer</th>
-                <th className="py-2.5 px-3 font-medium">Loan / Amount</th>
-                <th className="py-2.5 px-3 font-medium">Status</th>
-                <th className="py-2.5 px-3 font-medium">Next action</th>
-                <th className="py-2.5 px-3 w-9"></th>
+                <th className="py-2.5 px-4 font-medium">Customer</th>
+                <th className="py-2.5 px-4 font-medium">Loan / Amount</th>
+                <th className="py-2.5 px-4 font-medium">Status</th>
+                <th className="py-2.5 px-4 font-medium">Next action</th>
               </tr>
             </thead>
             <tbody>
               {paginatedLeads.map(lead => {
                 const status = STATUS_CONFIG[lead.category] || STATUS_CONFIG.escalation
-                const isSelected = selectedLeadIds.has(lead.id)
 
                 return (
                   <tr
@@ -773,40 +785,27 @@ export default function AttentionView({ role }: { role: Role }) {
                       setActiveDrawerTab("overview")
                       setShowFullAiBrief(false)
                     }}
-                    className={`border-b border-[var(--border)] last:border-b-0 cursor-pointer transition hover:bg-[var(--overlay-hover)] ${
-                      isSelected ? "bg-[var(--accent-blue)]/[0.04]" : ""
-                    }`}
+                    className="border-b border-[var(--border)] last:border-b-0 cursor-pointer transition hover:bg-[var(--overlay-hover)]"
                   >
-                    {/* Checkbox */}
-                    <td className="py-2.5 pl-3 pr-1" onClick={e => e.stopPropagation()}>
-                      <input
-                        type="checkbox"
-                        checked={isSelected}
-                        onChange={e => { const ev = e.nativeEvent as any; toggleSelectLead(lead.id, ev) }}
-                        onClick={e => e.stopPropagation()}
-                        className="h-3.5 w-3.5 rounded border-[var(--border)] bg-transparent accent-[var(--accent-blue)] cursor-pointer"
-                      />
-                    </td>
-
                     {/* Customer */}
-                    <td className="py-2.5 px-3">
+                    <td className="py-3 px-4">
                       <div className="text-[13px] font-semibold text-[var(--text-primary)] leading-tight">
                         {lead.lead_name}
                       </div>
                     </td>
 
                     {/* Loan / Amount */}
-                    <td className="py-2.5 px-3">
+                    <td className="py-3 px-4">
                       <div className="text-[13px] font-semibold text-[var(--text-primary)]">
                         {formatLoanAmount(lead.financial.loan_amount)}
                       </div>
                       <div className="text-[11.5px] text-[var(--text-muted)] capitalize">
-                        {(lead.financial.product_interest || "Loan").replace(/_/g, " ")}
+                        {(lead.financial.product_interest || "Business Loan").replace(/_/g, " ")}
                       </div>
                     </td>
 
                     {/* Status with colored dot */}
-                    <td className="py-2.5 px-3">
+                    <td className="py-3 px-4">
                       <div className="flex items-center gap-1.5">
                         <span
                           className="h-2 w-2 rounded-full flex-shrink-0"
@@ -819,15 +818,10 @@ export default function AttentionView({ role }: { role: Role }) {
                     </td>
 
                     {/* Next action */}
-                    <td className="py-2.5 px-3">
+                    <td className="py-3 px-4">
                       <span className="text-[12.5px] text-[var(--text-secondary)]">
                         {deriveNextAction(lead)}
                       </span>
-                    </td>
-
-                    {/* Chevron */}
-                    <td className="py-2.5 px-3 text-right">
-                      <ChevronRight size={15} className="text-[var(--text-muted)] inline-block" />
                     </td>
                   </tr>
                 )
@@ -837,48 +831,52 @@ export default function AttentionView({ role }: { role: Role }) {
         </div>
       )}
 
-      {/* ── PAGINATION FOOTER ── */}
-      <div className="mt-3 flex items-center justify-between text-[12px] text-[var(--text-muted)]">
-        <span>
+      {/* ── PAGINATION FOOTER (Showing X of Y leads + 25 per page + < 1 / 1 >) ── */}
+      <div className="mt-4 flex items-center justify-between text-[12px] text-[var(--text-muted)]">
+        <div>
           {filteredLeads.length > 0
-            ? `${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, filteredLeads.length)} of ${filteredLeads.length} leads`
-            : "No leads"
+            ? `Showing ${(page - 1) * pageSize + 1} of ${filteredLeads.length} leads`
+            : "Showing 0 of 0 leads"
           }
-        </span>
-        <div className="flex items-center gap-2">
+        </div>
+        <div className="flex items-center gap-3">
+          {/* Per-page selector with proper height and padding */}
           <select
             value={pageSize}
             onChange={e => { setPageSize(Number(e.target.value)); setPage(1) }}
-            className="h-7 rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-2 text-[11.5px] text-[var(--text-primary)] focus:outline-none cursor-pointer"
+            className="h-7 rounded-md border border-[var(--border)] bg-[var(--bg-card)] px-2 text-[11.5px] text-[var(--text-secondary)] focus:outline-none cursor-pointer"
           >
             <option value={10}>10 per page</option>
             <option value={25}>25 per page</option>
             <option value={50}>50 per page</option>
             <option value={100}>100 per page</option>
           </select>
-          <button
-            onClick={() => setPage(p => Math.max(1, p - 1))}
-            disabled={page === 1}
-            className="h-7 w-7 flex items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-card)] disabled:opacity-30 hover:bg-[var(--bg-card-hover)] transition cursor-pointer"
-          >
-            <ChevronLeft size={14} />
-          </button>
-          <span className="text-[11.5px] text-[var(--text-secondary)] tabular-nums">
-            {page}/{totalPages}
-          </span>
-          <button
-            onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-            disabled={page === totalPages}
-            className="h-7 w-7 flex items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-card)] disabled:opacity-30 hover:bg-[var(--bg-card-hover)] transition cursor-pointer"
-          >
-            <ChevronRight size={14} />
-          </button>
+
+          {/* Navigation Controls */}
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              disabled={page === 1}
+              className="flex h-7 w-7 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-card)] disabled:opacity-30 hover:bg-[var(--bg-card-hover)] transition cursor-pointer"
+            >
+              <ChevronLeft size={13} />
+            </button>
+            <span className="px-1 text-[11.5px] font-mono text-[var(--text-secondary)]">
+              {page} / {totalPages}
+            </span>
+            <button
+              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+              disabled={page === totalPages}
+              className="flex h-7 w-7 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-card)] disabled:opacity-30 hover:bg-[var(--bg-card-hover)] transition cursor-pointer"
+            >
+              <ChevronRight size={13} />
+            </button>
+          </div>
         </div>
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════════
           RIGHT-SIDE DETAIL DRAWER
-          Contains Overview (with OOP AI Intelligence) & Timeline
       ══════════════════════════════════════════════════════════════════════ */}
       {selectedLead && (
         <div
@@ -961,7 +959,7 @@ export default function AttentionView({ role }: { role: Role }) {
             <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
 
               {/* ════════════════════════════════════════════════════════════
-                  OVERVIEW TAB (INCLUDES OOP-STRUCTURED AI ANALYSIS)
+                  OVERVIEW TAB (OOP STRUCTURED PRESENTATION)
               ════════════════════════════════════════════════════════════ */}
               {activeDrawerTab === "overview" && (
                 <>
@@ -980,7 +978,7 @@ export default function AttentionView({ role }: { role: Role }) {
                       <div>
                         <div className="text-[11px] text-[var(--text-muted)]">Product Type</div>
                         <div className="text-[13px] font-semibold text-[var(--text-primary)] capitalize">
-                          {(selectedLead.financial.product_interest || "Personal Loan").replace(/_/g, " ")}
+                          {(selectedLead.financial.product_interest || "Business Loan").replace(/_/g, " ")}
                         </div>
                       </div>
                       <div>
@@ -1011,9 +1009,7 @@ export default function AttentionView({ role }: { role: Role }) {
                         </span>
                       </div>
 
-                      {/* Structured Domain Entity Breakdown */}
                       <div className="space-y-2 text-[12.5px]">
-                        {/* Loan Purpose Entity */}
                         {leadIntelligence.entities.purpose && (
                           <div className="flex items-start gap-2 bg-[var(--bg-card)]/80 rounded-md border border-[var(--border)] p-2">
                             <span className="text-[11px] font-bold text-[var(--text-muted)] uppercase shrink-0 w-24">
@@ -1025,7 +1021,6 @@ export default function AttentionView({ role }: { role: Role }) {
                           </div>
                         )}
 
-                        {/* Collateral Security Entity */}
                         {leadIntelligence.entities.collateral && (
                           <div className="flex items-start gap-2 bg-[var(--bg-card)]/80 rounded-md border border-[var(--border)] p-2">
                             <span className="text-[11px] font-bold text-amber-400/90 uppercase shrink-0 w-24">
@@ -1037,7 +1032,6 @@ export default function AttentionView({ role }: { role: Role }) {
                           </div>
                         )}
 
-                        {/* Credit / CIBIL Entity */}
                         {leadIntelligence.entities.cibilScore && (
                           <div className="flex items-start gap-2 bg-[var(--bg-card)]/80 rounded-md border border-[var(--border)] p-2">
                             <span className="text-[11px] font-bold text-[var(--text-muted)] uppercase shrink-0 w-24">
@@ -1055,7 +1049,6 @@ export default function AttentionView({ role }: { role: Role }) {
                           </div>
                         )}
 
-                        {/* Documentation Roadblocks Entity */}
                         {leadIntelligence.entities.roadblocks.length > 0 && (
                           <div className="flex items-start gap-2 bg-[var(--bg-card)]/80 rounded-md border border-[var(--border)] p-2">
                             <span className="text-[11px] font-bold text-red-400/90 uppercase shrink-0 w-24">
@@ -1074,7 +1067,6 @@ export default function AttentionView({ role }: { role: Role }) {
                           </div>
                         )}
 
-                        {/* Advisor Guidance Entity */}
                         {leadIntelligence.entities.advisorGuidance && (
                           <div className="flex items-start gap-2 bg-[var(--bg-card)]/80 rounded-md border border-[var(--border)] p-2">
                             <span className="text-[11px] font-bold text-blue-400/90 uppercase shrink-0 w-24">
@@ -1087,7 +1079,6 @@ export default function AttentionView({ role }: { role: Role }) {
                         )}
                       </div>
 
-                      {/* Expandable Full Conversation Brief */}
                       <div className="mt-2.5 pt-2 border-t border-indigo-500/20">
                         <button
                           onClick={() => setShowFullAiBrief(!showFullAiBrief)}
@@ -1106,7 +1097,7 @@ export default function AttentionView({ role }: { role: Role }) {
                     </section>
                   )}
 
-                  {/* 3. ACTIVE TASKS & APPOINTMENT SCHEDULE */}
+                  {/* 3. ACTIVE TASKS & APPOINTMENTS */}
                   {selectedLead.tasks.length > 0 && (
                     <section>
                       <h4 className="text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-2">
@@ -1118,7 +1109,7 @@ export default function AttentionView({ role }: { role: Role }) {
                             <div className="flex items-center justify-between">
                               <span className="text-[12.5px] font-semibold text-[var(--text-primary)]">{t.title}</span>
                               <span className="text-[10px] font-bold text-[var(--accent-blue)] uppercase px-1.5 py-0.5 rounded bg-[var(--accent-blue)]/10 border border-[var(--accent-blue)]/20">
-                                {t.status}
+                                {t.type === "proposed_visit" ? "Proposed" : t.status}
                               </span>
                             </div>
                             {t.due_at && (
@@ -1245,7 +1236,6 @@ export default function AttentionView({ role }: { role: Role }) {
               <button
                 onClick={() => {
                   setResolvingLead(selectedLead)
-                  setIsBulkResolving(false)
                   setResolutionNotes("")
                 }}
                 className="flex h-8 items-center gap-1.5 rounded-md bg-emerald-600 px-4 text-[12px] font-semibold text-white hover:bg-emerald-500 transition shadow-sm cursor-pointer"
@@ -1260,15 +1250,15 @@ export default function AttentionView({ role }: { role: Role }) {
       {/* ══════════════════════════════════════════════════════════════════════
           RESOLUTION MODAL
       ══════════════════════════════════════════════════════════════════════ */}
-      {(resolvingLead || isBulkResolving) && (
+      {resolvingLead && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4 backdrop-blur-[2px]">
           <div className="w-full max-w-md rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-5 shadow-2xl">
             <div className="flex items-center justify-between pb-3 border-b border-[var(--border)]">
               <h3 className="text-[14px] font-semibold text-[var(--text-primary)]">
-                {isBulkResolving ? `Resolve ${selectedLeadIds.size} leads` : "Resolve lead"}
+                Resolve lead
               </h3>
               <button
-                onClick={() => { setResolvingLead(null); setIsBulkResolving(false); setResolutionNotes("") }}
+                onClick={() => { setResolvingLead(null); setResolutionNotes("") }}
                 disabled={isSubmitting}
                 className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition cursor-pointer"
               >
@@ -1277,12 +1267,10 @@ export default function AttentionView({ role }: { role: Role }) {
             </div>
 
             <div className="mt-3">
-              {!isBulkResolving && resolvingLead && (
-                <div className="flex items-center justify-between text-[12.5px] mb-2">
-                  <span className="font-semibold text-[var(--text-primary)]">{resolvingLead.lead_name}</span>
-                  <span className="font-mono text-[var(--text-muted)]">{resolvingLead.lead_phone}</span>
-                </div>
-              )}
+              <div className="flex items-center justify-between text-[12.5px] mb-2">
+                <span className="font-semibold text-[var(--text-primary)]">{resolvingLead.lead_name}</span>
+                <span className="font-mono text-[var(--text-muted)]">{resolvingLead.lead_phone}</span>
+              </div>
               <p className="text-[11.5px] text-[var(--text-muted)] mb-2.5">
                 Add notes for the audit trail.
               </p>
@@ -1299,7 +1287,7 @@ export default function AttentionView({ role }: { role: Role }) {
 
             <div className="mt-3.5 flex items-center justify-end gap-2">
               <button
-                onClick={() => { setResolvingLead(null); setIsBulkResolving(false); setResolutionNotes("") }}
+                onClick={() => { setResolvingLead(null); setResolutionNotes("") }}
                 disabled={isSubmitting}
                 className="h-8 rounded-lg border border-[var(--border)] px-3 text-[12px] font-medium text-[var(--text-muted)] hover:bg-[var(--overlay-hover)] transition cursor-pointer"
               >
