@@ -65,7 +65,7 @@ const SARVAM_TTS_TEMPERATURE = parseFloat(process.env.SARVAM_TTS_TEMPERATURE || 
 
 const CARTESIA_API_KEY = (process.env.CARTESIA_API_KEY || "").trim()
 const CARTESIA_BASE = (process.env.CARTESIA_URL || "https://api.cartesia.ai").replace(/\/$/, "")
-const CARTESIA_MODEL = process.env.CARTESIA_MODEL || "sonic-3.6"
+const CARTESIA_MODEL = process.env.CARTESIA_MODEL || "sonic-latest"
 // Pick a voice at https://play.cartesia.ai/voices and paste its ID here.
 const CARTESIA_VOICE_ID = (process.env.CARTESIA_VOICE_ID || "").trim()
 const CARTESIA_VERSION = process.env.CARTESIA_VERSION || "2026-08-14"
