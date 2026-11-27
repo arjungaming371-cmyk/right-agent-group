@@ -22,12 +22,9 @@
 // makes each branch dial from ITS approved number while the bill stays on the
 // parent account.
 
-const EXOTEL_SID       = process.env.EXOTEL_SID || ""
-const EXOTEL_API_KEY   = process.env.EXOTEL_API_KEY || ""
-const EXOTEL_API_TOKEN = process.env.EXOTEL_API_TOKEN || ""
-const EXOTEL_SUBDOMAIN = process.env.EXOTEL_SUBDOMAIN || "api.exotel.com"
-const EXOTEL_CALLER_ID = process.env.EXOTEL_CALLER_ID || ""
-const EXOTEL_FLOW_APP_ID = process.env.EXOTEL_FLOW_APP_ID || ""
+function clean(v?: string) {
+  return (v || "").split("#")[0].trim()
+}
 
 export type ExotelCreds = {
   sid: string
@@ -39,7 +36,14 @@ export type ExotelCreds = {
 }
 
 function envCreds(): ExotelCreds {
-  return { sid: EXOTEL_SID, apiKey: EXOTEL_API_KEY, apiToken: EXOTEL_API_TOKEN, subdomain: EXOTEL_SUBDOMAIN, callerId: EXOTEL_CALLER_ID, flowAppId: EXOTEL_FLOW_APP_ID }
+  return {
+    sid: clean(process.env.EXOTEL_SID),
+    apiKey: clean(process.env.EXOTEL_API_KEY),
+    apiToken: clean(process.env.EXOTEL_API_TOKEN),
+    subdomain: clean(process.env.EXOTEL_SUBDOMAIN) || "api.exotel.com",
+    callerId: clean(process.env.EXOTEL_CALLER_ID),
+    flowAppId: clean(process.env.EXOTEL_FLOW_APP_ID),
+  }
 }
 
 /**
