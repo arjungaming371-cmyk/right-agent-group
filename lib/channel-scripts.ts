@@ -116,20 +116,16 @@ export const DEFAULT_VOICE_OPENERS: VoiceOpeners = {
   },
   cold: {
     english:
-      "Hello, good morning! This is Priya calling from Right Agent Group, Hyderabad — we help people get loans from over 20 banks without the running around. Do you have a minute? I'd love to know if you have any loan or financial need right now.",
-    // Native script + Latin loanwords (2026-09-30, native-speech pipeline):
-    // these lines are SPOKEN by Bulbul v3, which reads తెలుగు/देवनागरी with
-    // native phonemes — Roman-letter openers sounded foreign next to the
-    // now-native-script replies.
+      "Hello, this is Priya calling from Right Agent Group. Do you have a minute to speak?",
     hindi:
-      "नमस्ते, good morning! मैं Priya बोल रही हूँ Right Agent Group, Hyderabad से — हम twenty plus banks से loan दिलवाने में मदद करते हैं. एक मिनट है आपके पास? बताइए, आपको कोई loan की ज़रूरत है क्या अभी?",
+      "नमस्ते, मैं Right Agent Group से Priya बात कर रही हूँ। क्या बात करने के लिए एक मिनट है?",
     telugu:
-      "నమస్కారం sir, Right Agent Group, Hyderabad నుంచి Priya మాట్లాడుతున్నాను — మేము twenty plus banks తో మీకు best loan help చేస్తాం. ఒక మినిట్ time ఉందా sir, మీకేమైనా loan requirement ఉందా?",
+      "నమస్కారం sir, Right Agent Group నుంచి Priya మాట్లాడుతున్నాను. మాట్లాడటానికి ఒక నిమిషం time ఉందా sir?",
   },
   coldWithName: {
-    english: `Hello {name}! This is Priya calling from Right Agent Group, Hyderabad — we help people get loans from over 20 banks without the running around. Do you have a minute? I'd love to know if you have any loan need right now.`,
-    hindi: `नमस्ते {name} ji! मैं Priya बोल रही हूँ Right Agent Group, Hyderabad से — हम twenty plus banks से loan दिलवाने में मदद करते हैं. एक मिनट है आपके पास? बताइए, आपको कोई loan की ज़रूरत है क्या अभी?`,
-    telugu: `నమస్కారం {name} garu, Right Agent Group, Hyderabad నుంచి Priya మాట్లాడుతున్నాను sir — మేము twenty plus banks తో మీకు best loan help చేస్తాం. ఒక మినిట్ time ఉందా sir, మీకేమైనా loan requirement ఉందా?`,
+    english: `Hello {name}, this is Priya calling from Right Agent Group. Do you have a minute to speak?`,
+    hindi: `नमस्ते {name} ji, मैं Right Agent Group से Priya बात कर रही हूँ। क्या बात करने के लिए एक मिनट है?`,
+    telugu: `నమస్కారం {name} garu, Right Agent Group నుంచి Priya మాట్లాడుతున్నాను sir. మాట్లాడటానికి ఒక నిమిషం time ఉందా?`,
   },
   returning: {
     english:

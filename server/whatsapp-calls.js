@@ -1414,8 +1414,7 @@ class WhatsAppCallSession {
       console.log(`⏱ wa start API: ${Date.now() - t0}ms  lead=${r.leadId || "?"}  branch=${r.branchId || "hq"}`)
       this.language = r.language || "telugu"
       this.voice = r.voice && r.voice.speaker ? r.voice : null
-      const notice = (r && r.disclosure) || this.recordingNotice()
-      if (notice) await this.speak(notice)
+      // Speak the natural greeting directly without double-introducing Priya
       await this.speak(r.text)
       console.log(`⏱ wa answer → greeting fully queued: ${Date.now() - t0}ms`)
     } catch (e) {
