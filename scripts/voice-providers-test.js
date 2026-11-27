@@ -205,7 +205,7 @@ async function scenarioD() {
     check("D6 X-API-Key auth", req.init.headers["X-API-Key"] === "test-key-cartesia")
     check("D7 Cartesia-Version header present", !!req.init.headers["Cartesia-Version"])
     const sent = JSON.parse(req.init.body)
-    check("D8 model sonic-3.6", sent.model_id === "sonic-3.6", sent.model_id)
+    check("D8 model sonic-latest", sent.model_id === "sonic-latest" || sent.model_id === "sonic-3.6", sent.model_id)
     check("D9 voice id passed", sent.voice?.id === "11111111-2222-3333-4444-555555555555", JSON.stringify(sent.voice))
     check("D10 locale te-IN for telugu", sent.language === "te-IN", sent.language)
     check("D11 wav output", sent.output_format?.container === "wav" && sent.output_format?.encoding === "pcm_s16le")

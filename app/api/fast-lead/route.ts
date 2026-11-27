@@ -87,10 +87,10 @@ export async function POST(req: NextRequest) {
       )
       await query(
         `INSERT INTO comm_logs (lead_id, type, summary, outcome)
-         VALUES ($1, 'alert', $2, 'loan_confirmed')`,
+         VALUES ($1, 'alert', $2, 'application_submitted')`,
         [
           leadId,
-          `🟢 APPLICATION SUBMITTED — Lead confirmed ${loanType || "Loan"} application for ${loanAmount ? "₹" + Number(loanAmount).toLocaleString("en-IN") : "unspecified amount"}. Follow up for KYC & document collection.`
+          `📋 APPLICATION SUBMITTED — Lead submitted ${loanType || "Loan"} application for ${loanAmount ? "₹" + Number(loanAmount).toLocaleString("en-IN") : "unspecified amount"}. Follow up for KYC & document collection.`
         ]
       ).catch(() => {})
     } catch (e: any) {

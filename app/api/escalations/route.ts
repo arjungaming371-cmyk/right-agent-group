@@ -117,13 +117,13 @@ export async function GET(req: NextRequest) {
             ORDER BY la.submitted_at DESC
             LIMIT 1
          ) last_app ON true
-        WHERE c.type = 'alert' AND c.outcome IN ('needs_human', 'loan_confirmed', 'escalation')
+        WHERE c.type = 'alert' AND c.outcome IN ('needs_human', 'loan_confirmed', 'application_submitted', 'link_shared', 'escalation')
           AND ($1::uuid IS NULL OR l.branch_id = $1::uuid)
           AND NOT EXISTS (
             SELECT 1 FROM comm_logs r
              WHERE r.lead_id = c.lead_id
                AND (
-                 r.outcome IN ('needs_human_resolved', 'loan_confirmed_resolved', 'escalation_resolved')
+                 r.outcome IN ('needs_human_resolved', 'loan_confirmed_resolved', 'application_submitted_resolved', 'link_shared_resolved', 'escalation_resolved')
                  OR (r.type = 'system' AND r.outcome = 'resolved')
                )
                AND r.created_at >= c.created_at
@@ -323,14 +323,24 @@ export async function GET(req: NextRequest) {
       const key = getLeadKey(r.lead_id, r.lead_phone)
       const lead = getOrCreateLeadRecord(key, r.lead_id, r.lead_name, r.lead_phone, r.lead_whatsapp, r.lead_status, r.city || r.lead_address)
 
+      const isApplication = r.outcome === "application_submitted" || r.outcome === "link_shared" || r.outcome === "loan_confirmed"
       const isFrustration = /frustrated|angry|annoyed|complain/i.test(r.summary || "")
-      const taskPriority: "critical" | "high" | "medium" | "low" = isFrustration ? "critical" : "high"
+      const taskPriority: "critical" | "high" | "medium" | "low" = isFrustration ? "critical" : isApplication ? "medium" : "high"
+
+      const taskType = isApplication ? "loan_application" : "escalation"
+      const taskTitle = r.outcome === "application_submitted"
+        ? "Application Submitted — Review Eligibility"
+        : r.outcome === "link_shared"
+        ? "Application Link Requested — Follow Up"
+        : isFrustration
+        ? "Customer Grievance Escalation"
+        : "Human Assistance Requested"
 
       lead.tasks.push({
         id: `comm_${r.id}`,
         raw_id: String(r.id),
-        type: "escalation",
-        title: isFrustration ? "Customer Grievance Escalation" : "Human Assistance Requested",
+        type: taskType,
+        title: taskTitle,
         status: "pending",
         due_at: null,
         created_at: r.created_at,
@@ -342,10 +352,10 @@ export async function GET(req: NextRequest) {
       })
 
       if (taskPriority === "critical") lead.priority = "critical"
-      else if (lead.priority !== "critical") lead.priority = "high"
+      else if (lead.priority !== "critical" && taskPriority === "high") lead.priority = "high"
 
       if (lead.category !== "branch_visit" && lead.category !== "proposed_visit") {
-        lead.category = "escalation"
+        lead.category = isApplication ? "loan_application" : "escalation"
       }
 
       if (r.product_interest) lead.financial.product_interest = r.product_interest

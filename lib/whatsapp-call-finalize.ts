@@ -374,12 +374,12 @@ export async function finalizeWhatsAppCall(opts: {
             outcome: result.ok ? "sent" : "failed",
           }).catch(() => {})
 
-          // Alert: Lead confirmed loan interest on call — flag in Human Attention queue
+          // Alert: Lead requested loan application link on call — flag in Human Attention queue
           await db.from("comm_logs").insert({
             lead_id: leadId,
             type: "alert",
-            summary: `🟢 LOAN CONFIRMED ON CALL — Caller confirmed loan interest during call. Application link sent on WhatsApp. Follow up for documentation & bank processing.`,
-            outcome: "loan_confirmed",
+            summary: `📋 APPLICATION LINK REQUESTED — Caller expressed loan interest during call. Application link sent via WhatsApp. Follow up for application completion and document submission.`,
+            outcome: "link_shared",
           }).catch(() => {})
 
           if (result.ok) {

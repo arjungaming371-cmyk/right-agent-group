@@ -590,7 +590,7 @@ export default function AttentionView({ role }: { role: Role }) {
 
   // ── Computed Metrics (Accurate Due Today & Visits) ──
 
-  const dueToday = counts.due_today !== undefined ? counts.due_today : useMemo(() => {
+  const fallbackDueToday = useMemo(() => {
     if (!leads) return 0
     const now = new Date()
     const todayYMD = now.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" })
@@ -610,6 +610,8 @@ export default function AttentionView({ role }: { role: Role }) {
       return createdYMD === todayYMD || l.category === "proposed_visit" || l.category === "escalation"
     }).length
   }, [leads])
+
+  const dueToday = counts.due_today !== undefined ? counts.due_today : fallbackDueToday
 
   const officeVisits = counts.visits ?? ((counts.confirmed_visits || 0) + (counts.proposed_visits || 0))
   const escalationCount = counts.escalations || 0
