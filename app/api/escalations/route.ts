@@ -408,6 +408,87 @@ export async function GET(req: NextRequest) {
     // Convert Map to Array
     const rawLeads = Array.from(leadMap.values())
 
+    // 3b. Fetch Timeline Interactions (Voice Calls & WhatsApp Messages) for each lead
+    const leadIds = Array.from(new Set(rawLeads.map(l => l.lead_id).filter(Boolean)))
+    if (leadIds.length > 0) {
+      try {
+        const [callsRes, waRes] = await Promise.all([
+          query(
+            `SELECT id, lead_id, direction, status, duration, created_at, recording_url, ai_summary, sentiment, language
+               FROM voice_calls
+              WHERE lead_id = ANY($1::uuid[])
+              ORDER BY created_at DESC
+              LIMIT 200`,
+            [leadIds]
+          ),
+          query(
+            `SELECT id, lead_id, direction, status, content, created_at
+               FROM whatsapp_messages
+              WHERE lead_id = ANY($1::uuid[])
+              ORDER BY created_at DESC
+              LIMIT 200`,
+            [leadIds]
+          ),
+        ])
+
+        const leadById = new Map<string, any>()
+        for (const l of rawLeads) {
+          if (l.lead_id) leadById.set(l.lead_id, l)
+        }
+
+        for (const c of callsRes.rows) {
+          const l = leadById.get(c.lead_id)
+          if (!l) continue
+          const mins = Math.floor((c.duration || 0) / 60)
+          const secs = (c.duration || 0) % 60
+          const durStr = c.duration ? ` (${mins}m ${secs}s)` : ""
+          let summaryText = "Voice call with AI loan advisor"
+          if (typeof c.ai_summary === "object" && c.ai_summary !== null) {
+            summaryText = c.ai_summary.next_action || c.ai_summary.summary || JSON.stringify(c.ai_summary)
+          } else if (typeof c.ai_summary === "string" && c.ai_summary) {
+            try {
+              const parsed = JSON.parse(c.ai_summary)
+              summaryText = parsed.next_action || parsed.summary || c.ai_summary
+            } catch {
+              summaryText = c.ai_summary
+            }
+          }
+          l.timeline.push({
+            id: `call_${c.id}`,
+            channel: "phone",
+            direction: c.direction === "inbound" ? "inbound" : "outbound",
+            timestamp: c.created_at,
+            title: c.direction === "inbound" ? `Inbound Voice Call${durStr}` : `Outbound AI Call (Priya)${durStr}`,
+            summary: summaryText,
+            sentiment: c.sentiment?.toLowerCase() || "neutral",
+            language: c.language || "telugu",
+            recording_url: c.recording_url || undefined,
+          })
+        }
+
+        for (const m of waRes.rows) {
+          const l = leadById.get(m.lead_id)
+          if (!l) continue
+          l.timeline.push({
+            id: `wa_${m.id}`,
+            channel: "whatsapp",
+            direction: m.direction === "inbound" ? "inbound" : "outbound",
+            timestamp: m.created_at,
+            title: m.direction === "inbound" ? "Customer WhatsApp Message" : "Right Agent WhatsApp Message",
+            summary: m.content || "WhatsApp message",
+            sentiment: "neutral",
+          })
+        }
+
+        // Sort each lead's timeline chronologically (newest first)
+        for (const l of rawLeads) {
+          l.timeline.sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+        }
+      } catch (err: any) {
+        console.warn("[ActionCenter] Failed to fetch timeline interactions:", err?.message)
+      }
+    }
+
     // 4. Enrich Leads with Semantic Intelligence & Dynamic Next Actions
     const enrichedLeads = rawLeads.map(lead => {
       // Semantic Concern Extraction
