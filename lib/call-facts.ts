@@ -93,7 +93,11 @@ export type InCallFacts = {
   college?: string
   loanAmount?: string
   loanType?: string
+  monthlyIncome?: string
+  employmentType?: "salaried" | "business" | "self_employed"
+  cibilScore?: string
   whatsappSame?: boolean
+  correctionNote?: string
 }
 
 type Turn = { role: "user" | "model"; content: string }
@@ -129,7 +133,7 @@ const LOAN_INTENT_RE = /\b(loan|loans|finance|amount|kavali|kaavali|kavala|chahi
 const LOAN_AMOUNT_RE = /\b(\d{1,3}(?:\.\d{1,2})?)\s*(lakh|lakhs|lakulu|crore|crores|cr|k|thousand|veelu|velu)\b/i
 const LOAN_TYPE_RE = /\b(home|house|personal|business|education|study|gold|car|bike|vehicle|two ?wheeler|mortgage|lap|plot|construction)\s+loan\b|illu loan|intiki loan/i
 
-const YES_SAME_RE = /^(yes\s+)?(same|ide|idiye|idhe|ide ye|ide number|idhe number|same number|same sir|same madam|same a|same only|this number|same as this|same)\b/i
+const YES_SAME_RE = /^(?:yes|haan|avunu)?\s*[,.]?\s*(?:same|ide|idiye|idhe|ide ye|ide number|idhe number|same number|same sir|same madam|same a|same only|this number|same as this|same)\b/i
 
 function cleanCapture(raw: string, fillerRe: RegExp, maxWords: number): string {
   let out = raw
@@ -197,16 +201,51 @@ export function extractCallFacts(history: Turn[], speech: string): InCallFacts {
       }
     }
 
-    // LOAN TYPE.
-    if (!facts.loanType) {
-      const m = t.match(LOAN_TYPE_RE)
-      if (m) {
-        const raw = m[0].toLowerCase()
-        facts.loanType =
-          /illu loan|intiki loan/.test(raw) ? "home loan"
-          : /two ?wheeler/.test(raw) ? "bike loan"
-          : /lap\b/.test(raw) ? "loan against property"
-          : raw.replace(/\s+/g, " ").trim()
+    // LOAN TYPE (with customer correction awareness)
+    const m = t.match(LOAN_TYPE_RE)
+    if (m) {
+      const raw = m[0].toLowerCase()
+      const detected =
+        /illu loan|intiki loan/.test(raw) ? "home loan"
+        : /two ?wheeler/.test(raw) ? "bike loan"
+        : /lap\b/.test(raw) ? "loan against property"
+        : raw.replace(/\s+/g, " ").trim()
+
+      // If customer has a negation before or near the old loan type (e.g. "not personal, home loan", "personal kaadu, home loan kavali")
+      const isCorrection = /\b(not|no|vaddu|vaddandi|kaadu|nahi|badle|instead of)\b/i.test(t)
+      if (isCorrection && facts.loanType && facts.loanType !== detected) {
+        facts.correctionNote = `Customer explicitly corrected loan type from ${facts.loanType} to ${detected}`
+        facts.loanType = detected
+      } else if (!facts.loanType) {
+        facts.loanType = detected
+      }
+    }
+
+    // MONTHLY INCOME
+    if (!facts.monthlyIncome) {
+      const incMatch = t.match(/\b(?:salary|income|sampadana|kamai|aadhayam)\s*(?:is\s*)?(\d{1,3}(?:\.\d{1,2})?)\s*(lakh|lakhs|k|thousand|velu|veelu)?\b/i) ||
+                       t.match(/\b(\d{1,3}(?:\.\d{1,2})?)\s*(?:k|thousand|velu)\s*(?:salary|income|per month|nelaki|mahina)\b/i)
+      if (incMatch) {
+        const val = incMatch[1]
+        const unit = incMatch[2] ? incMatch[2].toLowerCase() : ""
+        facts.monthlyIncome = unit ? `${val} ${unit}` : `${val}`
+      }
+    }
+
+    // EMPLOYMENT TYPE
+    if (!facts.employmentType) {
+      if (/\b(salaried|job|employee|private job|govt job|software|work in)\b/i.test(t)) {
+        facts.employmentType = "salaried"
+      } else if (/\b(business|vyaparam|vyapar|dukaan|shop|self employed|own work)\b/i.test(t)) {
+        facts.employmentType = "business"
+      }
+    }
+
+    // CIBIL SCORE
+    if (!facts.cibilScore) {
+      const cibMatch = t.match(/\b(?:cibil|score|credit score)\s*(?:is\s*)?(\d{3})\b/i) || t.match(/\b(\d{3})\s*(?:cibil|score)\b/i)
+      if (cibMatch) {
+        facts.cibilScore = cibMatch[1]
       }
     }
 
@@ -283,6 +322,10 @@ export function formatInCallFactsBlock(facts: InCallFacts): string {
   if (facts.loanAmount || facts.loanType) {
     lines.push(`- loan: ${[facts.loanAmount, facts.loanType].filter(Boolean).join(", ")}`)
   }
+  if (facts.monthlyIncome) lines.push(`- monthly income: ${facts.monthlyIncome} (Customer already stated income — DO NOT ask for monthly income again!)`)
+  if (facts.employmentType) lines.push(`- employment type: ${facts.employmentType} (Customer already stated employment — DO NOT ask again!)`)
+  if (facts.cibilScore) lines.push(`- CIBIL score: ${facts.cibilScore} (Customer already provided CIBIL score — DO NOT ask credit score again!)`)
+  if (facts.correctionNote) lines.push(`- CORRECTION NOTE: ${facts.correctionNote} — acknowledge and respect this correction!`)
   if (facts.whatsappSame) lines.push("- whatsapp number: customer confirmed it is the SAME as this call")
   if (lines.length === 0) return ""
   return [

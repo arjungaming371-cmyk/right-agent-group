@@ -101,9 +101,7 @@ export async function POST(req: NextRequest) {
     if (!EDITABLE_KEYS.includes(language)) {
       return NextResponse.json({ error: "invalid language" }, { status: 400 })
     }
-    if (content.length > 40000) {
-      return NextResponse.json({ error: "script too long (max 40,000 characters)" }, { status: 400 })
-    }
+    // No character limit — allows unlimited script length for custom prompts and knowledge bases
     // Channel JSON keys must parse as an object — a broken save would
     // otherwise be rejected at load time per-field anyway, but failing fast
     // here gives the editor an immediate, actionable error instead.

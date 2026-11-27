@@ -5,7 +5,8 @@ import { useEffect, useState, useMemo } from "react"
 import {
   Users, Target, IndianRupee, BadgeCheck, Phone, MessageCircle, MessageSquare, RotateCcw,
   Plus, Search, Link2, Check, Download, Upload, Brain, Pin, Sparkles, CheckSquare,
-  PhoneCall, Instagram, X, ExternalLink, Clock, CheckCircle2, ArrowRight, Pencil, Landmark, AlertCircle, FileText
+  PhoneCall, Instagram, X, ExternalLink, Clock, CheckCircle2, ArrowRight, Pencil, Landmark, AlertCircle, FileText,
+  ShieldCheck, Zap, Copy, Trash2, Headphones
 } from "lucide-react"
 import { formatCurrency, timeAgo, formatDateTime } from "@/lib/utils"
 import { pctOf } from "@/lib/maths"
@@ -13,6 +14,7 @@ import { usePolling, broadcastCrmSync } from "@/lib/use-poll"
 import { useToast } from "../ui/toast"
 import { useEscapeDismiss } from "../ui/interactive"
 import { Skeleton } from "../ui/skeleton"
+import CustomSelect from "../ui/custom-select"
 import LeadMemoryModal from "./lead-memory-modal"
 import VoiceDictation from "../ui/voice-dictation"
 import { smartFilter } from "@/lib/smart-search"
@@ -273,6 +275,14 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
   const [queueShowSavePreset, setQueueShowSavePreset] = useState(false)
   const [queueSavePresetName, setQueueSavePresetName] = useState("")
 
+  const [showPresetModal, setShowPresetModal] = useState(false)
+  const [presetModalMode, setPresetModalMode] = useState<"create" | "edit">("create")
+  const [presetEditId, setPresetEditId] = useState<string | null>(null)
+  const [presetFormName, setPresetFormName] = useState("")
+  const [presetFormText, setPresetFormText] = useState("")
+  const [presetSaving, setPresetSaving] = useState(false)
+  const [presetModalContext, setPresetModalContext] = useState<"queue" | "upload">("queue")
+
   async function loadPresets() {
     try {
       const res = await fetch("/api/agenda-presets")
@@ -300,6 +310,104 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
     const match = presets.find((p) => p.label === lbl)
     if (match) {
       setQueueTalkingPoints(match.text)
+    }
+  }
+
+  async function handleCreatePreset(label: string, text: string, context: "queue" | "upload" = "queue") {
+    if (!label.trim()) {
+      toast.error("Please enter a preset name")
+      return
+    }
+    setPresetSaving(true)
+    try {
+      const res = await fetch("/api/agenda-presets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ label: label.trim(), text: text.trim() }),
+      })
+      const d = await res.json()
+      if (res.ok) {
+        toast.success(`Preset "${label}" created`)
+        setShowPresetModal(false)
+        await loadPresets()
+        if (context === "queue") {
+          setQueueAgendaPreset(label.trim())
+          setQueueTalkingPoints(text.trim())
+        } else {
+          setUploadAgendaPreset(label.trim())
+          setUploadTalkingPoints(text.trim())
+        }
+      } else {
+        toast.error(d.error || "Failed to create preset")
+      }
+    } catch {
+      toast.error("Failed to create preset")
+    } finally {
+      setPresetSaving(false)
+    }
+  }
+
+  async function handleUpdatePreset(id: string, label: string, text: string, context: "queue" | "upload" = "queue") {
+    if (!label.trim()) {
+      toast.error("Please enter a preset name")
+      return
+    }
+    setPresetSaving(true)
+    try {
+      const res = await fetch("/api/agenda-presets", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, label: label.trim(), text: text.trim() }),
+      })
+      const d = await res.json()
+      if (res.ok) {
+        toast.success(`Preset "${label}" updated`)
+        setShowPresetModal(false)
+        await loadPresets()
+        if (context === "queue") {
+          setQueueAgendaPreset(label.trim())
+          setQueueTalkingPoints(text.trim())
+        } else {
+          setUploadAgendaPreset(label.trim())
+          setUploadTalkingPoints(text.trim())
+        }
+      } else {
+        toast.error(d.error || "Failed to update preset")
+      }
+    } catch {
+      toast.error("Failed to update preset")
+    } finally {
+      setPresetSaving(false)
+    }
+  }
+
+  async function handleDeletePreset(id: string, label: string, context: "queue" | "upload" = "queue") {
+    if (!window.confirm(`Are you sure you want to delete preset "${label}"?`)) return
+    try {
+      const res = await fetch(`/api/agenda-presets?id=${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      })
+      if (res.ok) {
+        toast.success(`Preset "${label}" deleted`)
+        const remaining = presets.filter((p) => p.id !== id)
+        setPresets(remaining)
+        const fallback = remaining[0]?.label || "Custom brief"
+        const fallbackText = remaining[0]?.text || ""
+        if (context === "queue" || queueAgendaPreset === label) {
+          setQueueAgendaPreset(fallback)
+          setQueueTalkingPoints(fallbackText)
+        }
+        if (context === "upload" || uploadAgendaPreset === label) {
+          setUploadAgendaPreset(fallback)
+          setUploadTalkingPoints(fallbackText)
+        }
+        await loadPresets()
+      } else {
+        const d = await res.json()
+        toast.error(d.error || "Failed to delete preset")
+      }
+    } catch {
+      toast.error("Failed to delete preset")
     }
   }
 
@@ -458,6 +566,79 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
   const [bulkWaMode, setBulkWaMode] = useState<"template" | "text">("template")
   const [bulkWaTemplateName, setBulkWaTemplateName] = useState("loan_application_form")
   const [bulkWaTemplateLang, setBulkWaTemplateLang] = useState("en")
+  const [libraryProducts, setLibraryProducts] = useState<string[]>([])
+  const allLoanProducts = Array.from(new Set([...COMMON_LOAN_TYPES, ...libraryProducts]))
+  const [liveTplStatuses, setLiveTplStatuses] = useState<Record<string, { status: string; category?: string; languages: string[] }>>({})
+  const [quickPrompts, setQuickPrompts] = useState<{ id: string; label: string; text: string }[]>([])
+  const [customizingPrompts, setCustomizingPrompts] = useState(false)
+  const [editingPrompt, setEditingPrompt] = useState<{ id?: string; label: string; text: string } | null>(null)
+  const [savingPrompt, setSavingPrompt] = useState(false)
+
+  useEffect(() => {
+    if (!showBulkWaModal) return
+    fetch("/api/whatsapp/templates")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d?.liveStatuses) setLiveTplStatuses(d.liveStatuses)
+      })
+      .catch(() => {})
+    fetch("/api/whatsapp/quick-prompts")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (Array.isArray(d?.prompts)) setQuickPrompts(d.prompts)
+      })
+      .catch(() => {})
+  }, [showBulkWaModal])
+
+  async function saveQuickPrompt() {
+    if (!editingPrompt) return
+    const label = editingPrompt.label.trim()
+    const text = editingPrompt.text.trim()
+    if (!label || !text) {
+      toast.error("Please enter both prompt title and message")
+      return
+    }
+    setSavingPrompt(true)
+    try {
+      const isEdit = !!editingPrompt.id
+      const res = await fetch("/api/whatsapp/quick-prompts", {
+        method: isEdit ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(isEdit ? { id: editingPrompt.id, label, text } : { label, text }),
+      })
+      const d = await res.json().catch(() => ({}))
+      if (res.ok && d.prompt) {
+        if (isEdit) {
+          setQuickPrompts((prev) => prev.map((p) => (p.id === d.prompt.id ? d.prompt : p)))
+          toast.success(`Updated "${label}"`)
+        } else {
+          setQuickPrompts((prev) => [...prev, d.prompt])
+          toast.success(`Added "${label}"`)
+        }
+        setEditingPrompt(null)
+      } else {
+        toast.error(d.error || "Failed to save prompt")
+      }
+    } catch {
+      toast.error("Network error saving prompt")
+    } finally {
+      setSavingPrompt(false)
+    }
+  }
+
+  async function deleteQuickPrompt(id: string, label: string) {
+    try {
+      const res = await fetch(`/api/whatsapp/quick-prompts?id=${encodeURIComponent(id)}`, { method: "DELETE" })
+      if (res.ok) {
+        setQuickPrompts((prev) => prev.filter((p) => p.id !== id))
+        toast.success(`Deleted "${label}"`)
+      } else {
+        toast.error("Failed to delete prompt")
+      }
+    } catch {
+      toast.error("Network error deleting prompt")
+    }
+  }
 
   // ── Lead Name & Details Editing ──
   const [editingLeadId, setEditingLeadId] = useState<string | null>(null)
@@ -745,6 +926,12 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
     // Lane tab badges — two tiny COUNT queries riding the same poll cycle.
     fetch("/api/leads?count=1&scope=crm").then((r) => (r.ok ? r.json() : null)).then((d) => d && setCrmCount(d.count ?? 0)).catch(() => {})
     fetch("/api/leads?count=1&scope=social").then((r) => (r.ok ? r.json() : null)).then((d) => d && setSocialCount(d.count ?? 0)).catch(() => {})
+    fetch("/api/links/library").then((r) => (r.ok ? r.json() : [])).then((data) => {
+      if (Array.isArray(data)) {
+        const prods = data.filter((l: any) => l.active && l.product).map((l: any) => String(l.product).trim())
+        setLibraryProducts(Array.from(new Set(prods)))
+      }
+    }).catch(() => {})
     const params = new URLSearchParams()
     params.set("scope", scopeTab)
     if (debouncedSearch) params.set("search", debouncedSearch)
@@ -806,15 +993,23 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
   // closure), so it no longer needs its own deps list.
   usePolling(() => load(true), 15000)
 
-  const isQualified = (l: Lead) =>
-    l.status === "qualified" ||
-    l.status === "interested" ||
-    l.status === "form_opened" ||
-    l.status === "approved" ||
-    l.status === "link_sent" ||
-    l.status === "docs_pending" ||
-    l.interested === "interested" ||
-    (Number(l.score) || 0) >= 70
+  const QUALIFIED_STATUSES = new Set([
+    "qualified", "interested", "form_opened", "opened", "form_completed",
+    "applied", "approved", "link_sent", "docs_pending", "pending",
+    "sanctioned", "disbursed",
+  ])
+  const isQualified = (l: Lead) => {
+    const st = String(l.status || "").toLowerCase().trim()
+    const loanSt = String(l.loan_status || "").toLowerCase().trim()
+    if (st === "rejected" || st === "not_interested" || loanSt === "rejected") return false
+    return (
+      QUALIFIED_STATUSES.has(st) ||
+      QUALIFIED_STATUSES.has(loanSt) ||
+      l.interested === "interested" ||
+      l.form_completed ||
+      (Number(l.score) || 0) >= 70
+    )
+  }
 
   const totalLeads = leads.length
   const qualified = leads.filter(isQualified).length
@@ -833,7 +1028,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
     return s + (isFinite(amt) && amt > 0 ? amt : 0)
   }, 0)
   const qualifiedPct = pctOf(qualifiedValue, pipelineValue)
-  const interestedCount = leads.filter((l) => l.interested === "interested").length
+  const interestedCount = leads.filter((l) => l.interested === "interested" || isQualified(l)).length
 
   // Instagram prospect metrics:
   const socialDetectedCount = leads.filter((l) => !!l.ig_phone_extracted).length
@@ -1613,9 +1808,9 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                             </button>
                           </div>
                         ) : (
-                          <div style={{ fontWeight: 600, fontSize: 13, display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap", lineHeight: 1.25 }}>
+                          <div style={{ fontWeight: 600, fontSize: 13, display: "flex", alignItems: "center", gap: 5, flexWrap: "nowrap", minWidth: 0, lineHeight: 1.25 }}>
                             {lead.pinned && <Pin size={11} strokeWidth={2.2} style={{ color: "var(--accent-yellow)", fill: "var(--accent-yellow)", flexShrink: 0 }} />}
-                            <span>{lead.name || "Unknown"}</span>
+                            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={lead.name || "Unknown"}>{lead.name || "Unknown"}</span>
                             {canEdit && (
                               <button
                                 onClick={(e) => {
@@ -1633,6 +1828,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                                   alignItems: "center",
                                   borderRadius: 4,
                                   opacity: 0.65,
+                                  flexShrink: 0,
                                   transition: "opacity 0.15s",
                                 }}
                                 onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
@@ -1705,17 +1901,23 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                             style={{ background: "rgba(139,124,255,0.12)", border: "1px solid rgba(139,124,255,0.28)", color: "var(--accent-violet)", borderRadius: 7, width: 28, height: 28, display: "inline-flex", alignItems: "center", justifyContent: "center", opacity: calling === lead.id ? 0.5 : 1, cursor: "pointer" }}
                           ><Phone size={12.5} strokeWidth={1.9} /></button>
                           <button
-                            onClick={() => setWaTarget(lead)}
+                            onClick={() => {
+                              const target = lead.phone || lead.whatsapp_number || lead.name || lead.id
+                              window.dispatchEvent(new CustomEvent("rag:navigate", { detail: { view: "whatsapp", search: target } }))
+                            }}
                             disabled={!lead.phone && !lead.whatsapp_number}
-                            title="Send WhatsApp"
+                            title="Open in WhatsApp Chat"
                             style={{ background: "rgba(45,212,160,0.1)", border: "1px solid rgba(45,212,160,0.28)", color: "var(--accent-green)", borderRadius: 7, width: 28, height: 28, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
                           ><MessageCircle size={12.5} strokeWidth={1.9} /></button>
                           <button
-                            onClick={() => openSendBankLinkModal(lead)}
-                            disabled={!lead.phone && !lead.whatsapp_number}
-                            title="Send Right Agent Group Application Link"
+                            onClick={() => {
+                              const target = lead.phone || lead.name || ""
+                              window.dispatchEvent(new CustomEvent("rag:navigate", { detail: { view: "voice", search: target } }))
+                            }}
+                            disabled={!lead.phone && !lead.name}
+                            title="Listen Call Records"
                             style={{ background: "rgba(56,189,248,0.1)", border: "1px solid rgba(56,189,248,0.28)", color: "var(--accent-cyan)", borderRadius: 7, width: 28, height: 28, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
-                          ><FileText size={12.5} strokeWidth={1.9} /></button>
+                          ><Headphones size={12.5} strokeWidth={1.9} /></button>
                         </>
                       )}
                       <button
@@ -1791,20 +1993,103 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
 
             {/* What should Priya talk about? — Agenda picker */}
             <div style={{ marginBottom: 14, padding: "12px 14px", borderRadius: 10, background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6, flexWrap: "wrap", gap: 6 }}>
                 <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>
                   What should Priya talk about?
                 </label>
-                <select
-                  value={queueAgendaPreset}
-                  onChange={(e) => onSelectQueuePreset(e.target.value)}
-                  style={{ fontSize: 11.5, padding: "3px 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)" }}
-                >
-                  {presets.map((p) => (
-                    <option key={p.id} value={p.label}>{p.label}</option>
-                  ))}
-                  <option value="Custom brief">Custom brief</option>
-                </select>
+                <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                  <select
+                    value={queueAgendaPreset}
+                    onChange={(e) => onSelectQueuePreset(e.target.value)}
+                    style={{ fontSize: 11.5, padding: "3px 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)", maxWidth: 175 }}
+                  >
+                    {presets.map((p) => (
+                      <option key={p.id} value={p.label}>{p.label}</option>
+                    ))}
+                    <option value="Custom brief">Custom brief</option>
+                  </select>
+
+                  <button
+                    type="button"
+                    title="Add new talking point preset"
+                    onClick={() => {
+                      setPresetModalMode("create")
+                      setPresetModalContext("queue")
+                      setPresetEditId(null)
+                      setPresetFormName("")
+                      setPresetFormText(queueTalkingPoints || "")
+                      setShowPresetModal(true)
+                    }}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 3,
+                      fontSize: 11,
+                      padding: "3px 7px",
+                      borderRadius: 6,
+                      border: "1px solid rgba(139,124,255,0.4)",
+                      background: "rgba(139,124,255,0.12)",
+                      color: "var(--accent-violet)",
+                      cursor: "pointer",
+                      fontWeight: 600,
+                    }}
+                  >
+                    <Plus size={11} /> Add
+                  </button>
+
+                  {(() => {
+                    const matched = queueAgendaPreset !== "Custom brief" ? presets.find((p) => p.label === queueAgendaPreset) : null
+                    if (!matched) return null
+                    return (
+                      <>
+                        <button
+                          type="button"
+                          title={`Edit "${matched.label}"`}
+                          onClick={() => {
+                            setPresetModalMode("edit")
+                            setPresetModalContext("queue")
+                            setPresetEditId(matched.id)
+                            setPresetFormName(matched.label)
+                            setPresetFormText(queueTalkingPoints || matched.text || "")
+                            setShowPresetModal(true)
+                          }}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 2,
+                            fontSize: 11,
+                            padding: "3px 6px",
+                            borderRadius: 6,
+                            border: "1px solid var(--border)",
+                            background: "var(--bg-card)",
+                            color: "var(--text-secondary)",
+                            cursor: "pointer",
+                          }}
+                        >
+                          <Pencil size={11} /> Edit
+                        </button>
+                        <button
+                          type="button"
+                          title={`Delete "${matched.label}"`}
+                          onClick={() => handleDeletePreset(matched.id, matched.label, "queue")}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            fontSize: 11,
+                            padding: "3px 6px",
+                            borderRadius: 6,
+                            border: "1px solid rgba(239,68,68,0.3)",
+                            background: "rgba(239,68,68,0.08)",
+                            color: "var(--accent-red)",
+                            cursor: "pointer",
+                          }}
+                        >
+                          <Trash2 size={11} />
+                        </button>
+                      </>
+                    )
+                  })()}
+                </div>
               </div>
 
               <textarea
@@ -2198,20 +2483,103 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
 
                     {uploadDestination === "queue" && (
                       <div style={{ marginTop: 6, padding: "12px 14px", borderRadius: 10, background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6, flexWrap: "wrap", gap: 6 }}>
                           <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>
                             What should Priya talk about?
                           </label>
-                          <select
-                            value={uploadAgendaPreset}
-                            onChange={(e) => onSelectUploadPreset(e.target.value)}
-                            style={{ fontSize: 11.5, padding: "3px 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)" }}
-                          >
-                            {presets.map((p) => (
-                              <option key={p.id} value={p.label}>{p.label}</option>
-                            ))}
-                            <option value="Custom brief">Custom brief</option>
-                          </select>
+                          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                            <select
+                              value={uploadAgendaPreset}
+                              onChange={(e) => onSelectUploadPreset(e.target.value)}
+                              style={{ fontSize: 11.5, padding: "3px 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)", maxWidth: 175 }}
+                            >
+                              {presets.map((p) => (
+                                <option key={p.id} value={p.label}>{p.label}</option>
+                              ))}
+                              <option value="Custom brief">Custom brief</option>
+                            </select>
+
+                            <button
+                              type="button"
+                              title="Add new talking point preset"
+                              onClick={() => {
+                                setPresetModalMode("create")
+                                setPresetModalContext("upload")
+                                setPresetEditId(null)
+                                setPresetFormName("")
+                                setPresetFormText(uploadTalkingPoints || "")
+                                setShowPresetModal(true)
+                              }}
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 3,
+                                fontSize: 11,
+                                padding: "3px 7px",
+                                borderRadius: 6,
+                                border: "1px solid rgba(139,124,255,0.4)",
+                                background: "rgba(139,124,255,0.12)",
+                                color: "var(--accent-violet)",
+                                cursor: "pointer",
+                                fontWeight: 600,
+                              }}
+                            >
+                              <Plus size={11} /> Add
+                            </button>
+
+                            {(() => {
+                              const matched = uploadAgendaPreset !== "Custom brief" ? presets.find((p) => p.label === uploadAgendaPreset) : null
+                              if (!matched) return null
+                              return (
+                                <>
+                                  <button
+                                    type="button"
+                                    title={`Edit "${matched.label}"`}
+                                    onClick={() => {
+                                      setPresetModalMode("edit")
+                                      setPresetModalContext("upload")
+                                      setPresetEditId(matched.id)
+                                      setPresetFormName(matched.label)
+                                      setPresetFormText(uploadTalkingPoints || matched.text || "")
+                                      setShowPresetModal(true)
+                                    }}
+                                    style={{
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: 2,
+                                      fontSize: 11,
+                                      padding: "3px 6px",
+                                      borderRadius: 6,
+                                      border: "1px solid var(--border)",
+                                      background: "var(--bg-card)",
+                                      color: "var(--text-secondary)",
+                                      cursor: "pointer",
+                                    }}
+                                  >
+                                    <Pencil size={11} /> Edit
+                                  </button>
+                                  <button
+                                    type="button"
+                                    title={`Delete "${matched.label}"`}
+                                    onClick={() => handleDeletePreset(matched.id, matched.label, "upload")}
+                                    style={{
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      fontSize: 11,
+                                      padding: "3px 6px",
+                                      borderRadius: 6,
+                                      border: "1px solid rgba(239,68,68,0.3)",
+                                      background: "rgba(239,68,68,0.08)",
+                                      color: "var(--accent-red)",
+                                      cursor: "pointer",
+                                    }}
+                                  >
+                                    <Trash2 size={11} />
+                                  </button>
+                                </>
+                              )
+                            })()}
+                          </div>
                         </div>
 
                         <textarea
@@ -2554,7 +2922,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                   onChange={(e) => setBankProduct(e.target.value)}
                   style={{ width: "100%", height: 38, fontSize: 13, padding: "0 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)" }}
                 >
-                  {COMMON_LOAN_TYPES.map((t) => (
+                  {allLoanProducts.map((t) => (
                     <option key={t} value={t}>{t}</option>
                   ))}
                 </select>
@@ -2590,19 +2958,26 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
 
       {/* Bulk WhatsApp Campaign Modal */}
       {showBulkWaModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}>
-          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, padding: 26, width: "100%", maxWidth: 540, maxHeight: "90vh", overflowY: "auto" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <div style={{ width: 28, height: 28, borderRadius: "50%", background: "rgba(37,211,102,0.15)", display: "flex", alignItems: "center", justifyContent: "center", color: "#25D366" }}>
-                  <MessageCircle size={16} strokeWidth={2.4} />
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.72)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}>
+          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 16, width: "100%", maxWidth: 520, maxHeight: "88vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "var(--shadow-soft)" }}>
+            {/* Fixed Modal Header */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 22px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ width: 30, height: 30, borderRadius: 8, background: "rgba(91,124,250,0.14)", border: "1px solid rgba(91,124,250,0.3)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--accent-blue)" }}>
+                  <MessageCircle size={16} strokeWidth={2.2} />
                 </div>
-                <div style={{ fontWeight: 700, fontSize: 16, color: "var(--text-primary)" }}>
-                  Send Bulk WhatsApp Message
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 15, color: "var(--text-primary)", lineHeight: 1.2 }}>
+                    Send Bulk WhatsApp Message
+                  </div>
+                  <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2 }}>
+                    Blasting to <strong style={{ color: "var(--accent-green)" }}>{selectedIds.length} selected lead{selectedIds.length === 1 ? "" : "s"}</strong> via Meta Cloud API
+                  </div>
                 </div>
               </div>
               <button
                 type="button"
+                aria-label="Close modal"
                 onClick={() => {
                   if (!bulkWaBusy) {
                     setBulkWaResult(null)
@@ -2617,12 +2992,12 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
             </div>
 
             {bulkWaResult ? (
-              <div>
-                <div style={{ textAlign: "center", padding: "12px 0 20px" }}>
-                  <div style={{ width: 52, height: 52, borderRadius: "50%", background: "rgba(34,197,94,0.15)", border: "2px solid #22c55e", display: "inline-flex", alignItems: "center", justifyContent: "center", color: "#22c55e", marginBottom: 12 }}>
-                    <CheckCircle2 size={26} strokeWidth={2.4} />
+              <div style={{ padding: "20px 22px", overflowY: "auto", flex: 1 }}>
+                <div style={{ textAlign: "center", padding: "8px 0 18px" }}>
+                  <div style={{ width: 48, height: 48, borderRadius: "50%", background: "rgba(45,212,160,0.14)", border: "2px solid var(--accent-green)", display: "inline-flex", alignItems: "center", justifyContent: "center", color: "var(--accent-green)", marginBottom: 10 }}>
+                    <CheckCircle2 size={24} strokeWidth={2.2} />
                   </div>
-                  <div style={{ fontSize: 17, fontWeight: 700, color: "var(--text-primary)" }}>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)" }}>
                     Bulk WhatsApp Campaign Sent!
                   </div>
                   <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
@@ -2630,25 +3005,25 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                   </div>
                 </div>
 
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 18 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 16 }}>
                   <div style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 8px", textAlign: "center" }}>
                     <div style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500 }}>Delivered</div>
-                    <div style={{ fontSize: 20, fontWeight: 800, color: "#22c55e", marginTop: 4 }}>{bulkWaResult.sentCount}</div>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: "var(--accent-green)", marginTop: 4 }}>{bulkWaResult.sentCount}</div>
                   </div>
                   <div style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 8px", textAlign: "center" }}>
                     <div style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500 }}>Skipped (DND)</div>
-                    <div style={{ fontSize: 20, fontWeight: 800, color: "#eab308", marginTop: 4 }}>{bulkWaResult.skippedDnd}</div>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: "var(--accent-yellow)", marginTop: 4 }}>{bulkWaResult.skippedDnd}</div>
                   </div>
                   <div style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 8px", textAlign: "center" }}>
                     <div style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500 }}>Failed</div>
-                    <div style={{ fontSize: 20, fontWeight: 800, color: bulkWaResult.failedCount > 0 ? "#ef4444" : "var(--text-muted)", marginTop: 4 }}>{bulkWaResult.failedCount}</div>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: bulkWaResult.failedCount > 0 ? "var(--accent-red)" : "var(--text-muted)", marginTop: 4 }}>{bulkWaResult.failedCount}</div>
                   </div>
                 </div>
 
                 {bulkWaResult.errors && bulkWaResult.errors.length > 0 && (
-                  <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 10, padding: "10px 14px", fontSize: 11.5, color: "#f87171", marginBottom: 14 }}>
+                  <div style={{ background: "rgba(251,86,112,0.08)", border: "1px solid rgba(251,86,112,0.25)", borderRadius: 10, padding: "10px 14px", fontSize: 11.5, color: "var(--accent-red)", marginBottom: 14 }}>
                     <div style={{ fontWeight: 700, marginBottom: 4, display: "flex", alignItems: "center", gap: 6 }}>
-                      ⚠️ Meta Rejection Details:
+                      <AlertCircle size={13} /> Meta Rejection Details:
                     </div>
                     {bulkWaResult.errors.map((err, idx) => (
                       <div key={idx} style={{ marginTop: 3, fontFamily: "monospace", fontSize: 11, wordBreak: "break-all" }}>
@@ -2656,22 +3031,21 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                       </div>
                     ))}
                     {bulkWaResult.errors.some((e) => e.includes("132001") || e.includes("does not exist")) && (
-                      <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid rgba(239,68,68,0.2)", fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.5 }}>
-                        💡 <strong>Why this failed:</strong> Meta only sends templates that already exist in your Meta WhatsApp Business Manager.
-                        <br />• <strong>To test immediately:</strong> Pick <code style={{ color: "#22c55e" }}>hello_world</code> (Lang: <code style={{ color: "#22c55e" }}>en_US</code>) — Meta pre-approves this for instant testing!
-                        <br />• <strong>To send custom templates:</strong> Go to <em>Priya&apos;s Script &gt; WhatsApp &amp; Meta Templates</em>, click <em>Copy for Meta Approval</em>, and paste it into your Meta WhatsApp Manager.
+                      <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid rgba(251,86,112,0.2)", fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.5 }}>
+                        For instant delivery right now, choose <code style={{ color: "var(--accent-green)" }}>hello_world</code> (Lang: <code style={{ color: "var(--accent-green)" }}>en_US</code>). Custom templates require Meta approval (usually 1–5 minutes).
                       </div>
                     )}
                     {bulkWaResult.errors.some((e) => e.includes("131030") || e.includes("allowed list")) && (
-                      <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid rgba(239,68,68,0.2)", fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.5 }}>
-                        💡 <strong>Why this failed:</strong> In Meta Sandbox test mode, you can only send messages to phone numbers added to your Meta Developer Console allowed list (e.g. 6301689511).
+                      <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid rgba(251,86,112,0.2)", fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.5 }}>
+                        In Meta Sandbox test mode, you can only send to phone numbers added to your Meta Developer Console allowed list.
                       </div>
                     )}
                   </div>
                 )}
 
-                <div style={{ background: "rgba(37,211,102,0.06)", border: "1px solid rgba(37,211,102,0.2)", borderRadius: 10, padding: "12px 14px", fontSize: 11.5, color: "var(--text-secondary)", marginBottom: 18, lineHeight: 1.6 }}>
-                  🛡️ <strong>Permanent Audit History:</strong> This summary is saved in <strong>Security &gt; Audit Log</strong> for complete compliance tracking. Outbound messages are recorded in each customer&apos;s history and in <strong>WhatsApp Inbox</strong>, where AI responds to replies automatically.
+                <div style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 12px", fontSize: 11.5, color: "var(--text-secondary)", marginBottom: 16, lineHeight: 1.5, display: "flex", alignItems: "flex-start", gap: 8 }}>
+                  <ShieldCheck size={15} style={{ color: "var(--accent-blue)", flexShrink: 0, marginTop: 2 }} />
+                  <span>Saved in <strong>Security &gt; Audit Log</strong>. Outbound messages also appear in each customer&apos;s history and <strong>WhatsApp Inbox</strong>.</span>
                 </div>
 
                 <button
@@ -2688,12 +3062,10 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
               </div>
             ) : (
               <>
-                <div style={{ fontSize: 12.5, color: "var(--text-secondary)", marginBottom: 14 }}>
-                  Blasting to <strong style={{ color: "var(--accent-green)" }}>{selectedIds.length} selected lead{selectedIds.length === 1 ? "" : "s"}</strong> over official Meta WhatsApp Cloud API.
-                </div>
+                <div style={{ padding: "16px 22px", overflowY: "auto", flex: 1, display: "flex", flexDirection: "column", gap: 12 }}>
 
                 {/* Send Mode Selector: Meta Template vs Free-form */}
-                <div style={{ display: "flex", gap: 6, marginBottom: 14, background: "var(--bg-secondary)", padding: 4, borderRadius: 8, border: "1px solid var(--border)" }}>
+                <div style={{ display: "flex", gap: 4, background: "var(--bg-secondary)", padding: 4, borderRadius: 10, border: "1px solid var(--border)" }}>
                   <button
                     type="button"
                     onClick={() => setBulkWaMode("template")}
@@ -2702,18 +3074,19 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                       height: 32,
                       fontSize: 12,
                       fontWeight: 600,
-                      borderRadius: 6,
+                      borderRadius: 7,
                       border: "none",
-                      background: bulkWaMode === "template" ? "#25D366" : "transparent",
-                      color: bulkWaMode === "template" ? "#06331d" : "var(--text-secondary)",
+                      background: bulkWaMode === "template" ? "var(--gradient-brand)" : "transparent",
+                      color: bulkWaMode === "template" ? "#fff" : "var(--text-secondary)",
                       cursor: "pointer",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
                       gap: 6,
+                      transition: "all 0.15s ease",
                     }}
                   >
-                    🛡️ Meta Approved Template
+                    <ShieldCheck size={14} /> Meta Template
                   </button>
                   <button
                     type="button"
@@ -2723,226 +3096,314 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                       height: 32,
                       fontSize: 12,
                       fontWeight: 600,
-                      borderRadius: 6,
+                      borderRadius: 7,
                       border: "none",
-                      background: bulkWaMode === "text" ? "var(--bg-card)" : "transparent",
-                      color: bulkWaMode === "text" ? "var(--text-primary)" : "var(--text-secondary)",
+                      background: bulkWaMode === "text" ? "var(--gradient-brand)" : "transparent",
+                      color: bulkWaMode === "text" ? "#fff" : "var(--text-secondary)",
                       cursor: "pointer",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
                       gap: 6,
+                      transition: "all 0.15s ease",
                     }}
                   >
-                    💬 Free-form Text (24h Window)
+                    <MessageSquare size={14} /> Free-form (24h Window)
                   </button>
                 </div>
 
                 {bulkWaMode === "template" ? (
-                  <div style={{ marginBottom: 14 }}>
-                    <div style={{ background: "rgba(37,211,102,0.06)", border: "1px solid rgba(37,211,102,0.2)", borderRadius: 10, padding: 12, marginBottom: 12, fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.5 }}>
-                      ✅ <strong>Recommended for Cold &amp; Follow-up Leads:</strong> Meta approved templates deliver 100% reliably even if the customer hasn&apos;t messaged you recently. The CRM automatically fills &#123;&#123;1&#125;&#125; with the customer&apos;s name and maps the action button to their one-time application link.
+                  <>
+                    <div style={{ fontSize: 11.5, color: "var(--text-muted)", lineHeight: 1.45 }}>
+                      Auto-fills <code style={{ color: "var(--accent-cyan)" }}>{"{{1}}"}</code> with the customer&apos;s name and maps the button to their one-time application link.
                     </div>
 
-                    <div style={{ marginBottom: 10 }}>
-                      <label style={{ display: "block", fontSize: 11.5, color: "var(--text-muted)", marginBottom: 4, fontWeight: 500 }}>
-                        Meta Template Name
-                      </label>
-                      <input
-                        type="text"
-                        value={bulkWaTemplateName}
-                        onChange={(e) => setBulkWaTemplateName(e.target.value)}
-                        placeholder="e.g. loan_application_form, call_followup, or custom template"
-                        style={{
-                          width: "100%",
-                          height: 36,
-                          padding: "0 10px",
-                          borderRadius: 8,
-                          border: "1px solid var(--border)",
-                          background: "var(--bg-secondary)",
-                          color: "var(--text-primary)",
-                          fontSize: 12.5,
-                        }}
-                      />
-                    </div>
-
-                    {/* Quick suggestion chips from Meta Catalog */}
-                    <div style={{ marginBottom: 12 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                        <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500 }}>Choose Template Preset:</span>
-                        <span style={{ fontSize: 10, color: "#22c55e", background: "rgba(34,197,94,0.12)", padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>
-                          ⚡ hello_world is pre-approved by Meta
+                    <div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                        <label style={{ fontSize: 11.5, color: "var(--text-muted)", fontWeight: 500 }}>
+                          Meta Template
+                        </label>
+                        <span style={{ fontSize: 10.5, color: "var(--accent-green)", display: "inline-flex", alignItems: "center", gap: 4, fontWeight: 600 }}>
+                          <Zap size={11} /> hello_world is pre-approved
                         </span>
                       </div>
-                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                        {META_TEMPLATES_CATALOG.map((p) => {
-                          const isSelected = bulkWaTemplateName === p.name
-                          const isReady = p.name === "hello_world"
-                          return (
-                            <button
-                              key={p.name}
-                              type="button"
-                              onClick={() => {
-                                setBulkWaTemplateName(p.name)
-                                if (p.languages[0]?.code) setBulkWaTemplateLang(p.languages[0].code)
-                              }}
-                              style={{
-                                fontSize: 11,
-                                padding: "4px 9px",
-                                borderRadius: 6,
-                                border: isSelected
-                                  ? (isReady ? "1px solid #22c55e" : "1px solid #38bdf8")
-                                  : (isReady ? "1px solid rgba(34,197,94,0.4)" : "1px solid var(--border)"),
-                                background: isSelected
-                                  ? (isReady ? "rgba(34,197,94,0.2)" : "rgba(56,189,248,0.18)")
-                                  : (isReady ? "rgba(34,197,94,0.06)" : "var(--bg-secondary)"),
-                                color: isSelected
-                                  ? (isReady ? "#4ade80" : "#38bdf8")
-                                  : (isReady ? "#22c55e" : "var(--text-secondary)"),
-                                cursor: "pointer",
-                                fontWeight: isSelected ? 700 : 500,
-                              }}
-                            >
-                              {p.name === "hello_world" ? "🌍 hello_world (Instant Test)" : `📄 ${p.name}`}
-                            </button>
-                          )
+                      <CustomSelect
+                        value={bulkWaTemplateName}
+                        onChange={(val) => {
+                          setBulkWaTemplateName(val)
+                          const found = META_TEMPLATES_CATALOG.find((t) => t.name === val)
+                          if (found?.languages[0]?.code) setBulkWaTemplateLang(found.languages[0].code)
+                        }}
+                        options={META_TEMPLATES_CATALOG.map((p) => {
+                          const st = liveTplStatuses[p.name]?.status || (p.isPreApproved ? "APPROVED" : undefined)
+                          return {
+                            value: p.name,
+                            label: `${p.name} — ${p.displayName}`,
+                            dotColor: st === "APPROVED" ? "var(--accent-green)" : st === "REJECTED" ? "var(--accent-red)" : "var(--accent-yellow)",
+                          }
                         })}
-                      </div>
+                      />
                     </div>
 
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                       <div>
-                        <label style={{ display: "block", fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
+                        <label style={{ display: "block", fontSize: 11.5, color: "var(--text-muted)", marginBottom: 4, fontWeight: 500 }}>
                           Template Language
                         </label>
-                        <select
+                        <CustomSelect
                           value={bulkWaTemplateLang}
-                          onChange={(e) => setBulkWaTemplateLang(e.target.value)}
-                          style={{ width: "100%", height: 34, fontSize: 12, padding: "0 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)" }}
-                        >
-                          <option value="en_US">English US (en_US)</option>
-                          <option value="en">English (en)</option>
-                          <option value="te">Telugu (te)</option>
-                          <option value="hi">Hindi (hi)</option>
-                        </select>
+                          onChange={(val) => setBulkWaTemplateLang(val)}
+                          options={[
+                            { value: "en_US", label: "English US (en_US)" },
+                            { value: "en", label: "English (en)" },
+                            { value: "te", label: "Telugu (te)" },
+                            { value: "hi", label: "Hindi (hi)" },
+                          ]}
+                        />
                       </div>
 
                       <div>
-                        <label style={{ display: "block", fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
+                        <label style={{ display: "block", fontSize: 11.5, color: "var(--text-muted)", marginBottom: 4, fontWeight: 500 }}>
                           Link Loan Product
                         </label>
-                        <select
+                        <CustomSelect
                           value={bulkWaProduct}
-                          onChange={(e) => setBulkWaProduct(e.target.value)}
-                          style={{ width: "100%", height: 34, fontSize: 12, padding: "0 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)" }}
-                        >
-                          {COMMON_LOAN_TYPES.map((t) => (
-                            <option key={t} value={t}>{t}</option>
-                          ))}
-                        </select>
+                          onChange={(val) => setBulkWaProduct(val)}
+                          options={allLoanProducts.map((t) => ({ value: t, label: t }))}
+                        />
                       </div>
                     </div>
 
-                    {/* Live Meta Template Preview & Copy */}
+                    {/* Live Meta Template Preview (Synced with Priya's Script) */}
                     {(() => {
                       const curTpl = META_TEMPLATES_CATALOG.find((t) => t.name === bulkWaTemplateName)
                       if (!curTpl) return null
+                      const live = liveTplStatuses[curTpl.name]
+                      const liveStatus = live?.status || (curTpl.isPreApproved ? "APPROVED" : undefined)
+                      const previewLead = selectedIds.length === 1 ? leads.find((l) => l.id === selectedIds[0]) : null
+                      const recipientName = previewLead?.name || "Customer"
+                      const renderedBody = curTpl.body
+                        .replace(/\{\{1\}\}/g, recipientName)
+                        .replace(/\{\{2\}\}/g, "5th of this month")
                       return (
-                        <div style={{ marginTop: 12, background: "rgba(0,0,0,0.3)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px", fontSize: 11.5 }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                            <span style={{ fontWeight: 700, color: "var(--accent-green)" }}>
-                              📋 {curTpl.displayName}
+                        <div style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 12px", fontSize: 11.5 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                            <span style={{ fontWeight: 700, color: "var(--text-primary)", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                              <FileText size={13} style={{ color: "var(--accent-blue)" }} /> {curTpl.displayName}
                             </span>
-                            <span style={{ fontSize: 9.5, padding: "1px 6px", borderRadius: 4, background: curTpl.category === "UTILITY" ? "rgba(59,130,246,0.2)" : "rgba(234,179,8,0.2)", color: curTpl.category === "UTILITY" ? "#60a5fa" : "#facc15", fontWeight: 700 }}>
-                              {curTpl.category}
-                            </span>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <span style={{ fontSize: 9.5, padding: "2px 6px", borderRadius: 4, background: curTpl.category === "UTILITY" ? "rgba(91,124,250,0.16)" : "rgba(247,183,49,0.16)", color: curTpl.category === "UTILITY" ? "var(--accent-blue)" : "var(--accent-yellow)", fontWeight: 700 }}>
+                                {curTpl.category}
+                              </span>
+                              {liveStatus === "APPROVED" ? (
+                                <span style={{ fontSize: 10, color: "var(--accent-green)", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 3 }}>
+                                  <CheckCircle2 size={11} /> Approved
+                                </span>
+                              ) : liveStatus === "PENDING" ? (
+                                <span style={{ fontSize: 10, color: "var(--accent-yellow)", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 3 }}>
+                                  <Clock size={11} /> Pending Review
+                                </span>
+                              ) : null}
+                            </div>
                           </div>
-                          <div style={{ color: "#d1d5db", lineHeight: 1.45, whiteSpace: "pre-wrap", fontSize: 11, margin: "6px 0" }}>
-                            {curTpl.samplePreview}
+
+                          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px" }}>
+                            {curTpl.header && (
+                              <div style={{ fontWeight: 700, fontSize: 11, color: "var(--accent-green)", marginBottom: 5, borderBottom: "1px solid var(--border-light)", paddingBottom: 4 }}>
+                                {curTpl.header}
+                              </div>
+                            )}
+                            <div style={{ color: "var(--text-secondary)", lineHeight: 1.45, whiteSpace: "pre-wrap", fontSize: 11.5 }}>
+                              {renderedBody}
+                            </div>
+                            {curTpl.footer && (
+                              <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 6, fontStyle: "italic" }}>
+                                {curTpl.footer}
+                              </div>
+                            )}
+                            {curTpl.button && (
+                              <div style={{ marginTop: 8, borderTop: "1px solid var(--border-light)", paddingTop: 6, textAlign: "center" }}>
+                                <span style={{ fontSize: 11, fontWeight: 600, color: "var(--accent-cyan)", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                                  <Link2 size={11} /> {curTpl.button.text}
+                                </span>
+                              </div>
+                            )}
                           </div>
-                          {curTpl.name !== "hello_world" && (
-                            <div style={{ background: "rgba(234,179,8,0.09)", border: "1px solid rgba(234,179,8,0.3)", borderRadius: 6, padding: "6px 10px", margin: "8px 0", fontSize: 11, color: "#facc15", lineHeight: 1.4 }}>
-                              ⚠️ <strong>Meta Submission Needed:</strong> Before Meta will deliver &quot;{curTpl.name}&quot;, it must be created in your Meta WhatsApp Manager (click &quot;Copy Format&quot; below). For instant sending right now, choose <strong>🌍 hello_world</strong>!
+
+                          {liveStatus !== "APPROVED" && (
+                            <div style={{ marginTop: 8, fontSize: 11, color: "var(--accent-yellow)", display: "flex", alignItems: "center", gap: 6 }}>
+                              <Clock size={12} style={{ flexShrink: 0 }} />
+                              <span>Pending Meta approval (1–5 mins). Select <strong>hello_world</strong> for instant testing.</span>
                             </div>
                           )}
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8, paddingTop: 6, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-                            <span style={{ fontSize: 10, color: "var(--text-muted)" }}>
-                              {curTpl.pricing}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (typeof navigator !== "undefined" && navigator.clipboard) {
-                                  navigator.clipboard.writeText(curTpl.copyTextForMeta)
-                                  toast.success(`Copied "${curTpl.name}" format for Meta WhatsApp Manager`)
-                                }
-                              }}
-                              style={{ fontSize: 10.5, color: "#25D366", background: "transparent", border: "none", cursor: "pointer", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 4 }}
-                            >
-                              📋 Copy Format for Meta Approval
-                            </button>
-                          </div>
                         </div>
                       )
                     })()}
-                  </div>
+                  </>
                 ) : (
                   <>
                     {/* Quick Template Chips for freeform */}
-                    <div style={{ marginBottom: 14 }}>
-                      <label style={{ display: "block", fontSize: 11.5, color: "var(--text-muted)", marginBottom: 6, fontWeight: 500 }}>
-                        Quick Message Prompts ({`{name}`} auto-filled)
-                      </label>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                        <button
-                          type="button"
-                          onClick={() => setBulkWaMessage("Hello {name}, greetings from Right Agent Group! We provide fast-track approval on Personal, Business, and Home Loans with minimal documentation and attractive interest rates.")}
-                          style={{ textAlign: "left", fontSize: 11.5, padding: "7px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", cursor: "pointer" }}
-                        >
-                          🟢 <strong>General Loan Offer:</strong> &quot;Hello {`{name}`}, greetings from Right Agent Group! We provide fast-track approval...&quot;
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setBulkWaMessage("Hello {name}, this is a gentle follow-up regarding your recent loan inquiry with Right Agent Group. Our loan officer is ready to process your file. Please complete your application below.")}
-                          style={{ textAlign: "left", fontSize: 11.5, padding: "7px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", cursor: "pointer" }}
-                        >
-                          📄 <strong>Application Follow-up:</strong> &quot;Hello {`{name}`}, this is a gentle follow-up regarding your recent loan inquiry...&quot;
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setBulkWaMessage("Hello {name}, to fast-track your loan file approval, please keep your PAN Card, Aadhaar, and 6 months bank statement ready. Our advisor will guide you through instant sanction.")}
-                          style={{ textAlign: "left", fontSize: 11.5, padding: "7px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", cursor: "pointer" }}
-                        >
-                          📋 <strong>Document Checklist:</strong> &quot;Hello {`{name}`}, to fast-track your loan file approval, please keep your PAN Card...&quot;
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setBulkWaMessage("Hello {name}, special festive offer! Avail Home and Business Loans starting from 7.25% p.a. through 20+ partner banks in Hyderabad with minimal documentation.")}
-                          style={{ textAlign: "left", fontSize: 11.5, padding: "7px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", cursor: "pointer" }}
-                        >
-                          🎉 <strong>Festive Rate Offer:</strong> &quot;Hello {`{name}`}, special festive offer! Avail Home and Business Loans...&quot;
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setBulkWaMessage("నమస్కారం {name} గారు, రైట్ ఏజెంట్ గ్రూప్ నుండి మాట్లాడుతున్నాము. మీకు హోమ్ లోన్ లేదా బిజినెస్ లోన్ తక్కువ వడ్డీతో అవసరమా? మా బ్యాంకింగ్ కౌన్సిలర్ మీకు వెంటనే సహాయం చేస్తారు.")}
-                          style={{ textAlign: "left", fontSize: 11.5, padding: "7px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", cursor: "pointer" }}
-                        >
-                          🇮🇳 <strong>Telugu Offer:</strong> &quot;నమస్కారం {`{name}`} గారు, రైట్ ఏజెంట్ గ్రూప్ నుండి...&quot;
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setBulkWaMessage("नमस्ते {name} जी, राइट एजेंट ग्रुप से नमस्कार। यदि आपको होम, पर्सनल या बिजनेस लोन की आवश्यकता है तो सबसे कम ब्याज दरों पर आवेदन करें।")}
-                          style={{ textAlign: "left", fontSize: 11.5, padding: "7px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)", cursor: "pointer" }}
-                        >
-                          🇮🇳 <strong>Hindi Offer:</strong> &quot;नमस्ते {`{name}`} जी, राइट एजेंट ग्रुप से नमस्कार...&quot;
-                        </button>
+                    <div>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6, gap: 8 }}>
+                        <label style={{ fontSize: 11.5, color: "var(--text-muted)", fontWeight: 500 }}>
+                          Quick Message Prompts ({`{name}`} auto-filled)
+                        </label>
+                        {canEdit && (
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCustomizingPrompts((v) => !v)
+                                setEditingPrompt(null)
+                              }}
+                              style={{
+                                fontSize: 11,
+                                padding: "3px 8px",
+                                borderRadius: 6,
+                                border: customizingPrompts ? "1px solid var(--accent-violet)" : "1px solid var(--border)",
+                                background: customizingPrompts ? "rgba(139,124,255,0.14)" : "var(--bg-secondary)",
+                                color: customizingPrompts ? "var(--accent-violet)" : "var(--text-secondary)",
+                                cursor: "pointer",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 4,
+                                fontWeight: 600,
+                              }}
+                            >
+                              <Pencil size={11} /> {customizingPrompts ? "Done" : "Customize"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingPrompt({ label: "", text: bulkWaMessage || "Hello {name}, " })}
+                              style={{
+                                fontSize: 11,
+                                padding: "3px 8px",
+                                borderRadius: 6,
+                                border: "1px solid rgba(91,124,250,0.4)",
+                                background: "rgba(91,124,250,0.12)",
+                                color: "var(--accent-blue)",
+                                cursor: "pointer",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 4,
+                                fontWeight: 600,
+                              }}
+                            >
+                              <Plus size={11} /> Add
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {editingPrompt && (
+                        <div style={{ background: "var(--bg-secondary)", border: "1px solid var(--accent-blue)", borderRadius: 9, padding: 10, marginBottom: 8, display: "flex", flexDirection: "column", gap: 8 }}>
+                          <div style={{ fontSize: 11.5, fontWeight: 700, color: "var(--text-primary)" }}>
+                            {editingPrompt.id ? "Edit Quick Prompt" : "Add New Quick Prompt"}
+                          </div>
+                          <input
+                            type="text"
+                            value={editingPrompt.label}
+                            onChange={(e) => setEditingPrompt((prev) => prev ? { ...prev, label: e.target.value } : null)}
+                            placeholder="Prompt title (e.g. Home Loan Offer)"
+                            style={{ width: "100%", height: 32, fontSize: 12, padding: "0 9px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)" }}
+                          />
+                          <textarea
+                            value={editingPrompt.text}
+                            onChange={(e) => setEditingPrompt((prev) => prev ? { ...prev, text: e.target.value } : null)}
+                            placeholder="Message text (use {name} for customer name)"
+                            rows={2}
+                            style={{ width: "100%", fontSize: 12, padding: 8, borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)", resize: "vertical" }}
+                          />
+                          <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                            <button
+                              type="button"
+                              onClick={() => setEditingPrompt(null)}
+                              className="btn-ghost"
+                              style={{ height: 28, fontSize: 11.5, padding: "0 10px" }}
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="button"
+                              onClick={saveQuickPrompt}
+                              disabled={savingPrompt}
+                              className="btn-primary"
+                              style={{ height: 28, fontSize: 11.5, padding: "0 12px" }}
+                            >
+                              {savingPrompt ? "Saving…" : "Save Prompt"}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                        {quickPrompts.map((q) => (
+                          <div
+                            key={q.id}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 4,
+                              borderRadius: 7,
+                              border: "1px solid var(--border)",
+                              background: "var(--bg-secondary)",
+                              padding: customizingPrompts ? "3px 6px 3px 9px" : 0,
+                              minWidth: 0,
+                            }}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => setBulkWaMessage(q.text)}
+                              style={{
+                                flex: 1,
+                                textAlign: "left",
+                                fontSize: 11,
+                                padding: customizingPrompts ? "3px 0" : "6px 9px",
+                                borderRadius: 7,
+                                border: "none",
+                                background: "transparent",
+                                color: "var(--text-primary)",
+                                cursor: "pointer",
+                                whiteSpace: "nowrap",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                minWidth: 0,
+                              }}
+                              title={q.text}
+                            >
+                              {q.label}
+                            </button>
+                            {customizingPrompts && canEdit && (
+                              <div style={{ display: "inline-flex", alignItems: "center", gap: 2, flexShrink: 0 }}>
+                                <button
+                                  type="button"
+                                  aria-label={`Edit ${q.label}`}
+                                  onClick={() => setEditingPrompt({ id: q.id, label: q.label, text: q.text })}
+                                  style={{ background: "transparent", border: "none", color: "var(--accent-blue)", cursor: "pointer", padding: 3, display: "inline-flex", alignItems: "center" }}
+                                  title="Edit prompt"
+                                >
+                                  <Pencil size={11} />
+                                </button>
+                                <button
+                                  type="button"
+                                  aria-label={`Delete ${q.label}`}
+                                  onClick={() => deleteQuickPrompt(q.id, q.label)}
+                                  style={{ background: "transparent", border: "none", color: "var(--accent-red)", cursor: "pointer", padding: 3, display: "inline-flex", alignItems: "center" }}
+                                  title="Delete prompt"
+                                >
+                                  <Trash2 size={11} />
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        ))}
                       </div>
                     </div>
 
                     {/* Message Body Textarea */}
-                    <div style={{ marginBottom: 14 }}>
+                    <div>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                        <label style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 500 }}>
+                        <label style={{ fontSize: 11.5, color: "var(--text-muted)", fontWeight: 500 }}>
                           Message Content *
                         </label>
                         <span style={{ fontSize: 10.5, color: "var(--accent-violet)" }}>Use {`{name}`} for customer&apos;s name</span>
@@ -2951,7 +3412,7 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                         value={bulkWaMessage}
                         onChange={(e) => setBulkWaMessage(e.target.value)}
                         placeholder="Type your WhatsApp message here..."
-                        rows={4}
+                        rows={3}
                         style={{
                           width: "100%",
                           fontSize: 12.5,
@@ -2966,16 +3427,16 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                     </div>
 
                     {/* Include Link Toggle & Product */}
-                    <div style={{ background: "var(--bg-secondary)", borderRadius: 10, padding: 12, border: "1px solid var(--border)", marginBottom: 16 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: bulkWaIncludeLink ? 10 : 0 }}>
+                    <div style={{ background: "var(--bg-secondary)", borderRadius: 10, padding: 10, border: "1px solid var(--border)" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: bulkWaIncludeLink ? 8 : 0 }}>
                         <input
                           type="checkbox"
                           id="bulkWaIncludeLinkToggle"
                           checked={bulkWaIncludeLink}
                           onChange={(e) => setBulkWaIncludeLink(e.target.checked)}
-                          style={{ width: 16, height: 16, accentColor: "#25D366", cursor: "pointer" }}
+                          style={{ width: 15, height: 15, accentColor: "var(--accent-blue)", cursor: "pointer" }}
                         />
-                        <label htmlFor="bulkWaIncludeLinkToggle" style={{ fontSize: 12.5, color: "var(--text-primary)", cursor: "pointer", fontWeight: 600 }}>
+                        <label htmlFor="bulkWaIncludeLinkToggle" style={{ fontSize: 12, color: "var(--text-primary)", cursor: "pointer", fontWeight: 600 }}>
                           Include Personalized One-Time Application Link
                         </label>
                       </div>
@@ -2985,67 +3446,181 @@ export default function LeadsView({ role, initialSearch }: { role: Role; initial
                           <label style={{ display: "block", fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
                             Link Loan Product (Directs applicant to this form)
                           </label>
-                          <select
+                          <CustomSelect
                             value={bulkWaProduct}
-                            onChange={(e) => setBulkWaProduct(e.target.value)}
-                            style={{ width: "100%", height: 34, fontSize: 12, padding: "0 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)" }}
-                          >
-                            {COMMON_LOAN_TYPES.map((t) => (
-                              <option key={t} value={t}>{t}</option>
-                            ))}
-                          </select>
+                            onChange={(val) => setBulkWaProduct(val)}
+                            compact
+                            options={allLoanProducts.map((t) => ({ value: t, label: t }))}
+                          />
                         </div>
                       )}
                     </div>
                   </>
                 )}
+                </div>
 
-            {/* Compliance Note */}
-            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 16, lineHeight: 1.5 }}>
-              🛡️ DND protection is active. Numbers registered on your DND/suppression list will be skipped automatically to keep your Meta WhatsApp account compliant.
-            </div>
+                {/* Fixed Modal Footer — always visible */}
+                <div style={{ padding: "14px 22px", borderTop: "1px solid var(--border)", background: "var(--bg-card)", flexShrink: 0, display: "flex", flexDirection: "column", gap: 10 }}>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 6 }}>
+                    <ShieldCheck size={13} style={{ color: "var(--accent-blue)", flexShrink: 0 }} />
+                    <span>DND protection active — suppression list numbers are skipped automatically.</span>
+                  </div>
+                  <div style={{ display: "flex", gap: 10 }}>
+                    <button
+                      type="button"
+                      onClick={() => setShowBulkWaModal(false)}
+                      disabled={bulkWaBusy}
+                      className="btn-ghost"
+                      style={{ flex: 1, height: 38 }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={sendBulkWaCampaign}
+                      disabled={bulkWaBusy || (bulkWaMode === "text" && !bulkWaMessage.trim())}
+                      className="btn-primary"
+                      style={{ flex: 1, height: 38 }}
+                    >
+                      <MessageCircle size={15} strokeWidth={2.2} />
+                      {bulkWaBusy ? "Sending…" : `Send to ${selectedIds.length} Lead${selectedIds.length === 1 ? "" : "s"}`}
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
-            {/* Buttons */}
-            <div style={{ display: "flex", gap: 10 }}>
+      {/* Preset Customization Modal (Add / Edit) */}
+      {showPresetModal && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.75)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1100,
+          }}
+          onClick={() => !presetSaving && setShowPresetModal(false)}
+        >
+          <div
+            style={{
+              background: "var(--bg-card)",
+              border: "1px solid var(--border)",
+              borderRadius: 14,
+              padding: 24,
+              width: "min(460px, calc(100vw - 32px))",
+              boxShadow: "0 20px 40px rgba(0,0,0,0.5)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+              <div style={{ fontWeight: 700, fontSize: 15, color: "var(--text-primary)" }}>
+                {presetModalMode === "create" ? "Add New Talking Point Preset" : "Edit Talking Point Preset"}
+              </div>
               <button
                 type="button"
-                onClick={() => setShowBulkWaModal(false)}
-                disabled={bulkWaBusy}
-                className="btn-ghost"
-                style={{ flex: 1, height: 40 }}
+                onClick={() => setShowPresetModal(false)}
+                disabled={presetSaving}
+                style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", padding: 2 }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 5 }}>
+                Preset Name / Label
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. Loan Pre-approval Offer"
+                value={presetFormName}
+                onChange={(e) => setPresetFormName(e.target.value)}
+                maxLength={60}
+                style={{
+                  width: "100%",
+                  fontSize: 13,
+                  padding: "8px 10px",
+                  borderRadius: 8,
+                  border: "1px solid var(--border)",
+                  background: "var(--bg-secondary)",
+                  color: "var(--text-primary)",
+                }}
+              />
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 5 }}>
+                Talking Points / Opening Script
+              </label>
+              <textarea
+                rows={4}
+                maxLength={1000}
+                placeholder="What Priya should pitch or ask during the call..."
+                value={presetFormText}
+                onChange={(e) => setPresetFormText(e.target.value)}
+                style={{
+                  width: "100%",
+                  fontSize: 12.5,
+                  lineHeight: 1.45,
+                  padding: "8px 10px",
+                  borderRadius: 8,
+                  border: "1px solid var(--border)",
+                  background: "var(--bg-secondary)",
+                  color: "var(--text-primary)",
+                  resize: "vertical",
+                }}
+              />
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4, fontStyle: "italic" }}>
+                Priya will adapt this into natural conversation in the customer&apos;s chosen language.
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                onClick={() => setShowPresetModal(false)}
+                disabled={presetSaving}
+                style={{
+                  padding: "7px 14px",
+                  fontSize: 12,
+                  background: "transparent",
+                  border: "1px solid var(--border)",
+                  borderRadius: 7,
+                  color: "var(--text-secondary)",
+                  cursor: "pointer",
+                }}
               >
                 Cancel
               </button>
               <button
                 type="button"
-                onClick={sendBulkWaCampaign}
-                disabled={bulkWaBusy || !bulkWaMessage.trim()}
+                onClick={() => {
+                  if (presetModalMode === "create") {
+                    handleCreatePreset(presetFormName, presetFormText, presetModalContext)
+                  } else if (presetEditId) {
+                    handleUpdatePreset(presetEditId, presetFormName, presetFormText, presetModalContext)
+                  }
+                }}
+                disabled={!presetFormName.trim() || presetSaving}
+                className="btn-primary"
                 style={{
-                  flex: 1,
-                  height: 40,
-                  borderRadius: 8,
-                  border: "none",
-                  background: "#25D366",
-                  color: "#06331d",
-                  fontWeight: 700,
-                  fontSize: 13,
-                  cursor: "pointer",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 6,
-                  opacity: bulkWaBusy ? 0.7 : 1,
+                  padding: "7px 16px",
+                  fontSize: 12,
+                  height: "auto",
                 }}
               >
-                <MessageCircle size={16} strokeWidth={2.4} />
-                {bulkWaBusy ? "Sending…" : `Send to ${selectedIds.length} Lead${selectedIds.length === 1 ? "" : "s"}`}
+                {presetSaving ? "Saving..." : presetModalMode === "create" ? "Create Preset" : "Save Changes"}
               </button>
             </div>
-          </>
-        )}
-      </div>
-    </div>
-  )}
+          </div>
+        </div>
+      )}
 
       {memoryLeadId && (
         <LeadMemoryModal leadId={memoryLeadId} canEdit={canEdit} onClose={() => setMemoryLeadId(null)} />

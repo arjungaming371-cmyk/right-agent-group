@@ -10,17 +10,20 @@
 //    ignored were completely silent.
 //  - Builders are generic: db.from<Lead>("leads") gives typed rows at call
 //    sites. The default keeps the loose shape so existing routes compile.
+import "dotenv/config"
 import { Pool, type QueryResultRow, type PoolClient } from "pg"
 import { logger } from "@/lib/logger"
 
 const log = logger.child("db")
+
+const parsedDbPass = process.env.PG_PASSWORD || process.env.DATABASE_URL?.match(/:([^@:]+)@/)?.[1] || ""
 
 const pool = new Pool({
   host: process.env.PG_HOST || "localhost",
   port: parseInt(process.env.PG_PORT || "5432"),
   database: process.env.PG_DATABASE || "right_agent_group",
   user: process.env.PG_USER || "postgres",
-  password: process.env.PG_PASSWORD || "",
+  password: parsedDbPass,
   // Raised from 10 — each WhatsApp/call turn fires 3-5 queries, so with
   // several conversations active at once the old limit queued requests
   // behind each other. Postgres here allows 100 connections total and only

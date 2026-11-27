@@ -660,6 +660,7 @@ export default function CalendarView({ role }: { role: Role }) {
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <button
                 onClick={() => setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() - 1, 1))}
+                aria-label="Previous month"
                 className="btn-ghost"
                 style={{ width: 32, height: 32, padding: 0, display: "flex", alignItems: "center", justifyContent: "center" }}
               >
@@ -670,6 +671,7 @@ export default function CalendarView({ role }: { role: Role }) {
               </div>
               <button
                 onClick={() => setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1))}
+                aria-label="Next month"
                 className="btn-ghost"
                 style={{ width: 32, height: 32, padding: 0, display: "flex", alignItems: "center", justifyContent: "center" }}
               >

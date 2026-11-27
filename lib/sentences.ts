@@ -24,7 +24,7 @@ const MIN_SENTENCE_CHARS = 8
 // clause. Subsequent emissions ignore commas entirely: mid-sentence commas
 // (lists, "sixteen, twenty") must never split the voice. The floor keeps
 // one-word false starts from reaching TTS.
-const FIRST_COMMA_FLUSH_CHARS = 7
+const FIRST_COMMA_FLUSH_CHARS = 5
 
 /**
  * Splits accumulated stream text into complete sentences + the unfinished

@@ -65,7 +65,7 @@ const SARVAM_TTS_TEMPERATURE = parseFloat(process.env.SARVAM_TTS_TEMPERATURE || 
 
 const CARTESIA_API_KEY = (process.env.CARTESIA_API_KEY || "").trim()
 const CARTESIA_BASE = (process.env.CARTESIA_URL || "https://api.cartesia.ai").replace(/\/$/, "")
-const CARTESIA_MODEL = process.env.CARTESIA_MODEL || "sonic-3.6"
+const CARTESIA_MODEL = process.env.CARTESIA_MODEL || "sonic-latest"
 // Pick a voice at https://play.cartesia.ai/voices and paste its ID here.
 const CARTESIA_VOICE_ID = (process.env.CARTESIA_VOICE_ID || "").trim()
 const CARTESIA_VERSION = process.env.CARTESIA_VERSION || "2026-08-14"
@@ -251,7 +251,16 @@ function normalizeNumbersToEnglishWords(text) {
     s = s.replace(/\b(\d+),(\d{2,3})\b/g, "$1$2")
   }
 
-  // 2. Currency prefix: ₹ or Rs. / Rs -> rupees
+  // 2. Currency with Indian units (lakh/crore/thousand/లక్షలు/కోట్లు):
+  // "₹16 lakh" -> "16 lakh rupees", "₹2 crore" -> "2 crore rupees"
+  s = s.replace(/(?:₹|\bRs\.?\s*)\s*(\d+(?:\.\d+)?)\s*(lakhs?|lac|crores?|cr|thousands?|[kK])\b/gi, (match, num, unit) => {
+    return `${num} ${unit} rupees`
+  })
+  s = s.replace(/(?:₹|\bRs\.?\s*)\s*(\d+(?:\.\d+)?)\s*(లక్షలు?|లక్షల|కోట్లు?|కోట్ల|వేలు|వేల)/gi, (match, num, unit) => {
+    return `${num} ${unit} రూపాయలు`
+  })
+
+  // 2b. Standalone currency prefix: ₹14516 -> 14516 rupees, ₹1600000 -> 1600000 rupees
   s = s.replace(/(?:₹|\bRs\.?\s*)\s*(\d+(?:\.\d+)?)/gi, "$1 rupees")
 
   // 3. Indian phone numbers (10 digits starting with 6-9)
@@ -320,6 +329,12 @@ function normalizeNumbersToEnglishWords(text) {
 function normalizeForTts(text) {
   if (!text) return text
   let out = String(text)
+  out = out.replace(/https?:\/\/\S+/gi, "") // strip raw URLs
+  out = out.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1") // markdown links -> anchor text only
+  out = out.replace(/\[(?:VERIFIED|SOURCE|CITATION|RBI|BANK|NOTE)[^\]]*\]/gi, "") // strip citations / verification markers
+  out = out.replace(/\[\d+\]/g, "") // strip numbered footnote citations
+  out = out.replace(/^[\s•\*\-]+/gm, "") // strip bullet points
+  out = out.replace(/\n[\s•\*\-]+/g, "\n")
   out = out.replace(/\*\*([^*]+)\*\*/g, "$1") // **markdown bold** leaking from the WhatsApp rules
   out = out.replace(/\*([^*]+)\*/g, "$1") // *single-asterisk* bold too
   out = out.replace(/\p{Extended_Pictographic}/gu, "") // emoji is never spoken
@@ -330,6 +345,7 @@ function normalizeForTts(text) {
   // exists to prevent. English "one minute" (from the number rules below)
   // is correct in every language pair.
   out = out.replace(/&/g, " and ")
+  out = out.replace(/\s*…?\s*\([^)]*interrupted[^)]*\)/gi, "") // strip system stage directions
   out = out.replace(/(\.{2,}|…)/g, ".") // ellipses to single period
   out = out.replace(/!\s+/g, ", ") // soften exclamations to commas to prevent terminal pitch crashes
   out = out.replace(/!+$/g, ".") // end of text exclamation softened to period
@@ -337,7 +353,26 @@ function normalizeForTts(text) {
   // Convert numbers, integers, amounts, tenures, percentages, phone numbers to clean English words
   out = normalizeNumbersToEnglishWords(out)
 
-  out = out.replace(/rupees\s+rupees/gi, "rupees") // prevent duplicate rupees
+  // Expand common financial and conversational acronyms for natural human articulation
+  out = out.replace(/\bEMI\b/g, "E M I")
+  out = out.replace(/\bKYC\b/g, "K Y C")
+  out = out.replace(/\bNBFC\b/g, "N B F C")
+  out = out.replace(/\bNBFCs\b/g, "N B F C s")
+  out = out.replace(/\bDND\b/g, "D N D")
+  out = out.replace(/\bLAP\b/g, "Loan Against Property")
+  out = out.replace(/\bCIBIL\b/g, "Cibil")
+  out = out.replace(/\bAPR\b/g, "A P R")
+  out = out.replace(/\bGST\b/g, "G S T")
+  out = out.replace(/\bITR\b/g, "I T R")
+  out = out.replace(/\bPAN\b/g, "Pan")
+  out = out.replace(/\bSBI\b/g, "S B I")
+  out = out.replace(/\bHDFC\b/g, "H D F C")
+  out = out.replace(/\bICICI\b/g, "I C I C I")
+  out = out.replace(/\bPNB\b/g, "P N B")
+  out = out.replace(/\bBOB\b/g, "B O B")
+
+  out = out.replace(/\brupees\s+rupees\b/gi, "rupees") // prevent duplicate rupees
+  out = out.replace(/రూపాయలు\s+రూపాయలు/g, "రూపాయలు")
 
   // NOTE (2026-09-30, native-speech pipeline): this used to flatten every
   // reply through a native->Roman transliterator ("English alphabets only").

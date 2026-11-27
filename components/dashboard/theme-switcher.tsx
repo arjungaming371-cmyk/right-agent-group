@@ -46,9 +46,9 @@ export default function ThemeSwitcher() {
 
       {open && (
         <div
-          className="glass"
           style={{
-            position: "absolute", right: 0, top: 44, width: 252,
+            position: "absolute", right: 0, top: 44, width: 304,
+            background: "var(--bg-card)", border: "1px solid var(--border)",
             borderRadius: 12, padding: 8, zIndex: 50,
             boxShadow: "0 20px 50px -12px rgba(0,0,0,0.55)",
             animation: "paletteIn 0.15s ease",
@@ -76,7 +76,7 @@ export default function ThemeSwitcher() {
                         title={t.blurb}
                         aria-pressed={isActive}
                         style={{
-                          display: "flex", alignItems: "center", gap: 8,
+                          display: "flex", alignItems: "center", gap: 8, minWidth: 0,
                           background: isActive ? "var(--overlay-chip)" : "transparent",
                           border: `1px solid ${isActive ? "var(--accent-violet)" : "var(--border)"}`,
                           borderRadius: 9, padding: "7px 8px", cursor: "pointer",

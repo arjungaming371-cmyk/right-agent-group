@@ -142,7 +142,11 @@ async function runInstagramCommentScan() {
         if (!c.id || !c.text) continue
         const senderId = c.from?.id || ""
         const username = (c.from?.username || c.username || "").toLowerCase()
-        if (senderId === accountId) continue
+        if (senderId === accountId || senderId === "17841437996447189" || username === "arjungaming371") continue
+
+        // Check comment age: only process fresh comments (within the last 5 minutes)
+        const commTime = c.timestamp ? new Date(c.timestamp).getTime() : 0
+        if (!commTime || isNaN(commTime) || Date.now() - commTime > 5 * 60 * 1000) continue
 
         await fetch(`${appUrl}/api/instagram`, {
           method: "POST",
@@ -161,6 +165,8 @@ async function runInstagramCommentScan() {
                       text: c.text,
                       from: c.from || { id: c.id, username: c.username || "instagram_user" },
                       media: { id: m.id },
+                      created_time: c.timestamp,
+                      timestamp: commTime,
                     },
                   },
                 ],
@@ -215,11 +221,11 @@ async function runInstagramDMScan() {
         const senderUsername = (m.from?.username || "").toLowerCase()
 
         // Skip our own outbound messages
-        if (senderId === accountId || senderUsername === "arjungaming371") continue
+        if (senderId === accountId || senderId === "17841437996447189" || senderUsername === "arjungaming371") continue
 
-        // Check if message is within the last 48 hours to avoid re-triggering ancient messages
+        // Check if message is fresh (within the last 5 minutes) to avoid replying to old DMs
         const msgTime = new Date(m.created_time).getTime()
-        if (isNaN(msgTime) || Date.now() - msgTime > 48 * 3600 * 1000) continue
+        if (isNaN(msgTime) || Date.now() - msgTime > 5 * 60 * 1000) continue
 
         // Check if message already exists in DB
         const existing = await query(

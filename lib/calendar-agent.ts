@@ -18,7 +18,7 @@ import { normalizePhone, phoneLast10 } from "./phone"
 // Concurrency guard: prevents simultaneous execution of extraction for the same call
 const activeCallLocks = new Set<string>()
 
-export type CalendarEventType = "branch_visit" | "callback" | "document_deadline" | "reminder"
+export type CalendarEventType = "branch_visit" | "callback" | "document_deadline" | "reminder" | "proposed_visit" | "interested_lead"
 export type CalendarChannel = "in_person" | "phone" | "whatsapp_voice" | "whatsapp_text"
 export type CalendarConfidence = "high" | "medium" | "low"
 export type CalendarStatus = "confirmed" | "needs_review" | "completed" | "rescheduled" | "cancelled"
@@ -144,15 +144,21 @@ YOUR OBJECTIVE:
 Identify whether the customer and AI agent agreed on or requested any future appointment, branch visit, phone callback, document submission deadline, or reminder.
 
 EVENT CLASSIFICATION:
-1. "branch_visit": Customer or agent confirmed an in-person physical meeting at a branch, office, or specific location. (Location MUST be extracted).
-2. "callback": Customer or agent confirmed a telephone / WhatsApp voice call at a specific future date/time.
-3. "document_deadline": Customer promised to submit or upload documents by a specific date/time.
-4. "reminder": Customer asked for a reminder before an event (e.g., "call me Monday-Wednesday to remind me before Thursday").
+1. "branch_visit": Customer and agent explicitly confirmed an actual date and time for an in-person physical office/branch visit.
+2. "proposed_visit": An in-person meeting was suggested or customer said "I will visit sometime / maybe next week" WITHOUT an explicit confirmed date/time. DO NOT INVENT A FAKE APPOINTMENT TIME!
+3. "callback": Customer or agent confirmed a telephone / WhatsApp voice call at a future time.
+4. "interested_lead": Customer expressed interest in loan or asked for details on WhatsApp, but no specific appointment date/time was committed.
+5. "document_deadline": Customer promised to submit or upload documents by a specific date.
+6. "reminder": Customer asked for a reminder before an event.
 
 TEMPORAL RESOLUTION RULES:
 - All relative dates ("tomorrow", "next Thursday", "repu", "Monday morning") MUST be resolved relative to the ANCHOR DATE above (${istDateString}).
 - Output exact ISO 8601 strings in UTC format (e.g., "2026-10-15T05:30:00.000Z" for 11:00 AM IST).
-- If the time is approximate (e.g. "morning" -> 10:00 AM IST, "afternoon" -> 3:00 PM IST, "evening" -> 5:00 PM IST).
+- STRICT ACCURACY MANDATE — NEVER INVENT DATES OR TIMES:
+  * If the customer did NOT state an explicit day, date, or time, DO NOT INVENT ONE.
+  * If customer says "send details on WhatsApp", that is NOT an appointment; classify as "interested_lead" or return {"events": []}.
+  * If customer says "I might visit office" without specifying when, classify as "proposed_visit" with confidence "low" and review_reason "Tentative visit without agreed date/time".
+- If the time of day is approximate (e.g. "morning" -> 10:00 AM IST, "afternoon" -> 3:00 PM IST, "evening" -> 5:00 PM IST).
 - Never set a date that occurred before the conversation anchor date.
 
 CONFIDENCE RULES:
@@ -165,7 +171,7 @@ JSON OUTPUT STRUCTURE:
   "events": [
     {
       "title": string,
-      "event_type": "branch_visit" | "callback" | "document_deadline" | "reminder",
+      "event_type": "branch_visit" | "proposed_visit" | "callback" | "interested_lead" | "document_deadline" | "reminder",
       "event_at": string, // ISO 8601 UTC timestamp
       "location": string or null,
       "channel": "in_person" | "phone" | "whatsapp_voice" | "whatsapp_text",
@@ -879,6 +885,57 @@ export function runCalendarExtractionForCall(callSid: string): void {
     } finally {
       activeCallLocks.delete(sidLock)
       if (callDbId) activeCallLocks.delete(`call:${callDbId}`)
+    }
+  })()
+}
+
+/**
+ * Fire-and-forget background extraction for WhatsApp conversations.
+ * Detects in-person branch visits, callbacks, and document deadlines agreed upon in WhatsApp chat.
+ */
+export function runCalendarExtractionForWhatsApp(leadId: string): void {
+  if (!leadId) return
+  const lock = `wa-cal:${leadId}`
+  if (activeCallLocks.has(lock)) return
+  activeCallLocks.add(lock)
+
+  ;(async () => {
+    try {
+      const res = await query(
+        `SELECT wm.id, wm.direction, wm.content, wm.created_at,
+                l.name as lead_name, l.phone as lead_phone, l.branch_id
+           FROM whatsapp_messages wm
+           LEFT JOIN leads l ON wm.lead_id = l.id
+          WHERE wm.lead_id = $1
+            AND wm.created_at > now() - interval '6 hours'
+          ORDER BY wm.created_at ASC`,
+        [leadId]
+      )
+      if (!res.rows.length || res.rows.length < 2) return
+
+      const text = res.rows
+        .map((m: any) => `${m.direction === "inbound" ? "Customer" : "Priya"}: ${m.content}`)
+        .join("\n")
+      const lastMsg = res.rows[res.rows.length - 1]
+
+      const events = await extractCalendarEventsFromText({
+        conversationText: text,
+        sourceAt: new Date(lastMsg.created_at),
+        sourceType: "whatsapp_message",
+        sourceId: String(lastMsg.id),
+        leadId,
+        leadName: lastMsg.lead_name,
+        leadPhone: lastMsg.lead_phone,
+        branchId: lastMsg.branch_id,
+      })
+
+      for (const ev of events) {
+        await persistCalendarEvent(ev, { dryRun: false, autoSyncQueue: false })
+      }
+    } catch (err: any) {
+      console.error("[calendar-agent] runCalendarExtractionForWhatsApp background error:", err?.message || err)
+    } finally {
+      activeCallLocks.delete(lock)
     }
   })()
 }

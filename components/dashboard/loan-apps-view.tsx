@@ -11,6 +11,7 @@ import { formatCurrency, timeAgo, formatDateTime } from "@/lib/utils"
 import { usePolling, broadcastCrmSync } from "@/lib/use-poll"
 import { SkeletonList } from "../ui/skeleton"
 import { useToast } from "../ui/toast"
+import CustomSelect from "../ui/custom-select"
 import { COMMON_LOAN_TYPES } from "@/lib/products"
 
 type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
@@ -78,14 +79,14 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
 
   // Statuses state (Default + Custom)
   const [statuses, setStatuses] = useState<CustomStatus[]>([
-    { id: "pending", label: "Under Review / Pending", color: "#EAB308", bg_color: "rgba(234,179,8,0.15)", icon: "⏳", category: "pending", is_default: true, sort_order: 1 },
-    { id: "sanctioned", label: "Sanctioned", color: "#38BDF8", bg_color: "rgba(56,189,248,0.15)", icon: "✅", category: "sanctioned", is_default: true, sort_order: 2 },
-    { id: "rejected", label: "Not Sanctioned / Rejected", color: "#EF4444", bg_color: "rgba(239,68,68,0.15)", icon: "❌", category: "rejected", is_default: true, sort_order: 3 },
-    { id: "disbursed", label: "Disbursed", color: "#22C55E", bg_color: "rgba(34,197,94,0.15)", icon: "💰", category: "disbursed", is_default: true, sort_order: 4 },
+    { id: "pending", label: "Under Review / Pending", color: "#EAB308", bg_color: "rgba(234,179,8,0.15)", icon: "", category: "pending", is_default: true, sort_order: 1 },
+    { id: "sanctioned", label: "Sanctioned", color: "#38BDF8", bg_color: "rgba(56,189,248,0.15)", icon: "", category: "sanctioned", is_default: true, sort_order: 2 },
+    { id: "rejected", label: "Not Sanctioned / Rejected", color: "#EF4444", bg_color: "rgba(239,68,68,0.15)", icon: "", category: "rejected", is_default: true, sort_order: 3 },
+    { id: "disbursed", label: "Disbursed", color: "#22C55E", bg_color: "rgba(34,197,94,0.15)", icon: "", category: "disbursed", is_default: true, sort_order: 4 },
   ])
   const [showManageStatusModal, setShowManageStatusModal] = useState(false)
   const [newStatusLabel, setNewStatusLabel] = useState("")
-  const [newStatusIcon, setNewStatusIcon] = useState("📌")
+  const [newStatusIcon, setNewStatusIcon] = useState("")
   const [newStatusColor, setNewStatusColor] = useState("#8B5CF6")
   const [newStatusCategory, setNewStatusCategory] = useState<"pending" | "sanctioned" | "rejected" | "disbursed">("pending")
   const [savingCustomStatus, setSavingCustomStatus] = useState(false)
@@ -99,6 +100,12 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
 
   // History timeline modal state
   const [viewHistoryApp, setViewHistoryApp] = useState<any | null>(null)
+  useEffect(() => {
+    if (!viewHistoryApp) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setViewHistoryApp(null) }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [viewHistoryApp])
 
   // Loan Type Links state
   const [links, setLinks] = useState<LoanLink[]>([])
@@ -171,15 +178,15 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
     const found = statuses.find((s) => s.id === k)
     if (found) return found
     if (/sanctioned|approved/i.test(k)) {
-      return { id: k, label: "Sanctioned", color: "#38BDF8", bg_color: "rgba(56,189,248,0.15)", icon: "✅", category: "sanctioned", is_default: true, sort_order: 2 }
+      return { id: k, label: "Sanctioned", color: "#38BDF8", bg_color: "rgba(56,189,248,0.15)", icon: "", category: "sanctioned", is_default: true, sort_order: 2 }
     }
     if (/rejected|lost/i.test(k)) {
-      return { id: k, label: "Not Sanctioned / Rejected", color: "#EF4444", bg_color: "rgba(239,68,68,0.15)", icon: "❌", category: "rejected", is_default: true, sort_order: 3 }
+      return { id: k, label: "Not Sanctioned / Rejected", color: "#EF4444", bg_color: "rgba(239,68,68,0.15)", icon: "", category: "rejected", is_default: true, sort_order: 3 }
     }
     if (/disbursed/i.test(k)) {
-      return { id: k, label: "Disbursed", color: "#22C55E", bg_color: "rgba(34,197,94,0.15)", icon: "💰", category: "disbursed", is_default: true, sort_order: 4 }
+      return { id: k, label: "Disbursed", color: "#22C55E", bg_color: "rgba(34,197,94,0.15)", icon: "", category: "disbursed", is_default: true, sort_order: 4 }
     }
-    return { id: k, label: k.replace(/_/g, " "), color: "#EAB308", bg_color: "rgba(234,179,8,0.15)", icon: "⏳", category: "pending", is_default: false, sort_order: 99 }
+    return { id: k, label: k.replace(/_/g, " "), color: "#EAB308", bg_color: "rgba(234,179,8,0.15)", icon: "", category: "pending", is_default: false, sort_order: 99 }
   }
 
   // Open the remark & status update modal
@@ -396,6 +403,7 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
           toast.success(`Updated ${product} application link`)
           setShowLinkModal(false)
           loadLinks()
+          broadcastCrmSync()
         } else {
           toast.error(d.error || "Failed to update link")
         }
@@ -416,6 +424,7 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
           toast.success(`Added ${product} application link`)
           setShowLinkModal(false)
           loadLinks()
+          broadcastCrmSync()
         } else {
           toast.error(d.error || "Failed to add link")
         }
@@ -438,6 +447,7 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
       if (res.ok) {
         toast.success(`Deleted application link for ${product}`)
         setLinks((prev) => prev.filter((l) => l.id !== id))
+        broadcastCrmSync()
       } else {
         const d = await res.json().catch(() => ({}))
         toast.error(d.error || "Failed to delete link")
@@ -465,6 +475,7 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
         setLinks((prev) =>
           prev.map((l) => (l.id === link.id ? { ...l, active: !l.active } : l))
         )
+        broadcastCrmSync()
       } else {
         toast.error("Failed to toggle status")
       }
@@ -481,7 +492,7 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
 
   const internalStats = useMemo(() => {
     const total = internalApps.length
-    const approved = internalApps.filter((a) => /approved|sanctioned/i.test(a.status || "")).length
+    const approved = internalApps.filter((a) => /approved|sanctioned|disbursed/i.test(a.status || "")).length
     const pending = internalApps.filter((a) => /pending|review|new/i.test(a.status || "")).length
     const disbursed = internalApps.filter((a) => /disbursed/i.test(a.status || "")).length
     const totalVolume = internalApps.reduce((acc, a) => acc + (Number(a.loan_amount) || 0), 0)
@@ -541,27 +552,29 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
 
       {/* Primary Tab Navigation: Customer Applications vs Loan Type Links */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12, borderBottom: "1px solid var(--border)", paddingBottom: 14 }}>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <button
             type="button"
             onClick={() => setActiveTab("apps")}
             style={{
-              display: "flex",
+              display: "inline-flex",
               alignItems: "center",
               gap: 8,
-              padding: "8px 16px",
-              borderRadius: 8,
+              height: 38,
+              padding: "0 16px",
+              borderRadius: 10,
               fontWeight: 600,
               fontSize: 13,
               cursor: "pointer",
-              border: activeTab === "apps" ? "1px solid var(--accent-violet)" : "1px solid var(--border)",
-              background: activeTab === "apps" ? "rgba(139,124,255,0.12)" : "var(--bg-secondary)",
-              color: activeTab === "apps" ? "var(--accent-violet)" : "var(--text-secondary)",
+              transition: "all 0.15s",
+              border: activeTab === "apps" ? "none" : "1px solid var(--border)",
+              background: activeTab === "apps" ? "var(--gradient-brand)" : "var(--bg-card)",
+              color: activeTab === "apps" ? "#fff" : "var(--text-secondary)",
             }}
           >
             <FileText size={15} strokeWidth={2} />
             Customer Applications
-            <span style={{ fontSize: 11, padding: "1px 7px", borderRadius: 10, background: activeTab === "apps" ? "var(--accent-violet)" : "rgba(255,255,255,0.1)", color: "#fff" }}>
+            <span style={{ fontSize: 11, padding: "1px 7px", borderRadius: 10, background: activeTab === "apps" ? "rgba(255,255,255,0.22)" : "var(--overlay-chip)", color: activeTab === "apps" ? "#fff" : "var(--text-primary)", fontWeight: 700 }}>
               {internalApps.length}
             </span>
           </button>
@@ -570,22 +583,24 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
             type="button"
             onClick={() => setActiveTab("links")}
             style={{
-              display: "flex",
+              display: "inline-flex",
               alignItems: "center",
               gap: 8,
-              padding: "8px 16px",
-              borderRadius: 8,
+              height: 38,
+              padding: "0 16px",
+              borderRadius: 10,
               fontWeight: 600,
               fontSize: 13,
               cursor: "pointer",
-              border: activeTab === "links" ? "1px solid var(--accent-cyan)" : "1px solid var(--border)",
-              background: activeTab === "links" ? "rgba(56,189,248,0.12)" : "var(--bg-secondary)",
-              color: activeTab === "links" ? "var(--accent-cyan)" : "var(--text-secondary)",
+              transition: "all 0.15s",
+              border: activeTab === "links" ? "none" : "1px solid var(--border)",
+              background: activeTab === "links" ? "var(--gradient-brand)" : "var(--bg-card)",
+              color: activeTab === "links" ? "#fff" : "var(--text-secondary)",
             }}
           >
             <Link2 size={15} strokeWidth={2} />
-            Loan Type Links & Routing
-            <span style={{ fontSize: 11, padding: "1px 7px", borderRadius: 10, background: activeTab === "links" ? "var(--accent-cyan)" : "rgba(255,255,255,0.1)", color: "#000", fontWeight: 700 }}>
+            Loan Type Links &amp; Routing
+            <span style={{ fontSize: 11, padding: "1px 7px", borderRadius: 10, background: activeTab === "links" ? "rgba(255,255,255,0.22)" : "var(--overlay-chip)", color: activeTab === "links" ? "#fff" : "var(--text-primary)", fontWeight: 700 }}>
               {links.length}
             </span>
           </button>
@@ -677,7 +692,7 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
                 />
               </div>
 
-              <div style={{ display: "flex", gap: 4, overflowX: "auto", flexWrap: "nowrap", alignItems: "center", paddingBottom: 2 }}>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", paddingBottom: 2 }}>
                 <button
                   type="button"
                   onClick={() => setStatusFilter("all")}
@@ -816,34 +831,34 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
                           </td>
                           <td style={{ padding: "12px 16px" }}>
                             {canEdit ? (
-                              <div style={{ display: "flex", flexDirection: "column", gap: 5, maxWidth: 240 }}>
-                                <select
+                              <div style={{ display: "flex", flexDirection: "column", gap: 5, maxWidth: 230 }}>
+                                <CustomSelect
                                   value={st}
                                   disabled={updatingAppId === app.id}
-                                  onChange={(e) => updateInternalAppStatus(app, e.target.value)}
-                                  style={{
-                                    padding: "4px 8px",
-                                    borderRadius: 6,
-                                    fontSize: 11.5,
-                                    fontWeight: 600,
+                                  onChange={(val) => updateInternalAppStatus(app, val)}
+                                  compact
+                                  title="Update Status (AI voice & WhatsApp bot will answer customer according to this status)"
+                                  triggerStyle={{
                                     background: meta.bg_color,
                                     color: meta.color,
-                                    border: `1px solid ${meta.color}40`,
-                                    cursor: "pointer",
-                                    outline: "none",
-                                    width: "100%",
+                                    borderColor: `${meta.color}45`,
+                                    fontWeight: 600,
                                   }}
-                                  title="Update Status (AI voice & WhatsApp bot will answer customer according to this status)"
-                                >
-                                  {statuses.map((s) => (
-                                    <option key={s.id} value={s.id} style={{ background: "var(--bg-card)", color: "var(--text-primary)" }}>
-                                      {s.icon} {s.label}
-                                    </option>
-                                  ))}
-                                  <option value="__manage__" style={{ background: "var(--bg-card)", color: "var(--accent-violet)", fontWeight: 600 }}>
-                                    ⚙️ + Customize Statuses...
-                                  </option>
-                                </select>
+                                  options={[
+                                    ...statuses.map((s) => ({
+                                      value: s.id,
+                                      label: s.label,
+                                      dotColor: s.color,
+                                    })),
+                                    {
+                                      value: "__manage__",
+                                      label: "Customize Statuses...",
+                                      icon: <Settings2 size={13} />,
+                                      accent: true,
+                                      dividerBefore: true,
+                                    },
+                                  ]}
+                                />
 
                                 {/* Officer Reason / Remarks snippet */}
                                 {app.status_reason && (
@@ -1173,16 +1188,21 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
                 <label style={{ display: "block", fontSize: 12, color: "var(--text-muted)", marginBottom: 4, fontWeight: 500 }}>
                   Loan Type / Category *
                 </label>
-                <select
+                <CustomSelect
                   value={linkFormProduct}
-                  onChange={(e) => setLinkFormProduct(e.target.value)}
-                  style={{ width: "100%", height: 38, fontSize: 13, padding: "0 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)" }}
-                >
-                  {COMMON_LOAN_TYPES.map((t) => (
-                    <option key={t} value={t}>{t}</option>
-                  ))}
-                  <option value="custom">✏️ Other / Custom Loan Type…</option>
-                </select>
+                  onChange={(val) => setLinkFormProduct(val)}
+                  triggerStyle={{ height: 38, fontSize: 13 }}
+                  options={[
+                    ...COMMON_LOAN_TYPES.map((t) => ({ value: t, label: t })),
+                    {
+                      value: "custom",
+                      label: "Other / Custom Loan Type…",
+                      icon: <Pencil size={12} />,
+                      accent: true,
+                      dividerBefore: true,
+                    },
+                  ]}
+                />
 
                 {linkFormProduct === "custom" && (
                   <input
@@ -1627,6 +1647,7 @@ export default function LoanAppsView({ role, initialSearch }: { role: Role; init
               </div>
               <button
                 type="button"
+                aria-label="Close"
                 onClick={() => setViewHistoryApp(null)}
                 className="icon-btn"
                 style={{ width: 28, height: 28 }}

@@ -543,7 +543,11 @@ async function graphPost(payload: Record<string, any>, branch?: BranchWhatsAppCt
     clearTimeout(timeoutId)
     const data: any = await res.json().catch(() => ({}))
     if (!res.ok) {
-      const msg = data?.error?.message || `HTTP ${res.status}`
+      let msg = data?.error?.message || `HTTP ${res.status}`
+      if (data?.error?.code === 132001 || msg.includes("132001")) {
+        const tplName = payload.template?.name || "template"
+        msg = `(#132001) Template "${tplName}" is still PENDING Meta approval (or translation not found). Please wait 1-2 minutes for Meta to approve it, or use "hello_world" for instant sending.`
+      }
       // Surface WHY Meta refused — expired token (190), outside the 24h
       // service window (131047), re-engagement required, wrong number…
       console.error(`WA send failed → ${payload.to || "?"} HTTP ${res.status}: ${msg}${data?.error?.error_data?.details ? ` — ${data.error.error_data.details}` : ""}${data?.error?.code ? ` (code ${data.error.code})` : ""} tokenPrefix="${token.slice(0, 15)}..." phoneId="${phoneId}" error:`, JSON.stringify(data?.error || data))
@@ -657,12 +661,17 @@ export async function sendWhatsAppTemplate(
     }
   }
 
+  let langCode = options?.language || "en"
+  if (templateName === "hello_world" && langCode === "en") {
+    langCode = "en_US"
+  }
+
   const payload: any = {
     to: number,
     type: "template",
     template: {
       name: templateName,
-      language: { code: options?.language || "en" },
+      language: { code: langCode },
     },
   }
   if (components.length > 0) {
@@ -708,18 +717,38 @@ export async function sendApplicationLink(
   }
   const brand = branch?.brandName || defaultBranding()
 
-  const result = await graphPost({
+  const components: any[] = [
+    {
+      type: "body",
+      parameters: [
+        { type: "text", text: name || "there" },
+        { type: "text", text: token },
+      ],
+    },
+  ]
+
+  let result = await graphPost({
     to: number,
     type: "template",
     template: {
       name: FORM_TEMPLATE,
-      language: { code: "en" },
-      components: [
-        { type: "body", parameters: [{ type: "text", text: name || "there" }] },
-        { type: "button", sub_type: "url", index: "0", parameters: [{ type: "text", text: token }] },
-      ],
+      language: { code: "en_US" },
+      components,
     },
   }, branch)
+
+  if (!result.ok) {
+    result = await graphPost({
+      to: number,
+      type: "template",
+      template: {
+        name: FORM_TEMPLATE,
+        language: { code: "en" },
+        components,
+      },
+    }, branch)
+  }
+
   if (result.ok) return { ok: true }
 
   // FALLBACK: if the template isn't approved yet but the customer messaged
@@ -822,7 +851,7 @@ export async function recentFormLinkSent(leadId: string, hours = 6): Promise<boo
       `SELECT 1 FROM comm_logs
          WHERE lead_id = $1
            AND outcome IN ('sent', 'pending')
-           AND summary ILIKE '%form link%'
+           AND (summary ILIKE '%form link%' OR summary ILIKE '%application link%')
            AND created_at > now() - ($2 || ' hours')::interval
          LIMIT 1`,
       [leadId, String(hours)]
@@ -858,15 +887,27 @@ export async function sendCallFollowUp(to: string, name: string, branch?: Branch
   }
   const brand = branch?.brandName || defaultBranding()
 
-  const result = await graphPost({
+  let result = await graphPost({
     to: number,
     type: "template",
     template: {
       name: CALL_FOLLOWUP_TEMPLATE,
-      language: { code: "en" },
+      language: { code: "en_US" },
       components: [{ type: "body", parameters: [{ type: "text", text: name || "there" }] }],
     },
   }, branch)
+
+  if (!result.ok) {
+    result = await graphPost({
+      to: number,
+      type: "template",
+      template: {
+        name: CALL_FOLLOWUP_TEMPLATE,
+        language: { code: "en" },
+        components: [{ type: "body", parameters: [{ type: "text", text: name || "there" }] }],
+      },
+    }, branch)
+  }
   if (result.ok) return { ok: true }
 
   // FALLBACK: only delivers if the customer already has an open 24h session
@@ -907,15 +948,27 @@ export async function sendMissedCallFollowUp(to: string, name: string, branch?: 
   }
   const brand = branch?.brandName || defaultBranding()
 
-  const result = await graphPost({
+  let result = await graphPost({
     to: number,
     type: "template",
     template: {
       name: MISSED_CALL_TEMPLATE,
-      language: { code: "en" },
+      language: { code: "en_US" },
       components: [{ type: "body", parameters: [{ type: "text", text: name || "there" }] }],
     },
   }, branch)
+
+  if (!result.ok) {
+    result = await graphPost({
+      to: number,
+      type: "template",
+      template: {
+        name: MISSED_CALL_TEMPLATE,
+        language: { code: "en" },
+        components: [{ type: "body", parameters: [{ type: "text", text: name || "there" }] }],
+      },
+    }, branch)
+  }
   if (result.ok) return { ok: true }
 
   // Only on a definitive 4xx — see sendApplicationLink's note on double-sends.
@@ -970,11 +1023,12 @@ const SUBJECT_REGEX = new RegExp(
     "\\bform\\b", "\\bforms\\b",
     "\\bapply\\b", "\\baply\\b",
     "\\bregister\\b", "\\bregistration\\b",
+    "\\blink\\b", "\\blinks\\b", "\\blinku\\b", "\\bportal\\b", "\\bwebsite\\b",
   ].join("|"),
   "i"
 )
 
-const STRONG_REGEX = /\b(loan application|application form|form link|apply link|application link|registration link|google form|apply now|how to apply)\b/i
+const STRONG_REGEX = /\b(loan application|application form|form link|apply link|application link|registration link|google form|apply now|how to apply|send (me )?(the )?link|send link|link send|share (me )?(the )?link|share link|give (me )?(the )?link|give link|drop link|link drop|link pampu|link pampandi|link pampinchandi|link kavali|link bhejo|link dijiye|link send chey|link ivvandi|link share chey)\b/i
 const NEGATIVE_REGEX = /\b(status|update|approved?|approval|rejected?|submitted|already (filled|sent|applied|got|submitted)|kab aayega|kab hua|em aindi|vachinda|refund|cancel)\b/i
 
 export function detectApplicationRequest(text: string): boolean {

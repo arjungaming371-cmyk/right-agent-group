@@ -30,6 +30,7 @@ const PUBLIC_PREFIXES = [
   "/api/fast-lead",
   "/api/form/",
   "/api/warmup",
+  "/api/banking-knowledge/",
 ]
 
 // EXACT matches only — everything else stays session-protected.

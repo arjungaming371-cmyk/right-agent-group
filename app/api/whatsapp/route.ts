@@ -489,8 +489,12 @@ async function handleInbound(msg: any, profileName: string | null, waBranch: Bra
     const cleanIntro = rawIntro.charAt(0).toUpperCase() + rawIntro.slice(1).toLowerCase()
     const ignoredWords = ["here", "calling", "interested", "looking", "applying", "asking", "fine", "good", "okay", "ready", "new"]
     if (!ignoredWords.includes(cleanIntro.toLowerCase())) {
-      lead.name = cleanIntro
-      query(`UPDATE leads SET name = $1 WHERE id = $2`, [cleanIntro, lead.id]).catch(() => {})
+      // NEVER overwrite an uploaded/existing lead name — uploaded lead names are final
+      const isPlaceholder = !lead.name || lead.name.trim() === "" || lead.name === lead.phone || lead.name.toLowerCase() === "customer"
+      if (isPlaceholder) {
+        lead.name = cleanIntro
+        query(`UPDATE leads SET name = $1 WHERE id = $2`, [cleanIntro, lead.id]).catch(() => {})
+      }
     }
   }
 
@@ -584,8 +588,8 @@ ${isExternal ? "- IMPORTANT FOR EXTERNAL LINKS: Because this is an external port
 - Phone: ${lead.phone || `+${from}`}
 ${customerCity ? `- City / Area: ${customerCity}\n` : ""}${customerLoan ? `- Recorded Loan Requirement: ${customerLoan}\n` : ""}${memSummary ? `- Details from Recent Conversation / Call: ${memSummary}\n` : ""}
 STRICT INSTRUCTIONS FOR RETURNING CUSTOMER:
-1. Greet the customer warmly by name ("${customerName} sir").
-2. If they ask for updates or reference previous talks, acknowledge their specific loan requirement (${customerLoan || "loan"}).
+1. Address the customer naturally (only greet with "${customerName}" if starting a new conversation today, not on every back-and-forth message).
+2. If they ask for updates or reference previous talks, acknowledge their specific loan requirement (${customerLoan || "loan"}) naturally without sounding scripted.
 3. Never invent or hallucinate loan types or details not listed in the profile above.`
     } else {
       knownProfileBlock = `=== CUSTOMER CONTEXT ===
@@ -602,6 +606,10 @@ INSTRUCTIONS FOR NEW INQUIRY:
     const isExplicitHindi = HINDI_ASK_RE.test(text)
     const isExplicitEnglish = ENGLISH_ASK_RE.test(text)
 
+    // Neutral 1-2 word acknowledgements keep the ongoing conversation language;
+    // actual sentences/questions ("What is the status", "Is it rejected") use their own language.
+    const NEUTRAL_ACK_RE = /^(ok|okay|kk|k|yes|ya|yeah|yep|no|nope|hmm+|hm+|sure|fine|thanks|thank you|tq|ty|thx|alright|good|great|nice|bye|haan|ha|ji|avunu|sare|ledu|chalu)[.!?\s]*$/i
+
     let lang: Language
     let explicitSwitch = false
 
@@ -615,19 +623,13 @@ INSTRUCTIONS FOR NEW INQUIRY:
       lang = "english"
       explicitSwitch = true
     } else if (isNewContact || historyRes.rows.length === 0) {
-      // First turn of a new contact: use the detected language of their initial greeting
       lang = detectLanguage(text) as Language
       explicitSwitch = true
+    } else if (NEUTRAL_ACK_RE.test(text.trim())) {
+      lang = (lead.language as Language) || "english"
     } else {
-      // Ongoing conversation:
-      // Short messages ("ya", "ok", "sure", "fine", "no", "yes") stick to the ongoing conversation language!
-      const wordCount = text.trim().split(/\s+/).length
-      const currentConversationLang = (lead.language as Language) || "english"
-      if (wordCount <= 4) {
-        lang = currentConversationLang
-      } else {
-        lang = detectLanguage(text) as Language
-      }
+      lang = detectLanguage(text) as Language
+      if (lang !== lead.language) explicitSwitch = true
     }
 
     if (explicitSwitch && lang !== lead.language) {
@@ -639,32 +641,24 @@ INSTRUCTIONS FOR NEW INQUIRY:
     // without this the AI "speaks" on WhatsApp (call greetings, hold-style
     // brevity) instead of texting like a chat agent.
     let extraContext: string | undefined =
-      "IMPORTANT — CHANNEL: This conversation is a WhatsApp TEXT CHAT, not a phone call. " +
-      "Never use call phrases (no 'thanks for calling', 'I'll call you back', 'on this call'). " +
-      "The phone-call-only rules DO NOT apply here: on WhatsApp you SHOULD discuss interest " +
-      "rates, EMI, eligibility, and loan details directly — you ARE the WhatsApp follow-up the " +
-      "call script promises, so never say a loan officer will send details 'on WhatsApp' later. " +
-      "Answer the customer's question yourself, completely, using the knowledge-base context when " +
-      "provided. Quote rates, amounts, and tenures EXACTLY as written in the knowledge context — " +
-      "never invent, round, or adjust numbers; if a detail isn't in the context, say the loan " +
-      "officer will confirm it. Reply like a professional WhatsApp chat agent: friendly and " +
-      "complete answers, WhatsApp formatting allowed (single-asterisk *bold* only — never " +
-      "**double** — and bullet lists), as long as needed to answer properly. " +
-      "NEVER ask for their WhatsApp number — the number they are texting you from RIGHT NOW " +
-      "is their WhatsApp number, you already have it. " +
-      "If name and city are already known from the customer profile below, NEVER ask for them! " +
-      "If the customer explicitly asks for the loan application, application form, or the link: " +
-      "confirm it is DONE — say the form was just sent right here in this chat (the system " +
-      "delivers it automatically with your reply). In Telugu: 'Sure sir, application link idigo ee chat lo ne pampinchaanu, fill cheyandi'. Never say you will send it later, never point them to email or another app."
+      "IMPORTANT — CHANNEL & HUMAN STYLE: This is a live WhatsApp TEXT CHAT, not a phone call. " +
+      "Text like a real, sharp, helpful human advisor on WhatsApp — NOT like a scripted call-center bot.\n" +
+      "- NATURAL CONVERSATION: Answer the customer's actual message directly and stay on their topic (e.g., if they ask about a branch visit, meeting time, or status, answer THAT directly — never ignore their question to force a loan pitch).\n" +
+      "- NO REPETITIVE ROBOT CLOSINGS: NEVER repeat 'our loan officer will call you soon' or 'Ma loan officer meeku soon contact avtharu' or 'do you have any other doubts / Inkemaina help kavala?' at the end of every message. Vary how you reply, and only mention a loan officer callback when genuinely needed.\n" +
+      "- NO 'SIR' SPAM OR REPEATED GREETINGS: In an ongoing back-and-forth chat, do NOT start every reply with 'Hi sir!' or 'Sir,'. Just reply naturally and directly.\n" +
+      "- CONCISE & CLEAR: Keep most replies to 1–3 natural sentences unless listing rates/documents. Single-asterisk *bold* only (never **double**).\n" +
+      "- NEVER use phone-call phrases ('thanks for calling', 'on this call') and NEVER ask for their WhatsApp number (you are already chatting on it). " +
+      "If name and city are already in the customer profile below, never ask for them. " +
+      "Quote rates, amounts, and tenures EXACTLY as written in the knowledge context — never invent numbers. " +
+      "If the customer explicitly asks for the loan application form/link, confirm it is sent right here in this chat (the system attaches it automatically)."
 
-    if (explicitSwitch) {
-      if (lang === "english") {
-        extraContext = [extraContext, "CRITICAL LANGUAGE MANDATE: The customer requested English. You MUST reply 100% in pure English from your very first word (e.g. 'Sure sir, let\\'s speak in English...'). Never use Telugu, Tenglish, or Hindi words."].filter(Boolean).join("\n\n")
-      } else if (lang === "hindi") {
-        extraContext = [extraContext, "CRITICAL LANGUAGE MANDATE: The customer requested Hindi. You MUST reply in natural Hinglish/Hindi from your very first word (e.g. 'Bilkul sir, Hindi mein baat karte hain...'). Never use Telugu words."].filter(Boolean).join("\n\n")
-      } else if (lang === "telugu") {
-        extraContext = [extraContext, "CRITICAL LANGUAGE MANDATE: The customer requested Telugu. You MUST reply in friendly conversational Tenglish from your very first word (e.g. 'Sure sir, Telugu lo matladadam...')."].filter(Boolean).join("\n\n")
-      }
+    // Always enforce the detected language so prior Tenglish/Hindi history never overrides the customer's current language
+    if (lang === "english") {
+      extraContext = [extraContext, "LANGUAGE RULE: The customer is writing in English. Reply 100% in natural, conversational English (no Telugu, Tenglish, or Hindi words)."].filter(Boolean).join("\n\n")
+    } else if (lang === "hindi") {
+      extraContext = [extraContext, "LANGUAGE RULE: The customer is writing in Hindi/Hinglish. Reply in natural conversational Hinglish/Hindi (no Telugu words)."].filter(Boolean).join("\n\n")
+    } else if (lang === "telugu") {
+      extraContext = [extraContext, "LANGUAGE RULE: The customer is writing in Telugu/Tenglish. Reply in warm, natural conversational Tenglish (just like a real person texting in Hyderabad, not stiff textbook translation)."].filter(Boolean).join("\n\n")
     }
 
     const NO_DOUBTS_RE = /\b(no doubts?|no questions?|em ledu|ledu|chalu|nothing|nope|thank you bye|bye)\b/i
@@ -765,9 +759,15 @@ INSTRUCTIONS FOR NEW INQUIRY:
   // chat request), they already hold a live one-time link — don't mint and
   // message a fresh token on every ask.
   try {
-    const aiMentionedForm = !!(aiReply && /\b(sent (the )?(simple )?(application|form)|link on (this )?chat|fill it (when|here)|application link|form link|లింక్ పంపించా|లింక్ పంపిస్తా|form right here)\b/i.test(aiReply))
     const customerRequested = detectApplicationRequest(text)
-    if ((customerRequested || aiMentionedForm) && !(await recentFormLinkSent(lead.id))) {
+    // Do NOT send the application link when Priya is merely mentioning it or offering options (e.g. "if you'd like the application link or visit branch").
+    // Only send if the customer explicitly requested it, or if AI explicitly states it has sent/shared/attached it right now.
+    const aiExplicitlySending = !!(
+      aiReply &&
+      /\b(I have sent|sending you|sharing (with you|the)|shared (the|an|your)|already attached|link is attached|attached (right )?here|లింక్ పంపించా|లింక్ ఇచ్చా)\b/i.test(aiReply) &&
+      /\b(link|form|application)\b/i.test(aiReply)
+    )
+    if (customerRequested || (aiExplicitlySending && !(await recentFormLinkSent(lead.id)))) {
       const token = await createOneTimeFormToken(lead.id)
       const linkResult = await sendApplicationLinkText(from, lead.name || "there", token, waBranch)
       const linkMessageBody = formLinkMessage(lead.name || "there", token, waBranch?.brandName)
@@ -803,6 +803,14 @@ INSTRUCTIONS FOR NEW INQUIRY:
   }
 
   refreshLeadScore(lead.id).catch(() => {})
+
+  // Autonomous calendar extraction: detects office visits, callbacks, and deadlines from WhatsApp conversation
+  try {
+    const { runCalendarExtractionForWhatsApp } = await import("@/lib/calendar-agent")
+    runCalendarExtractionForWhatsApp(lead.id)
+  } catch (err: any) {
+    console.error("[whatsapp] Calendar extraction trigger error:", err?.message || err)
+  }
 
   // LOAN EDIT REQUESTS: fire-and-forget, after the customer already has
   // their reply — never adds latency, never writes to loan_applications

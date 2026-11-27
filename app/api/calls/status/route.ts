@@ -178,13 +178,44 @@ export async function POST(req: NextRequest) {
         const waBranch = await branchWhatsAppCtx(typeof call.branch_id === "string" ? call.branch_id : null)
 
         if (target && outcome === "resolved" && transcript.length > 0) {
-          const result = await sendCallFollowUp(target, lead?.name || "there", waBranch)
-          await db.from("comm_logs").insert({
-            lead_id: leadId,
-            type: "whatsapp",
-            summary: result.ok ? "Post-call WhatsApp follow-up sent" : `Post-call WhatsApp follow-up failed: ${result.error}`,
-            outcome: result.ok ? "sent" : "failed",
-          })
+          const { shouldSendApplicationLink } = await import("@/lib/whatsapp-call-finalize")
+          const wantsApplication = shouldSendApplicationLink(transcript)
+
+          if (wantsApplication) {
+            const { createOneTimeFormToken, sendApplicationLink } = await import("@/lib/whatsapp")
+            const token = await createOneTimeFormToken(leadId)
+            const result = await sendApplicationLink(target, lead?.name || "there", token, waBranch)
+            if (!result.ok) {
+              await sendCallFollowUp(target, lead?.name || "there", waBranch)
+            }
+            const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "https://13.201.0.111.sslip.io").replace(/\/$/, "")
+            await db.from("comm_logs").insert({
+              lead_id: leadId,
+              type: "whatsapp",
+              summary: result.ok
+                ? `Bank application link sent on WhatsApp to ${target}: ${appUrl}/l/${token}`
+                : `Post-call WhatsApp send attempted (${result.error})`,
+              outcome: result.ok ? "sent" : "failed",
+            })
+            // Alert: Lead confirmed loan interest on call — flag in Human Attention queue
+            await db.from("comm_logs").insert({
+              lead_id: leadId,
+              type: "alert",
+              summary: `🟢 LOAN CONFIRMED ON CALL — Caller confirmed loan interest during call. Application link sent on WhatsApp. Follow up for documentation & bank processing.`,
+              outcome: "loan_confirmed",
+            }).catch(() => {})
+          } else {
+            // Script Post-call follow-up (no loan form link)
+            const result = await sendCallFollowUp(target, lead?.name || "there", waBranch)
+            await db.from("comm_logs").insert({
+              lead_id: leadId,
+              type: "whatsapp",
+              summary: result.ok
+                ? `Post-call follow-up sent on WhatsApp to ${target}`
+                : `Post-call WhatsApp send attempted (${result.error})`,
+              outcome: result.ok ? "sent" : "failed",
+            }).catch(() => {})
+          }
         } else if (target && outcome === "missed") {
           const result = await sendMissedCallFollowUp(target, lead?.name || "there", waBranch)
           await db.from("comm_logs").insert({

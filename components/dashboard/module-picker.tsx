@@ -13,14 +13,13 @@ export type ModuleOption = {
 export const ALL_MODULES: ModuleOption[] = [
   // Overview
   { key: "analytics", label: "Analytics", section: "Overview", description: "Performance metrics & conversion charts" },
-  { key: "attention", label: "Needs Human", section: "Overview", description: "Escalation queue — customers who asked for a person" },
+  { key: "attention", label: "Needs Human", section: "Overview", description: "Action Center — confirmed loans, scheduled callbacks, visits & escalations" },
   { key: "leads", label: "Leads", section: "Overview", description: "Prospect pipeline & lead status tracking" },
   { key: "loans", label: "Loan Applications", section: "Overview", description: "Loan applications & enquiry files" },
   { key: "queue", label: "Call Queue", section: "Overview", description: "AI call queue, scheduled calls & bulk dialing" },
-  { key: "calendar", label: "Calendar", section: "Overview", description: "Follow-up calendar & scheduled callbacks" },
 
   // Engagement
-  { key: "voice", label: "Voice Logs", section: "Engagement", description: "Voice call recordings, transcripts, & durations" },
+  { key: "voice", label: "Voice Logs", section: "Engagement", description: "Voice call recordings, transcripts & durations" },
   { key: "whatsapp", label: "WhatsApp Chat", section: "Engagement", description: "Live customer chat & automated messages" },
   { key: "instagram", label: "Instagram Chat", section: "Engagement", description: "Direct messages & post comment auto-replies" },
 

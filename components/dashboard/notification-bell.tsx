@@ -102,7 +102,7 @@ export default function NotificationBell({ onNavigate }: { onNavigate: (view: Vi
           }}
         >
           <div style={{ padding: "13px 16px", borderBottom: "1px solid var(--border-light)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <span style={{ fontWeight: 600, fontSize: 13.5 }}>Notifications</span>
+            <span style={{ fontWeight: 600, fontSize: 13.5 }}>Notifications {items.length > 0 ? `(${items.length})` : ""}</span>
             {unread > 0 && (
               <button onClick={markAllRead} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, color: "var(--text-muted)", background: "none", border: "none", cursor: "pointer" }}>
                 <Check size={12} strokeWidth={2} /> Mark all read
@@ -136,7 +136,7 @@ export default function NotificationBell({ onNavigate }: { onNavigate: (view: Vi
                       <span style={{ fontSize: 13, fontWeight: n.read ? 500 : 650, color: "var(--text-primary)" }}>{n.title}</span>
                       {!n.read && <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--accent-violet)", flexShrink: 0 }} />}
                     </span>
-                    {n.body && <span style={{ display: "block", fontSize: 11.5, color: "var(--text-muted)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{n.body}</span>}
+                    {n.body && <span style={{ display: "block", fontSize: 11.5, color: "var(--text-muted)", marginTop: 2, whiteSpace: "normal", wordBreak: "break-word", lineHeight: 1.4 }}>{n.body}</span>}
                     <span style={{ display: "block", fontSize: 10.5, color: "var(--text-muted)", marginTop: 3 }}>{timeAgo(n.created_at)} · {formatDateTime(n.created_at)}</span>
                   </span>
                 </button>

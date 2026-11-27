@@ -841,11 +841,9 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
         <div
           style={{
             display: "flex",
+            flexWrap: "wrap",
             gap: 6,
             padding: "4px 14px 10px",
-            overflowX: "auto",
-            scrollbarWidth: "none",
-            msOverflowStyle: "none",
             borderBottom: `1px solid ${IG_THEME.hairline}`,
           }}
         >
@@ -1291,7 +1289,7 @@ export default function InstagramView({ initialSearch = "" }: { initialSearch?: 
                             whiteSpace: "nowrap",
                           }}
                         >
-                          <span>💬</span> Public Post Comment
+                          Public Post Comment
                         </div>
                       )}
 

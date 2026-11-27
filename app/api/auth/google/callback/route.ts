@@ -88,11 +88,29 @@ export async function GET(req: NextRequest) {
           try {
             const cf = await query(`SELECT config FROM form_configs WHERE id = 'custom_roles_config'`)
             if (cf.rowCount && cf.rows[0]?.config?.roles) {
-              const found = cf.rows[0].config.roles.find((cr: any) => cr.id === rawRole)
+              const needle = rawRole.toLowerCase().trim()
+              const needleId = needle.replace(/[^a-z0-9]+/g, "_")
+              const found = cf.rows[0].config.roles.find(
+                (cr: any) =>
+                  String(cr?.id || "").toLowerCase() === needle ||
+                  String(cr?.id || "").toLowerCase() === needleId ||
+                  String(cr?.label || "").toLowerCase() === needle
+              )
               if (found?.baseRole) role = found.baseRole as Role
             }
           } catch {}
-          if (!role) role = "agent"
+          if (!role) {
+            const norm = rawRole.toLowerCase().trim()
+            if (norm === "loan officer" || norm === "loan_officer" || norm === "officer") {
+              role = "agent"
+            } else if (norm.includes("branch manager") || norm.includes("branch admin") || norm === "branch_admin") {
+              role = "branch_manager"
+            } else if (norm === "viewer") {
+              role = "viewer"
+            } else {
+              role = "agent"
+            }
+          }
         }
       }
     }

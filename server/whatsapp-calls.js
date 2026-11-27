@@ -109,9 +109,9 @@ const STT_RATE = parseInt(process.env.VOICEBOT_WA_STT_SAMPLE_RATE || "16000")
 const DSR = WA_RATE / STT_RATE   // decimation factor (3 at 16 kHz)
 
 // Endpointing — tuned for natural listening: 600ms gives fast turn-taking without dead air.
-const ENERGY_THRESHOLD = parseInt(process.env.VOICEBOT_WA_ENERGY_THRESHOLD || "300")
+const ENERGY_THRESHOLD = parseInt(process.env.VOICEBOT_WA_ENERGY_THRESHOLD || "280")
 const SILENCE_END_MS = parseInt(process.env.VOICEBOT_SILENCE_END_MS || "600")
-const MIN_SPEECH_MS = parseInt(process.env.VOICEBOT_MIN_SPEECH_MS || "250")
+const MIN_SPEECH_MS = parseInt(process.env.VOICEBOT_MIN_SPEECH_MS || "200")
 // Hard cap on one uninterrupted caller utterance. 15s used to silently cut
 // off leads mid-answer ("my salary is 45000 and I pay 12000 EMI every month
 // and..."). Saaras batch accepts up to 30 s — default 20 s keeps headroom
@@ -125,7 +125,8 @@ const MAX_UTTERANCE_MS = Math.max(5_000, parseInt(process.env.VOICEBOT_WA_MAX_UT
 // DISCARDED (onInboundFrame early-returns) and callers had to repeat
 // themselves after every reply. Set VOICEBOT_WA_BARGE_IN=0 to disable.
 const BARGE_IN = (process.env.VOICEBOT_WA_BARGE_IN || "1").trim() === "1"
-const BARGE_MIN_MS = parseInt(process.env.VOICEBOT_WA_BARGE_MIN_MS || "300")
+const WA_BARGE_ENERGY = parseInt(process.env.VOICEBOT_WA_BARGE_ENERGY || "330")
+const BARGE_MIN_MS = parseInt(process.env.VOICEBOT_WA_BARGE_MIN_MS || "160")
 
 // SPEECH CLARITY ("Priya is not speaking the words clearly like a human"):
 // @discordjs/opus hardcodes OPUS_APPLICATION_AUDIO (MUSIC mode) and never
@@ -737,18 +738,6 @@ async function prewarmWa() {
     CLARIFY_PHRASE.telugu,
     FALLBACK_PHRASE.telugu,
     START_FALLBACK_PHRASE.telugu,
-    "సరే sir,",
-    "Sure sir,",
-    "అవును sir,",
-    "చెప్పండి sir,",
-    "హలో sir,",
-    "Okay sir,",
-    "Student loan,",
-    "Personal loan,",
-    "Home loan,",
-    "Business loan,",
-    "Twelve lakh rupees,",
-    "Fifteen lakh rupees,",
   ]
   for (const line of fixedLines) {
     if (line) {
@@ -1085,13 +1074,25 @@ class WhatsAppCallSession {
 
     if (this.botTalking) {
       if (!BARGE_IN) return
-      if (energy > ENERGY_THRESHOLD * 2) {
+      if (energy > WA_BARGE_ENERGY) {
+        this.bargeSilenceFrames = 0
         this.bargeMs += ms
         this.bargeBuffer.push(pcm16k)
         if (this.bargeMs >= BARGE_MIN_MS) this.interrupt()
       } else {
-        this.bargeMs = 0
-        this.bargeBuffer = []
+        if (this.bargeMs < 60) {
+          this.bargeMs = 0
+          this.bargeBuffer = []
+          this.bargeSilenceFrames = 0
+        } else {
+          // Allow up to 2 grace frames (~40ms) for consonant micro-dips or natural syllabic breaks
+          this.bargeSilenceFrames = (this.bargeSilenceFrames || 0) + 1
+          if (this.bargeSilenceFrames > 2) {
+            this.bargeMs = 0
+            this.bargeBuffer = []
+            this.bargeSilenceFrames = 0
+          }
+        }
       }
       return
     }
@@ -1139,7 +1140,8 @@ class WhatsAppCallSession {
     this.silenceMs = 0
     this.bargeBuffer = []
     this.bargeMs = 0
-    console.log(`✋ WhatsApp barge-in — caller cut in, dropping the rest of the reply`)
+    this.bargeSilenceFrames = 0
+    console.log(`✋ WhatsApp barge-in — caller cut in (${this.speechMs.toFixed(0)}ms), dropped reply and listening immediately`)
   }
 
   async endUtterance() {
@@ -1400,8 +1402,7 @@ class WhatsAppCallSession {
       console.log(`⏱ wa start API: ${Date.now() - t0}ms  lead=${r.leadId || "?"}  branch=${r.branchId || "hq"}`)
       this.language = r.language || "telugu"
       this.voice = r.voice && r.voice.speaker ? r.voice : null
-      const notice = (r && r.disclosure) || this.recordingNotice()
-      if (notice) await this.speak(notice)
+      // Speak the natural greeting directly without double-introducing Priya
       await this.speak(r.text)
       console.log(`⏱ wa answer → greeting fully queued: ${Date.now() - t0}ms`)
     } catch (e) {

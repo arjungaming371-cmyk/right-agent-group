@@ -43,8 +43,36 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ ok: true, preset: res.rows[0] })
 }
 
+export async function PATCH(req: NextRequest) {
+  const session = await requireModuleOrRole(req, "voice", ["admin", "agent", "branch_manager"])
+  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+
+  const body = await req.json().catch(() => ({}))
+  const { id, label, text, product, language } = body
+  if (!id) return NextResponse.json({ error: "ID is required" }, { status: 400 })
+  if (!label || typeof label !== "string" || !label.trim()) {
+    return NextResponse.json({ error: "Label is required" }, { status: 400 })
+  }
+
+  const res = await query(
+    `UPDATE agenda_presets
+        SET label = $2,
+            text = $3,
+            product = COALESCE($4, product),
+            language = COALESCE($5, language),
+            updated_at = now()
+      WHERE id = $1
+      RETURNING *`,
+    [id, label.trim(), (text || "").trim(), product || null, language || null]
+  )
+  if ((res.rowCount ?? 0) === 0) {
+    return NextResponse.json({ error: "Preset not found" }, { status: 404 })
+  }
+  return NextResponse.json({ ok: true, preset: res.rows[0] })
+}
+
 export async function DELETE(req: NextRequest) {
-  const session = await requireModuleOrRole(req, "voice", ["admin", "branch_manager"])
+  const session = await requireModuleOrRole(req, "voice", ["admin", "agent", "branch_manager"])
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
 
   const { searchParams } = new URL(req.url)

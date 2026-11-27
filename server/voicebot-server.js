@@ -122,33 +122,19 @@ const DEBUG_DIR = process.env.VOICEBOT_DEBUG_DIR || ""
 
 // ---------- Barge-in (interrupting Priya mid-sentence) ----------
 //
-// OFF BY DEFAULT, deliberately. Whether this works at all depends on
-// something that cannot be determined from code: how much of our own
-// outbound audio Exotel echoes back into the inbound media stream on a real
-// phone line. If it echoes, Priya hears herself, decides the caller is
-// talking, and cuts herself off — every call, every sentence. That failure
-// is far worse than the half-duplex behaviour it replaces, so it does not
-// get switched on until someone has made a real call with it.
-//
-// To validate: set VOICEBOT_BARGE_IN=1, call in, and stay SILENT through a
-// full reply. If Priya interrupts herself, the line echoes — raise
-// VOICEBOT_BARGE_ENERGY until she doesn't, or leave the feature off. Then
-// call again and talk over her; she should stop within ~300ms.
-const BARGE_IN = (process.env.VOICEBOT_BARGE_IN || "0").trim() === "1"
-// Deliberately well above ENERGY_THRESHOLD: a frame only counts as the
-// caller interrupting if it is clearly louder than the level we accept as
-// speech when the line is otherwise quiet. Echo and line noise sit low.
-const BARGE_ENERGY = parseInt(process.env.VOICEBOT_BARGE_ENERGY || String(ENERGY_THRESHOLD * 2))
-// ...and it has to be SUSTAINED. A single loud frame is a cough, a door, or
-// a codec artefact. A third of a second of continuous energy is someone
-// actually talking.
+// In production, barge-in defaults to ENABLED (VOICEBOT_BARGE_IN=1) for natural
+// real-time human turn-taking and conversational flow. If a specific trunk or
+// PSTN line exhibits excessive carrier echo, it can be disabled via
+// VOICEBOT_BARGE_IN=0 or the energy threshold tuned with VOICEBOT_BARGE_ENERGY.
+const BARGE_IN = (process.env.VOICEBOT_BARGE_IN || "1").trim() === "1"
+// Threshold tuned for natural interruption: ~360 catches normal speaking volume without false echoes
+const BARGE_ENERGY = parseInt(process.env.VOICEBOT_BARGE_ENERGY || "360")
+// 300ms (~15 frames) standard duration to confirm genuine human speech rather than line noise
 const BARGE_MIN_MS = parseInt(process.env.VOICEBOT_BARGE_MIN_MS || "300")
 // How far ahead of real time we let playback run. Audio already handed to
 // Exotel cannot be recalled, so this is the worst-case overhang the caller
-// still hears after interrupting. With barge-in off it is Infinity, which
-// reproduces the original behaviour exactly: push the whole reply into the
-// socket at once and let Exotel buffer it.
-const PLAYBACK_LEAD_MS = BARGE_IN ? parseInt(process.env.VOICEBOT_PLAYBACK_LEAD_MS || "300") : Infinity
+// still hears after interrupting.
+const PLAYBACK_LEAD_MS = BARGE_IN ? parseInt(process.env.VOICEBOT_PLAYBACK_LEAD_MS || "160") : Infinity
 
 // ---------- Echo probe ----------
 //
@@ -381,20 +367,6 @@ async function prewarm() {
     CLARIFY_PHRASE.telugu,
     FALLBACK_PHRASE.telugu,
     START_FALLBACK_PHRASE.telugu,
-    "సరే sir,",
-    "Sure sir,",
-    "అవును sir,",
-    "చెప్పండి sir,",
-    "హలో sir,",
-    "Okay sir,",
-    "Student loan,",
-    "Personal loan,",
-    "Home loan,",
-    "Business loan,",
-    "Twelve lakh rupees,",
-    "Fifteen lakh rupees,",
-    "Ten lakh rupees,",
-    "Twenty lakh rupees,",
   ]
   for (const line of fixedLinesTelugu) {
     if (line) {
@@ -886,6 +858,7 @@ class CallSession {
   interrupt() {
     this.speechEpoch++
     this.botTalking = false
+    this.greetingDone = true
     this.processing = false
     this.outPcmQueue = []
     this.synthChain = Promise.resolve()
@@ -919,7 +892,8 @@ class CallSession {
     this.silenceMs = 0
     this.bargeBuffer = []
     this.bargeMs = 0
-    console.log(`✋ barge-in — caller cut in, dropping the rest of the reply`)
+    this.bargeSilenceFrames = 0
+    console.log(`✋ barge-in — caller cut in (${this.speechMs.toFixed(0)}ms), stopped speaking and listening immediately`)
   }
 
   onMedia(msg) {
@@ -948,14 +922,26 @@ class CallSession {
     if (this.botTalking) {
       if (!BARGE_IN) return
       if (energy > BARGE_ENERGY) {
+        this.bargeSilenceFrames = 0
         this.bargeMs += ms
         this.bargeBuffer.push(frame)
         if (this.bargeMs >= BARGE_MIN_MS) this.interrupt()
       } else {
-        // Not continuous — start over. Interrupting must take a real run of
-        // speech, not a loud frame here and there.
-        this.bargeMs = 0
-        this.bargeBuffer = []
+        // If speech was not yet sustained (less than 60ms / ~3 frames), isolated loud blips
+        // followed by quiet are line clicks/noise and reset immediately.
+        if (this.bargeMs < 60) {
+          this.bargeMs = 0
+          this.bargeBuffer = []
+          this.bargeSilenceFrames = 0
+        } else {
+          // Allow up to 2 grace frames (~40ms) for consonant micro-dips or natural syllabic breaks
+          this.bargeSilenceFrames = (this.bargeSilenceFrames || 0) + 1
+          if (this.bargeSilenceFrames > 2) {
+            this.bargeMs = 0
+            this.bargeBuffer = []
+            this.bargeSilenceFrames = 0
+          }
+        }
       }
       return
     }
@@ -1008,11 +994,9 @@ class CallSession {
     this.maxEnergy = 0
     if (!hadRealSpeech || this.processing) return
 
-    // If initial greeting has not completed playing yet, the caller was just answering/picking up
-    // (e.g. saying "Hello?"). Discard the pickup sound so it doesn't trigger a premature duplicate turn.
+    // Ensure greeting flag is cleared so subsequent turns process immediately
     if (!this.greetingDone) {
-      console.log(`🎙 caller pickup sound before greeting finished (${durationMs.toFixed(0)}ms) — greeting has priority, skipping turn trigger`)
-      return
+      this.greetingDone = true
     }
 
     // The epoch this turn belongs to. If the caller barges in partway

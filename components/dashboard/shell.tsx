@@ -6,12 +6,13 @@ import {
   Users, FileText, Phone, MessageCircle, ShieldCheck,
   ScrollText, LogOut, Mic, BarChart3, UserCog, Search, Menu, X, BookOpen,
   Sparkles, Instagram, PhoneCall, type LucideIcon,
-  BellRing, HeartPulse, CalendarDays,
+  BellRing, HeartPulse, CalendarDays, Landmark,
 } from "lucide-react"
 import { ToastProvider } from "../ui/toast"
 import { Skeleton, SkeletonList } from "../ui/skeleton"
 import CommandPalette from "../ui/command-palette"
 import LeadsView    from "./leads-view"
+import AttentionView from "./attention-view"
 
 // Code splitting: every non-default view is loaded on first navigation
 // instead of shipping in the dashboard's initial bundle. LeadsView stays
@@ -50,6 +51,10 @@ const KnowledgeBaseView = dynamic(() => import("./knowledge-base-view"), {
   ssr: false,
   loading: () => <ViewFallback label="Knowledge Base" />,
 })
+const BankingIntelligenceView = dynamic(() => import("./banking-intelligence-view"), {
+  ssr: false,
+  loading: () => <ViewFallback label="Banking Intelligence" />,
+})
 
 // Floating ops chatbot (Executive Operations Commander) — drag bubble bottom-
 // right, chat history, attachments, voice dictation, action proposals with
@@ -79,10 +84,6 @@ const CalendarView = dynamic(() => import("./calendar-view"), {
   loading: () => <ViewFallback label="Calendar" />,
 })
 const ProfileModal = dynamic(() => import("./profile-modal"), { ssr: false })
-const AttentionView = dynamic(() => import("./attention-view"), {
-  ssr: false,
-  loading: () => <ViewFallback label="Needs Human" />,
-})
 
 import { usePolling, setActivePollingView, PollingViewContext } from "@/lib/use-poll"
 
@@ -103,7 +104,7 @@ function ViewFallback({ label }: { label: string }) {
 // NOTE 2026-10-03: the Branches & Staff AI console was removed per owner
 // decision — the multi-branch backend (session scoping, per-branch script
 // fallback, usage meters) stays intact, just with no management UI.
-export type ViewKey = "leads" | "loans" | "queue" | "voice" | "whatsapp" | "instagram" | "calendar" | "security" | "script" | "knowledge" | "analytics" | "dev-logs" | "attention"
+export type ViewKey = "leads" | "loans" | "queue" | "voice" | "whatsapp" | "instagram" | "calendar" | "security" | "script" | "knowledge" | "brie" | "analytics" | "dev-logs" | "attention"
 export type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
 
 const ROLE_LABEL: Record<Role, string> = { admin: "Administrator", agent: "Loan Officer", viewer: "Viewer", developer: "Administrator", branch_manager: "Operations Manager" }
@@ -117,12 +118,11 @@ const NAV_SECTIONS: NavSection[] = [
   {
     title: "Overview",
     items: [
+      { key: "attention", label: "Needs Human",      icon: BellRing,  roles: ["admin", "agent", "viewer", "branch_manager"] },
       { key: "analytics", label: "Analytics",        icon: BarChart3, roles: ["admin", "agent", "viewer", "branch_manager"] },
-      { key: "attention", label: "Needs Human",      icon: BellRing,  roles: ["admin", "agent", "branch_manager"] },
       { key: "leads",     label: "Leads",             icon: Users,     roles: ["admin", "agent", "viewer", "branch_manager"] },
       { key: "loans",     label: "Loan Applications", icon: FileText,  roles: ["admin", "agent", "viewer", "branch_manager"] },
       { key: "queue",     label: "Call Queue",        icon: PhoneCall, roles: ["admin", "agent", "viewer", "branch_manager"] },
-      { key: "calendar",  label: "Calendar",          icon: CalendarDays, roles: ["admin", "agent", "viewer", "branch_manager", "developer"] },
     ],
   },
   {
@@ -139,6 +139,7 @@ const NAV_SECTIONS: NavSection[] = [
       { key: "security", label: "Security",       icon: ShieldCheck,  roles: ["admin", "developer"] },
       { key: "script",   label: "Priya's Script", icon: ScrollText,   roles: ["admin", "agent", "viewer", "branch_manager"] },
       { key: "knowledge",label: "Knowledge Base", icon: BookOpen,     roles: ["admin", "agent", "viewer", "branch_manager"] },
+      { key: "brie",     label: "Banking Intelligence", icon: Landmark, roles: ["admin", "agent", "viewer", "branch_manager"] },
     ],
   },
   {
@@ -151,9 +152,9 @@ const NAV_SECTIONS: NavSection[] = [
 
 const VIEW_TITLES: Record<ViewKey, { title: string; sub: string }> = {
   analytics: { title: "Analytics",         sub: "Performance across calls, leads, and WhatsApp" },
-  attention: { title: "Needs Human",        sub: "Customers who asked for a person — or need one" },
+  attention: { title: "Needs Human",        sub: "Confirmed loans, scheduled callbacks, office visits & escalations" },
   leads:    { title: "Leads",              sub: "Pipeline and qualified prospects" },
-  loans:    { title: "Loan Applications",  sub: "Incoming home & business loan enquiries" },
+  loans:    { title: "Loan Applications",  sub: "Incoming loan enquiries" },
   queue:    { title: "Call Queue",         sub: "Bulk outbound calling — queue, radar, and controls" },
   voice:    { title: "Voice Logs",         sub: "Voice bot call activity and outcomes" },
   whatsapp: { title: "WhatsApp Chat",      sub: "Live customer conversations" },
@@ -162,6 +163,7 @@ const VIEW_TITLES: Record<ViewKey, { title: string; sub: string }> = {
   security: { title: "Security",           sub: "Access control, compliance policy, and live system health" },
   script:   { title: "Priya's Script",     sub: "View and edit what Priya says on every call" },
   knowledge:{ title: "Knowledge Base",     sub: "Facts Priya can pull into any call or chat, on any turn" },
+  brie:     { title: "Banking Intelligence Engine (BRIE)", sub: "Verified bank rates, RBI guidelines, KFS terms, and lender policy research" },
   "dev-logs": { title: "Activity Logs",   sub: "Your activity, login history, and system events" },
 }
 
@@ -192,7 +194,7 @@ function StatusPill({ icon: Icon, label, ok }: { icon: LucideIcon; label: string
 
 export default function DashboardShell() {
   // Owner-focused default: the console opens on business outcomes, not a list.
-  const [view, setView] = useState<ViewKey>("analytics")
+  const [view, setView] = useState<ViewKey>("attention")
   const [counts, setCounts] = useState({ leads: 0, loans: 0, whatsapp: 0, queue: 0 })
   const [userEmail, setUserEmail] = useState("")
   const [role, setRole] = useState<Role>("viewer") // safest default until the real role loads
@@ -414,7 +416,7 @@ export default function DashboardShell() {
   useEffect(() => {
     const allowed = NAV_SECTIONS.some(s => s.items.some(i => i.key === view && canSee(i.key, i.roles)))
     if (!allowed) {
-      const firstAvailable = visibleSections[0]?.items[0]?.key || "leads"
+      const firstAvailable = visibleSections[0]?.items[0]?.key || "attention"
       setView(firstAvailable)
     }
   }, [role, view, userAllowedModules])
@@ -436,14 +438,15 @@ export default function DashboardShell() {
       case "leads":        return <LeadsView role={role} initialSearch={seedSearch?.view === "leads" ? seedSearch.q : undefined} />
       case "loans":        return <LoanAppsView role={role} initialSearch={seedSearch?.view === "loans" ? seedSearch.q : undefined} />
       case "queue":        return <QueueView role={role} />
-      case "voice":        return <VoiceLogsView role={role} />
-      case "whatsapp":     return <WhatsAppView role={role} />
+      case "voice":        return <VoiceLogsView role={role} initialSearch={seedSearch?.view === "voice" ? seedSearch.q : undefined} />
+      case "whatsapp":     return <WhatsAppView role={role} initialSearch={seedSearch?.view === "whatsapp" ? seedSearch.q : undefined} />
       case "instagram":    return <InstagramView initialSearch={seedSearch?.view === "instagram" ? seedSearch.q : undefined} />
-      case "calendar":     return <CalendarView role={role} />
+      case "calendar":     return <AttentionView role={role} />
       case "security":     return <SecurityView role={role} />
       case "script":       return <ScriptView />
       case "attention":    return <AttentionView role={role} />
       case "knowledge":    return <KnowledgeBaseView role={role} />
+      case "brie":         return <BankingIntelligenceView />
       case "dev-logs":     return role === "developer" ? <DeveloperLogsView userEmail={userEmail} /> : null
       default:             return null
     }
@@ -474,11 +477,11 @@ export default function DashboardShell() {
           translate-x` reads correctly, `translate` does not). Plain inline
           transform sidesteps that entirely. */}
       <aside
-        className="mobile-nav-drawer fixed inset-y-0 left-0 z-50 flex w-[258px] flex-shrink-0 flex-col border-r border-[var(--border)] bg-[var(--bg-sidebar)] md:static"
+        className="mobile-nav-drawer fixed inset-y-0 left-0 z-50 flex h-screen w-[258px] flex-shrink-0 flex-col overflow-hidden border-r border-[var(--border)] bg-[var(--bg-sidebar)] md:static"
         style={{ transform: mobileNavOpen ? "translateX(0)" : "translateX(-100%)", transition: "transform 200ms ease-out" }}
       >
         {/* Brand */}
-        <div className="flex h-16 items-center justify-between border-b border-[var(--border-light)] px-4">
+        <div className="flex h-16 flex-shrink-0 items-center justify-between border-b border-[var(--border-light)] px-4">
           <button
             onClick={() => { setView("analytics"); setMobileNavOpen(false) }}
             className="flex items-center gap-2.5 min-w-0 flex-1 text-left cursor-pointer hover:opacity-90 transition-opacity"
@@ -502,7 +505,7 @@ export default function DashboardShell() {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 overflow-y-auto px-3 pb-4 pt-3" aria-label="Primary">
+        <nav className="flex-1 min-h-0 overflow-y-auto px-3 pb-4 pt-3" aria-label="Primary">
           {visibleSections.map(section => (
             <div key={section.title} className="mb-1">
               <div className="mb-1.5 mt-3 px-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">
@@ -566,7 +569,7 @@ export default function DashboardShell() {
         </nav>
 
         {/* System status — live from /api/system/status, not hardcoded */}
-        <div className="mx-3 mb-3 rounded-xl border border-[var(--border-light)] bg-[var(--overlay-soft)] px-3.5 py-3">
+        <div className="mx-3 mb-3 flex-shrink-0 rounded-xl border border-[var(--border-light)] bg-[var(--overlay-soft)] px-3.5 py-3">
           <div className="flex items-center gap-2">
             <span
               className="h-[7px] w-[7px] rounded-full"
@@ -588,7 +591,7 @@ export default function DashboardShell() {
         </div>
 
         {/* User */}
-        <div className="flex items-center gap-2.5 border-t border-[var(--border-light)] px-4 py-3">
+        <div className="flex flex-shrink-0 items-center gap-2.5 border-t border-[var(--border-light)] px-4 py-3">
           <button
             onClick={() => setShowProfile(true)}
             aria-label="View profile"
@@ -640,6 +643,14 @@ export default function DashboardShell() {
           <button
             onClick={() => setPaletteOpen(true)}
             aria-label="Search everything"
+            className="icon-btn md:hidden"
+            title="Search"
+          >
+            <Search size={16} strokeWidth={2} />
+          </button>
+          <button
+            onClick={() => setPaletteOpen(true)}
+            aria-label="Search everything"
             className="hidden h-9 items-center gap-2.5 rounded-[10px] border border-[var(--border)] bg-[var(--bg-secondary)] px-3 text-[13px] text-[var(--text-muted)] transition-colors hover:border-[var(--border)] hover:text-[var(--text-secondary)] md:flex"
             style={{ width: 210 }}
           >
@@ -682,7 +693,7 @@ export default function DashboardShell() {
             data-view-active attribute flip in globals.css. The old
             key={view} remounted everything on every switch: refetch, scroll
             reset, lost form state, and a loading flash each time. */}
-        <main ref={mainRef} className="flex-1 overflow-auto p-3 md:p-6">
+        <main ref={mainRef} className="flex-1 overflow-auto p-3 pb-24 md:p-6 md:pb-24">
           {[...visitedViews].map(k => (
             <PollingViewContext.Provider key={k} value={k}>
               <div

@@ -151,9 +151,14 @@ export default function ApplyPage() {
         }}
       >
         {!submitted ? (
-          <form onSubmit={handleSubmit}>
+          <form onSubmit={handleSubmit} noValidate>
             {/* Header */}
             <div style={{ marginBottom: 24 }}>
+              <img
+                src="/logo.png"
+                alt="Right Agent Group"
+                style={{ height: 38, width: "auto", objectFit: "contain", marginBottom: 14 }}
+              />
               <h1
                 style={{
                   fontSize: 22,
@@ -290,7 +295,7 @@ export default function ApplyPage() {
                 id="app-loan-type"
                 type="text"
                 required
-                placeholder="e.g. Home Loan, Business Loan, Personal Loan, LAP..."
+                placeholder="e.g. Home, Business, Personal Loan…"
                 value={loanType}
                 onChange={(e) => setLoanType(e.target.value)}
                 style={{

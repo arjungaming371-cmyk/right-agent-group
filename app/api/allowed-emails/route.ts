@@ -13,15 +13,23 @@ async function getBaseRole(roleId: string): Promise<Role> {
   if (VALID_BUILTIN_ROLES.includes(norm as Role)) {
     return norm as Role
   }
+  if (norm === "loan officer" || norm === "loan_officer" || norm === "officer") {
+    return "agent"
+  }
+  if (norm.includes("branch manager") || norm.includes("branch admin") || norm === "branch_admin") {
+    return "branch_manager"
+  }
   try {
     const res = await query(`SELECT config FROM form_configs WHERE id = 'custom_roles_config'`)
     if (res.rowCount && res.rows[0]?.config?.roles) {
-      // Case-insensitive on id AND label: "Admin" must resolve to the role
-      // whose id is "admin" — a case mismatch let a crafted role name slip
-      // past every gate and escalate at login time (2026-09-26 audit).
+      // Case-insensitive on id, slug, AND label
       const needle = norm
+      const needleId = needle.replace(/[^a-z0-9]+/g, "_")
       const found = res.rows[0].config.roles.find(
-        (r: any) => String(r?.id || "").toLowerCase() === needle || String(r?.label || "").toLowerCase() === needle
+        (r: any) =>
+          String(r?.id || "").toLowerCase() === needle ||
+          String(r?.id || "").toLowerCase() === needleId ||
+          String(r?.label || "").toLowerCase() === needle
       )
       if (found?.baseRole) return found.baseRole as Role
     }

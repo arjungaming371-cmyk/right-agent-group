@@ -232,7 +232,7 @@ export async function POST(req: NextRequest) {
           if (brand) for (const w of brand.split(/\s+/)) if (w.length >= 3 && w.length <= 40) vocabulary.push(w)
         }
       } catch { /* vocabulary is optional */ }
-      return NextResponse.json({ text: greeting, disclosure: disclosureFor(language), language, leadId, branchId, voice, vocabulary, hangup: false })
+      return NextResponse.json({ text: greeting, disclosure: null, language, leadId, branchId, voice, vocabulary, hangup: false })
     }
 
     if (event === "turn") {

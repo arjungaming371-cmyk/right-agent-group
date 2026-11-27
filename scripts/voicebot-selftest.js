@@ -28,9 +28,9 @@ const FRAME_MS = 20
 // ---------- runner ----------
 if (!MODE) {
   const modes = [
-    ["A", "default (barge-in off, probe off)", { VOICEBOT_BARGE_IN: "0", VOICEBOT_ECHO_PROBE: "0" }],
-    ["B", "echo probe on", { VOICEBOT_BARGE_IN: "0", VOICEBOT_ECHO_PROBE: "1" }],
-    ["C", "barge-in on", { VOICEBOT_BARGE_IN: "1", VOICEBOT_ECHO_PROBE: "0" }],
+    ["A", "default (barge-in off, probe off)", { VOICEBOT_BARGE_IN: "0", VOICEBOT_ECHO_PROBE: "0", VOICEBOT_BARGE_MIN_MS: "300" }],
+    ["B", "echo probe on", { VOICEBOT_BARGE_IN: "0", VOICEBOT_ECHO_PROBE: "1", VOICEBOT_BARGE_MIN_MS: "300" }],
+    ["C", "barge-in on", { VOICEBOT_BARGE_IN: "1", VOICEBOT_ECHO_PROBE: "0", VOICEBOT_BARGE_MIN_MS: "300" }],
   ]
   let failed = 0
   for (const [id, label, env] of modes) {
