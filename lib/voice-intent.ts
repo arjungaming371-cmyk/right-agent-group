@@ -11,6 +11,7 @@ export type VoiceIntentType =
   | "caller_will_call"
   | "greeting_hello"
   | "caller_asking_identity"
+  | "ai_identity_check"
   | "permission_granted"
   | "backchannel_listening"
   | "repeat_request"
@@ -63,6 +64,19 @@ const ASKING_IDENTITY_RE = new RegExp(
   ')\\b|' +
   'ఎవరు|ఎవరండి|ఎవరు మాట్లాడేది|ఎక్కడి నుంచి|' +
   'कौन बोल रहे हो|कौन है|कहाँ से' +
+  ')',
+  'i'
+)
+
+// 0b2. Caller asking if Priya is a robot / AI / machine
+const AI_IDENTITY_CHECK_RE = new RegExp(
+  '(?:\\b(?:' +
+  'are\\s+you\\s+(?:a\\s+)?(?:robot|ai|machine|computer|bot)|' +
+  'robot\\s*(?:aa|ah|kadha)|ai\\s*(?:aa|ah)|bot\\s*(?:aa|ah)|' +
+  'real\\s+(?:person|human)|nuvvu\\s+(?:robot|manishi)' +
+  ')\\b|' +
+  'రోబోట్|మనిషివా|రోబో|' +
+  'रोबोट|क्या तुम ai हो|असली इंसान' +
   ')',
   'i'
 )
@@ -227,6 +241,15 @@ export function analyzeVoiceSpeech(speech: string): VoiceSemanticAnalysis {
   }
 
   // 5. Caller asking who is speaking / identity inquiry
+  if (AI_IDENTITY_CHECK_RE.test(trimmed)) {
+    return {
+      intent: "ai_identity_check",
+      confidence: 0.98,
+      isInterruptionWorthy: true,
+      rawSpeech: trimmed,
+    }
+  }
+
   if (ASKING_IDENTITY_RE.test(trimmed)) {
     return {
       intent: "caller_asking_identity",

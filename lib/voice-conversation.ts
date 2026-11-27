@@ -832,6 +832,17 @@ STRICT OPERATIONAL DIRECTIVES:
   * English: "This is Priya calling from Right Agent Group sir, do you have a minute to speak?"
 - DO NOT launch into any loan amount question or sales pitch! STOP and wait for them.`,
     ].filter(Boolean).join("\n\n")
+  } else if (semantic.intent === "ai_identity_check") {
+    merged = [
+      merged,
+      `=== CALLER ASKING IF YOU ARE AI / ROBOT ("Are you AI", "Robot va", "Real human") ===
+- The caller is asking if you are an artificial intelligence, robot, or real person.
+- Be honest, polite, and confident in 1 concise natural sentence:
+  * Telugu: "అవును sir, నేను Right Agent Group నుండి AI వాయిస్ అసిస్టెంట్ ప్రియని. మీకు బెస్ట్ లోన్ ఆప్షన్స్ ఇవ్వడంలో సహాయం చేస్తాను. మీకు ప్రస్తుతం లోన్ అవసరం ఉందా?"
+  * Hindi: "जी हाँ sir, मैं Right Agent Group की AI असिस्टेंट प्रिया हूँ। मैं आपको बेस्ट लोन ऑफर्स बताने में मदद कर सकती हूँ।"
+  * English: "Yes sir, I am Priya, an AI voice assistant from Right Agent Group. I can help you find the best loan rates across 20+ partner banks."
+- Do not deny being an AI, and do not recite a long speech.`,
+    ].filter(Boolean).join("\n\n")
   } else if (semantic.intent === "permission_granted") {
     merged = [
       merged,
@@ -991,11 +1002,10 @@ STRICT OPERATIONAL DIRECTIVES:
     merged = [
       merged,
       `=== CRITICAL GROUNDING: INQUIRY ONLY (NO LOAN APPLICATION SUBMITTED YET) ===
-- This caller has NOT submitted any official loan application yet. They only inquired about a loan.
-- STRICT BAN: NEVER say or claim "మీ application already మా దగ్గర ఉంది sir" (we already have your application) or "already in our system"!
-- STRICT BAN: NEVER ask them to provide documents (PAN, Aadhaar) over the phone — all documents are submitted when they fill the official application!
-- Acknowledge their loan requirement warmly. Ask if they would like the official application link sent to their WhatsApp, or if they would prefer to visit our Gandimaisamma office directly to complete the application in person.
-- STRICT SCRIPT RULE: Only send or promise the application link if the customer explicitly agrees ("ఆ పంపించండి", "pampandi", "yes", "sure", "ok"). If the customer says no, vaddu, not now, or does not ask for it, DO NOT send or promise any loan application link — simply provide information and follow the standard post-call script!`,
+- This caller has NOT submitted any official loan application yet.
+- STRICT BAN: NEVER claim their application is already in our system.
+- STRICT BAN: NEVER ask them to provide sensitive documents over the phone.
+- Answer whatever the caller asked directly first. Only discuss loan products or application links when the customer actually asks or confirms interest.`,
     ].filter(Boolean).join("\n\n")
   }
 

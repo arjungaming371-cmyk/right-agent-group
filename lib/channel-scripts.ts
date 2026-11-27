@@ -155,16 +155,16 @@ export const DEFAULT_VOICE_OPENERS: VoiceOpeners = {
   },
   whatsappCallback: {
     english:
-      "Hello! This is Priya from Right Agent Group, Hyderabad — you had reached out to us on WhatsApp earlier, so I'm calling you back. Do you have a minute? I'd love to know what you were looking for.",
+      "Hello, this is Priya calling from Right Agent Group. Do you have a minute to speak?",
     hindi:
-      "नमस्ते! मैं Priya बोल रही हूँ Right Agent Group, Hyderabad से — आपने पहले हमें WhatsApp पे reach out किया था, तो मैं आपको call back कर रही हूँ. एक मिनट है? बताइए, आपको क्या चाहिए था?",
+      "नमस्ते, मैं Right Agent Group से Priya बात कर रही हूँ। क्या बात करने के लिए एक मिनट है?",
     telugu:
-      "నమస్కారం sir, Right Agent Group నుంచి Priya మాట్లాడుతున్నాను — మీరు ఇంతకుముందు మా WhatsApp లో contact అయ్యారు కాబట్టి call back చేస్తున్నాను. One minute time ఉందా sir?",
+      "నమస్కారం sir, Right Agent Group నుంచి Priya మాట్లాడుతున్నాను. మాట్లాడటానికి ఒక నిమిషం time ఉందా sir?",
   },
   whatsappCallbackWithName: {
-    english: `Hello {name}! Priya here from Right Agent Group — you had reached out to us on WhatsApp earlier, so I'm calling you back. Do you have a minute?`,
-    hindi: `नमस्ते {name} ji! मैं Priya, Right Agent Group से — आपने पहले हमें WhatsApp पे contact किया था, तो मैं call back कर रही हूँ. एक मिनट है क्या?`,
-    telugu: `నమస్కారం {name} garu, Right Agent Group నుంచి Priya మాట్లాడుతున్నాను sir — మీరు ఇంతకుముందు మా WhatsApp లో contact అయ్యారు కాబట్టి call back చేస్తున్నాను. కొంచెం time ఉందా sir?`,
+    english: `Hello {name}, this is Priya calling from Right Agent Group. Do you have a minute to speak?`,
+    hindi: `नमस्ते {name} ji, मैं Right Agent Group से Priya बात कर रही हूँ। क्या बात करने के लिए एक मिनट है?`,
+    telugu: `నమస్కారం {name} garu, Right Agent Group నుంచి Priya మాట్లాడుతున్నాను sir. మాట్లాడటానికి ఒక నిమిషం time ఉందా?`,
   },
 }
 
