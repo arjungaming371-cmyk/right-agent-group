@@ -99,7 +99,14 @@ export interface ActionCenterLead {
 
 type Role = "admin" | "agent" | "viewer" | "developer" | "branch_manager"
 type CategoryFilter = "all" | "loan_confirmed" | "branch_visit" | "proposed_visit" | "callback" | "escalation" | "interested_lead"
-type SortField = "priority" | "newest" | "due_at" | "loan_amount"
+type SortField =
+  | "priority"
+  | "newest_first"
+  | "oldest_first"
+  | "upcoming_followup"
+  | "loan_high_low"
+  | "loan_low_high"
+  | "customer_name"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // OBJECT-ORIENTED DOMAIN MODEL: LeadIntelligenceProfile
@@ -323,10 +330,13 @@ const TABS: { key: CategoryFilter; label: string }[] = [
 ]
 
 const SORT_OPTIONS: { key: SortField; label: string }[] = [
-  { key: "priority",    label: "Priority" },
-  { key: "due_at",      label: "Due date" },
-  { key: "loan_amount", label: "Loan amount" },
-  { key: "newest",      label: "Newest" },
+  { key: "priority", label: "Priority" },
+  { key: "newest_first", label: "Newest first" },
+  { key: "oldest_first", label: "Oldest first" },
+  { key: "upcoming_followup", label: "Upcoming follow-up" },
+  { key: "loan_high_low", label: "Loan amount: High to low" },
+  { key: "loan_low_high", label: "Loan amount: Low to high" },
+  { key: "customer_name", label: "Customer name" },
 ]
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -435,16 +445,29 @@ export default function AttentionView({ role }: { role: Role }) {
         if (pDiff !== 0) return pDiff
         return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       }
-      if (sortField === "newest") return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-      if (sortField === "due_at") {
+      if (sortField === "newest_first") {
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      }
+      if (sortField === "oldest_first") {
+        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      }
+      if (sortField === "upcoming_followup") {
         const aDue = a.tasks.find(t => t.due_at)?.due_at
         const bDue = b.tasks.find(t => t.due_at)?.due_at
-        if (!aDue && !bDue) return 0
-        if (!aDue) return 1
-        if (!bDue) return -1
-        return new Date(aDue).getTime() - new Date(bDue).getTime()
+        if (aDue && bDue) return new Date(aDue).getTime() - new Date(bDue).getTime()
+        if (aDue) return -1
+        if (bDue) return 1
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       }
-      if (sortField === "loan_amount") return Number(b.financial.loan_amount || 0) - Number(a.financial.loan_amount || 0)
+      if (sortField === "loan_high_low") {
+        return Number(b.financial.loan_amount || 0) - Number(a.financial.loan_amount || 0)
+      }
+      if (sortField === "loan_low_high") {
+        return Number(a.financial.loan_amount || 0) - Number(b.financial.loan_amount || 0)
+      }
+      if (sortField === "customer_name") {
+        return (a.lead_name || "").localeCompare(b.lead_name || "", undefined, { sensitivity: "base" })
+      }
       return 0
     })
 
@@ -675,28 +698,41 @@ export default function AttentionView({ role }: { role: Role }) {
           </button>
 
           {showSortMenu && (
-            <div className="absolute right-0 top-10 z-40 w-44 rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-1 shadow-2xl animate-in fade-in duration-100">
-              <div className="px-2.5 py-1.5 text-[10.5px] font-bold text-[var(--text-muted)] uppercase tracking-wider border-b border-[var(--border)]">
-                Sort Leads By
+            <div className="absolute right-0 top-10 z-40 w-56 rounded-2xl border border-[var(--border)] bg-[#1a1b1e] p-3.5 shadow-2xl animate-in fade-in duration-100">
+              <div className="mb-3 text-[14px] font-semibold text-white tracking-tight">
+                Sort by
               </div>
-              <div className="py-1">
-                {SORT_OPTIONS.map(opt => (
-                  <button
-                    key={opt.key}
-                    onClick={() => {
-                      setSortField(opt.key)
-                      setShowSortMenu(false)
-                    }}
-                    className={`flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-[12px] text-left transition cursor-pointer ${
-                      sortField === opt.key
-                        ? "bg-[var(--accent-blue)]/15 text-[var(--accent-blue)] font-semibold"
-                        : "text-[var(--text-secondary)] hover:bg-[var(--overlay-hover)] hover:text-[var(--text-primary)]"
-                    }`}
-                  >
-                    <span>{opt.label}</span>
-                    {sortField === opt.key && <Check size={13} />}
-                  </button>
-                ))}
+              <div className="space-y-2.5">
+                {SORT_OPTIONS.map(opt => {
+                  const isSelected = sortField === opt.key
+                  return (
+                    <button
+                      key={opt.key}
+                      onClick={() => {
+                        setSortField(opt.key)
+                        setShowSortMenu(false)
+                      }}
+                      className="group flex w-full items-start gap-2.5 text-left transition cursor-pointer"
+                    >
+                      <div className="pt-0.5 shrink-0">
+                        {isSelected ? (
+                          <span className="flex h-4 w-4 items-center justify-center rounded-full bg-white">
+                            <span className="h-1.5 w-1.5 rounded-full bg-black" />
+                          </span>
+                        ) : (
+                          <span className="flex h-4 w-4 rounded-full border-2 border-neutral-600 group-hover:border-neutral-400 transition" />
+                        )}
+                      </div>
+                      <span className={`text-[13px] leading-snug transition ${
+                        isSelected
+                          ? "font-medium text-white"
+                          : "font-normal text-neutral-300 group-hover:text-white"
+                      }`}>
+                        {opt.label}
+                      </span>
+                    </button>
+                  )
+                })}
               </div>
             </div>
           )}
