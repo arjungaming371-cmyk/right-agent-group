@@ -30,6 +30,7 @@ export type PriorityLevel = "critical" | "high" | "medium" | "low"
 
 export type TaskType =
   | "loan_confirmed"
+  | "loan_application"
   | "branch_visit"
   | "proposed_visit"
   | "callback"
@@ -281,6 +282,7 @@ function timeAgo(iso: string): string {
 
 const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   loan_confirmed:  { label: "Loan confirmed",   color: "#10b981" },
+  loan_application:{ label: "Loan application", color: "#10b981" },
   branch_visit:    { label: "Visit confirmed",   color: "#a78bfa" },
   proposed_visit:  { label: "Visit proposed",    color: "#f59e0b" },
   callback:        { label: "Callback",          color: "#3b82f6" },
@@ -306,7 +308,7 @@ function deriveNextAction(lead: ActionCenterLead): string {
     return formatAppointmentTime(nearest.due_at)
   }
 
-  if (lead.category === "loan_confirmed") return "Review application"
+  if (lead.category === "loan_confirmed" || lead.category === "loan_application") return "Review application"
   if (lead.category === "branch_visit") return "Confirm appointment"
   if (lead.category === "callback") return "Schedule call"
   if (lead.category === "escalation") return "Human assistance"
@@ -367,6 +369,7 @@ export default function AttentionView({ role }: { role: Role }) {
   // Detail Drawer & Resolution State
   const [selectedLead, setSelectedLead] = useState<ActionCenterLead | null>(null)
   const [resolvingLead, setResolvingLead] = useState<ActionCenterLead | null>(null)
+  const [resolvingTask, setResolvingTask] = useState<{ lead: ActionCenterLead; task: ActionTask } | null>(null)
   const [resolutionNotes, setResolutionNotes] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [activeDrawerTab, setActiveDrawerTab] = useState<"overview" | "timeline">("overview")
@@ -425,9 +428,15 @@ export default function AttentionView({ role }: { role: Role }) {
     }
 
     if (category !== "all") {
-      result = result.filter(l =>
-        l.category === category || l.tasks.some(t => t.type === category)
-      )
+      result = result.filter(l => {
+        if (category === "loan_confirmed") {
+          return l.category === "loan_confirmed" || l.category === "loan_application" || l.tasks.some(t => t.type === "loan_confirmed" || t.type === "loan_application")
+        }
+        if (category === "branch_visit") {
+          return l.category === "branch_visit" || l.category === "proposed_visit" || l.tasks.some(t => t.type === "branch_visit" || t.type === "proposed_visit")
+        }
+        return l.category === category || l.tasks.some(t => t.type === category)
+      })
     }
 
     if (priority !== "all") {
@@ -485,29 +494,58 @@ export default function AttentionView({ role }: { role: Role }) {
     return filteredLeads.slice(start, start + pageSize)
   }, [filteredLeads, page, pageSize])
 
-  // ── Resolve ──
+  // ── Resolve (Supports both individual task and consolidated lead resolution) ──
 
   async function handleResolveSubmit() {
     const notes = resolutionNotes.trim()
     if (!notes) return
     setIsSubmitting(true)
 
-    const idsToResolve = resolvingLead ? [resolvingLead.id] : []
+    const targetId = resolvingTask ? resolvingTask.task.id : resolvingLead ? resolvingLead.id : null
+    if (!targetId) {
+      setIsSubmitting(false)
+      return
+    }
 
     try {
       const res = await fetch("/api/escalations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ bulkIds: idsToResolve, notes }),
+        body: JSON.stringify({ id: targetId, notes }),
       })
 
       if (res.ok) {
-        setLeads(prev => (prev ? prev.filter(l => !idsToResolve.includes(l.id)) : prev))
-        setResolvingLead(null)
+        if (resolvingTask) {
+          const parentLeadId = resolvingTask.lead.id
+          const resolvedTaskId = resolvingTask.task.id
+
+          setLeads(prev => {
+            if (!prev) return prev
+            return prev.map(l => {
+              if (l.id !== parentLeadId) return l
+              const remainingTasks = l.tasks.filter(t => t.id !== resolvedTaskId)
+              return { ...l, tasks: remainingTasks }
+            }).filter(l => l.tasks.length > 0)
+          })
+
+          setSelectedLead(prev => {
+            if (!prev || prev.id !== parentLeadId) return prev
+            const remaining = prev.tasks.filter(t => t.id !== resolvedTaskId)
+            if (remaining.length === 0) return null
+            return { ...prev, tasks: remaining }
+          })
+
+          setResolvingTask(null)
+        } else if (resolvingLead) {
+          const leadId = resolvingLead.id
+          setLeads(prev => (prev ? prev.filter(l => l.id !== leadId) : prev))
+          if (selectedLead && selectedLead.id === leadId) setSelectedLead(null)
+          setResolvingLead(null)
+        }
         setResolutionNotes("")
-        if (selectedLead && idsToResolve.includes(selectedLead.id)) setSelectedLead(null)
       } else {
-        setError("Could not resolve item. Please try again.")
+        const data = await res.json().catch(() => ({}))
+        setError(data.error || "Could not resolve item. Please try again.")
       }
     } catch {
       setError("Network error while resolving item.")
@@ -552,7 +590,7 @@ export default function AttentionView({ role }: { role: Role }) {
 
   // ── Computed Metrics (Accurate Due Today & Visits) ──
 
-  const dueToday = useMemo(() => {
+  const dueToday = counts.due_today !== undefined ? counts.due_today : useMemo(() => {
     if (!leads) return 0
     const now = new Date()
     const todayYMD = now.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" })
@@ -573,7 +611,7 @@ export default function AttentionView({ role }: { role: Role }) {
     }).length
   }, [leads])
 
-  const officeVisits = (counts.visits || 0) + (counts.proposed_visits || 0)
+  const officeVisits = counts.visits ?? ((counts.confirmed_visits || 0) + (counts.proposed_visits || 0))
   const escalationCount = counts.escalations || 0
 
   // Instantiated OOP Intelligence Object for Selected Lead
@@ -1194,9 +1232,22 @@ export default function AttentionView({ role }: { role: Role }) {
                           <div key={t.id} className="rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)]/50 p-2.5">
                             <div className="flex items-center justify-between">
                               <span className="text-[12.5px] font-semibold text-[var(--text-primary)]">{t.title}</span>
-                              <span className="text-[10px] font-bold text-[var(--accent-blue)] uppercase px-1.5 py-0.5 rounded bg-[var(--accent-blue)]/10 border border-[var(--accent-blue)]/20">
-                                {t.type === "proposed_visit" ? "Proposed" : t.status}
-                              </span>
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-bold text-[var(--accent-blue)] uppercase px-1.5 py-0.5 rounded bg-[var(--accent-blue)]/10 border border-[var(--accent-blue)]/20">
+                                  {t.type === "proposed_visit" ? "Proposed" : t.status}
+                                </span>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    setResolvingTask({ lead: selectedLead, task: t })
+                                    setResolutionNotes("")
+                                  }}
+                                  className="text-[11px] font-semibold text-emerald-400 hover:text-emerald-300 hover:underline cursor-pointer"
+                                  title="Resolve this task"
+                                >
+                                  Resolve
+                                </button>
+                              </div>
                             </div>
                             {t.due_at && (
                               <div className="mt-1 flex items-center gap-1 text-[11.5px] text-amber-300">
@@ -1334,17 +1385,17 @@ export default function AttentionView({ role }: { role: Role }) {
       )}
 
       {/* ══════════════════════════════════════════════════════════════════════
-          RESOLUTION MODAL
+          RESOLUTION MODAL (Independent Task or Lead Resolution)
       ══════════════════════════════════════════════════════════════════════ */}
-      {resolvingLead && (
+      {(resolvingLead || resolvingTask) && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4 backdrop-blur-[2px]">
           <div className="w-full max-w-md rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-5 shadow-2xl">
             <div className="flex items-center justify-between pb-3 border-b border-[var(--border)]">
               <h3 className="text-[14px] font-semibold text-[var(--text-primary)]">
-                Resolve lead
+                {resolvingTask ? "Resolve individual task" : "Resolve lead action items"}
               </h3>
               <button
-                onClick={() => { setResolvingLead(null); setResolutionNotes("") }}
+                onClick={() => { setResolvingLead(null); setResolvingTask(null); setResolutionNotes("") }}
                 disabled={isSubmitting}
                 className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition cursor-pointer"
               >
@@ -1354,11 +1405,17 @@ export default function AttentionView({ role }: { role: Role }) {
 
             <div className="mt-3">
               <div className="flex items-center justify-between text-[12.5px] mb-2">
-                <span className="font-semibold text-[var(--text-primary)]">{resolvingLead.lead_name}</span>
-                <span className="font-mono text-[var(--text-muted)]">{resolvingLead.lead_phone}</span>
+                <span className="font-semibold text-[var(--text-primary)]">
+                  {resolvingTask ? resolvingTask.task.title : resolvingLead?.lead_name}
+                </span>
+                <span className="font-mono text-[var(--text-muted)]">
+                  {resolvingTask ? resolvingTask.lead.lead_phone : resolvingLead?.lead_phone}
+                </span>
               </div>
               <p className="text-[11.5px] text-[var(--text-muted)] mb-2.5">
-                Add notes for the audit trail.
+                {resolvingTask
+                  ? "Resolving this task will only complete this specific item without affecting other customer records."
+                  : "Add notes for the audit trail to complete all active action center items for this customer."}
               </p>
               <textarea
                 value={resolutionNotes}
@@ -1373,7 +1430,7 @@ export default function AttentionView({ role }: { role: Role }) {
 
             <div className="mt-3.5 flex items-center justify-end gap-2">
               <button
-                onClick={() => { setResolvingLead(null); setResolutionNotes("") }}
+                onClick={() => { setResolvingLead(null); setResolvingTask(null); setResolutionNotes("") }}
                 disabled={isSubmitting}
                 className="h-8 rounded-lg border border-[var(--border)] px-3 text-[12px] font-medium text-[var(--text-muted)] hover:bg-[var(--overlay-hover)] transition cursor-pointer"
               >

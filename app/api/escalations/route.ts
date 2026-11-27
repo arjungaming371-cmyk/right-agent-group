@@ -1,39 +1,73 @@
 import { NextRequest, NextResponse } from "next/server"
-import { query } from "@/lib/db"
+import { query, withTransaction } from "@/lib/db"
 import { requireModuleOrRole, type Role } from "@/lib/auth"
 import { sessionBranchId } from "@/lib/branches"
 import { logAudit } from "@/lib/audit"
 
 export const dynamic = "force-dynamic"
 
-// UNIFIED CRM HUMAN ACTION CENTER API
-// Consolidates Voice & WhatsApp interactions per lead into actionable CRM items:
-// 1. Confirmed Loans (High-value applicants)
-// 2. Confirmed & Proposed Branch Visits (In-person appointments)
-// 3. Scheduled Callbacks (Phone/WhatsApp voice calls)
-// 4. Interested Leads (Inquiry/brochure requests)
-// 5. Customer Escalations & Frustration Flags
+// UNIFIED CRM HUMAN ACTION CENTER API (ENTERPRISE SINGLE-BRANCH ARCHITECTURE)
+// Right Agent Group operates as a single-branch financial consultancy in Hyderabad, India.
+// Consolidates Voice & WhatsApp interactions, Calendar commitments, and Loan applications per lead.
 
 const ROLE_LIST: Role[] = ["admin", "agent", "branch_manager", "developer"]
+
+const COMPANY_CONFIG = {
+  name: "Right Agent Group",
+  officeName: "Head Office (Medchal Branch)",
+  officeLocation: "Medchal branch above Masters GYM, Hyderabad",
+  operatingHours: "Weekdays 9:30 AM – 6:30 PM",
+  helpline: "+91 8333997227",
+  whatsappSupport: "+91 8333993223",
+  partnerBanksCount: "20+ leading banks and NBFCs",
+}
 
 function normalizePhone(p?: string | null): string {
   if (!p) return ""
   return p.replace(/\D/g, "").slice(-10)
 }
 
-function parseCallSummary(raw: any): { fullSpokenName?: string; address?: string; nextAction?: string; concerns?: string[] } {
-  if (!raw) return {}
-  try {
-    const parsed = typeof raw === "object" ? raw : JSON.parse(String(raw))
-    return {
-      fullSpokenName: parsed.lead_name || undefined,
-      address: parsed.address || undefined,
-      nextAction: parsed.next_action || undefined,
-      concerns: Array.isArray(parsed.concerns) ? parsed.concerns : undefined,
+function extractStructuredConcerns(facts: any, memorySummary: string, tasks: any[]): string[] {
+  const concernsList = new Set<string>()
+
+  // 1. Semantic Objections directly from Lead Brain analysis
+  if (Array.isArray(facts?.objections_raised)) {
+    for (const obj of facts.objections_raised) {
+      if (typeof obj === "string" && obj.trim()) {
+        concernsList.add(obj.trim())
+      }
     }
-  } catch {
-    return {}
   }
+
+  // 2. Verified CIBIL analysis (Only flag if score is actually subprime / delinquent, not just mentioned)
+  const cibilStr = String(facts?.cibil_mentioned || "")
+  const cibilNum = parseInt(cibilStr.replace(/\D/g, ""), 10)
+  if (!isNaN(cibilNum)) {
+    if (cibilNum < 650) {
+      concernsList.add(`Low CIBIL (${cibilNum})`)
+    }
+  } else if (/low\s+cibil|bad\s+cibil|cibil\s+issue|past\s+default|delinquen|settlement/i.test(cibilStr)) {
+    concernsList.add("Low CIBIL / Past Delinquency")
+  }
+
+  // 3. Collateral Details (Agricultural land requires specialized lending programs)
+  const propDetails = String(facts?.property_details || "")
+  if (/agri|agriculture|land|patta|passbook|dharani/i.test(propDetails)) {
+    concernsList.add("Agricultural Land Collateral")
+  }
+
+  // 4. Processing fees & charges queries
+  if (/processing\s+fee|hidden\s+charge|advance\s+payment/i.test(memorySummary)) {
+    concernsList.add("Processing Fee Queries")
+  }
+
+  // 5. Genuine Escalations / Frustration from tasks
+  const hasEscalationTask = tasks.some(t => t.type === "escalation" || /frustrated|complaint|manager/i.test(t.title || ""))
+  if (hasEscalationTask) {
+    concernsList.add("Requested Senior Assistance")
+  }
+
+  return Array.from(concernsList)
 }
 
 export async function GET(req: NextRequest) {
@@ -48,7 +82,7 @@ export async function GET(req: NextRequest) {
   const channelFilter = url.searchParams.get("channel") || "all"
 
   try {
-    // 1. Fetch pending alerts from comm_logs
+    // 1. Fetch pending alerts from comm_logs (No hardcoded limits; no 60-day exclusion of active alerts)
     const alertsRes = await query(
       `SELECT c.id, c.lead_id, c.summary, c.outcome, c.created_at,
               l.name AS lead_name, l.phone AS lead_phone, l.whatsapp_number AS lead_whatsapp,
@@ -83,22 +117,20 @@ export async function GET(req: NextRequest) {
             ORDER BY la.submitted_at DESC
             LIMIT 1
          ) last_app ON true
-        WHERE c.type = 'alert' AND c.outcome IN ('needs_human', 'loan_confirmed')
-          AND c.created_at > now() - interval '60 days'
+        WHERE c.type = 'alert' AND c.outcome IN ('needs_human', 'loan_confirmed', 'escalation')
           AND ($1::uuid IS NULL OR l.branch_id = $1::uuid)
           AND NOT EXISTS (
             SELECT 1 FROM comm_logs r
              WHERE r.lead_id = c.lead_id
                AND (
-                 r.outcome IN ('needs_human_resolved', 'loan_confirmed_resolved')
+                 r.outcome IN ('needs_human_resolved', 'loan_confirmed_resolved', 'escalation_resolved')
                  OR (r.type = 'system' AND r.outcome = 'resolved')
                )
                AND r.created_at >= c.created_at
           )
-        ORDER BY c.created_at DESC
-        LIMIT 250`,
+        ORDER BY c.created_at DESC`,
       [branchId]
-    ).catch(() => ({ rows: [] as any[] }))
+    )
 
     // 2. Fetch calendar events (Appointments, Callbacks, Proposed visits)
     const calRes = await query(
@@ -128,14 +160,12 @@ export async function GET(req: NextRequest) {
          ) last_call ON true
         WHERE e.status IN ('confirmed', 'needs_review', 'rescheduled')
           AND e.event_type IN ('branch_visit', 'proposed_visit', 'callback', 'interested_lead')
-          AND e.created_at >= now() - interval '60 days'
           AND ($1::uuid IS NULL OR e.branch_id = $1::uuid)
-        ORDER BY e.event_at ASC NULLS LAST, e.created_at DESC
-        LIMIT 250`,
+        ORDER BY e.event_at ASC NULLS LAST, e.created_at DESC`,
       [branchId]
-    ).catch(() => ({ rows: [] as any[] }))
+    )
 
-    // 3. Fetch loan applications
+    // 3. Fetch loan applications pending review
     const loanAppsRes = await query(
       `SELECT a.id, a.lead_id, a.customer_name AS lead_name, a.phone AS lead_phone,
               a.whatsapp_number AS lead_whatsapp, a.loan_type AS product_interest,
@@ -159,22 +189,21 @@ export async function GET(req: NextRequest) {
             LIMIT 1
          ) last_call ON true
         WHERE a.status IN ('pending', 'submitted')
-          AND a.submitted_at > now() - interval '60 days'
           AND ($1::uuid IS NULL OR a.branch_id = $1::uuid)
-        ORDER BY a.submitted_at DESC
-        LIMIT 100`,
+        ORDER BY a.submitted_at DESC`,
       [branchId]
-    ).catch(() => ({ rows: [] as any[] }))
+    )
 
     // =========================================================================
-    // CONSOLIDATION ENGINE: Group all interactions per Unique Lead
+    // CONSOLIDATION ENGINE: Group all interactions per Unique Customer
+    // One customer may have multiple tasks, but appears only once in customer table
     // =========================================================================
     const leadMap = new Map<string, any>()
 
     function getLeadKey(leadId?: string | null, phone?: string | null): string {
-      if (leadId) return `lead_${leadId}`
       const norm = normalizePhone(phone)
       if (norm) return `phone_${norm}`
+      if (leadId) return `lead_${leadId}`
       return `temp_${Math.random().toString(36).slice(2)}`
     }
 
@@ -200,7 +229,7 @@ export async function GET(req: NextRequest) {
           priority: "medium",     // default, upgraded by tasks
           tasks: [],
           financial: {},
-          concerns: new Set<string>(),
+          concerns: [] as string[],
           recommended_actions: [] as string[],
           timeline: [] as any[],
           ai_analysis: {},
@@ -211,6 +240,7 @@ export async function GET(req: NextRequest) {
         })
       }
       const existing = leadMap.get(key)
+      if (!existing.lead_id && leadId) existing.lead_id = leadId
       if (!existing.lead_name || existing.lead_name === "Unknown Lead") {
         if (name) existing.lead_name = name
       }
@@ -220,14 +250,15 @@ export async function GET(req: NextRequest) {
       return existing
     }
 
-    // 1. Map Calendar Events
+    // 1. Process Calendar Events
     for (const ce of calRes.rows) {
       const key = getLeadKey(ce.lead_id, ce.lead_phone)
       const lead = getOrCreateLeadRecord(key, ce.lead_id, ce.lead_name, ce.lead_phone, ce.lead_whatsapp, ce.lead_status, ce.location || ce.lead_address)
 
       const isTentative = ce.status === "needs_review" || ce.confidence !== "high" ||
         /open invitation|without confirming|did not commit|tentative/i.test(ce.notes || "") ||
-        /open invitation|without confirming|did not commit|tentative/i.test(ce.review_reason || "")
+        /open invitation|without confirming|did not commit|tentative/i.test(ce.review_reason || "") ||
+        !ce.event_at
 
       let taskType = ce.event_type || "callback"
       if (isTentative && (taskType === "branch_visit" || !taskType)) {
@@ -239,7 +270,6 @@ export async function GET(req: NextRequest) {
       const isDueSoon = !isNaN(eventTime) && eventTime < Date.now() + 2 * 3600 * 1000
 
       let taskPriority: "critical" | "high" | "medium" | "low" = "medium"
-
       if (taskType === "branch_visit") {
         taskPriority = isOverdue ? "critical" : isDueSoon ? "critical" : "high"
       } else if (taskType === "proposed_visit") {
@@ -247,7 +277,7 @@ export async function GET(req: NextRequest) {
       } else if (taskType === "callback") {
         taskPriority = isOverdue ? "critical" : isDueSoon ? "high" : "medium"
       } else if (taskType === "interested_lead") {
-        taskPriority = "medium"
+        taskPriority = "low"
       }
 
       lead.tasks.push({
@@ -266,15 +296,18 @@ export async function GET(req: NextRequest) {
         channel: ce.channel || "phone",
         confidence: ce.confidence || "medium",
         is_overdue: isOverdue,
+        is_due_soon: isDueSoon,
+        priority: taskPriority,
       })
 
-      // Upgrade lead priority & primary category
+      // Update lead priority
       if (taskPriority === "critical") lead.priority = "critical"
       else if (taskPriority === "high" && lead.priority !== "critical") lead.priority = "high"
 
+      // Category assignment
       if (taskType === "branch_visit") lead.category = "branch_visit"
-      else if (taskType === "proposed_visit") lead.category = "proposed_visit"
-      else if (taskType === "callback" && lead.category !== "branch_visit" && lead.category !== "loan_confirmed" && lead.category !== "proposed_visit") lead.category = "callback"
+      else if (taskType === "proposed_visit" && lead.category !== "branch_visit") lead.category = "proposed_visit"
+      else if (taskType === "callback" && lead.category !== "branch_visit" && lead.category !== "proposed_visit") lead.category = "callback"
 
       if (ce.product_interest) lead.financial.product_interest = ce.product_interest
       if (ce.loan_amount) lead.financial.loan_amount = ce.loan_amount
@@ -285,20 +318,19 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // 2. Map Alerts from comm_logs
+    // 2. Process Comm Log Alerts
     for (const r of alertsRes.rows) {
       const key = getLeadKey(r.lead_id, r.lead_phone)
       const lead = getOrCreateLeadRecord(key, r.lead_id, r.lead_name, r.lead_phone, r.lead_whatsapp, r.lead_status, r.city || r.lead_address)
 
-      const isLoan = r.outcome === "loan_confirmed"
-      const taskType = isLoan ? "loan_confirmed" : "escalation"
-      const taskPriority = isLoan ? "critical" : "high"
+      const isFrustration = /frustrated|angry|annoyed|complain/i.test(r.summary || "")
+      const taskPriority: "critical" | "high" | "medium" | "low" = isFrustration ? "critical" : "high"
 
       lead.tasks.push({
         id: `comm_${r.id}`,
         raw_id: String(r.id),
-        type: taskType,
-        title: isLoan ? "Loan Confirmed by Customer" : "Human Attention Escalation",
+        type: "escalation",
+        title: isFrustration ? "Customer Grievance Escalation" : "Human Assistance Requested",
         status: "pending",
         due_at: null,
         created_at: r.created_at,
@@ -306,13 +338,14 @@ export async function GET(req: NextRequest) {
         source_id: String(r.id),
         notes: r.summary,
         channel: "voice",
+        priority: taskPriority,
       })
 
-      if (isLoan) {
-        lead.category = "loan_confirmed"
-        lead.priority = "critical"
-      } else if (lead.priority !== "critical") {
-        lead.priority = "high"
+      if (taskPriority === "critical") lead.priority = "critical"
+      else if (lead.priority !== "critical") lead.priority = "high"
+
+      if (lead.category !== "branch_visit" && lead.category !== "proposed_visit") {
+        lead.category = "escalation"
       }
 
       if (r.product_interest) lead.financial.product_interest = r.product_interest
@@ -324,26 +357,34 @@ export async function GET(req: NextRequest) {
       if (r.memory_facts) lead.ai_analysis.facts = r.memory_facts
     }
 
-    // 3. Map Loan Applications
+    // 3. Process Loan Applications (Do NOT mark as confirmed loan; accurately classify as loan_application)
     for (const la of loanAppsRes.rows) {
       const key = getLeadKey(la.lead_id, la.lead_phone)
       const lead = getOrCreateLeadRecord(key, la.lead_id, la.lead_name, la.lead_phone, la.lead_whatsapp, la.loan_status, la.city || la.lead_address)
 
+      const amt = Number(la.loan_amount || 0)
+      const isHighValue = amt >= 5000000 // >= 50 Lakhs
+      const appPriority: "critical" | "high" | "medium" | "low" = isHighValue ? "high" : "medium"
+
       lead.tasks.push({
         id: `app_${la.id}`,
         raw_id: String(la.id),
-        type: "loan_confirmed",
-        title: `Loan Application Submitted (${la.product_interest || "Loan"})`,
+        type: "loan_application",
+        title: `Loan Application Submitted (${la.product_interest || "Business Loan"})`,
         status: la.loan_status || "pending",
         due_at: null,
         created_at: la.submitted_at,
         source: "loan_application",
         source_id: String(la.id),
         channel: "online",
+        priority: appPriority,
       })
 
-      lead.category = "loan_confirmed"
-      lead.priority = "critical"
+      // Set lead priority only if higher
+      if (appPriority === "high" && lead.priority !== "critical") lead.priority = "high"
+      if (lead.category !== "branch_visit" && lead.category !== "proposed_visit" && lead.category !== "escalation") {
+        lead.category = "loan_application"
+      }
 
       if (la.product_interest) lead.financial.product_interest = la.product_interest
       if (la.loan_amount) lead.financial.loan_amount = la.loan_amount
@@ -357,137 +398,45 @@ export async function GET(req: NextRequest) {
     // Convert Map to Array
     const rawLeads = Array.from(leadMap.values())
 
-    // 4. Enrich Leads with Timeline, Concerns & Recommended Actions
-    const leadIdsForEnrichment = rawLeads.map(l => l.lead_id).filter(Boolean)
-    let callHistoryMap = new Map<string, any[]>()
-    let waHistoryMap = new Map<string, any[]>()
-
-    if (leadIdsForEnrichment.length > 0) {
-      // Fetch recent voice calls
-      const callsQuery = await query(
-        `SELECT v.id, v.lead_id, v.duration, v.sentiment, v.language, v.ai_summary, v.created_at, v.recording_url
-           FROM voice_calls v
-          WHERE v.lead_id = ANY($1::uuid[])
-          ORDER BY v.created_at DESC`,
-        [leadIdsForEnrichment]
-      ).catch(() => ({ rows: [] as any[] }))
-
-      for (const c of callsQuery.rows) {
-        if (!callHistoryMap.has(c.lead_id)) callHistoryMap.set(c.lead_id, [])
-        callHistoryMap.get(c.lead_id)!.push(c)
-      }
-
-      // Fetch recent whatsapp messages
-      const waQuery = await query(
-        `SELECT m.id, m.lead_id, m.body, m.direction, m.created_at, m.status
-           FROM whatsapp_messages m
-          WHERE m.lead_id = ANY($1::uuid[])
-          ORDER BY m.created_at DESC
-          LIMIT 500`,
-        [leadIdsForEnrichment]
-      ).catch(() => ({ rows: [] as any[] }))
-
-      for (const m of waQuery.rows) {
-        if (!waHistoryMap.has(m.lead_id)) waHistoryMap.set(m.lead_id, [])
-        waHistoryMap.get(m.lead_id)!.push(m)
-      }
-    }
-
-    // Build Final Clean Lead Structure
+    // 4. Enrich Leads with Semantic Intelligence & Dynamic Next Actions
     const enrichedLeads = rawLeads.map(lead => {
-      const calls = lead.lead_id ? callHistoryMap.get(lead.lead_id) || [] : []
-      const waMsgs = lead.lead_id ? waHistoryMap.get(lead.lead_id) || [] : []
+      // Semantic Concern Extraction
+      lead.concerns = extractStructuredConcerns(lead.ai_analysis.facts, lead.ai_analysis.summary || "", lead.tasks)
 
-      // Build Chronological Timeline
-      const timeline: any[] = []
-      calls.slice(0, 5).forEach(c => {
-        const parsed = parseCallSummary(c.ai_summary)
-        timeline.push({
-          id: `call_${c.id}`,
-          channel: "phone",
-          direction: "outbound",
-          timestamp: c.created_at,
-          title: `Voice Call (${c.duration ? `${Math.floor(c.duration / 60)}m ${c.duration % 60}s` : "Connected"})`,
-          summary: typeof c.ai_summary === "string" ? c.ai_summary : (parsed.fullSpokenName ? `Call with ${parsed.fullSpokenName}` : "Voice interaction with Priya"),
-          sentiment: c.sentiment || "neutral",
-          language: c.language || "Telugu",
-          recording_url: c.recording_url,
-        })
-      })
-
-      waMsgs.slice(0, 5).forEach(w => {
-        timeline.push({
-          id: `wa_${w.id}`,
-          channel: "whatsapp",
-          direction: w.direction || "inbound",
-          timestamp: w.created_at,
-          title: w.direction === "inbound" ? "WhatsApp Message Received" : "WhatsApp Message Sent",
-          summary: w.body ? w.body.slice(0, 160) : "WhatsApp message",
-          sentiment: "neutral",
-        })
-      })
-
-      timeline.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-      lead.timeline = timeline
-
-      // Detect Concerns from Memory & Tasks
-      const concernsList = new Set<string>()
-      const memText = (lead.ai_analysis.summary || "").toLowerCase()
-      const quoteText = lead.tasks.map((t: any) => t.raw_quote || "").join(" ").toLowerCase()
-      const combinedIntel = `${memText} ${quoteText}`
-
-      if (combinedIntel.includes("interest") || combinedIntel.includes("rate") || combinedIntel.includes("roi") || combinedIntel.includes("expensive")) {
-        concernsList.add("Interest Rate Sensitivity")
-      }
-      if (combinedIntel.includes("cibil") || combinedIntel.includes("score") || combinedIntel.includes("overdue") || combinedIntel.includes("settlement")) {
-        concernsList.add("Low CIBIL / Past Delinquency")
-      }
-      if (combinedIntel.includes("processing") || combinedIntel.includes("fee") || combinedIntel.includes("charges")) {
-        concernsList.add("Processing Fee Queries")
-      }
-      if (combinedIntel.includes("father") || combinedIntel.includes("family") || combinedIntel.includes("spouse") || combinedIntel.includes("wife")) {
-        concernsList.add("Family / Co-applicant Consultation")
-      }
-      if (combinedIntel.includes("agri") || combinedIntel.includes("land") || combinedIntel.includes("passbook") || combinedIntel.includes("dharani")) {
-        concernsList.add("Agricultural Land Collateral")
-      }
-      if (combinedIntel.includes("frustrat") || combinedIntel.includes("angry") || combinedIntel.includes("annoyed") || combinedIntel.includes("human")) {
-        concernsList.add("Frustrated / Demanded Senior Person")
-      }
-
-      lead.concerns = Array.from(concernsList)
-
-      // Derive Recommended Next Actions
+      // Dynamic Recommended Actions using Company Configuration
       const actions: string[] = []
-      const hasLoanConfirmed = lead.tasks.some((t: any) => t.type === "loan_confirmed")
+      const hasApp = lead.tasks.some((t: any) => t.type === "loan_application")
       const hasBranchVisit = lead.tasks.some((t: any) => t.type === "branch_visit")
       const hasCallback = lead.tasks.some((t: any) => t.type === "callback")
       const hasProposedVisit = lead.tasks.some((t: any) => t.type === "proposed_visit")
+      const hasEscalation = lead.tasks.some((t: any) => t.type === "escalation")
 
-      if (hasLoanConfirmed) {
-        actions.push("Review KYC & Bank Statement PDF")
-        actions.push("Check eligibility across partner banks (HDFC/ICICI/SBI)")
-        actions.push("Generate and send Sanction Key Facts Statement (KFS)")
+      if (hasApp) {
+        actions.push(`Review KYC & Bank Statement PDF for eligibility check across ${COMPANY_CONFIG.partnerBanksCount}`)
+        actions.push("Verify business vintage and GST filings")
+        actions.push("Generate and issue Sanction Key Facts Statement (KFS)")
       } else if (hasBranchVisit) {
-        actions.push("Confirm Branch Officer availability for scheduled visit")
-        actions.push("Send WhatsApp location pin (Mallikarjuna Complex, Gandimaisamma)")
-        actions.push("Prepare physical file checklist (Aadhaar, PAN, Payslips)")
+        actions.push(`Confirm Branch Manager availability at ${COMPANY_CONFIG.officeLocation}`)
+        actions.push("Send WhatsApp location pin & physical file checklist (Aadhaar, PAN, Bank slips)")
+        actions.push("Block in-person meeting slot")
+      } else if (hasProposedVisit) {
+        actions.push(`Follow up on WhatsApp with ${COMPANY_CONFIG.officeName} directions & hours (${COMPANY_CONFIG.operatingHours})`)
+        actions.push("Lock in a specific appointment time slot with the customer")
       } else if (hasCallback) {
         const nextCb = lead.tasks.find((t: any) => t.type === "callback")
-        actions.push(`Call customer at promised callback slot (${nextCb?.due_at ? new Date(nextCb.due_at).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "numeric", minute: "2-digit", hour12: true }) : "As scheduled"})`)
-        actions.push("Have lowest ROI corporate discount quotes ready")
-      } else if (hasProposedVisit) {
-        actions.push("Follow up on WhatsApp with office directions & timings (9 AM - 6 PM)")
-        actions.push("Lock in a specific appointment time slot")
+        actions.push(`Call customer at scheduled slot (${nextCb?.due_at ? new Date(nextCb.due_at).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "numeric", minute: "2-digit", hour12: true }) : "As scheduled"})`)
+        actions.push("Have bank comparison sheets ready")
+      } else if (hasEscalation) {
+        actions.push("Connect directly to resolve customer questions or grievance")
+        actions.push("Review recent call recording & WhatsApp history for context before dialing")
       } else {
-        actions.push("Connect directly to understand loan requirement")
-        actions.push("Verify employment and monthly income")
+        actions.push("Connect to understand loan requirement and eligibility")
       }
 
       lead.recommended_actions = actions
 
-      // Clean Structured AI Summary (Structured 2-line summary instead of giant paragraphs)
-      const prod = (lead.financial.product_interest || "Loan").toUpperCase()
+      // Structured Summary
+      const prod = (lead.financial.product_interest || "Business Loan").toUpperCase()
       const amtStr = lead.financial.loan_amount ? `₹${Number(lead.financial.loan_amount).toLocaleString("en-IN")}` : "Flexible requirement"
       const cityStr = lead.city || lead.financial.city ? ` in ${lead.city || lead.financial.city}` : ""
       const taskHighlight = lead.tasks[0]?.title || "Attention required"
@@ -498,9 +447,8 @@ export async function GET(req: NextRequest) {
       return lead
     })
 
-    // Apply In-Memory Search & Filters (Scalable to 10,000 leads)
+    // Filter by Search Query
     let filtered = enrichedLeads
-
     if (searchQuery) {
       filtered = filtered.filter(l => {
         const nameMatch = (l.lead_name || "").toLowerCase().includes(searchQuery)
@@ -508,35 +456,48 @@ export async function GET(req: NextRequest) {
         const cityMatch = (l.city || "").toLowerCase().includes(searchQuery)
         const prodMatch = (l.financial.product_interest || "").toLowerCase().includes(searchQuery)
         const summaryMatch = (l.summary || "").toLowerCase().includes(searchQuery)
-        return nameMatch || phoneMatch || cityMatch || prodMatch || summaryMatch
+        const concernsMatch = l.concerns.some((c: string) => c.toLowerCase().includes(searchQuery))
+        return nameMatch || phoneMatch || cityMatch || prodMatch || summaryMatch || concernsMatch
       })
     }
 
+    // Filter by Category
     if (categoryFilter !== "all") {
       filtered = filtered.filter(l => {
-        if (categoryFilter === "loan_confirmed") return l.category === "loan_confirmed" || l.tasks.some((t: any) => t.type === "loan_confirmed")
-        if (categoryFilter === "branch_visit") return l.category === "branch_visit" || l.tasks.some((t: any) => t.type === "branch_visit")
-        if (categoryFilter === "proposed_visit") return l.category === "proposed_visit" || l.tasks.some((t: any) => t.type === "proposed_visit")
-        if (categoryFilter === "callback") return l.category === "callback" || l.tasks.some((t: any) => t.type === "callback")
-        if (categoryFilter === "escalation") return l.category === "escalation" || l.tasks.some((t: any) => t.type === "escalation")
-        if (categoryFilter === "interested_lead") return l.category === "interested_lead" || l.tasks.some((t: any) => t.type === "interested_lead")
+        if (categoryFilter === "loan_confirmed" || categoryFilter === "loan_application") {
+          return l.category === "loan_confirmed" || l.category === "loan_application" || l.tasks.some((t: any) => t.type === "loan_application" || t.type === "loan_confirmed")
+        }
+        if (categoryFilter === "branch_visit") {
+          return l.category === "branch_visit" || l.category === "proposed_visit" || l.tasks.some((t: any) => t.type === "branch_visit" || t.type === "proposed_visit")
+        }
+        if (categoryFilter === "callback") {
+          return l.category === "callback" || l.tasks.some((t: any) => t.type === "callback")
+        }
+        if (categoryFilter === "escalation") {
+          return l.category === "escalation" || l.tasks.some((t: any) => t.type === "escalation")
+        }
+        if (categoryFilter === "interested_lead") {
+          return l.category === "interested_lead" || l.tasks.some((t: any) => t.type === "interested_lead")
+        }
         return true
       })
     }
 
+    // Filter by Priority
     if (priorityFilter !== "all") {
       filtered = filtered.filter(l => l.priority === priorityFilter)
     }
 
+    // Filter by Channel
     if (channelFilter !== "all") {
       filtered = filtered.filter(l => {
-        if (channelFilter === "phone") return l.timeline.some((t: any) => t.channel === "phone") || l.tasks.some((t: any) => t.channel === "phone")
-        if (channelFilter === "whatsapp") return l.timeline.some((t: any) => t.channel === "whatsapp") || l.tasks.some((t: any) => t.channel === "whatsapp_text" || t.channel === "whatsapp_voice")
+        if (channelFilter === "phone") return l.tasks.some((t: any) => t.channel === "phone" || t.channel === "in_person")
+        if (channelFilter === "whatsapp") return l.tasks.some((t: any) => t.channel === "whatsapp" || t.channel === "whatsapp_text" || t.channel === "whatsapp_voice")
         return true
       })
     }
 
-    // Sort: Critical first, then High, then Medium, then newest
+    // Default Sorting: Critical first, then High, then Medium, then Newest
     const pOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 }
     filtered.sort((a, b) => {
       const pDiff = (pOrder[a.priority] ?? 2) - (pOrder[b.priority] ?? 2)
@@ -544,19 +505,43 @@ export async function GET(req: NextRequest) {
       return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     })
 
-    const counts = {
-      all: enrichedLeads.length,
-      loans: enrichedLeads.filter(i => i.category === "loan_confirmed" || i.tasks.some((t: any) => t.type === "loan_confirmed")).length,
-      visits: enrichedLeads.filter(i => i.category === "branch_visit" || i.tasks.some((t: any) => t.type === "branch_visit")).length,
-      proposed_visits: enrichedLeads.filter(i => i.category === "proposed_visit" || i.tasks.some((t: any) => t.type === "proposed_visit")).length,
-      callbacks: enrichedLeads.filter(i => i.category === "callback" || i.tasks.some((t: any) => t.type === "callback")).length,
-      escalations: enrichedLeads.filter(i => i.category === "escalation" || i.tasks.some((t: any) => t.type === "escalation")).length,
-      interested: enrichedLeads.filter(i => i.category === "interested_lead" || i.tasks.some((t: any) => t.type === "interested_lead")).length,
-      critical: enrichedLeads.filter(i => i.priority === "critical").length,
-      high: enrichedLeads.filter(i => i.priority === "high").length,
+    // Accurate Timezone-Consistent Dashboard Counters (Asia/Kolkata)
+    const now = new Date()
+    const todayYMD = now.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" })
+
+    function isTaskDueToday(t: any): boolean {
+      if (!t.due_at) return false
+      const d = new Date(t.due_at)
+      if (isNaN(d.getTime())) return false
+      return d.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }) === todayYMD
     }
 
-    // Optional server pagination
+    function isTaskOverdue(t: any): boolean {
+      if (!t.due_at) return false
+      const ts = new Date(t.due_at).getTime()
+      if (isNaN(ts)) return false
+      return ts < Date.now()
+    }
+
+    const totalPendingTasksCount = enrichedLeads.reduce((acc, l) => acc + l.tasks.length, 0)
+
+    const counts = {
+      all: enrichedLeads.length,
+      pending_actions: totalPendingTasksCount,
+      unique_leads: enrichedLeads.length,
+      due_today: enrichedLeads.filter(l => l.tasks.some(isTaskDueToday) || l.category === "proposed_visit" || l.category === "escalation").length,
+      overdue: enrichedLeads.filter(l => l.tasks.some(isTaskOverdue)).length,
+      visits: enrichedLeads.filter(l => l.category === "branch_visit" || l.category === "proposed_visit" || l.tasks.some((t: any) => t.type === "branch_visit" || t.type === "proposed_visit")).length,
+      confirmed_visits: enrichedLeads.filter(l => l.category === "branch_visit" || l.tasks.some((t: any) => t.type === "branch_visit")).length,
+      proposed_visits: enrichedLeads.filter(l => l.category === "proposed_visit" || l.tasks.some((t: any) => t.type === "proposed_visit")).length,
+      callbacks: enrichedLeads.filter(l => l.category === "callback" || l.tasks.some((t: any) => t.type === "callback")).length,
+      applications: enrichedLeads.filter(l => l.category === "loan_application" || l.tasks.some((t: any) => t.type === "loan_application")).length,
+      escalations: enrichedLeads.filter(l => l.category === "escalation" || l.tasks.some((t: any) => t.type === "escalation")).length,
+      critical: enrichedLeads.filter(l => l.priority === "critical").length,
+      high: enrichedLeads.filter(l => l.priority === "high").length,
+    }
+
+    // Server-level Pagination
     const page = parseInt(url.searchParams.get("page") || "1")
     const limit = parseInt(url.searchParams.get("limit") || "50")
     const totalItems = filtered.length
@@ -572,7 +557,7 @@ export async function GET(req: NextRequest) {
     })
   } catch (e: any) {
     console.error("[ActionCenter] escalations GET failed:", e?.message)
-    return NextResponse.json({ error: "Could not load action items. Please try again." }, { status: 500 })
+    return NextResponse.json({ error: "Failed to load action items. " + (e?.message || "") }, { status: 500 })
   }
 }
 
@@ -585,13 +570,12 @@ export async function POST(req: NextRequest) {
     logId?: string
     id?: string
     bulkIds?: string[]
-    itemSource?: string
     action?: string
     notes?: string
   }
 
   const targetIds: string[] = body.bulkIds && Array.isArray(body.bulkIds) && body.bulkIds.length > 0
-    ? body.bulkIds
+    ? body.bulkIds.map(String).map(s => s.trim()).filter(Boolean)
     : [String(body.id || body.logId || "").trim()].filter(Boolean)
 
   const noteText = String(body.notes || "").trim()
@@ -599,121 +583,171 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "id or bulkIds required" }, { status: 400 })
   }
 
+  const resolutionResults: { id: string; success: boolean; type: string; error?: string; affectedCount?: number }[] = []
+
   try {
-    for (const targetId of targetIds) {
-      // 1. Resolve Calendar Event (cal_ID)
-      if (targetId.startsWith("cal_")) {
-        const calId = targetId.replace(/^cal_/, "")
-        const res = await query(
-          `UPDATE calendar_events
-              SET status = 'completed',
-                  notes = CASE WHEN $3 <> '' THEN COALESCE(notes || E'\n[Resolution Note]: ', '') || $3 ELSE notes END,
-                  updated_at = now()
-            WHERE id = $1
-              AND ($2::uuid IS NULL OR branch_id = $2::uuid)
-            RETURNING lead_id, title`,
-          [calId, branchId, noteText]
-        )
-        const leadId = res.rows[0]?.lead_id
-        if (leadId) {
-          await query(
-            `INSERT INTO comm_logs (lead_id, type, summary, outcome)
-             VALUES ($1, 'system', $2, 'resolved')`,
-            [leadId, `Resolved (${session.email || "Staff"}): ${res.rows[0]?.title || "Appointment"}${noteText ? ` — Note: ${noteText}` : ""}`]
-          ).catch(() => {})
-
-          await query(
-            `UPDATE comm_logs
-                SET outcome = CASE WHEN outcome = 'needs_human' THEN 'needs_human_resolved' WHEN outcome = 'loan_confirmed' THEN 'loan_confirmed_resolved' ELSE outcome || '_resolved' END,
-                    summary = CASE WHEN $2 <> '' THEN summary || ' | Resolved: ' || $2 ELSE summary END
-              WHERE lead_id = $1 AND type = 'alert' AND outcome IN ('needs_human', 'loan_confirmed')`,
-            [leadId, noteText]
-          ).catch(() => {})
-        }
-
-        logAudit("calendar event resolved", session.email, {
-          calId,
-          leadId,
-          resolutionNotes: noteText,
-        })
-      }
-      // 2. Resolve Loan Application (app_ID)
-      else if (targetId.startsWith("app_")) {
-        const appId = targetId.replace(/^app_/, "")
-        const res = await query(
-          `UPDATE loan_applications
-              SET status = 'in_review'
-            WHERE id = $1 AND ($2::uuid IS NULL OR branch_id = $2::uuid)
-            RETURNING lead_id`,
-          [appId, branchId]
-        )
-        const leadId = res.rows[0]?.lead_id
-        if (leadId) {
-          await query(
-            `INSERT INTO comm_logs (lead_id, type, summary, outcome)
-             VALUES ($1, 'system', $2, 'resolved')`,
-            [leadId, `Loan application marked in-review (${session.email || "Staff"})${noteText ? ` — Note: ${noteText}` : ""}`]
-          ).catch(() => {})
-        }
-        logAudit("loan application marked in_review", session.email, { appId, leadId, resolutionNotes: noteText })
-      }
-      // 3. Resolve Comm Log Alert (comm_ID)
-      else if (targetId.startsWith("comm_")) {
-        const commId = targetId.replace(/^comm_/, "")
-        const owner = await query(`SELECT lead_id, outcome FROM comm_logs WHERE id = $1 LIMIT 1`, [commId])
-        const row = owner.rows[0]
-        if (row) {
-          const nextOutcome = row.outcome?.endsWith("_resolved") ? row.outcome : `${row.outcome || "needs_human"}_resolved`
-          await query(
-            `UPDATE comm_logs
-                SET outcome = $2,
-                    summary = CASE WHEN $3 <> '' THEN summary || ' | Resolved: ' || $3 ELSE summary END
-              WHERE id = $1`,
-            [commId, nextOutcome, noteText]
+    await withTransaction(async (client) => {
+      for (const targetId of targetIds) {
+        // 1. Resolve Calendar Event (cal_<id>) - STRICTLY INDEPENDENT TASK RESOLUTION
+        if (targetId.startsWith("cal_")) {
+          const calId = targetId.replace(/^cal_/, "")
+          const updateRes = await client.query(
+            `UPDATE calendar_events
+                SET status = 'completed',
+                    notes = CASE WHEN $3 <> '' THEN COALESCE(notes || E'\n[Resolution Note]: ', '') || $3 ELSE notes END,
+                    updated_at = now()
+              WHERE id = $1
+                AND status IN ('confirmed', 'needs_review', 'rescheduled')
+                AND ($2::uuid IS NULL OR branch_id = $2::uuid)
+              RETURNING id, lead_id, title`,
+            [calId, branchId, noteText]
           )
-          if (row.lead_id) {
-            await query(
-              `UPDATE calendar_events
-                  SET status = 'completed', updated_at = now()
-                WHERE lead_id = $1 AND status IN ('confirmed', 'needs_review', 'rescheduled')`,
-              [row.lead_id]
-            ).catch(() => {})
+
+          if (updateRes.rowCount === 0) {
+            resolutionResults.push({ id: targetId, success: false, type: "calendar_event", error: "Already completed or not found" })
+            continue
           }
-          logAudit("attention item resolved", session.email, { commId, leadId: row.lead_id, resolutionNotes: noteText })
+
+          const row = updateRes.rows[0]
+          if (row?.lead_id) {
+            await client.query(
+              `INSERT INTO comm_logs (lead_id, type, summary, outcome)
+               VALUES ($1, 'system', $2, 'resolved')`,
+              [row.lead_id, `Appointment resolved (${session.email || "Staff"}): ${row.title || "Calendar Task"}${noteText ? ` — Note: ${noteText}` : ""}`]
+            )
+          }
+
+          await logAudit("calendar_event_resolved", session.email, {
+            calId,
+            leadId: row?.lead_id,
+            resolutionNotes: noteText,
+          })
+
+          resolutionResults.push({ id: targetId, success: true, type: "calendar_event" })
+        }
+        // 2. Resolve Loan Application (app_<id>) - STRICTLY INDEPENDENT TASK RESOLUTION
+        else if (targetId.startsWith("app_")) {
+          const appId = targetId.replace(/^app_/, "")
+          const updateRes = await client.query(
+            `UPDATE loan_applications
+                SET status = 'in_review',
+                    remarks = CASE WHEN $3 <> '' THEN COALESCE(remarks || E'\n[Review Note]: ', '') || $3 ELSE remarks END,
+                    last_edited_at = now()
+              WHERE id = $1
+                AND status IN ('pending', 'submitted')
+                AND ($2::uuid IS NULL OR branch_id = $2::uuid)
+              RETURNING id, lead_id, customer_name`,
+            [appId, branchId, noteText]
+          )
+
+          if (updateRes.rowCount === 0) {
+            resolutionResults.push({ id: targetId, success: false, type: "loan_application", error: "Already in review or not found" })
+            continue
+          }
+
+          const row = updateRes.rows[0]
+          if (row?.lead_id) {
+            await client.query(
+              `INSERT INTO comm_logs (lead_id, type, summary, outcome)
+               VALUES ($1, 'system', $2, 'resolved')`,
+              [row.lead_id, `Application marked in-review (${session.email || "Staff"})${noteText ? ` — Note: ${noteText}` : ""}`]
+            )
+          }
+
+          await logAudit("loan_application_in_review", session.email, {
+            appId,
+            leadId: row?.lead_id,
+            resolutionNotes: noteText,
+          })
+
+          resolutionResults.push({ id: targetId, success: true, type: "loan_application" })
+        }
+        // 3. Resolve Comm Log Alert (comm_<id>) - STRICTLY INDEPENDENT TASK RESOLUTION
+        else if (targetId.startsWith("comm_")) {
+          const commId = targetId.replace(/^comm_/, "")
+          const updateRes = await client.query(
+            `UPDATE comm_logs
+                SET outcome = CASE WHEN outcome LIKE '%_resolved' THEN outcome ELSE outcome || '_resolved' END,
+                    summary = CASE WHEN $2 <> '' THEN summary || ' | Resolved: ' || $2 ELSE summary END
+              WHERE id = $1
+                AND type = 'alert'
+                AND outcome NOT LIKE '%_resolved'
+              RETURNING id, lead_id, summary`,
+            [commId, noteText]
+          )
+
+          if (updateRes.rowCount === 0) {
+            resolutionResults.push({ id: targetId, success: false, type: "comm_log", error: "Already resolved or not found" })
+            continue
+          }
+
+          const row = updateRes.rows[0]
+          await logAudit("attention_item_resolved", session.email, {
+            commId,
+            leadId: row?.lead_id,
+            resolutionNotes: noteText,
+          })
+
+          resolutionResults.push({ id: targetId, success: true, type: "comm_log" })
+        }
+        // 4. Resolve Consolidated Lead by Lead UUID (lead_<uuid>) - EXPLICIT FULL-LEAD RESOLUTION
+        else if (targetId.startsWith("lead_")) {
+          const leadId = targetId.replace(/^lead_/, "")
+          let affected = 0
+
+          const commUp = await client.query(
+            `UPDATE comm_logs
+                SET outcome = CASE WHEN outcome LIKE '%_resolved' THEN outcome ELSE outcome || '_resolved' END,
+                    summary = CASE WHEN $2 <> '' THEN summary || ' | Resolved: ' || $2 ELSE summary END
+              WHERE lead_id = $1
+                AND type = 'alert'
+                AND outcome NOT LIKE '%_resolved'`,
+            [leadId, noteText]
+          )
+          affected += commUp.rowCount ?? 0
+
+          const calUp = await client.query(
+            `UPDATE calendar_events
+                SET status = 'completed',
+                    notes = CASE WHEN $2 <> '' THEN COALESCE(notes || E'\n[Resolution Note]: ', '') || $2 ELSE notes END,
+                    updated_at = now()
+              WHERE lead_id = $1
+                AND status IN ('confirmed', 'needs_review', 'rescheduled')`,
+            [leadId, noteText]
+          )
+          affected += calUp.rowCount ?? 0
+
+          if (affected > 0) {
+            await client.query(
+              `INSERT INTO comm_logs (lead_id, type, summary, outcome)
+               VALUES ($1, 'system', $2, 'resolved')`,
+              [leadId, `All active action center items resolved (${session.email || "Staff"})${noteText ? ` — Note: ${noteText}` : ""}`]
+            )
+            await logAudit("lead_all_tasks_resolved", session.email, { leadId, affectedCount: affected, resolutionNotes: noteText })
+            resolutionResults.push({ id: targetId, success: true, type: "lead", affectedCount: affected })
+          } else {
+            resolutionResults.push({ id: targetId, success: false, type: "lead", error: "No active tasks found for lead" })
+          }
         }
       }
-      // 4. Resolve Consolidated Lead directly (lead_UUID)
-      else if (targetId.startsWith("lead_")) {
-        const leadId = targetId.replace(/^lead_/, "")
-        await query(
-          `UPDATE comm_logs
-              SET outcome = CASE WHEN outcome = 'needs_human' THEN 'needs_human_resolved' WHEN outcome = 'loan_confirmed' THEN 'loan_confirmed_resolved' ELSE outcome || '_resolved' END,
-                  summary = CASE WHEN $2 <> '' THEN summary || ' | Resolved: ' || $2 ELSE summary END
-            WHERE lead_id = $1 AND type = 'alert' AND outcome IN ('needs_human', 'loan_confirmed')`,
-          [leadId, noteText]
-        ).catch(() => {})
+    })
 
-        await query(
-          `UPDATE calendar_events
-              SET status = 'completed', updated_at = now(),
-                  notes = CASE WHEN $2 <> '' THEN COALESCE(notes || E'\n[Resolution Note]: ', '') || $2 ELSE notes END
-            WHERE lead_id = $1 AND status IN ('confirmed', 'needs_review', 'rescheduled')`,
-          [leadId, noteText]
-        ).catch(() => {})
-
-        await query(
-          `INSERT INTO comm_logs (lead_id, type, summary, outcome)
-           VALUES ($1, 'system', $2, 'resolved')`,
-          [leadId, `Action Center item resolved (${session.email || "Staff"})${noteText ? ` — Note: ${noteText}` : ""}`]
-        ).catch(() => {})
-
-        logAudit("lead action items resolved", session.email, { leadId, resolutionNotes: noteText })
-      }
+    const successfulCount = resolutionResults.filter(r => r.success).length
+    if (successfulCount === 0 && targetIds.length > 0) {
+      return NextResponse.json({
+        error: "None of the selected items could be resolved (they may have already been completed or not found).",
+        results: resolutionResults,
+      }, { status: 409 })
     }
 
-    return NextResponse.json({ ok: true, resolvedCount: targetIds.length })
+    return NextResponse.json({
+      ok: true,
+      resolvedCount: successfulCount,
+      totalCount: targetIds.length,
+      results: resolutionResults,
+    })
   } catch (e: any) {
-    console.error("[ActionCenter] escalations POST failed:", e?.message)
-    return NextResponse.json({ error: "Could not resolve item. Please try again." }, { status: 500 })
+    console.error("[ActionCenter] escalations POST transaction failed:", e?.message)
+    return NextResponse.json({ error: e?.message || "Failed to resolve items due to a database transaction error." }, { status: 500 })
   }
 }
