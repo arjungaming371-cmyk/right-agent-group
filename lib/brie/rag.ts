@@ -136,11 +136,11 @@ export async function queryBankingKnowledge(req: BrieQueryRequest): Promise<Brie
     claimsQuery += ` ORDER BY kc.created_at DESC LIMIT 6`
     const claimsRes = await query(claimsQuery, claimsParams)
 
-    // 6. Fetch Pricing Facts
+    // 6. Fetch Pricing Facts (Latest effective date first)
     let pricingRow: any = null
     if (matchedProduct) {
       const pRes = await query(
-        `SELECT * FROM pricing_facts WHERE institution_id = $1 AND product_id = $2 LIMIT 1`,
+        `SELECT * FROM pricing_facts WHERE institution_id = $1 AND product_id = $2 ORDER BY effective_from DESC NULLS LAST, created_at DESC LIMIT 1`,
         [instRow.id, matchedProduct.id]
       )
       pricingRow = pRes.rows[0]

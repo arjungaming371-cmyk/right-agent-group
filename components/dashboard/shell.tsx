@@ -138,7 +138,6 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { key: "security", label: "Security",       icon: ShieldCheck,  roles: ["admin", "developer"] },
       { key: "script",   label: "Priya's Script", icon: ScrollText,   roles: ["admin", "agent", "viewer", "branch_manager"] },
-      { key: "knowledge",label: "Knowledge Base", icon: BookOpen,     roles: ["admin", "agent", "viewer", "branch_manager"] },
       { key: "brie",     label: "Banking Intelligence", icon: Landmark, roles: ["admin", "agent", "viewer", "branch_manager"] },
     ],
   },

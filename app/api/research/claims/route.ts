@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { query } from "@/lib/db"
+import { requireRole } from "@/lib/auth"
+import { logAudit } from "@/lib/audit"
 
 export async function GET(req: NextRequest) {
   try {
@@ -40,6 +42,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const session = await requireRole(req, ["admin", "developer", "branch_manager"])
+  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+
   try {
     const body = await req.json()
     const { claimId, action, notes } = body // action: 'approve' | 'reject'
@@ -57,6 +62,17 @@ export async function POST(req: NextRequest) {
        RETURNING *`,
       [newStatus, claimId]
     )
+
+    if (res.rowCount === 0) {
+      return NextResponse.json({ error: "claim not found" }, { status: 404 })
+    }
+
+    await logAudit(session.email, `brie_claim_${action}`, {
+      claimId,
+      status: newStatus,
+      notes: notes || null,
+      user: session.email,
+    })
 
     if (res.rowCount === 0) {
       return NextResponse.json({ error: "Claim not found" }, { status: 404 })
