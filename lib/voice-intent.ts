@@ -9,6 +9,9 @@ export type VoiceIntentType =
   | "explicit_disconnect"
   | "reschedule_request"
   | "caller_will_call"
+  | "greeting_hello"
+  | "caller_asking_identity"
+  | "permission_granted"
   | "backchannel_listening"
   | "repeat_request"
   | "wait_hold_request"
@@ -39,6 +42,41 @@ export interface VoiceSemanticAnalysis {
   isInterruptionWorthy: boolean // Should this cut off Priya or is it just a passive backchannel?
   rawSpeech: string
 }
+
+// 0. Greeting / Hello on picking up or addressing the call
+const GREETING_HELLO_RE = new RegExp(
+  '^(?:' +
+  'hello|helo|halo|hlo|hai|hi|hey|namaste|namaskaram|namaskar|' +
+  'hello\\s+(?:andi|sir|madam|garu|priya)|' +
+  'హలో|నమస్కారం|నమస్తే|హాయ్|' +
+  'नमस्ते|नमस्कार|हेलो|हाय' +
+  ')[.!? ]*$',
+  'i'
+)
+
+// 0b. Caller asking who is speaking / identity inquiry
+const ASKING_IDENTITY_RE = new RegExp(
+  '(?:\\b(?:' +
+  'who\\s+(?:is\\s+this|are\\s+you|calling)|evaru|evarandi|evaru\\s+matladedi|' +
+  'kaun\\s+(?:bol\\s+rahe\\s+ho|hai|baat\\s+kar\\s+raha\\s+hai)|kiska\\s+call\\s+hai|' +
+  'from\\s+where|ekkada\\s+nunchi|kahan\\s+se' +
+  ')\\b|' +
+  'ఎవరు|ఎవరండి|ఎవరు మాట్లాడేది|ఎక్కడి నుంచి|' +
+  'कौन बोल रहे हो|कौन है|कहाँ से' +
+  ')',
+  'i'
+)
+
+// 0c. Caller confirming permission / readiness to talk
+const PERMISSION_GRANTED_RE = new RegExp(
+  '^(?:' +
+  'time\\s+undi|cheppandi|matladandi|ha\\s+cheppandi|haa\\s+cheppandi|avunu\\s+cheppandi|' +
+  'boliye|bataiye|haan\\s+boliye|yes\\s+tell\\s+me|tell\\s+me|go\\s+ahead|speak|' +
+  'టైం ఉంది|చెప్పండి|మాట్లాడండి|హా చెప్పండి|' +
+  'बोलिए|बताइए|हाँ बोलिए' +
+  ')[.!? ]*$',
+  'i'
+)
 
 // 1. Passive backchannels / acknowledgments while Priya is speaking
 // These indicate the caller is listening ("uh-huh", "haan", "hmm", "avunu"), NOT interrupting!
@@ -132,17 +170,17 @@ const OBJECTION_DETECTORS: Array<{ type: ObjectionType; regex: RegExp }> = [
 export function analyzeVoiceSpeech(speech: string): VoiceSemanticAnalysis {
   const trimmed = (speech || "").trim()
 
-  // 1. Check for passive backchannels (Caller is just acknowledging, do NOT interrupt Priya!)
-  if (BACKCHANNEL_RE.test(trimmed)) {
+  // 0. Greeting / Hello (Caller answered or said hello)
+  if (GREETING_HELLO_RE.test(trimmed)) {
     return {
-      intent: "backchannel_listening",
-      confidence: 0.98,
-      isInterruptionWorthy: false,
+      intent: "greeting_hello",
+      confidence: 0.99,
+      isInterruptionWorthy: true,
       rawSpeech: trimmed,
     }
   }
 
-  // 2. Check for repeat request
+  // 1. Check for repeat request
   if (REPEAT_REQUEST_RE.test(trimmed)) {
     return {
       intent: "repeat_request",
@@ -152,7 +190,7 @@ export function analyzeVoiceSpeech(speech: string): VoiceSemanticAnalysis {
     }
   }
 
-  // 3. Check for wait/hold request
+  // 2. Check for wait/hold request
   if (WAIT_HOLD_REQUEST_RE.test(trimmed)) {
     return {
       intent: "wait_hold_request",
@@ -162,7 +200,7 @@ export function analyzeVoiceSpeech(speech: string): VoiceSemanticAnalysis {
     }
   }
 
-  // 4. Check for product correction
+  // 3. Check for product correction
   for (const item of PRODUCT_CORRECTION_PATTERNS) {
     if (item.regex.test(trimmed) && (/\b(?:no|not|vaddu|nahi|kaadu|chustunna|kavali)\b/i.test(trimmed) || /వద్దు|కాదు|కావాలి|नहीं/.test(trimmed))) {
       return {
@@ -175,7 +213,7 @@ export function analyzeVoiceSpeech(speech: string): VoiceSemanticAnalysis {
     }
   }
 
-  // 5. Check for objection detection
+  // 4. Check for objection detection
   for (const obj of OBJECTION_DETECTORS) {
     if (obj.regex.test(trimmed)) {
       return {
@@ -185,6 +223,36 @@ export function analyzeVoiceSpeech(speech: string): VoiceSemanticAnalysis {
         isInterruptionWorthy: true,
         rawSpeech: trimmed,
       }
+    }
+  }
+
+  // 5. Caller asking who is speaking / identity inquiry
+  if (ASKING_IDENTITY_RE.test(trimmed)) {
+    return {
+      intent: "caller_asking_identity",
+      confidence: 0.96,
+      isInterruptionWorthy: true,
+      rawSpeech: trimmed,
+    }
+  }
+
+  // 6. Caller giving permission / readiness to talk
+  if (PERMISSION_GRANTED_RE.test(trimmed)) {
+    return {
+      intent: "permission_granted",
+      confidence: 0.95,
+      isInterruptionWorthy: true,
+      rawSpeech: trimmed,
+    }
+  }
+
+  // 7. Check for passive backchannels (Caller is just acknowledging, do NOT interrupt Priya!)
+  if (BACKCHANNEL_RE.test(trimmed)) {
+    return {
+      intent: "backchannel_listening",
+      confidence: 0.98,
+      isInterruptionWorthy: false,
+      rawSpeech: trimmed,
     }
   }
 

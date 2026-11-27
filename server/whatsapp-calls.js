@@ -738,18 +738,6 @@ async function prewarmWa() {
     CLARIFY_PHRASE.telugu,
     FALLBACK_PHRASE.telugu,
     START_FALLBACK_PHRASE.telugu,
-    "సరే sir,",
-    "Sure sir,",
-    "అవును sir,",
-    "చెప్పండి sir,",
-    "హలో sir,",
-    "Okay sir,",
-    "Student loan,",
-    "Personal loan,",
-    "Home loan,",
-    "Business loan,",
-    "Twelve lakh rupees,",
-    "Fifteen lakh rupees,",
   ]
   for (const line of fixedLines) {
     if (line) {

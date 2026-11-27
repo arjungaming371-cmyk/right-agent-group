@@ -802,9 +802,48 @@ STRICT OPERATIONAL DIRECTIVES:
   const inCallFactsBlock = formatInCallFactsBlock(inCallFacts)
   if (inCallFactsBlock) merged = [merged, inCallFactsBlock].filter(Boolean).join("\n\n")
 
+  // Detect if customer explicitly stated their name in this call OR already known from lead identity/opener
+  const spokenNameMatch = speech.match(/\b(?:naa|my)\s+(?:full\s+)?name\s+(?:is\s+)?([A-Za-z\s]+)/i)
+  const leadNameMatch = (brief || "").match(/IDENTITY\s*—\s*name:\s*([A-Za-z0-9_-]+)/i) || (history[0]?.content || "").match(/(?:నమస్కారం|namaskaram|hello|hi)\s+([A-Za-z]+)\s+garu/i)
+  const effectiveName = spokenNameMatch ? spokenNameMatch[1].trim().split(/\s+/).slice(0, 3).join(" ") : (leadNameMatch ? leadNameMatch[1].trim() : "")
+
   // VOICE INTENT & OBJECTION INTELLIGENCE
   const semantic = analyzeVoiceSpeech(speech)
-  if (semantic.intent === "wait_hold_request") {
+  if (semantic.intent === "greeting_hello") {
+    merged = [
+      merged,
+      `=== CALLER SAID HELLO / GREETED ===
+- The caller just answered or said "Hello" / "హలో" / "Namaskaram".
+- CRITICAL HUMAN BEHAVIOR: DO NOT recite a sales pitch, DO NOT say "మీ loan requirement గురించి మాట్లాడటానికి call చేశాను", and DO NOT immediately ask how many lakhs loan they want!
+- Acknowledge their hello warmly in ONE short natural sentence, verify they can hear you, and state who is calling:
+  * Telugu: "${effectiveName ? `హలో ${effectiveName} garu, నా voice వినిపిస్తోందా sir? Right Agent Group నుంచి Priya ని.` : `హలో sir, నా voice clear గా వినిపిస్తోందా? Right Agent Group నుంచి ప్రియ మాట్లాడుతున్నాను.`}"
+  * Hindi: "${effectiveName ? `नमस्ते ${effectiveName} जी, क्या मेरी आवाज़ आ रही है? मैं Right Agent Group से Priya बोल रही हूँ।` : `नमस्ते sir, क्या मेरी आवाज़ साफ आ रही है? मैं Right Agent Group से Priya बोल रही हूँ।`}"
+  * English: "${effectiveName ? `Hello ${effectiveName}, can you hear me clearly? This is Priya from Right Agent Group.` : `Hello sir, can you hear me clearly? This is Priya from Right Agent Group.`}"
+- STOP talking immediately and let them answer!`,
+    ].filter(Boolean).join("\n\n")
+  } else if (semantic.intent === "caller_asking_identity") {
+    merged = [
+      merged,
+      `=== CALLER ASKING IDENTITY ("Evaru" / "Who is this") ===
+- The caller wants to know who is calling.
+- Tell them politely in ONE sentence who you are and ask if you can speak for a minute:
+  * Telugu: "Right Agent Group నుంచి Priya మాట్లాడుతున్నాను sir, మీతో ఒక నిమిషం మాట్లాడవచ్చా?"
+  * Hindi: "Right Agent Group से Priya बात कर रही हूँ sir, क्या आपसे एक मिनट बात हो सकती है?"
+  * English: "This is Priya calling from Right Agent Group sir, do you have a minute to speak?"
+- DO NOT launch into any loan amount question or sales pitch! STOP and wait for them.`,
+    ].filter(Boolean).join("\n\n")
+  } else if (semantic.intent === "permission_granted") {
+    merged = [
+      merged,
+      `=== CALLER CONFIRMED READINESS TO TALK ("Cheppandi" / "Time undi") ===
+- The caller gave permission to talk.
+- DO NOT recite a pre-scripted robotic opener like "Sure sir, mee loan requirement gurinchi matladadaniki call chesanu".
+- Speak like a friendly human advisor in 1 natural sentence:
+  * Telugu: "${effectiveName ? `Thanks ${effectiveName} garu. మీరు లోన్ కోసం చూస్తున్నారని తెలిసింది, మీకు ప్రస్తుతం ఎలాంటి లోన్ అవసరం ఉంది sir?` : `Thanks andi. మీరు లోన్ కోసం చూస్తున్నారని తెలిసింది, మీకు ఎలాంటి లోన్ అవసరం ఉంది sir?`}"
+  * Hindi: "${effectiveName ? `Thanks ${effectiveName} जी। क्या आपको किसी loan की आवश्यकता है sir?` : `Thanks sir! क्या आपको किसी loan की ज़रूरत है?`}"
+  * English: "Thanks sir! I understand you were looking for a loan — what type of loan are you currently looking for?"`,
+    ].filter(Boolean).join("\n\n")
+  } else if (semantic.intent === "wait_hold_request") {
     merged = [
       merged,
       `=== CALLER ASKED TO HOLD / WAIT ===
@@ -960,18 +999,13 @@ STRICT OPERATIONAL DIRECTIVES:
     ].filter(Boolean).join("\n\n")
   }
 
-  // Detect if customer explicitly stated their name in this call OR already known from lead identity/opener
-  const spokenNameMatch = speech.match(/\b(?:naa|my)\s+(?:full\s+)?name\s+(?:is\s+)?([A-Za-z\s]+)/i)
-  const leadNameMatch = (brief || "").match(/IDENTITY\s*—\s*name:\s*([A-Za-z0-9_-]+)/i) || (history[0]?.content || "").match(/(?:నమస్కారం|namaskaram|hello|hi)\s+([A-Za-z]+)\s+garu/i)
-  const effectiveName = spokenNameMatch ? spokenNameMatch[1].trim().split(/\s+/).slice(0, 3).join(" ") : (leadNameMatch ? leadNameMatch[1].trim() : "")
-
   if (effectiveName && effectiveName.length > 1 && !/prabhutvam|government|unknown/i.test(effectiveName)) {
     merged = [
       merged,
       `=== CUSTOMER NAME IS ALREADY KNOWN ===
 - Customer name is ALREADY KNOWN as "${effectiveName}". Address them respectfully as ${effectiveName} sir/garu.
 - STRICT BAN: NEVER ask for their name, full name, or "మీ full name చెప్తారా". That step is DONE.
-${isEmiCollection ? "- Move directly to demanding payment of their overdue loan EMI." : isNonLoanCall ? "- Move directly to conveying the operator's message." : "- Move directly to discussing their loan requirement (purpose, amount, loan type)."}`
+${isEmiCollection ? "- Focus on demanding payment of their overdue loan EMI." : isNonLoanCall ? "- Focus on conveying the operator's message." : "- Have an attentive, natural conversation. Never recite rigid scripts or fixed lines."}`
     ].filter(Boolean).join("\n\n")
   }
 
@@ -991,25 +1025,6 @@ ${isEmiCollection ? "- Move directly to demanding payment of their overdue loan 
   * Maximum 1 to 2 short sentences ONLY (under 25 words).
   * STRICT BAN ON FIXED CANNED OPENERS: NEVER start every turn with the same predictable phrases like "Sure sir,", "అవును sir,", "తప్పకుండా sir,", "No problem sir,"! Vary your language naturally like an intelligent person.
   * When directly answering a question or objection, answer directly without forced filler words.
-  * When the customer responds with "Hello" or "Hello andi":
-    ${isEmiCollection
-      ? `State firmly and professionally: "నమస్కారం sir, మీ loan account లో overdue EMI payment గురించి మాట్లాడటానికి call చేశాను, దీన్ని వెంటనే clear చేయాలి sir."`
-      : isNonLoanCall
-      ? `Greet warmly and state your exact purpose as per the operator instructions.`
-      : instructions
-      ? `Greet warmly and state your exact purpose as per the operator instructions.`
-      : direction === "inbound"
-      ? `Greet warmly: "నమస్కారం sir, Right Agent Group కి call చేసినందుకు ధన్యవాదాలు, చెప్పండి sir మీకు ఎలా help చేయగలను?"`
-      : `Greet warmly: "నమస్కారం sir! Right Agent Group నుంచి Priya మాట్లాడుతున్నాను. మీతో మాట్లాడటానికి ఒక్క నిమిషం time ఉందా sir?"`
-    }
-  * When the customer responds with "time undi cheppandi", "aa time undi", "time undi", "cheppandi", "haa cheppandi", or "avunu cheppandi":
-    They are confirming they have time to talk. They are NOT asking for office hours or clock time.
-    ${isEmiCollection
-      ? `State your collection purpose directly and politely: "ధన్యవాదాలు sir, మీ loan account లో pending EMI payment గురించి మాట్లాడాలి sir."`
-      : isNonLoanCall
-      ? `State your exact message as per the operator instructions.`
-      : `Respond naturally without a robotic pitch: "Thanks andi, మీకు ప్రస్తుతం ఏదైనా loan requirement ఉందా అని తెలుసుకుందామని call చేశాను."`
-    }
 
 - STRICT ANTI-REPETITION MANDATE (TODAY'S CRITICAL MANDATE):
   * Check the previous conversation turns carefully. NEVER repeat the same statement, loan approval pitch, appointment pitch, or question you already said!
@@ -1549,7 +1564,7 @@ export async function handleTurnStream(
     reply = (
       await chatWithLLMStream(messages, language, mergedInstructions || undefined, (delta) => {
         pending += delta
-        const { complete, rest } = splitSentences(pending, { allowFirstCommaFlush: flushedSentences === 0 })
+        const { complete, rest } = splitSentences(pending, { allowFirstCommaFlush: false })
         for (const s of complete) onSentence(s)
         flushedSentences += complete.length
         pending = rest
