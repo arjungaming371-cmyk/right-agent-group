@@ -1023,11 +1023,12 @@ const SUBJECT_REGEX = new RegExp(
     "\\bform\\b", "\\bforms\\b",
     "\\bapply\\b", "\\baply\\b",
     "\\bregister\\b", "\\bregistration\\b",
+    "\\blink\\b", "\\blinks\\b", "\\blinku\\b", "\\bportal\\b", "\\bwebsite\\b",
   ].join("|"),
   "i"
 )
 
-const STRONG_REGEX = /\b(loan application|application form|form link|apply link|application link|registration link|google form|apply now|how to apply)\b/i
+const STRONG_REGEX = /\b(loan application|application form|form link|apply link|application link|registration link|google form|apply now|how to apply|send (me )?(the )?link|send link|link send|share (me )?(the )?link|share link|give (me )?(the )?link|give link|drop link|link drop|link pampu|link pampandi|link pampinchandi|link kavali|link bhejo|link dijiye|link send chey|link ivvandi|link share chey)\b/i
 const NEGATIVE_REGEX = /\b(status|update|approved?|approval|rejected?|submitted|already (filled|sent|applied|got|submitted)|kab aayega|kab hua|em aindi|vachinda|refund|cancel)\b/i
 
 export function detectApplicationRequest(text: string): boolean {

@@ -761,8 +761,12 @@ INSTRUCTIONS FOR NEW INQUIRY:
   try {
     const customerRequested = detectApplicationRequest(text)
     // Do NOT send the application link when Priya is merely mentioning it or offering options (e.g. "if you'd like the application link or visit branch").
-    // Only send if the customer explicitly requested it, or if AI explicitly states it has sent/shared it right now.
-    const aiExplicitlySending = !!(aiReply && /\b(I have sent (the )?(application|form) link|sending you the (application|form) link|sharing the (application|form) link with you|లింక్ పంపించా)\b/i.test(aiReply))
+    // Only send if the customer explicitly requested it, or if AI explicitly states it has sent/shared/attached it right now.
+    const aiExplicitlySending = !!(
+      aiReply &&
+      /\b(I have sent|sending you|sharing (with you|the)|shared (the|an|your)|already attached|link is attached|attached (right )?here|లింక్ పంపించా|లింక్ ఇచ్చా)\b/i.test(aiReply) &&
+      /\b(link|form|application)\b/i.test(aiReply)
+    )
     if (customerRequested || (aiExplicitlySending && !(await recentFormLinkSent(lead.id)))) {
       const token = await createOneTimeFormToken(lead.id)
       const linkResult = await sendApplicationLinkText(from, lead.name || "there", token, waBranch)
