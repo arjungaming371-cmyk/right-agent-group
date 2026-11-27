@@ -358,6 +358,7 @@ export default function AttentionView({ role }: { role: Role }) {
   const [showFilters, setShowFilters] = useState(false)
   const [showSortMenu, setShowSortMenu] = useState(false)
   const sortRef = useRef<HTMLDivElement>(null)
+  const filterRef = useRef<HTMLDivElement>(null)
 
   // Pagination
   const [page, setPage] = useState(1)
@@ -371,11 +372,14 @@ export default function AttentionView({ role }: { role: Role }) {
   const [activeDrawerTab, setActiveDrawerTab] = useState<"overview" | "timeline">("overview")
   const [showFullAiBrief, setShowFullAiBrief] = useState(false)
 
-  // Dismiss sort popover on click outside
+  // Dismiss sort and filter popovers on click outside
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (sortRef.current && !sortRef.current.contains(event.target as Node)) {
         setShowSortMenu(false)
+      }
+      if (filterRef.current && !filterRef.current.contains(event.target as Node)) {
+        setShowFilters(false)
       }
     }
     document.addEventListener("mousedown", handleClickOutside)
@@ -672,17 +676,101 @@ export default function AttentionView({ role }: { role: Role }) {
           )}
         </div>
 
-        {/* Compact Filters Button */}
-        <button
-          onClick={() => setShowFilters(!showFilters)}
-          className={`flex h-9 items-center gap-1.5 rounded-lg border px-3 text-[12px] font-medium transition cursor-pointer ${
-            showFilters || priority !== "all" || channel !== "all"
-              ? "border-[var(--accent-blue)] text-[var(--accent-blue)] bg-[var(--accent-blue)]/5"
-              : "border-[var(--border)] text-[var(--text-secondary)] bg-[var(--bg-card)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-card-hover)]"
-          }`}
-        >
-          <Filter size={13} /> Filters
-        </button>
+        {/* Compact Filters Popover Button */}
+        <div className="relative" ref={filterRef}>
+          <button
+            onClick={() => setShowFilters(!showFilters)}
+            className={`flex h-9 items-center gap-1.5 rounded-lg border px-3 text-[12px] font-medium transition cursor-pointer ${
+              showFilters || priority !== "all" || channel !== "all"
+                ? "border-[var(--accent-blue)] text-[var(--accent-blue)] bg-[var(--accent-blue)]/5"
+                : "border-[var(--border)] text-[var(--text-secondary)] bg-[var(--bg-card)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-card-hover)]"
+            }`}
+          >
+            <Filter size={13} />
+            <span>Filters</span>
+            {(priority !== "all" || channel !== "all") && (
+              <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[var(--accent-blue)] text-[10px] font-bold text-white">
+                {(priority !== "all" ? 1 : 0) + (channel !== "all" ? 1 : 0)}
+              </span>
+            )}
+          </button>
+
+          {showFilters && (
+            <div className="absolute right-0 top-10 z-40 w-64 rounded-2xl border border-[var(--border)] bg-[#1a1b1e] p-3.5 shadow-2xl animate-in fade-in duration-100">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-[14px] font-semibold text-white tracking-tight">Filter by</span>
+                {(priority !== "all" || channel !== "all") && (
+                  <button
+                    onClick={() => { setPriority("all"); setChannel("all"); setPage(1) }}
+                    className="text-[11px] font-medium text-indigo-400 hover:text-indigo-300 transition cursor-pointer"
+                  >
+                    Reset all
+                  </button>
+                )}
+              </div>
+
+              {/* Priority Section */}
+              <div className="mb-3.5">
+                <div className="mb-1.5 text-[10.5px] font-bold uppercase tracking-wider text-neutral-400">
+                  Priority
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    { key: "all", label: "All" },
+                    { key: "critical", label: "Critical" },
+                    { key: "high", label: "High" },
+                    { key: "medium", label: "Medium" },
+                    { key: "low", label: "Low" },
+                  ].map(opt => {
+                    const isSelected = priority === opt.key
+                    return (
+                      <button
+                        key={opt.key}
+                        onClick={() => { setPriority(opt.key); setPage(1) }}
+                        className={`rounded-lg px-2.5 py-1 text-[11.5px] font-medium transition cursor-pointer ${
+                          isSelected
+                            ? "bg-white text-black font-semibold shadow-sm"
+                            : "bg-[#27272a] text-neutral-300 hover:bg-[#323238] hover:text-white"
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* Channel Section */}
+              <div>
+                <div className="mb-1.5 text-[10.5px] font-bold uppercase tracking-wider text-neutral-400">
+                  Channel
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    { key: "all", label: "All" },
+                    { key: "phone", label: "Phone" },
+                    { key: "whatsapp", label: "WhatsApp" },
+                  ].map(opt => {
+                    const isSelected = channel === opt.key
+                    return (
+                      <button
+                        key={opt.key}
+                        onClick={() => { setChannel(opt.key); setPage(1) }}
+                        className={`rounded-lg px-2.5 py-1 text-[11.5px] font-medium transition cursor-pointer ${
+                          isSelected
+                            ? "bg-white text-black font-semibold shadow-sm"
+                            : "bg-[#27272a] text-neutral-300 hover:bg-[#323238] hover:text-white"
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* Compact Sort Popover Button (Replaces oversized dropdown) */}
         <div className="relative" ref={sortRef}>
@@ -738,44 +826,6 @@ export default function AttentionView({ role }: { role: Role }) {
           )}
         </div>
       </div>
-
-      {/* ── FILTER PANEL (collapsible) ── */}
-      {showFilters && (
-        <div className="mb-4 flex items-center gap-3 rounded-lg border border-[var(--border)] bg-[var(--bg-card)] px-4 py-2.5 animate-in fade-in duration-100">
-          <span className="text-[11.5px] text-[var(--text-muted)] font-medium mr-1">Priority</span>
-          <select
-            value={priority}
-            onChange={e => { setPriority(e.target.value); setPage(1) }}
-            className="h-7 rounded-md border border-[var(--border)] bg-[var(--bg-secondary)] px-2 text-[12px] text-[var(--text-primary)] focus:outline-none cursor-pointer"
-          >
-            <option value="all">All</option>
-            <option value="critical">Critical</option>
-            <option value="high">High</option>
-            <option value="medium">Medium</option>
-            <option value="low">Low</option>
-          </select>
-
-          <span className="ml-3 text-[11.5px] text-[var(--text-muted)] font-medium mr-1">Channel</span>
-          <select
-            value={channel}
-            onChange={e => { setChannel(e.target.value); setPage(1) }}
-            className="h-7 rounded-md border border-[var(--border)] bg-[var(--bg-secondary)] px-2 text-[12px] text-[var(--text-primary)] focus:outline-none cursor-pointer"
-          >
-            <option value="all">All</option>
-            <option value="phone">Phone</option>
-            <option value="whatsapp">WhatsApp</option>
-          </select>
-
-          {(priority !== "all" || channel !== "all") && (
-            <button
-              onClick={() => { setPriority("all"); setChannel("all"); setPage(1) }}
-              className="ml-auto text-[11px] text-[var(--text-muted)] hover:text-[var(--text-primary)] underline cursor-pointer"
-            >
-              Clear filters
-            </button>
-          )}
-        </div>
-      )}
 
       {/* ── ERROR ── */}
       {error && (
