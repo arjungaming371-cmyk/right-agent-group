@@ -57,13 +57,15 @@ const INTENT_RE = new RegExp(
 // CALLER SAYS THEY WILL CALL OR CHECK LATER:
 // "repu call chesta" / "nenu tarvata call chesta" / "chusi cheptanu".
 // Caller-initiated -> DO NOT auto-schedule an outbound callback in Calendar.
+// NOTE: Office visits / branch visits ("vastaanu", "office ki vasta") are IN-PERSON VISITS,
+// NOT phone callbacks — they must NEVER match here!
 export const CALLER_WILL_CALL_RE = new RegExp(
   [
-    `\\b(?:nenu|memu|nene)?\\s*(?:repu|tarvata|tarvatha|malli|sayanthram|udayam|evening lo|morning lo|office ayyaka|free ayyaka)\\b[^.?!]{0,35}\\b(?:call\\s+chesta|call\\s+chestanu|matladathanu|matladathaa|cheptanu|cheptha|vastaanu|vastanu|osthanu|chestale|chesta\\s+le)\\b`,
-    `\\b(?:nenu|memu|nene)\\s+(?:tarvata|malli|repu|chusi|office velli)?\\s*(?:call\\s+chesta|call\\s+chestanu|matladathanu|chestale|chesta\\s+le)\\b`,
+    `\\b(?:nenu|memu|nene)?\\s*(?:repu|tarvata|tarvatha|malli|sayanthram|udayam|evening lo|morning lo|office ayyaka|free ayyaka)\\b[^.?!]{0,35}\\b(?:call\\s+chesta|call\\s+chestanu|matladathanu|matladathaa|cheptanu|cheptha|chestale|chesta\\s+le)\\b`,
+    `\\b(?:nenu|memu|nene)\\s+(?:tarvata|malli|repu|chusi)?\\s*(?:call\\s+chesta|call\\s+chestanu|matladathanu|chestale|chesta\\s+le)\\b`,
     `\\b(?:nene\\s+chestale|nene\\s+call\\s+chesta)\\b`,
     `\\b(?:chusi|chuse)\\s+(?:cheptanu|cheptha|call chestanu|call chesta)\\b`,
-    `(?:నేను|మేము)?\\s*(?:రేపు|తర్వాత|మళ్ళీ|సాయంత్రం)[^.?!]{0,30}(?:కాల్\\s*చేస్తా|కాల్\\s*చేస్తాను|మాట్లాడతాను|చెప్తాను|చూసి\\s*చెప్తాను|వస్తాను)`,
+    `(?:నేను|మేము)?\\s*(?:రేపు|తర్వాత|మళ్ళీ|సాయంత్రం)[^.?!]{0,30}(?:కాల్\\s*చేస్తా|కాల్\\s*చేస్తాను|మాట్లాడతాను|చెప్తాను|చూసి\\s*చెప్తాను)`,
     `\\b(?:i|i'll|i will|let me|we will)\\s+(?:call|reach out|contact|ring|check and call)(?:\\s+you)?(?:\\s+back|\\s+later|\\s+tomorrow|\\s+tonight|\\s+next week|\\s+when[^.?!]{0,20})?\\b`,
     `\\b(?:i will|i'll)\\s+(?:check and call back|call back later|call when[^.?!]{0,20})\\b`,
     `\\b(?:main|hum)?\\s*(?:baad me|baad mein|kal|phir|khud|free hokar)\\s+(?:call\\s+karunga|call\\s+karenge|call\\s+karti hoon|call\\s+karta hoon|baat\\s+karunga)\\b`,
@@ -74,6 +76,10 @@ export const CALLER_WILL_CALL_RE = new RegExp(
 
 export function detectCallerWillCall(speech: string): boolean {
   if (!speech) return false
+  // Never classify an office visit, branch visit, or appointment request as "caller will call back"
+  if (/\b(?:office|branch|appointment|visit|meet|kalustha|fix\s*(?:chey|date)|vastaanu|vastanu|osthanu|వస్తాను|ఆఫీస్|ఆఫీసు)\b/i.test(speech)) {
+    return false
+  }
   return CALLER_WILL_CALL_RE.test(speech)
 }
 

@@ -8,7 +8,7 @@ import { searchKnowledgeBase } from "./knowledge-base"
 import { buildEmiInstruction, buildEligibilityInstruction, buildPrepaymentInstruction, buildRateInstruction, detectLoanType } from "./finance"
 import { detectFrustration, flagFrustratedCall, detectHumanRequest, flagHumanRequested, OPERATOR_REPLY_INSTRUCTION } from "./frustration"
 import { extractCallFacts, formatInCallFactsBlock } from "./call-facts"
-import { analyzeVoiceSpeech } from "./voice-intent"
+import { analyzeVoiceSpeech, detectAppointmentVisitIntent } from "./voice-intent"
 import { getPriyaRAGContext } from "./rag"
 import { createNotification } from "./notifications"
 import { maybeProposeLoanEdit } from "./loan-edit-requests"
@@ -679,7 +679,8 @@ async function buildTurnInstructions(
   callerPhone: string | undefined,
   contextPromise: Promise<TurnContext>,
   voiceChannel: "whatsapp" | "phone" = "phone",
-  direction?: "inbound" | "outbound"
+  direction?: "inbound" | "outbound",
+  language: Language = "telugu"
 ): Promise<string> {
   // LEAD BRAIN: brief Priya with the full cross-channel picture — known
   // facts, rolling relationship summary, recent interactions, sentiment
@@ -700,7 +701,22 @@ async function buildTurnInstructions(
   const isEmiCollection = Boolean(instructions && /\b(emi|overdue|due|defaul|not paid|harsh|warning|settle|recover|police|penalty|arrears)\b/i.test(instructions))
   const isNonLoanCall = Boolean(instructions && !/\b(loan|borrow|lakh|crore|home|personal|education|business|emi|cibil|interest)\b/i.test(instructions))
 
-  let merged = ""
+  // STRICT LANGUAGE ENFORCEMENT DIRECTIVE
+  let languageDirective = ""
+  if (language === "english") {
+    languageDirective = `=== CRITICAL LANGUAGE ENFORCEMENT: SPEAK 100% ENGLISH ONLY ===
+- THE CALLER IS SPEAKING IN ENGLISH OR EXPLICITLY DEMANDED ENGLISH.
+- YOU MUST REPLY 100% IN NATURAL, POLITE ENGLISH.
+- ABSOLUTE BAN: DO NOT SPEAK TELUGU OR HINDI. DO NOT USE TELUGU WORDS LIKE "porapaatu", "maatlaaduthunnaanu", "avunu", "cheppandi", "garu", "andi", "nenu".
+- SPEAK CLEAR, CONCISE ENGLISH ONLY.`
+  } else if (language === "hindi") {
+    languageDirective = `=== CRITICAL LANGUAGE ENFORCEMENT: SPEAK 100% HINDI ONLY ===
+- THE CALLER IS SPEAKING IN HINDI OR EXPLICITLY DEMANDED HINDI.
+- YOU MUST REPLY IN HINDI (DEVANAGARI SCRIPT WITH EVERYDAY LATIN LOANWORDS LIKE LOAN, EMI, SIR).
+- DO NOT SPEAK TELUGU.`
+  }
+
+  let merged = languageDirective
   if (isEmiCollection) {
     merged = `=== CRITICAL OPERATOR MANDATE: OVERDUE LOAN EMI COLLECTION CALL ===
 OPERATOR AGENDA & INSTRUCTIONS FOR THIS CALL:
@@ -810,7 +826,24 @@ STRICT OPERATIONAL DIRECTIVES:
 
   // VOICE INTENT & OBJECTION INTELLIGENCE
   const semantic = analyzeVoiceSpeech(speech)
-  if (semantic.intent === "greeting_hello") {
+  if (semantic.intent === "appointment_visit_request" || detectAppointmentVisitIntent(speech)) {
+    merged = [
+      merged,
+      `=== CALLER WANTS TO VISIT OFFICE / FIX IN-PERSON APPOINTMENT ===
+- The caller wants to visit our office in person or schedule an appointment (e.g. "repu mee office ki vastaanu, fix cheyandi date").
+- CRITICAL DIRECTIVES:
+  1. DO NOT SAY GOODBYE AND DO NOT HANG UP!
+  2. Warmly welcome their in-person office visit!
+  3. Office Details from Knowledge Base:
+     * Office Address: 4-143 Mallikarjuna Complex, 5th Floor, Gandimaisamma X Road, Medchal District (above Masters GYM), Hyderabad.
+     * Office Timings: Morning 9:00 AM to Evening 6:00 PM.
+  4. Confirm their appointment date and ask what time they will arrive so we can notify the loan officer:
+     * Telugu: "తప్పకుండా sir! మీరు రేపు మా Gandimaisamma / Medchal office కి రావచ్చు. మా office timings ఉదయం 9 గంటల నుంచి సాయంత్రం 6 గంటల వరకు ఉంటాయి. మీరు రేపు ఏ సమయానికి రాగలరు sir? నేను మా loan officer కి మీ appointment confirm చేస్తాను."
+     * English: "Definitely sir! You are welcome to visit our Gandimaisamma / Medchal office tomorrow. Our office hours are 9:00 AM to 6:00 PM. What time would be convenient for you? I will confirm your appointment with our loan officer."
+     * Hindi: "बिल्कुल sir! आप कल हमारे Gandimaisamma / Medchal ऑफिस आ सकते हैं। हमारा ऑफिस सुबह 9 बजे से शाम 6 बजे तक खुला रहता है। आप किस समय आना चाहेंगे? मैं आपके लिए अपॉइंटमेंट बुक कर देती हूँ।"
+- STOP talking and let the caller state their preferred visit time!`,
+    ].filter(Boolean).join("\n\n")
+  } else if (semantic.intent === "greeting_hello") {
     merged = [
       merged,
       `=== CALLER SAID HELLO / GREETED ===
@@ -1301,11 +1334,11 @@ export async function handleTurn(opts: {
     return { text: dndReply, hangup: true }
   }
 
-  // 2. EXPLICIT CONTINUATION / QUESTION CHECK
-  // If the caller is asking a doubt, clarifying, or continuing (e.g., "Chalu, oka doubt undi",
-  // "Okay sir, bye... actually one small doubt", "Repu call chesta, meeru ippudu cheppandi"),
+  // 2. EXPLICIT CONTINUATION / QUESTION CHECK / APPOINTMENT VISIT
+  // If the caller is asking a doubt, clarifying, continuing, or requesting an office appointment visit,
   // this MUST BEAT any ending, callback, or goodbye detection and proceed straight to the AI conversation!
-  const hasContinuation = CONTINUATION_INTENT_RE.test(speech)
+  const isAppointmentVisit = detectAppointmentVisitIntent(speech)
+  const hasContinuation = CONTINUATION_INTENT_RE.test(speech) || isAppointmentVisit
 
   if (!hasContinuation) {
     // 3. SMART RESCHEDULE: Caller explicitly requests the company/agent to call back
@@ -1385,7 +1418,7 @@ export async function handleTurn(opts: {
     flagHumanRequested(callSid, leadId || null, speech)
   }
 
-  const mergedInstructions = await buildTurnInstructions(leadId, history, instructions, speech, callerPhone, contextPromise, isWhatsAppCall ? "whatsapp" : "phone", direction)
+  const mergedInstructions = await buildTurnInstructions(leadId, history, instructions, speech, callerPhone, contextPromise, isWhatsAppCall ? "whatsapp" : "phone", direction, language)
 
   let reply = ""
   let rateLimited = false
@@ -1494,8 +1527,9 @@ export async function handleTurnStream(
     return { hangup: true }
   }
 
-  // 2. EXPLICIT CONTINUATION / QUESTION CHECK
-  const hasContinuation = CONTINUATION_INTENT_RE.test(speech)
+  // 2. EXPLICIT CONTINUATION / QUESTION CHECK / APPOINTMENT VISIT
+  const isAppointmentVisit = detectAppointmentVisitIntent(speech)
+  const hasContinuation = CONTINUATION_INTENT_RE.test(speech) || isAppointmentVisit
 
   if (!hasContinuation) {
     // 3. SMART RESCHEDULE: Caller requests company to call back
@@ -1577,7 +1611,7 @@ export async function handleTurnStream(
     flagHumanRequested(callSid, leadId || null, speech)
   }
 
-  const mergedInstructions = await buildTurnInstructions(leadId, history, instructions, speech, callerPhone, contextPromise, isWhatsAppCall ? "whatsapp" : "phone", direction)
+  const mergedInstructions = await buildTurnInstructions(leadId, history, instructions, speech, callerPhone, contextPromise, isWhatsAppCall ? "whatsapp" : "phone", direction, language)
 
   let reply = ""
   let pending = ""

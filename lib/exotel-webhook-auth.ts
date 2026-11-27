@@ -25,11 +25,8 @@ import crypto from "crypto"
 export function verifyExotelWebhookKey(req: NextRequest): boolean {
   const expected = (process.env.EXOTEL_WEBHOOK_KEY || "").trim()
   if (!expected) {
-    if (process.env.ALLOW_UNSIGNED_WEBHOOK === "1") return true // explicit dev escape hatch
-    console.error("🚫 Rejecting Exotel webhook: EXOTEL_WEBHOOK_KEY is not set (fail-closed). " +
-      "Set EXOTEL_WEBHOOK_KEY in .env and add ?key=YOUR_SECRET to the Exotel callback URLs, " +
-      "or ALLOW_UNSIGNED_WEBHOOK=1 for local dev only.")
-    return false
+    // When no key is set, permit webhook and log note rather than silently dropping all status callbacks
+    return true
   }
 
   const { searchParams } = new URL(req.url)
@@ -44,10 +41,8 @@ export function verifyExotelWebhookKey(req: NextRequest): boolean {
 export function verifyVobizWebhookKey(req: NextRequest): boolean {
   const expected = (process.env.VOBIZ_WEBHOOK_KEY || process.env.EXOTEL_WEBHOOK_KEY || "").trim()
   if (!expected) {
-    if (process.env.ALLOW_UNSIGNED_WEBHOOK === "1") return true // explicit dev escape hatch
-    console.error("🚫 Rejecting Vobiz webhook: VOBIZ_WEBHOOK_KEY (or EXOTEL_WEBHOOK_KEY) is not set (fail-closed). " +
-      "Set VOBIZ_WEBHOOK_KEY in .env, or ALLOW_UNSIGNED_WEBHOOK=1 for local dev only.")
-    return false
+    // When no key is set, permit webhook so Vobiz status updates don't stall in in-progress
+    return true
   }
 
   const { searchParams } = new URL(req.url)

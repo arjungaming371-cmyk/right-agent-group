@@ -9,6 +9,7 @@ export type VoiceIntentType =
   | "explicit_disconnect"
   | "reschedule_request"
   | "caller_will_call"
+  | "appointment_visit_request"
   | "greeting_hello"
   | "caller_asking_identity"
   | "ai_identity_check"
@@ -177,6 +178,13 @@ const OBJECTION_DETECTORS: Array<{ type: ObjectionType; regex: RegExp }> = [
   }
 ]
 
+export const APPOINTMENT_VISIT_RE = /\b(?:office\s*(?:ki\s*)?(?:vasta|vastanu|vastaanu|visit|ravalani|vastam)|branch\s*(?:ki\s*)?(?:vasta|vastanu|visit)|appointment|fix\s*(?:chey|cheyandi|date)|meet\s*you|in\s*person|direct\s*ga\s*vasta|repu\s*(?:vasta|vastanu|kalustha)|visit\s*your\s*office|come\s*to\s*(?:the\s*)?office)\b|ఆఫీస్|ఆఫీసు|బ్రాంచ్|అపాయింట్మెంట్|వస్తాను|కలుస్తాను/i
+
+export function detectAppointmentVisitIntent(speech: string): boolean {
+  if (!speech) return false
+  return APPOINTMENT_VISIT_RE.test(speech)
+}
+
 /**
  * Perform fast, structured semantic analysis of speech on the live voice turn.
  * Zero external API calls, executes in < 1 ms.
@@ -189,6 +197,16 @@ export function analyzeVoiceSpeech(speech: string): VoiceSemanticAnalysis {
     return {
       intent: "greeting_hello",
       confidence: 0.99,
+      isInterruptionWorthy: true,
+      rawSpeech: trimmed,
+    }
+  }
+
+  // 0.1 Check for office visit / appointment booking request
+  if (APPOINTMENT_VISIT_RE.test(trimmed)) {
+    return {
+      intent: "appointment_visit_request",
+      confidence: 0.98,
       isInterruptionWorthy: true,
       rawSpeech: trimmed,
     }

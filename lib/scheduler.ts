@@ -388,5 +388,20 @@ export function startScheduler() {
     runInstagramDMScan().catch(() => {})
   }, 15_000)
 
-  console.log("[scheduler] in-app cron started — due callbacks every 30s, daily digest 08:00, weekly digest Mon 08:00, lead brain scan every 5m, prompt tuner Sun 09:00, calendar agent scan every 15m, ig comment scan every 20s, ig DM scan every 15s")
+  // Automated Call Status Reconciler: closes lingering initiated/in-progress calls older than 5 minutes
+  setInterval(async () => {
+    try {
+      const { query } = await import("./db")
+      await query(`
+        UPDATE voice_calls
+           SET status = CASE WHEN duration > 0 OR jsonb_array_length(transcript) > 0 THEN 'completed' ELSE 'no-answer' END,
+               outcome = CASE WHEN duration > 0 OR jsonb_array_length(transcript) > 0 THEN 'resolved' ELSE 'missed' END,
+               updated_at = NOW()
+         WHERE status IN ('initiated', 'in-progress', 'ringing')
+           AND created_at < NOW() - INTERVAL '5 minutes'
+      `)
+    } catch {}
+  }, 60_000)
+
+  console.log("[scheduler] in-app cron started — due callbacks every 30s, daily digest 08:00, weekly digest Mon 08:00, lead brain scan every 5m, prompt tuner Sun 09:00, calendar agent scan every 15m, ig comment scan every 20s, ig DM scan every 15s, call reconciler every 1m")
 }
