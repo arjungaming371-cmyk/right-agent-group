@@ -271,6 +271,7 @@ export async function GET(req: NextRequest) {
       if (ce.product_interest) lead.financial.product_interest = ce.product_interest
       if (ce.loan_amount) lead.financial.loan_amount = ce.loan_amount
       if (ce.memory_summary) lead.ai_analysis.summary = ce.memory_summary
+      if (ce.memory_facts) lead.ai_analysis.facts = ce.memory_facts
       if (ce.created_at && (!lead.created_at || new Date(ce.created_at) < new Date(lead.created_at))) {
         lead.created_at = ce.created_at
       }
@@ -312,6 +313,7 @@ export async function GET(req: NextRequest) {
       if (r.employment_type) lead.financial.employment_type = r.employment_type
       if (r.city) lead.financial.city = r.city
       if (r.memory_summary) lead.ai_analysis.summary = r.memory_summary
+      if (r.memory_facts) lead.ai_analysis.facts = r.memory_facts
     }
 
     // 3. Map Loan Applications
@@ -341,6 +343,7 @@ export async function GET(req: NextRequest) {
       if (la.employment_type) lead.financial.employment_type = la.employment_type
       if (la.city) lead.financial.city = la.city
       if (la.memory_summary) lead.ai_analysis.summary = la.memory_summary
+      if (la.memory_facts) lead.ai_analysis.facts = la.memory_facts
     }
 
     // Convert Map to Array
