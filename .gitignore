@@ -66,4 +66,5 @@ scripts/.appreq-build/
 /scratch_token.py
 /ssh_exec.py
 /update_remote_env.py
+data/datasets/
 

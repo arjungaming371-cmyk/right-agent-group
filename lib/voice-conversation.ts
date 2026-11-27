@@ -9,6 +9,7 @@ import { buildEmiInstruction, buildEligibilityInstruction, buildPrepaymentInstru
 import { detectFrustration, flagFrustratedCall, detectHumanRequest, flagHumanRequested, OPERATOR_REPLY_INSTRUCTION } from "./frustration"
 import { extractCallFacts, formatInCallFactsBlock } from "./call-facts"
 import { analyzeVoiceSpeech } from "./voice-intent"
+import { getPriyaRAGContext } from "./rag"
 import { createNotification } from "./notifications"
 import { maybeProposeLoanEdit } from "./loan-edit-requests"
 import { isAiPaused } from "./ai-pause"
@@ -925,6 +926,21 @@ STRICT OPERATIONAL DIRECTIVES:
         `=== LIVE OBJECTION GUIDANCE ===\n${objectionGuidance}\n- Strict rule: EMPATHIZE, EXPLAIN TRANSPARENTLY, DO NOT PRESSURE OR ARGUE!`,
       ].filter(Boolean).join("\n\n")
     }
+  }
+
+  // 11,000 CONVERSATION INTELLIGENCE RAG INTEGRATION (V1 + V2)
+  try {
+    const ragResponse = await getPriyaRAGContext({
+      query: speech,
+      intent: semantic.intent,
+      objectionType: semantic.objectionType,
+      topK: 2,
+    })
+    if (ragResponse.formattedPromptContext) {
+      merged = [merged, ragResponse.formattedPromptContext].filter(Boolean).join("\n\n")
+    }
+  } catch (ragErr) {
+    console.warn("[VoiceConversation] RAG retrieval error (safe fallback):", ragErr)
   }
 
   if (leadId && (inCallFacts.name || inCallFacts.area || inCallFacts.loanAmount)) {
