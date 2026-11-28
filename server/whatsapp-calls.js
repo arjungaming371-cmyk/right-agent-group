@@ -1103,7 +1103,13 @@ class WhatsAppCallSession {
     if (energy > this.maxEnergy) this.maxEnergy = energy
     if (energy > this.callMaxEnergy) this.callMaxEnergy = energy
 
-    if (energy > ENERGY_THRESHOLD) {
+    // Adaptive noise floor (exponential moving average during silence):
+    if (!this.speaking) {
+      this.noiseFloor = this.noiseFloor ? (0.95 * this.noiseFloor + 0.05 * energy) : energy
+    }
+    const effectiveThreshold = Math.max(ENERGY_THRESHOLD, Math.min(800, (this.noiseFloor || ENERGY_THRESHOLD) * 1.5 + 40))
+
+    if (energy > effectiveThreshold) {
       if (this._greetingWakeup) {
         this._greetingWakeup()
         this._greetingWakeup = null
@@ -1154,6 +1160,7 @@ class WhatsAppCallSession {
     this.speechMs = 0
     this.silenceMs = 0
     this.maxEnergy = 0
+    if (this.noiseFloor) this.noiseFloor = Math.max(ENERGY_THRESHOLD, this.noiseFloor * 0.9)
     if (!hadRealSpeech || this.processing || this.closed) return
 
     const epoch = this.speechEpoch

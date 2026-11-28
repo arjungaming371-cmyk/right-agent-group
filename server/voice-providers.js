@@ -31,6 +31,10 @@
 // No new npm dependencies: multipart bodies are assembled by hand, everything
 // is plain Node 22 fetch.
 
+const fs = require("fs")
+const path = require("path")
+const { spawn } = require("child_process")
+
 // ---------- Configuration ----------
 
 const STT_PROVIDER = "sarvam" // cloud-only pipeline — Saaras is the only STT
@@ -735,6 +739,61 @@ async function cartesiaTts(text, language, voiceIdOverride) {
   return wav
 }
 
+// ---------- Inbound Neural Noise Cancellation (RNNoise / FFmpeg) ----------
+const INBOUND_DENOISE_ENABLED = (process.env.VOICEBOT_INBOUND_DENOISE || "1").trim() !== "0"
+const RNNOISE_MODEL_PATH = process.env.VOICEBOT_RNNOISE_MODEL || path.resolve(__dirname, "../models/rnnoise.rnnn")
+
+/**
+ * Clean incoming caller audio using Deep Learning (RNNoise) + Telephony Bandpass.
+ * Removes traffic, ambient chatter, AC/fan hum, and line buzz before STT.
+ * Falls back to raw buffer safely on timeout (>1500ms) or error.
+ */
+function denoiseInboundWav(wavBuffer) {
+  if (!INBOUND_DENOISE_ENABLED || !wavBuffer || wavBuffer.length <= 44) {
+    return Promise.resolve(wavBuffer)
+  }
+
+  return new Promise((resolve) => {
+    const hasModel = fs.existsSync(RNNOISE_MODEL_PATH)
+    // Filter chain:
+    // 1. highpass=180Hz cuts vehicle engine rumble, wind, desk thumps
+    // 2. arnndn (Recurrent Neural Network Denoise) strips non-speech noise
+    //    OR afftdn (FFT-based adaptive denoiser) if model is missing
+    // 3. lowpass=3600Hz cuts digital aliasing, coil whine, high-frequency hiss
+    // 4. alimiter=0.95 prevents distortion on sudden loud shouts
+    const filter = hasModel
+      ? `highpass=f=180,arnndn=m=${RNNOISE_MODEL_PATH.replace(/\\/g, "/")},lowpass=f=3600,alimiter=limit=0.95`
+      : `highpass=f=180,afftdn=nr=12:nf=-30,lowpass=f=3600,alimiter=limit=0.95`
+
+    const args = ["-hide_banner", "-loglevel", "error", "-i", "pipe:0", "-af", filter, "-f", "wav", "pipe:1"]
+    const ff = spawn("ffmpeg", args)
+    const out = []
+
+    const timer = setTimeout(() => {
+      try { ff.kill("SIGKILL") } catch {}
+      console.warn("⚠️ Inbound denoise timed out (1500ms) — falling back to raw audio")
+      resolve(wavBuffer)
+    }, 1500)
+
+    ff.stdout.on("data", (c) => out.push(c))
+    ff.on("error", (e) => {
+      clearTimeout(timer)
+      console.warn(`⚠️ Inbound denoise ffmpeg error (${e.message}) — falling back to raw audio`)
+      resolve(wavBuffer)
+    })
+    ff.on("close", (code) => {
+      clearTimeout(timer)
+      if (code === 0 && out.length > 0) {
+        const cleaned = Buffer.concat(out)
+        if (cleaned.length > 44) return resolve(cleaned)
+      }
+      resolve(wavBuffer)
+    })
+    ff.stdin.on("error", () => {})
+    ff.stdin.end(wavBuffer)
+  })
+}
+
 // ---------- Unified dispatch (used by voicebot-server) ----------
 
 function sttProviderName() {
@@ -746,9 +805,22 @@ function ttsCallProviderName() {
 }
 
 async function transcribe(wavBuffer, language, callSid) {
-  // Cloud-only: Saaras is the only STT. Throws on failure — the voicebot's
-  // caller-facing error handling takes over (clarify/fallback phrases).
-  return sarvamStt(wavBuffer, language, callSid)
+  // Cloud-only: Saaras is the only STT.
+  // Neural AI Denoising cleans background traffic/hum before Sarvam STT transcribes.
+  let audioToTranscribe = wavBuffer
+  const t0 = Date.now()
+  try {
+    audioToTranscribe = await denoiseInboundWav(wavBuffer)
+    const denoiseMs = Date.now() - t0
+    if (denoiseMs > 10) {
+      console.log(`🧹 Inbound Neural Denoise: ${denoiseMs}ms (in: ${wavBuffer.length}B -> out: ${audioToTranscribe.length}B)`)
+    }
+  } catch (err) {
+    console.warn("⚠️ Denoise exception, continuing with raw audio:", err.message)
+    audioToTranscribe = wavBuffer
+  }
+
+  return sarvamStt(audioToTranscribe, language, callSid)
 }
 
 /**
@@ -827,7 +899,7 @@ module.exports = {
   // config introspection
   sttProviderName, ttsCallProviderName, validateConfig, describeCallPipeline,
   // dispatchers (throw on failure — caller-facing error handling takes over)
-  transcribe, synthesize,
+  transcribe, synthesize, denoiseInboundWav,
   // direct provider calls (exported for tests + reuse)
   sarvamStt, sarvamTts, sarvamCloneTts, cartesiaTts,
   // call-scoped STT vocabulary (name accuracy)
