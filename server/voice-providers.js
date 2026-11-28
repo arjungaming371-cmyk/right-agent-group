@@ -507,6 +507,15 @@ function levenshtein(a, b, max) {
   return prev[b.length]
 }
 
+// Common conversational stop words in Telugu and Hindi that must NEVER be
+// replaced by fuzzy name/vocabulary matching (prevents "Arey/Sare/Aithe" -> "Ajay").
+const TELUGU_HINDI_STOPWORDS = new Set([
+  "arey", "sare", "aithe", "avunu", "ledu", "kadu", "enti", "ento", "enta",
+  "ha", "haa", "haan", "nahi", "nahin", "acha", "bhai", "sir", "garu", "pura",
+  "oka", "leni", "cheppu", "undi", "undhi", "naaku", "maaku", "meeku", "chalu",
+  "tharaanu", "choostanu", "chustanu", "pampandi", "pampinchandi"
+])
+
 function applyCallVocabulary(text, callSid) {
   if (!text || !callSid) return text
   const entry = callVocabulary.get(callSid)
@@ -517,14 +526,24 @@ function applyCallVocabulary(text, callSid) {
     // 1) Exact whole-word match — canonicalize the casing/spelling.
     const exact = new RegExp(`\\b${term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "gi")
     if (exact.test(out)) { out = out.replace(exact, term); continue }
-    // 2) Near-miss: a single word within edit distance ≤ 2 (words ≥ 4 chars
-    //    only — short words are too risky to fuzzy-match).
+
+    // 2) Near-miss fuzzy match:
+    // CRITICAL FIX: DO NOT fuzzy match short words (<= 5 chars like "Ajay", "Amit", "Rao")!
+    // An edit distance of 2 on a 4-letter name blindly replaces common Telugu filler words
+    // like "Arey", "Sare", "Ayithe" into "Ajay"!
+    if (term.length <= 5) continue
+
     const words = out.split(/\s+/)
     for (let w = 0; w < words.length; w++) {
-      const bare = words[w].replace(/[^\p{L}\p{N}]/gu, "")
-      if (bare.length < 4) continue
-      const dl = levenshtein(bare.toLowerCase(), term.toLowerCase(), 2)
-      if (dl <= 2) words[w] = term
+      const bare = words[w].replace(/[^\p{L}\p{N}]/gu, "").toLowerCase()
+      if (bare.length < 5) continue
+      // NEVER overwrite common conversational stop words:
+      if (TELUGU_HINDI_STOPWORDS.has(bare)) continue
+
+      // For 6-7 char terms, allow max 1 edit. For 8+ char terms, allow max 2 edits.
+      const maxDistance = term.length >= 8 ? 2 : 1
+      const dl = levenshtein(bare, term.toLowerCase(), maxDistance)
+      if (dl <= maxDistance) words[w] = term
     }
     out = words.join(" ")
   }

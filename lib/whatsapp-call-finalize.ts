@@ -429,7 +429,7 @@ export async function finalizeWhatsAppCall(opts: {
       .map((t) => `${t.role === "ai" ? "Priya" : "Customer"}: ${typeof t.text === "string" ? t.text : ""}`)
       .join("\n")
     try {
-      const summary = await generateLeadSummary(transcriptText)
+      const summary = await generateLeadSummary(transcriptText, call?.phone || (digits ? `+${digits}` : undefined))
       await db.from("voice_calls").update({ ai_summary: summary }).eq("twilio_call_sid", callSid)
     } catch (e) {
       console.error("wa finalize: summary error:", e)

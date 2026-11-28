@@ -1135,14 +1135,24 @@ export async function detectLoanEditRequest(
   }
 }
 
-export async function generateLeadSummary(transcript: string): Promise<string> {
+export async function generateLeadSummary(transcript: string, customerPhone?: string): Promise<string> {
   try {
     const text = await runCompletion(
       [
-        { role: "system", content: "Return ONLY valid JSON, no other text." },
-        { role: "user", content: `Summarize this call with keys: lead_name, address, whatsapp_number, next_action, sentiment.\n\n${transcript}` },
+        {
+          role: "system",
+          content:
+            "You are an expert CRM lead analyst for a financial loan distribution agency. Return ONLY valid JSON with keys: lead_name, address, property_location, loan_type, loan_amount, monthly_income, whatsapp_number, next_action, sentiment.\n" +
+            "- If a location/area/landmark is mentioned by the customer (e.g. Kajikula railway station, Medchal, Miyapur), capture it under address and property_location.\n" +
+            "- If the customer provided or used a phone number, set it as whatsapp_number.\n" +
+            "- Extract any discussed loan amount (e.g. 1 Crore) and salary (e.g. 5 Lakhs)."
+        },
+        {
+          role: "user",
+          content: `${customerPhone ? `Customer Phone: ${customerPhone}\n\n` : ""}Summarize this loan consultation call into the specified JSON format:\n\n${transcript}`
+        },
       ],
-      { timeoutMs: 20000, temperature: 0.2, numPredict: 1024, json: true, model: GROQ_UTILITY_MODEL }
+      { timeoutMs: 20000, temperature: 0.1, numPredict: 1024, json: true, model: GROQ_UTILITY_MODEL }
     )
     return text && text.trim() ? text.trim() : "{}"
   } catch (e) {
